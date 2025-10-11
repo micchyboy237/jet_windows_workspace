@@ -1,0 +1,1 @@
+FROM deepseek-coder-v2:16b-lite-instruct-q3_K_M
