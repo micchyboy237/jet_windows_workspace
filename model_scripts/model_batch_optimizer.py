@@ -11,19 +11,33 @@ import os
 logger = logging.getLogger(__name__)
 
 class ModelBatchSizeOptimizer:
-    def __init__(self, model_name: str, use_cuda: bool = True):
-        logger.info(f"Initializing ModelBatchSizeOptimizer with model: {model_name}, use_cuda: {use_cuda}")
-        self.device = torch.device("cuda" if use_cuda and torch.cuda.is_available() else "cpu")
-        logger.debug(f"Selected device: {self.device}")
+    def __init__(self, model_name: str, use_accelerator: bool = True):
+        logger.info(f"Initializing ModelBatchSizeOptimizer with model: {model_name}, use_accelerator: {use_accelerator}")
+        # Dynamic device selection: cuda > mps > cpu
+        if use_accelerator and torch.cuda.is_available() and hasattr(torch, 'cuda'):
+            try:
+                self.device = torch.device("cuda")
+                self.vram_limit = torch.cuda.get_device_properties(0).total_memory  # Dynamic VRAM detection
+            except AssertionError:
+                logger.warning("CUDA enabled but get_device_properties failed, using default VRAM limit")
+                self.device = torch.device("cpu")
+                self.vram_limit = 6 * 1024 * 1024 * 1024  # Fallback for GTX 1660
+        elif use_accelerator and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+            self.vram_limit = 8 * 1024 * 1024 * 1024  # Assume 8 GB for MPS (conservative estimate for M1)
+        else:
+            self.device = torch.device("cpu")
+            self.vram_limit = 0  # No VRAM limit for CPU
+        logger.debug(f"Selected device: {self.device}, VRAM limit: {self.vram_limit / (1024 * 1024):.2f} MB")
+        
         self.model = AutoModel.from_pretrained(model_name).to(self.device)
         # Apply FP16 only for stable models
         if model_name == "sentence-transformers/all-MiniLM-L12-v2":
             self.model = self.model.half()
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.vram_limit = 6 * 1024 * 1024 * 1024
-        self.ram_limit = 16 * 1024 * 1024 * 1024
+        self.ram_limit = psutil.virtual_memory().available  # Dynamic RAM detection
         self.model_size = self._estimate_model_size()
-        logger.info(f"Estimated model size: {self.model_size / (1024 * 1024):.2f} MB")
+        logger.info(f"Estimated model size: {self.model_size / (1024 * 1024):.2f} MB, Available RAM: {self.ram_limit / (1024 * 1024):.2f} MB")
     
     def _estimate_model_size(self) -> int:
         """Estimate model size in bytes (FP16 or FP32 based on model dtype)."""
@@ -49,15 +63,16 @@ class ModelBatchSizeOptimizer:
             return 1
 
         try:
-            available_vram = self.vram_limit - self.model_size - 1 * 1024 * 1024 * 1024
-            available_ram = psutil.virtual_memory().available - 4 * 1024 * 1024 * 1024
+            available_vram = self.vram_limit - self.model_size if self.vram_limit > 0 else float('inf')
+            available_vram = max(0, available_vram - 1 * 1024 * 1024 * 1024)  # Reserve 1 GB
+            available_ram = self.ram_limit - 4 * 1024 * 1024 * 1024  # Reserve 4 GB
             logger.debug(f"Available VRAM: {available_vram / (1024 * 1024):.2f} MB, Available RAM: {available_ram / (1024 * 1024):.2f} MB")
             
             encoded = self.tokenizer(sample_sentences[:1], padding=True, truncation=True, return_tensors="pt")
             input_size = sum(t.element_size() * t.numel() for t in encoded.values()) * (2 if self.model.dtype == torch.float16 else 4)
             logger.debug(f"Estimated input size per sentence: {input_size / 1024:.2f} KB")
             
-            max_vram_batch = max(1, int(available_vram // input_size))
+            max_vram_batch = max(1, int(available_vram // input_size)) if self.vram_limit > 0 else float('inf')
             max_ram_batch = max(1, int(available_ram // input_size))
             max_batch = min(max_vram_batch, max_ram_batch, max_batch_size, len(sample_sentences))
             logger.info(f"Maximum batch size based on memory: {max_batch}")
@@ -155,7 +170,7 @@ if __name__ == "__main__":
             "Dynamic batch sizing optimizes performance on limited hardware."
         ] * 25
     
-    optimizer = ModelBatchSizeOptimizer(args.model, use_cuda=True)
+    optimizer = ModelBatchSizeOptimizer(args.model, use_accelerator=True)
     optimal_batch_size = optimizer.get_optimal_batch_size(sample_sentences)
     print(f"Optimal batch size: {optimal_batch_size}")
     embeddings = optimizer.generate_embeddings(sample_sentences, optimal_batch_size)
