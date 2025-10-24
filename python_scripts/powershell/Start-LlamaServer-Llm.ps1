@@ -31,7 +31,7 @@ switch ($modelChoice) {
     }
     "5" {
         $modelName = "bartowski_DeepSeek-Coder-V2-Lite-Instruct-GGUF_DeepSeek-Coder-V2-Lite-Instruct-IQ4_XS.gguf"
-        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --port 8080 --host 0.0.0.0"
+        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --port 8080 --host 0.0.0.0 --n-gpu-layers 10"
     }
     default {
         Write-Host "Invalid selection. Exiting..."
