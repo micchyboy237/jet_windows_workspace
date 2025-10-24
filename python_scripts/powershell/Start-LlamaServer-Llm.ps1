@@ -14,7 +14,7 @@ $modelChoice = Read-Host "Enter the number of your choice (1-5)"
 switch ($modelChoice) {
     "1" {
         $modelName = "bartowski_Hermes-3-Llama-3.1-8B-GGUF_Hermes-3-Llama-3.1-8B-Q4_K_M.gguf"
-        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --port 8080"
+        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --jinja --port 8080"
     }
     "2" {
         $modelName = "ggml-org_Qwen2.5-VL-7B-Instruct-GGUF_Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
@@ -23,15 +23,15 @@ switch ($modelChoice) {
     }
     "3" {
         $modelName = "bartowski_Qwen_Qwen3-4B-Instruct-2507-GGUF_Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --port 8080 --host 0.0.0.0"
+        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --jinja --port 8080 --host 0.0.0.0"
     }
     "4" {
         $modelName = "bartowski_DeepSeek-R1-Distill-Qwen-7B-GGUF_DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf"
-        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --port 8080 --host 0.0.0.0"
+        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --jinja --port 8080 --host 0.0.0.0"
     }
     "5" {
         $modelName = "bartowski_DeepSeek-Coder-V2-Lite-Instruct-GGUF_DeepSeek-Coder-V2-Lite-Instruct-IQ4_XS.gguf"
-        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --port 8080 --host 0.0.0.0 --n-gpu-layers 10"
+        $command = "llama-server -m `"C:\Users\druiv\.cache\llama.cpp\$modelName`" --jinja --port 8080 --host 0.0.0.0 --n-gpu-layers 10"
     }
     default {
         Write-Host "Invalid selection. Exiting..."
