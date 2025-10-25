@@ -1,5 +1,22 @@
 # wifi-auto-reconnect.ps1
-# Auto reconnect to available known WiFi networks on Windows 11
+# Auto reconnect to available known WiFi networks on Windows 11 with logging
+
+# Define log file path
+$logFile = "$Env:USERPROFILE\.cache\scheduled_tasks\wifi-auto-reconnect.log"
+
+# Ensure log directory exists
+$logDir = Split-Path $logFile -Parent
+if (-not (Test-Path $logDir)) {
+    New-Item -Path $logDir -ItemType Directory -Force | Out-Null
+}
+
+# Function to write to both console and log file
+function Write-Log {
+    param ($Message)
+    $timestamp = Get-Date -Format 'HH:mm:ss'
+    Write-Host "$timestamp - $Message"
+    Add-Content -Path $logFile -Value "$timestamp - $Message"
+}
 
 function Get-CurrentWiFi {
     $wifi = netsh wlan show interfaces | Select-String " SSID" | Select-String -NotMatch "BSSID"
@@ -37,27 +54,30 @@ function Connect-ToKnownWiFi {
     $toTry = $available | Where-Object { $known -contains $_ }
 
     foreach ($ssid in $toTry) {
-        Write-Host "Trying to connect to known network: $ssid"
+        Write-Log "Trying to connect to known network: $ssid"
         netsh wlan connect name="$ssid" ssid="$ssid" | Out-Null
         Start-Sleep -Seconds 5
 
         if (Get-CurrentWiFi) {
-            Write-Host "✅ Connected to $ssid"
+            Write-Log "✅ Connected to $ssid"
             return $true
         }
     }
-    Write-Host "⚠️ No known WiFi networks available"
+    Write-Log "⚠️ No known WiFi networks available"
     return $false
 }
+
+# Initialize log with script start
+Write-Log "WiFi Auto-Reconnect script started"
 
 while ($true) {
     $current = Get-CurrentWiFi
     if (-not $current) {
-        Write-Host "$(Get-Date -Format 'HH:mm:ss') - Not connected. Attempting reconnect..."
+        Write-Log "Not connected. Attempting reconnect..."
         Connect-ToKnownWiFi | Out-Null
     }
     else {
-        Write-Host "$(Get-Date -Format 'HH:mm:ss') - Connected to: $current"
+        Write-Log "Connected to: $current"
     }
     Start-Sleep -Seconds 30
 }
