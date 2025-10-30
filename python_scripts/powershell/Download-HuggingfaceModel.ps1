@@ -1,1 +1,1 @@
-hf download bartowski/Meta-Llama-3.1-8B-Instruct-GGUF Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf --local-dir "C:\Users\druiv\.cache\llama.cpp"
+hf download bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf --local-dir "C:\Users\druiv\.cache\llama.cpp"
