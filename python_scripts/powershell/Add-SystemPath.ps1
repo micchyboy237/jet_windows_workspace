@@ -57,3 +57,10 @@ if ($PSCmdlet.ShouldProcess("$Scope PATH", "Add '$PathToAdd'")) {
 
     Write-Host "Successfully added '$PathToAdd' to $Scope PATH (permanent)." -ForegroundColor Green
 }
+
+##### Sample commands #####
+# As normal user → adds to your user PATH (recommended for Redis)
+# .\Add-SystemPath.ps1 "C:\redis"
+
+# Or as Administrator → adds to machine PATH (all users)
+# .\Add-SystemPath.ps1 "C:\redis" -Scope Machine
