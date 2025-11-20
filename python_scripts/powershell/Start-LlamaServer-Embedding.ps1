@@ -13,27 +13,27 @@ $modelChoice = Read-Host "Enter the number of your choice (1-4)"
 switch ($modelChoice) {
     "1" {
         $modelName = "embeddinggemma-300M-Q8_0.gguf"
+        $b = 2048
         $ub = 2048
-        $pooling = "mean"
-        $gpu = 999
+        $gpu = -1
     }
     "2" {
         $modelName = "nomic-embed-text-v1.5.Q4_K_M.gguf"
+        $b = 2048
         $ub = 2048
-        $pooling = "mean"
-        $gpu = 999
+        $gpu = -1
     }
     "3" {
         $modelName = "nomic-embed-text-v2-moe.Q4_K_M.gguf"
+        $b = 2048
         $ub = 2048
-        $pooling = "mean"
-        $gpu = 999
+        $gpu = -1
     }
     "4" {
         $modelName = "all-MiniLM-L12-v2-q4_0.gguf"
+        $b = 512
         $ub = 512
-        $pooling = "cls"
-        $gpu = 999
+        $gpu = -1
     }
     default {
         Write-Host "Invalid selection. Please choose 1-4." -ForegroundColor Red
@@ -49,15 +49,15 @@ if (-Not (Test-Path $modelPath)) {
 }
 
 Write-Host "`nStarting embedding server with model: $modelName" -ForegroundColor Green
-Write-Host "Pooling: $pooling | Max tokens: $ub | GPU: Full Offload" -ForegroundColor Yellow
+Write-Host "Max tokens: $ub | GPU: Full Offload" -ForegroundColor Yellow
 Write-Host "---------------------------------------------`n"
 
 # --- Optimized Command ---
 $cmd = "llama-server.exe " +
        "-m `"$modelPath`" " +
-       "--embedding --pooling $pooling " +
+       "--embedding " +
        "--host 0.0.0.0 --port 8081 " +
-       "-c $ub -ub $ub -b 512 " +                     # Context, ubatch, batch
+       "-c $b -ub $ub -b $b " +                     # Context, ubatch, batch
        "--n-gpu-layers $gpu " +                       # Full offload
        "--threads 6 --threads-batch 6 " +             # Match CPU
        "--mlock --no-mmap " +                         # Prevent swapping

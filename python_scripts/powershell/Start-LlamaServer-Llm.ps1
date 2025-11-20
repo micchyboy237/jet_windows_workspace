@@ -35,13 +35,14 @@ if (-Not (Test-Path $modelPath)) { Write-Host "Model not found: $modelPath" -For
 $cmd = "llama-server.exe " +
        "-m `"$modelPath`" " +
        "--host 0.0.0.0 --port 8080 " +
-       "-c $ub -ub $ub -b 512 " +           # Context, ubatch, batch
-       "--n-gpu-layers $gpu " +             # GPU offload
-       "--threads 6 --threads-batch 6 " +   # Match CPU cores
-       "--mlock --no-mmap " +               # RAM lock, avoid pagefile
+       "--ctx-size 4096 " +
+    #    "-c $ub -ub $ub -b 512 " +           # Context, ubatch, batch
+    #    "--n-gpu-layers $gpu " +             # GPU offload
+    #    "--threads 6 --threads-batch 6 " +   # Match CPU cores
+    #    "--mlock --no-mmap " +               # RAM lock, avoid pagefile
        "--flash-attn on " +                 # Critical for speed
-       "--cache-type-k q8_0 --cache-type-v q8_0 " +  # Q8 KV cache = faster + accurate
-       "--cont-batching"                    # Dynamic batching
+       "--cache-type-k q8_0 --cache-type-v q8_0 "  # Q8 KV cache = faster + accurate
+    #    "--cont-batching"                    # Dynamic batching
 
 if ($jinja) { $cmd += " --jinja" }
 if ($mmprojPath -and (Test-Path $mmprojPath)) { $cmd += " --mmproj `"$mmprojPath`"" }
