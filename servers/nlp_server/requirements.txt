@@ -2,3 +2,5 @@ fastapi[standard]
 uvicorn[standard]
 stanza
 pytest
+python-dotenv
+pydantic-settings

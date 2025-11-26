@@ -34,8 +34,9 @@ $PathToAdd = (Resolve-Path -Path $PathToAdd -ErrorAction Stop).Path.TrimEnd('\')
 # Determine target (Machine needs elevation)
 $target = if ($Scope -eq 'Machine') { 'Machine' } else { 'User' }
 
-# Get current PATH
-$currentPath = [Environment]::GetEnvironmentVariable('PATH', $target) ?? ''
+# Get current PATH - compatible with both PS 5.1 and PS 7+
+$currentPath = [Environment]::GetEnvironmentVariable('PATH', $target)
+if ([string]::IsNullOrWhiteSpace($currentPath)) { $currentPath = '' }
 
 # Split into array, trim whitespace, remove empty entries
 $paths = $currentPath -split ';' | Where-Object { $_ } | ForEach-Object { $_.Trim() }
