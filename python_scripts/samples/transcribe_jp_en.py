@@ -2,7 +2,7 @@ import os
 import shutil
 import dataclasses
 from faster_whisper import WhisperModel
-from jet.file.utils import save_file
+from utils import save_file
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
