@@ -10,7 +10,7 @@ shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 
 sound_file = "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/generated/run_record_mic_stream/recording_20251126_022942.wav"
 # Load model (GPU example; use device="cpu" for CPU)
-model = WhisperModel("large-v3", device="cpu")
+model = WhisperModel("large-v3", device="cuda")
 
 # Transcribe Japanese audio and translate to English
 segments_iter, info = model.transcribe(
