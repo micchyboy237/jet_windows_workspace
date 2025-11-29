@@ -8,6 +8,7 @@ from typing import Any, TypedDict
 import jiwer
 import pandas as pd
 import torch
+from typing import Literal
 from datasets import Dataset
 from faster_whisper import WhisperModel
 from rich.console import Console
@@ -16,10 +17,48 @@ from rich.table import Table
 import time
 
 console = Console()
+log = console.print  # easy alias for log output
 
 
 def auto_detect_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def get_best_compute_config() -> dict[str, str | torch.dtype | Literal["cuda", "cpu"]]:
+    """
+    Detect hardware and return optimal Whisper inference settings.
+    Supports your GTX 1660 (Turing architecture → fp16 supported).
+    """
+    log("[bold blue]Detecting hardware & best compute configuration...[/]")
+
+    device: Literal["cuda", "cpu"] = "cpu"
+    dtype = torch.float32
+    compute_type = "float32"
+
+    if torch.cuda.is_available():
+        device_name = torch.cuda.get_device_name(0)
+        capability = torch.cuda.get_device_capability(0)
+        log(f"CUDA available → [green]{device_name}[/] (Compute Capability {capability[0]}.{capability[1]})")
+
+        # GTX 1660 = Turing = sm_75 → full fp16 support
+        if capability >= (7, 0):  # Turing and newer
+            device = "cuda"
+            dtype = torch.float16
+            compute_type = "float16"
+            log("[bold green]→ Using FP16 (fast & memory-efficient) on GTX 1660[/]")
+        else:
+            device = "cuda"
+            log("[yellow]→ Falling back to FP32 on CUDA (older arch)[/]")
+    else:
+        log("[yellow]CUDA not available → using CPU (slow but safe)[/]")
+
+    config = {
+        "device": device,
+        "dtype": dtype,
+        "compute_type": compute_type,
+    }
+    log(f"Final inference config: [cyan]{config}[/]")
+    return config
 
 
 def _is_na(val: Any) -> bool:
@@ -48,24 +87,25 @@ class JapaneseS2TEvaluator:
         compute_type: str | None = None,
         output_dir: Path | str | None = None,
         save_audio: bool = True,
+        device: Literal["cuda", "cpu"] | None = None,  # allow passing deteced device
     ) -> None:
         self.model_size = model_size
         self.compute_type = compute_type
         self.output_dir = Path(output_dir) if output_dir else None
         self.save_audio = save_audio
 
-        self.device = auto_detect_device()
-        default_ct = "float16" if self.device == "cuda" else "int8"
-        ct = self.compute_type or default_ct
+        # Device auto-detection: honor supplied device or fallback
+        self.device = device or auto_detect_device()
+        self.compute_type = compute_type or get_best_compute_config()
 
         with console.status(f"[bold green]Loading faster-whisper {self.model_size}..."):
             self.model = WhisperModel(
                 model_size_or_path=self.model_size,
                 device=self.device,
-                compute_type=ct,
+                compute_type=self.compute_type,
             )
 
-        console.print(f"Loaded [bold cyan]{self.model_size}[/] → [bold green]{ct}[/] on [bold yellow]{self.device.upper()}[/]")
+        console.print(f"Loaded [bold cyan]{self.model_size}[/] → [bold green]{self.compute_type}[/] on [bold yellow]{self.device.upper()}[/]")
 
         if self.output_dir:
             self.output_dir.mkdir(parents=True, exist_ok=True)

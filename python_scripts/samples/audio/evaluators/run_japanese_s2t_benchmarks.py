@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import print as rprint
 
-from japanese_s2t_evaluator import JapaneseS2TEvaluator
+from japanese_s2t_evaluator import JapaneseS2TEvaluator, get_best_compute_config
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
@@ -98,16 +98,20 @@ def save_results(results_df: pd.DataFrame, metrics: dict, output_dir: Path, mode
         ))
 
 
-def main(config: BenchmarkConfig | None = None) -> None:
+def main(config: "BenchmarkConfig" | None = None) -> None:
     config = config or BenchmarkConfig()
     console.rule("[bold magenta]Japanese → English Speech-to-Text Translation Benchmark[/]")
     log(f"Running with [bold cyan]{config.sample_limit}[/] samples")
 
     output_dir = make_output_dir()
 
+    # === DETECT BEST COMPUTE SETTINGS ===
+    compute_config = get_best_compute_config()
+    device = compute_config["device"]
+    compute_type = compute_config["compute_type"]
+
     # Prefer offline extracted data.json (much faster)
     default_json = Path(__file__).parent.parent / "generated" / "extract_parquet_data" / "data.json"
-    # or as string if you really need it
     default_json = str(default_json.resolve())
     if Path(default_json).exists():
         console.print("[bold green]Found extracted data.json → using offline mode (fast!)[/]")
@@ -137,18 +141,19 @@ def main(config: BenchmarkConfig | None = None) -> None:
             for s in dataset
         ]
 
-    # Initialize evaluator (task is now implicit: only translate)
+    # === PASS DEVICE & COMPUTE TYPE TO EVALUATOR ===
     evaluator = JapaneseS2TEvaluator(
         model_size="large-v3",
         output_dir=output_dir,
         save_audio=True,
+        device=device,
+        compute_type=compute_type,
     )
 
     console.print(f"[bold blue]Starting translation of {len(samples)} Japanese audio files to English...[/]")
     results_df, metrics = evaluator.evaluate(samples, save_audio=True)
-
     save_results(results_df, metrics, output_dir, config.output_subdir)
-    
+
     console.rule("[bold green]S2T Benchmark Completed Successfully![/]")
     rprint("\n[bold cyan]Pro Tip:[/] Run your data extraction script once to enable lightning-fast repeated evaluations!")
 
