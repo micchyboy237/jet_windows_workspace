@@ -1,6 +1,7 @@
 import os
 import shutil
 import dataclasses
+import torch
 from faster_whisper import WhisperModel
 from utils import save_file
 
@@ -8,9 +9,21 @@ OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 
-audio_path = "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/python_scripts/samples/data/audio/1.wav"
-# Load model (GPU example; use device="cpu" for CPU)
-model = WhisperModel("large-v3", device="cuda")
+audio_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "data/audio/1.wav")
+)
+
+# Device detection
+if torch.cuda.is_available():
+    device = "cuda"
+    print(f"[Device] Using CUDA ({torch.cuda.get_device_name(0)})")
+else:
+    device = "cpu"
+    print("[Device] Using CPU")
+
+# UPDATED — replace previous WhisperModel init
+model = WhisperModel("large-v3", device=device)
+
 
 # Transcribe Japanese audio and translate to English
 segments_iter, info = model.transcribe(

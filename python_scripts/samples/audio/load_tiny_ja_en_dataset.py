@@ -13,7 +13,7 @@ def load_tiny_ja_en_dataset(
 ) -> List[dict]:
     """
     Load tiny JA→EN CoVoST 2 subset – NOW WORKS WITHOUT MANUAL DOWNLOAD.
-    Uses the new fully hosted dataset: https://huggingface.co/datasets/covost2
+    Uses the new fully hosted dataset: https://huggingface.co/datasets/facebook/covost2
     """
     # This works instantly – no manual download needed!
     dataset = load_dataset("covost2", "ja_en", split=split)
