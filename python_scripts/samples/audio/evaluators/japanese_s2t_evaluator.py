@@ -24,37 +24,26 @@ def auto_detect_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def get_best_compute_config() -> dict[str, str | torch.dtype | Literal["cuda", "cpu"]]:
-    """
-    Detect hardware and return optimal Whisper inference settings.
-    Supports your GTX 1660 (Turing architecture → fp16 supported).
-    """
+def get_best_compute_config() -> dict[str, Any]:
     log("[bold blue]Detecting hardware & best compute configuration...[/]")
 
-    device: Literal["cuda", "cpu"] = "cpu"
-    dtype = torch.float32
-    compute_type = "float32"
-
     if torch.cuda.is_available():
-        device_name = torch.cuda.get_device_name(0)
-        capability = torch.cuda.get_device_capability(0)
-        log(f"CUDA available → [green]{device_name}[/] (Compute Capability {capability[0]}.{capability[1]})")
+        device = "cuda"
+        compute_type = "float16"          # GTX 1660 → native fp16
+        log("[bold green]→ CUDA + float16 (GTX 1660+)[/]")
 
-        # GTX 1660 = Turing = sm_75 → full fp16 support
-        if capability >= (7, 0):  # Turing and newer
-            device = "cuda"
-            dtype = torch.float16
-            compute_type = "float16"
-            log("[bold green]→ Using FP16 (fast & memory-efficient) on GTX 1660[/]")
-        else:
-            device = "cuda"
-            log("[yellow]→ Falling back to FP32 on CUDA (older arch)[/]")
+    elif torch.backends.mps.is_available():
+        device = "cpu"
+        compute_type = "int8"             # Apple Silicon → int8 is king
+        log("[bold green]→ CPU + int8 (fastest on M1/M2/M3)[/]")
+
     else:
-        log("[yellow]CUDA not available → using CPU (slow but safe)[/]")
+        device = "cpu"
+        compute_type = "int8"             # even on CPU int8 is usually faster
+        log("[yellow]→ CPU + int8 fallback[/]")
 
     config = {
         "device": device,
-        "dtype": dtype,
         "compute_type": compute_type,
     }
     log(f"Final inference config: [cyan]{config}[/]")
@@ -96,7 +85,7 @@ class JapaneseS2TEvaluator:
 
         # Device auto-detection: honor supplied device or fallback
         self.device = device or auto_detect_device()
-        self.compute_type = compute_type or get_best_compute_config()
+        self.compute_type = compute_type or get_best_compute_config()["compute_type"]
 
         with console.status(f"[bold green]Loading faster-whisper {self.model_size}..."):
             self.model = WhisperModel(

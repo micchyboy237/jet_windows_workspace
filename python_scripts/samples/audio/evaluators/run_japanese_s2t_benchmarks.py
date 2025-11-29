@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import print as rprint
 
-from japanese_s2t_evaluator import JapaneseS2TEvaluator, get_best_compute_config
+from japanese_s2t_evaluator import JapaneseS2TEvaluator
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
@@ -105,11 +105,6 @@ def main(config: "BenchmarkConfig" | None = None) -> None:
 
     output_dir = make_output_dir()
 
-    # === DETECT BEST COMPUTE SETTINGS ===
-    compute_config = get_best_compute_config()
-    device = compute_config["device"]
-    compute_type = compute_config["compute_type"]
-
     # Prefer offline extracted data.json (much faster)
     default_json = Path(__file__).parent.parent / "generated" / "extract_parquet_data" / "data.json"
     default_json = str(default_json.resolve())
@@ -146,8 +141,6 @@ def main(config: "BenchmarkConfig" | None = None) -> None:
         model_size="large-v3",
         output_dir=output_dir,
         save_audio=True,
-        device=device,
-        compute_type=compute_type,
     )
 
     console.print(f"[bold blue]Starting translation of {len(samples)} Japanese audio files to English...[/]")
