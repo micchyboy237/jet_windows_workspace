@@ -106,7 +106,9 @@ def main(config: BenchmarkConfig | None = None) -> None:
     output_dir = make_output_dir()
 
     # Prefer offline extracted data.json (much faster)
-    default_json = "/Users/jethroestrada/Desktop/External_Projects/Jet_Windows_Workspace/python_scripts/samples/audio/generated/extract_parquet_data/data.json"
+    default_json = Path(__file__).parent.parent / "generated" / "extract_parquet_data" / "data.json"
+    # or as string if you really need it
+    default_json = str(default_json.resolve())
     if Path(default_json).exists():
         console.print("[bold green]Found extracted data.json → using offline mode (fast!)[/]")
         samples = JapaneseS2TEvaluator.from_extracted_json(
