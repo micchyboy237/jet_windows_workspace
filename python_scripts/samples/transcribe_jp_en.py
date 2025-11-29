@@ -8,23 +8,43 @@ OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 
-sound_file = "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/generated/run_record_mic_stream/recording_20251126_212124.wav"
+audio_path = "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/python_scripts/samples/data/audio/1.wav"
 # Load model (GPU example; use device="cpu" for CPU)
 model = WhisperModel("large-v3", device="cuda")
 
 # Transcribe Japanese audio and translate to English
 segments_iter, info = model.transcribe(
-    sound_file,  # Your audio file (supports MP3, WAV, M4A, etc.)
-    beam_size=1,           # Improves accuracy (default: 5)
-    temperature=[0.0],
-    language="ja",         # Source language: Japanese
-    task="translate",      # Output: English translation
-    condition_on_previous_text=False,  # Avoid carry-over errors
-    word_timestamps=True,  # Optional: Get word-level timestamps
-    vad_filter=True        # Optional: Filter out silence using Silero VAD
+    audio=audio_path,
+    language="ja",
+    task="translate",
+
+    # # Decoding: Maximum accuracy
+    # beam_size=10,
+    # patience=2.0,
+    # temperature=0.0,
+    # length_penalty=1.0,
+    # best_of=1,
+    # log_prob_threshold=-0.5,
+
+    # # Context & consistency
+    # condition_on_previous_text=True,
+
+    # # Japanese punctuation handling
+    # prepend_punctuations="\"'“¿([{-『「（［",
+    # append_punctuations="\"'.。,，!！?？:：”)]}、。」」！？",
+
+    # # Clean input
+    # vad_filter=True,
+    # vad_parameters=None,
+
+    # Output options
+    without_timestamps=False,
+    word_timestamps=True,
+    chunk_length=30,
+    log_progress=True,
 )
 
-save_file(info, f"{OUTPUT_DIR}/info.json")
+save_file(info, f"{OUTPUT_DIR}/1_wav/info.json")
 
 print(f"Detected language: {info.language} (probability: {info.language_probability:.2f})")
 segments = []
@@ -33,4 +53,4 @@ for segment in segments_iter:
     segments.append(segment_dict)
     print(f"[{segment.start:.2f}s -> {segment.end:.2f}s] {segment.text}")
 
-save_file(segments, f"{OUTPUT_DIR}/segments.json")
+save_file(segments, f"{OUTPUT_DIR}/1_wav/segments.json")

@@ -32,5 +32,5 @@ def save_file(data: Any, filepath: str | Path) -> None:
             sort_keys=True,          # deterministic output for easier diffing/testing
             default=str              # fallback for objects that aren't natively serializable
         )
-    # Optional: confirm write success
-    # print(f"Saved: {filepath}")
+
+    print(f"Saved: {filepath}")
