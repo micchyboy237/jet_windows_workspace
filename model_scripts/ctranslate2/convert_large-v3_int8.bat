@@ -3,7 +3,7 @@ setlocal EnableDelayedExpansion
 
 :: ================================================================
 ::  Whisper large-v3 → pure int8 (FASTEST on GTX 1660)
-::  Full verbose + debug logging
+::  Verbose logging via environment variables
 :: ================================================================
 
 set "MODEL=openai/whisper-large-v3"
@@ -18,16 +18,18 @@ echo.
 
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
 
-echo [VERBOSE] Starting conversion (you will see every layer)...
+echo [INFO] Enabling verbose logging...
+set CT2_VERBOSE=1
+set TRANSFORMERS_VERBOSITY=debug
+
+echo [VERBOSE] Starting conversion (every layer + details will show)...
 echo.
 
 ct2-transformers-converter ^
   --model %MODEL% ^
   --output_dir "%OUTPUT_DIR%" ^
   --quantization int8 ^
-  --force ^
-  --verbose ^
-  --log_level debug
+  --force
 
 if %ERRORLEVEL% EQU 0 (
     echo.
