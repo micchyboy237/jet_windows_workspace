@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict
 from concurrent.futures import ThreadPoolExecutor
-from helpers.audio.whisper_ct2_transcriber import WhisperCT2Transcriber, QuantizedModelSizes
+from .whisper_ct2_transcriber import WhisperCT2Transcriber, QuantizedModelSizes
 
 _MODEL_CACHE: Dict[str, WhisperCT2Transcriber] = {}
 _CACHE_LOCK = ThreadPoolExecutor(max_workers=1)

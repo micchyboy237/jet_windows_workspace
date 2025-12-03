@@ -1,6 +1,6 @@
 import pytest
-from server.transcribe_service import get_transcriber
-from helpers.audio.whisper_ct2_transcriber import QuantizedModelSizes
+from python_scripts.server.transcribe_service import get_transcriber
+from .helpers.audio.whisper_ct2_transcriber import QuantizedModelSizes
 def test_get_transcriber_returns_same_instance():
     t1 = get_transcriber("small","int8","cpu")
     t2 = get_transcriber("small","int8","cpu")

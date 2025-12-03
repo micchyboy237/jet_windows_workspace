@@ -2,16 +2,36 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from .transcribe_service import get_transcriber
-from helpers.audio.whisper_ct2_transcriber import QuantizedModelSizes
+from .whisper_ct2_transcriber import QuantizedModelSizes
 from rich.logging import RichHandler
 
-logging.basicConfig(level=logging.INFO, format="%^(message^)s", datefmt="[^%X]", handlers=[RichHandler(rich_tracebacks=True)])
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",           # Clean, valid % style
+    datefmt="%X",                   # Standard time format
+    handlers=[RichHandler(rich_tracebacks=True, show_time=True, show_path=False)]
+)
 log = logging.getLogger("whisper-api")
 
-app = FastAPI(title="Whisper CTranslate2 FastAPI Server", version="1.0.0")
+app = FastAPI(
+    title="Whisper CTranslate2 FastAPI Server",
+    version="1.0.0",
+    docs_url="/docs",       # Swagger UI
+    redoc_url="/redoc",     # ReDoc
+    openapi_url="/openapi.json"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 class TranscriptionResponse(BaseModel):
     audio_path: str
