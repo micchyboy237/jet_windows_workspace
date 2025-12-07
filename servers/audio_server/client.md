@@ -49,7 +49,7 @@ async def transcribe():
                 "compute_type": "int8_float16",
                 "device": "cuda",
             }
-            r = await client.post("http://127.0.0.0.1:8001/transcribe", files=files, params=params, timeout=None)
+            r = await client.post("http://shawn-pc.local:8001/transcribe", files=files, params=params, timeout=None)
             print(r.json())
 
 import asyncio
