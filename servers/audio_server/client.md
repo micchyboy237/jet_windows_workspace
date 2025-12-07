@@ -91,19 +91,17 @@ print(response.json()["text"])
 
 ## 5. Real-time chunk streaming (raw PCM 16kHz float32)
 
-Useful for WebSocket-like pipelines or microphone capture.
+Useful for microphone capture or processing audio in chunks.
 
-```bash
-# Example: send first 10 seconds of a 16kHz float32 raw file
-curl -X POST "http://shawn-pc.local:8001/transcribe_chunk?task=transcribe" \
-  --data-binary @chunk_10sec.raw \
-  -H "Content-Type: application/octet-stream"
-```
+The endpoint expects **raw little-endian 16kHz float32** audio bytes  
+(no WAV header, no container).
 
+### From a pre-loaded NumPy array (advanced / microphone)
 ```python
 import numpy as np
+import requests
 
-# Assume `audio_np` is numpy float32 array @ 16kHz
+# Example: audio_np is float32, 16kHz, shape (N,)
 chunk_bytes = audio_np.tobytes()
 
 response = requests.post(
@@ -111,9 +109,73 @@ response = requests.post(
     params={"task": "transcribe"},
     data=chunk_bytes,
     headers={"Content-Type": "application/octet-stream"},
+    timeout=None,
 )
-print(response.json()["text"]
+print(response.json()["text"])
 ```
+
+### Recommended: From any audio file (WAV, MP3, etc.) – easiest for testing
+```python
+import librosa
+import requests
+import numpy as np
+
+def load_audio_for_chunk(file_path: str, sr: int = 16000) -> bytes:
+    """Load audio file and return raw 16kHz float32 bytes expected by /transcribe_chunk"""
+    audio, _ = librosa.load(file_path, sr=sr, mono=True)
+    audio = audio.astype(np.float32)
+    return audio.tobytes()
+
+# Usage
+file_path = "short_clip.wav"  # or .mp3, .m4a, .flac, etc.
+chunk_bytes = load_audio_for_chunk(file_path)
+
+response = requests.post(
+    "http://shawn-pc.local:8001/transcribe_chunk",
+    params={"task": "transcribe"},
+    data=chunk_bytes,
+    headers={"Content-Type": "application/octet-stream"},
+    timeout=None,
+)
+result = response.json()
+print("Text:", result["text"])
+print("Language:", result["language"], f"({result['language_probability']:.2f})")
+print("Duration:", f"{result['duration_sec']:.2f}s")
+```
+
+### Async version (httpx)
+```python
+import httpx
+import librosa
+import numpy as np
+
+async def transcribe_chunk_file(file_path: str):
+    audio, _ = librosa.load(file_path, sr=16000, mono=True)
+    audio_bytes = np.asarray(audio, dtype=np.float32).tobytes()
+
+    async with httpx.AsyncClient(timeout=None) as client:
+        r = await client.post(
+            "http://shawn-pc.local:8001/transcribe_chunk?task=transcribe",
+            data=audio_bytes,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        print(r.json()["text"])
+
+# Run it
+import asyncio
+asyncio.run(transcribe_chunk_file("short_clip.wav"))
+```
+
+### cURL (from file → raw bytes via tool)
+```bash
+# Using ffmpeg to extract raw float32 16kHz (works on Windows/Linux/macOS)
+ffmpeg -i short_clip.wav -f f32le -acodec pcm_f32le -ar 16000 -ac 1 - | \
+curl -X POST "http://shawn-pc.local:8001/transcribe_chunk?task=transcribe" \
+  --data-binary @- \
+  -H "Content-Type: application/octet-stream"
+```
+
+> Tip: Use `task=translate` to translate non-English audio directly in streaming mode.
 
 ## Common query parameters
 
