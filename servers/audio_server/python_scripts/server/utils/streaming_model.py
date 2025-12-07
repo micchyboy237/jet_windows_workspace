@@ -1,14 +1,15 @@
+# servers/audio_server/python_scripts/server/utils/streaming_model.py
 from __future__ import annotations
 
-import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Optional
 
 from faster_whisper import WhisperModel
 
-log = logging.getLogger(__name__)
+from python_scripts.server.utils.logger import get_logger
+log = get_logger("streaming_model")
 
-# Thread-safe cache + initialization lock (exactly like CT2 cache)
+# Thread-safe cache + initialization lock
 _STREAMING_MODEL_CACHE: Dict[str, WhisperModel] = {}
 _CACHE_LOCK = ThreadPoolExecutor(max_workers=1)
 
@@ -37,25 +38,31 @@ def get_streaming_model(
 
         def _init_model() -> None:
             if key not in _STREAMING_MODEL_CACHE:
-                log.info(f"Loading faster-whisper model: {model_size} | {compute_type} | {device}")
+                log.info(
+                    f"[bold yellow]Loading faster-whisper model[/] "
+                    f"[dim]→[/] [cyan]{model_size}[/] | [green]{compute_type}[/] | [blue]{device}[/]"
+                )
 
-                # Optional: allow custom quantized model path (useful for large-v3 int8_float16 etc.)
                 model_path = model_size
                 if quantized_model_root:
                     import pathlib
                     candidate = pathlib.Path(quantized_model_root) / f"whisper-{model_size}-ct2"
                     if candidate.exists():
                         model_path = str(candidate)
+                        log.debug(f"Using local quantized model: {model_path}")
 
                 _STREAMING_MODEL_CACHE[key] = WhisperModel(
                     model_path,
                     device=device,
                     compute_type=compute_type,
-                    download_root=quantized_model_root,  # fallback to HF hub if not local
+                    download_root=quantized_model_root,
                 )
-                log.info(f"faster-whisper model cached → {key}")
 
-        # Block until initialization is done (prevents duplicate loading)
+                log.info(
+                    f"[bold green]faster-whisper model ready & cached[/] "
+                    f"[dim]→[/] [bright_white]{key}[/]"
+                )
+
         _CACHE_LOCK.submit(_init_model).result()
 
     return _STREAMING_MODEL_CACHE[key]

@@ -9,7 +9,7 @@ import transformers
 from typing import Literal, Optional, Tuple, List
 from pathlib import Path
 
-# Supported quantized Whisper models (int8_float16 or int8)
+# Supported quantized Whisper models (int8 or int8_float16)
 QuantizedModelSizes = Literal[
     "tiny", "base", "small", "medium", "large-v2", "large-v3"
 ]
@@ -35,7 +35,7 @@ class WhisperCT2Transcriber:
         model_size: QuantizedModelSizes = "large-v2",
         model_dir: Optional[str | Path] = None,
         device: str = "cpu",
-        compute_type: str = "int8_float16",  # or "int8" on CPU
+        compute_type: str = "int8",  # or "int8" on CPU
     ) -> None:
         if model_size not in self.SUPPORTED_SIZES:
             raise ValueError(f"model_size must be one of {self.SUPPORTED_SIZES}")
