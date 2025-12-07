@@ -438,45 +438,16 @@ def remove_parent_paths(path: str) -> str:
     return os.path.join(
         *(part for part in os.path.normpath(path).split(os.sep) if part != ".."))
 
-import shutil
-import tempfile
-import subprocess
+import pyperclip  # lazy import – only needed on Windows when used
 
 def copy_to_clipboard(text: str) -> None:
     """
-    Cross-platform clipboard helper:
-    - macOS: pbcopy
-    - Windows: clip
-    - Linux: xclip / xsel
-    - fallback: write to a temp file and log the path
+    Copy text to clipboard using pyperclip.
+    Assumes pyperclip is installed (recommended and required for perfect Unicode support on Windows).
     """
-    # Prefer well-known clipboard utilities if available
     try:
-        if shutil.which("pbcopy"):
-            proc = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
-            proc.communicate(text.encode("utf-8"))
-            return
-        if shutil.which("clip"):
-            # On Windows, 'clip' is a shell utility; use shell=True to ensure availability in some environments.
-            proc = subprocess.Popen("clip", stdin=subprocess.PIPE, shell=True)
-            proc.communicate(text.encode("utf-8"))
-            return
-        if shutil.which("xclip"):
-            proc = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE)
-            proc.communicate(text.encode("utf-8"))
-            return
-        if shutil.which("xsel"):
-            proc = subprocess.Popen(["xsel", "--clipboard", "--input"], stdin=subprocess.PIPE)
-            proc.communicate(text.encode("utf-8"))
-            return
+        pyperclip.copy(text)
+        logger.log("[bold green]Copied to clipboard[/] (via pyperclip)", len(text), "chars")
     except Exception as e:
-        logger.print_exception(e)
-
-    # Fallback: write content to a temporary file and inform the user
-    try:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
-        tmp.write(text)
-        tmp.close()
-        logger.log("No clipboard utility found. Clipboard content written to:", tmp.name)
-    except Exception as e:
-        logger.print_exception(f"Failed to write clipboard fallback file: {e}")
+        logger.print_exception()
+        raise RuntimeError(f"Failed to copy to clipboard: {e}")

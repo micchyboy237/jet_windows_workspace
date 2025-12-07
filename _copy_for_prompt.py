@@ -77,7 +77,7 @@ include_files = [
     # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/transcribers/run_transcribe_audio_silero.py",
     # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/transcribers/generated/run_transcribe_audio_silero/segment_001/sound/insights",
 
-    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/whisper_server",
+    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server",
 ]
 
 structure_include = [
@@ -94,81 +94,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = True
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix error and imports if any
-
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\whisper_server> .\start.bat
-
-========================================================
- Whisper CTranslate2 FastAPI Server
- Starting on http://127.0.0.1:8001
- GPU: CUDA + int8_float16 (GTX 1660 optimized)
-========================================================
-
-Open the interactive docs at:
-    http://127.0.0.1:8001/docs
-
-Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Scripts\uvicorn.exe\__main__.py", line 7, in <module>
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\click\core.py", line 1485, in __call__
-    return self.main(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\click\core.py", line 1406, in main
-    rv = self.invoke(ctx)
-         ^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\click\core.py", line 1269, in invoke
-    return ctx.invoke(self.callback, **ctx.params)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\click\core.py", line 824, in invoke
-    return callback(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\main.py", line 423, in main
-    run(
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\main.py", line 593, in run
-    server.run()
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\server.py", line 67, in run
-    return asyncio_run(self.serve(sockets=sockets), loop_factory=self.config.get_loop_factory())
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\asyncio\runners.py", line 195, in run
-    return runner.run(main)
-           ^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\asyncio\runners.py", line 118, in run
-    return self._loop.run_until_complete(task)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\asyncio\base_events.py", line 691, in run_until_complete
-    return future.result()
-           ^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\server.py", line 71, in serve
-    await self._serve(sockets)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\server.py", line 78, in _serve
-    config.load()
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\config.py", line 439, in load
-    self.loaded_app = import_from_string(self.app)
-                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\importer.py", line 22, in import_from_string
-    raise exc from None
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\importer.py", line 19, in import_from_string
-    module = importlib.import_module(module_str)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\importlib\__init__.py", line 90, in import_module
-    return _bootstrap._gcd_import(name[level:], package, level)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
-  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
-  File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
-  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
-  File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
-  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
-  File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
-  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
-  File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
-  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
-  File "<frozen importlib._bootstrap>", line 1324, in _find_and_load_unlocked
-ModuleNotFoundError: No module named 'python_scripts'
-
-Server stopped.
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\whisper_server>
+Update client.md with python and curl usage examples
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
