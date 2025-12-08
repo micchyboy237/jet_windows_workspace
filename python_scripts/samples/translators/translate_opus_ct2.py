@@ -9,9 +9,44 @@ from translator_types import (
     Translator,
 )
 
+# ── Device auto-detection with memory safety ──────────────────────────────────
+import torch
+
+MIN_FREE_VRAM_GB = 2.0  # Safe threshold for quantized Opus-MT models
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 QUANTIZED_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 DEFAULT_TOKENIZER = "Helsinki-NLP/opus-mt-ja-en"
+
+
+def detect_device() -> Device:
+    """
+    Automatically choose the best device:
+      - "cuda"  → if GPU available AND ≥ 2 GB free VRAM
+      - "cpu"   → otherwise
+
+    Uses PyTorch (already a dependency via transformers).
+    """
+    if not torch.cuda.is_available():
+        return "cpu"
+
+    try:
+        # Get current free memory in bytes
+        free_memory_bytes = torch.cuda.mem_get_info()[0]  # (free, total)
+        free_memory_gb = free_memory_bytes / (1024 ** 3)
+        print(f"Detected free GPU VRAM: {free_memory_gb:.2f} GB")  # Print free memory
+
+        if free_memory_gb >= MIN_FREE_VRAM_GB:
+            return "cuda"
+        else:
+            print(
+                f"Warning: GPU has only {free_memory_gb:.2f} GB free VRAM "
+                f"(< {MIN_FREE_VRAM_GB} GB), falling back to CPU"
+            )
+            return "cpu"
+    except Exception as e:
+        print(f"Warning: Could not query GPU memory ({e}), using CPU")
+        return "cpu"
 
 
 # ── Single Translation ───────────────────────────────────────────────────────
@@ -22,7 +57,7 @@ def translate_ja_to_en(
     tokenizer_name: str = DEFAULT_TOKENIZER,
     beam_size: int = 5,
     max_decoding_length: int = 512,
-    device: Device = "cpu",
+    device: Device | None = None,  # ← now optional!
     **options: TranslationOptions,
 ) -> str:
     """
@@ -36,7 +71,7 @@ def translate_ja_to_en(
         tokenizer_name: Hugging Face tokenizer (must match the model).
         beam_size: Beam size (1 = greedy decoding).
         max_decoding_length: Maximum number of generated tokens.
-        device: Device to run on ("cpu", "cuda", or "auto").
+        device: Device to run on ("cpu", "cuda", "auto", or ``None`` for smart auto-detect).
         **options: Any additional valid keys from :class:`TranslationOptions`
                    (e.g. ``return_scores=True``, ``sampling_temperature=0.8``).
 
@@ -44,6 +79,12 @@ def translate_ja_to_en(
         Translated English string (stripped whitespace).
     """
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+    # Resolve device: None or "auto" → smart detection, otherwise use as-is
+    if device is None or device == "auto":
+        device = detect_device()
+    # Explicit "cpu" or "cuda" → respect user choice (no memory check)
+
     translator = Translator(model_path, device=device)  # our thin wrapper
 
     # Tokenize → convert to subword tokens expected by CTranslate2
@@ -73,7 +114,7 @@ def batch_translate_ja_to_en(
     tokenizer_name: str = DEFAULT_TOKENIZER,
     beam_size: int = 5,
     max_decoding_length: int = 512,
-    device: Device = "cpu",
+    device: Device | None = None,
     max_batch_size: int = 32,
     batch_type: BatchType = "examples",
     **options: TranslationOptions,
@@ -89,7 +130,7 @@ def batch_translate_ja_to_en(
         tokenizer_name: Matching tokenizer.
         beam_size: Beam size for decoding.
         max_decoding_length: Max tokens to generate.
-        device: Runtime device.
+        device: Runtime device ("cpu", "cuda", "auto", or ``None`` → auto-detect with memory check).
         max_batch_size: Split large inputs to reduce padding (0 = auto).
         batch_type: "examples" or "tokens".
         **options: Any additional :class:`TranslationOptions`.
@@ -98,6 +139,10 @@ def batch_translate_ja_to_en(
         List of English translations in the same order.
     """
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+    if device is None or device == "auto":
+        device = detect_device()
+
     # ctranslate2.Translator is the class itself; avoid instantiating a second time
     translator = Translator(model_path, device=device)  # our thin wrapper
 
@@ -132,6 +177,7 @@ if __name__ == "__main__":
 
     print("=== Single Translation ===")
     print(f"JA:  {ja_example}")
+    # No device argument → automatically uses GPU if available
     print(f"EN:  {translate_ja_to_en(ja_example, beam_size=5)}")
 
     ja_batch = [
@@ -145,9 +191,10 @@ if __name__ == "__main__":
         ja_batch,
         beam_size=4,
         max_batch_size=16,
-        return_scores=True,           # type-checked!
-        sampling_temperature=0.9,     # type-checked!
-        replace_unknowns=True,        # type-checked!
+        return_scores=True,
+        sampling_temperature=0.9,
+        replace_unknowns=True,
+        # device=None → auto-detect (will use GPU on your Windows machine)
     )
 
     for ja, en in zip(ja_batch, en_batch):
