@@ -98,7 +98,7 @@ def batch_translate_ja_to_en(
     """
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     # ctranslate2.Translator is the class itself; avoid instantiating a second time
-    translator = ctranslate2.Translator(model_path, device=device)
+    translator: Translator = ctranslate2.Translator(model_path, device=device)
 
     source_batch: list[list[str]] = [
         tokenizer.convert_ids_to_tokens(tokenizer.encode(text)) for text in texts
