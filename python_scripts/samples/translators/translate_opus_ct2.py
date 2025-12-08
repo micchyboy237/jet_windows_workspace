@@ -6,7 +6,8 @@ from transformers import AutoTokenizer
 from translator_types import (
     Device,
     BatchType,
-    TranslationOptions
+    TranslationOptions,
+    Translator,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -45,7 +46,7 @@ def translate_ja_to_en(
     """
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     # ctranslate2.Translator is the class itself
-    translator = ctranslate2.Translator(model_path, device=device)
+    translator: Translator = ctranslate2.Translator(model_path, device=device)
 
     # Tokenize → convert to subword tokens expected by CTranslate2
     source_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(text))
