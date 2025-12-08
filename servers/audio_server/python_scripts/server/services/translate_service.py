@@ -1,91 +1,84 @@
-import json
+from __future__ import annotations
+from pathlib import Path
+from typing import Dict
+from concurrent.futures import ThreadPoolExecutor
+
 import ctranslate2
 from transformers import AutoTokenizer
-from typing import List, Any
 
-QUANTIZED_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
+from ..utils.logger import get_logger
 
-def translate_ja_to_en(
+log = get_logger("translate_service")
+
+# Cache: one translator instance per (model_path | device | compute_type)
+_TRANSLATOR_CACHE: Dict[str, ctranslate2.Translator] = {}
+_TOKENIZER_CACHE: Dict[str, AutoTokenizer] = {}
+_CACHE_LOCK = ThreadPoolExecutor(max_workers=1)
+
+# Change this path if you use a different quantized OPUS/NLLB model
+DEFAULT_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
+DEFAULT_TOKENIZER = "Helsinki-NLP/opus-mt-ja-en"  # must match the model above
+
+
+def _get_cache_key(model_path: str, device: str) -> str:
+    return f"{model_path}|{device}"
+
+
+def get_translator(
+    model_path: str = DEFAULT_MODEL_PATH,
+    tokenizer_name: str = DEFAULT_TOKENIZER,
+    device: str = "cuda",
+) -> tuple[ctranslate2.Translator, AutoTokenizer]:
+    """
+    Returns cached CTranslate2 translator + tokenizer.
+    Same safe concurrent initialization pattern used everywhere else.
+    """
+    key = _get_cache_key(model_path, device)
+
+    if key not in _TRANSLATOR_CACHE:
+        def _init():
+            if key not in _TRANSLATOR_CACHE:
+                log.info(
+                    f"[bold yellow]Loading translation model[/] "
+                    f"[cyan]{Path(model_path).name}[/] → [blue]{device}[/]"
+                )
+                translator = ctranslate2.Translator(model_path, device=device)
+                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+
+                _TRANSLATOR_CACHE[key] = translator
+                _TOKENIZER_CACHE[key] = tokenizer
+
+                log.info(f"[bold green]Translation model cached[/] → [bright_white]{key}[/]")
+
+        _CACHE_LOCK.submit(_init).result()
+    else:
+        log.info(f"[dim]Translation cache hit[/] → {key}")
+
+    return _TRANSLATOR_CACHE[key], _TOKENIZER_CACHE[key]
+
+
+def translate_text(
     text: str,
-    model_path: str = QUANTIZED_MODEL_PATH,
-    tokenizer_name: str = "Helsinki-NLP/opus-mt-ja-en",
+    model_path: str = DEFAULT_MODEL_PATH,
+    tokenizer_name: str = DEFAULT_TOKENIZER,
+    device: str = "cuda",
     beam_size: int = 5,
-    max_decoding_length: int = 512,  # Changed from max_length
-    device: str = "cpu",  # 'cuda' for GPU
 ) -> str:
     """
-    Translates Japanese text to English using a quantized OPUS-MT model.
-    
-    Args:
-        text: Input Japanese sentence.
-        model_path: Path to converted CTranslate2 model.
-        tokenizer_name: Hugging Face tokenizer ID.
-        beam_size: Beam search width (higher = better quality, slower).
-        max_decoding_length: Max output tokens.  # Updated docstring
-        device: 'cpu' or 'cuda'.
-    
-    Returns:
-        Translated English text.
-    
-    Raises:
-        RuntimeError: If model loading fails.
+    Translate a single piece of text using the cached CTranslate2 model.
     """
-    # Load tokenizer (reusable across calls)
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-    
-    # Load quantized translator
-    translator = ctranslate2.Translator(model_path, device=device)
-    
-    # Tokenize input
-    source_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(text))
-    source_batch = [source_tokens]  # Batch of 1
-    
-    # Translate
+    if not text.strip():
+        return ""
+
+    translator, tokenizer = get_translator(model_path, tokenizer_name, device)
+
+    source = tokenizer.encode(text)
+    source_tokens = tokenizer.convert_ids_to_tokens(source)
     results = translator.translate_batch(
-        source_batch,
+        [source_tokens],
         beam_size=beam_size,
-        max_decoding_length=max_decoding_length,  # Changed from max_length
-        return_scores=False,  # Set True for log-prob scores
+        max_decoding_length=512,
     )
-    
-    # Decode output
     target_tokens = results[0].hypotheses[0]
     translated = tokenizer.decode(tokenizer.convert_tokens_to_ids(target_tokens))
-    return translated.strip()  # Clean up
-
-def batch_translate_ja_to_en(
-    texts: List[str],
-    model_path: str = QUANTIZED_MODEL_PATH,
-    tokenizer_name: str = "Helsinki-NLP/opus-mt-ja-en",
-    beam_size: int = 5,
-    max_decoding_length: int = 512,
-    device: str = "cpu",
-    **kwargs: Any,
-) -> List[str]:
-    """
-    Batch version of translate_ja_to_en with identical default arguments.
-    
-    Accepts the same translation options as translate_ja_to_en.
-    Extra kwargs are forwarded to ctranslate2.Translator.translate_batch.
-    """
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-    translator = ctranslate2.Translator(model_path, device=device)
-
-    source_batch = [
-        tokenizer.convert_ids_to_tokens(tokenizer.encode(text)) for text in texts
-    ]
-
-    results = translator.translate_batch(
-        source_batch,
-        beam_size=beam_size,
-        max_decoding_length=max_decoding_length,
-        **kwargs,  # allow extra ctranslate2 options (e.g. return_scores=True)
-    )
-
-    translations = [
-        tokenizer.decode(
-            tokenizer.convert_tokens_to_ids(result.hypotheses[0])
-        ).strip()
-        for result in results
-    ]
-    return translations
+    return translated.strip()

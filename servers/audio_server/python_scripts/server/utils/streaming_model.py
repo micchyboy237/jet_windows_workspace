@@ -49,7 +49,7 @@ def get_streaming_model(
                     candidate = pathlib.Path(quantized_model_root) / f"whisper-{model_size}-ct2"
                     if candidate.exists():
                         model_path = str(candidate)
-                        log.debug(f"Using local quantized model: {model_path}")
+                        log.info(f"Using local quantized model: {model_path}")
 
                 _STREAMING_MODEL_CACHE[key] = WhisperModel(
                     model_path,

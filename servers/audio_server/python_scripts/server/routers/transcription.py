@@ -9,6 +9,7 @@ from faster_whisper import WhisperModel
 from pydantic import BaseModel
 from python_scripts.server.models.responses import TranscriptionResponse
 from python_scripts.server.services.transcribe_service import get_transcriber
+from python_scripts.server.services.translate_service import translate_text
 from python_scripts.server.services.whisper_ct2_transcriber import QuantizedModelSizes
 from python_scripts.server.utils.logger import get_logger
 from python_scripts.server.utils.streaming_model import get_streaming_model
@@ -77,10 +78,10 @@ async def transcribe_audio(
 async def translate_audio(
     file: UploadFile = File(...),
     model_size: QuantizedModelSizes = Query("large-v3", description="CTranslate2 model size"),
-    compute_type: str = Query("int8", description="Compute type for CTranslate2"),
-    device: str = Query("cpu", description="Device for CTranslate2 (cpu/cuda)"),
+    compute_type: str = Query("int8_float16", description="Compute type for CTranslate2"),
+    device: str = Query("cuda", description="Device for CTranslate2 (cpu/cuda)"),
 ):
-    """Translate audio to English using CTranslate2 (best quality)."""
+    """Translate audio → English using Whisper (transcribe) + dedicated translation model."""
     if not file.filename.lower().endswith((".wav", ".mp3", ".m4a", ".flac", ".ogg")):
         raise HTTPException(400, "Unsupported file format. Use WAV, MP3, M4A, FLAC, or OGG.")
 
@@ -91,19 +92,33 @@ async def translate_audio(
 
     try:
         log.info(
-            f"[bold magenta]Translate (CT2)[/] [white]processing[/] "
+            f"[bold magenta]Translate (CT2 → Post-process)[/] [white]processing[/] "
             f"[dim]→[/] [yellow]'{file.filename}'[/] "
             f"[green]{len(content)/1024/1024:.2f} MB[/] | "
             f"[cyan]{model_size}[/] | [blue]{device}[/]"
         )
-        
-        t = get_transcriber(model_size, compute_type, device)
-        result = t(tmp, detect_language=True, translate_to_english=True)
-        log.info(f"[bold green]CT2[/] [dim]translated[/] → [white]{result['translation'][:60]}...[/white]")
-        
+
+        # Step 1: Transcribe in original language (no translation flag)
+        transcriber = get_transcriber(model_size, compute_type, device)
+        result = transcriber(tmp, detect_language=True, translate_to_english=False)
+
+        # Step 2: Translate the transcription text using the dedicated service
+        if result["transcription"] and result["transcription"].strip():
+            translated = translate_text(
+                text=result["transcription"],
+                device=device,  # reuse same device (cuda/cpu)
+            )
+            result["translation"] = translated
+        else:
+            result["translation"] = ""
+
+        log.info(
+            f"[bold green]CT2 → Translated[/] → [white]{result['translation'][:60]}...[/white]"
+        )
         return TranscriptionResponse(**result)
+
     except Exception as e:
-        log.error(f"[bold red]CT2[/] [dim]translate failed[/] → {e}")
+        log.error(f"[bold red]Translate pipeline failed[/] → {e}")
         raise HTTPException(500, f"Translation failed: {str(e)}")
     finally:
         if tmp.exists():

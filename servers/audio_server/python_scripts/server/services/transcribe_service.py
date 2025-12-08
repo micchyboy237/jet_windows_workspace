@@ -35,5 +35,5 @@ def get_transcriber(
                 )
         _CACHE_LOCK.submit(init).result()
     else:
-        log.debug(f"[dim]CTranslate2 cache hit[/] → {key}")
+        log.info(f"[dim]CTranslate2 cache hit[/] → {key}")
     return _MODEL_CACHE[key]

@@ -75,7 +75,7 @@ async def log_requests(request: Request, call_next):
                     return {"type": "http.request", "body": body, "more_body": False}
                 request._receive = receive  # type: ignore
         except Exception as e:
-            log.debug(f"Could not parse form in middleware: {e}")
+            log.error(f"Could not parse form in middleware: {e}")
 
     # Request incoming log
     if is_multipart:
