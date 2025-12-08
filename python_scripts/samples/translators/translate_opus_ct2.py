@@ -3,7 +3,7 @@ from typing import List
 import ctranslate2
 from transformers import AutoTokenizer
 
-from .types import (
+from translator_types import (
     Device,
     BatchType,
     TranslationOptions
