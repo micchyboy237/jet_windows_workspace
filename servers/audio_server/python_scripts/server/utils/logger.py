@@ -1,4 +1,5 @@
-# python_scripts/server/utils/logger.py
+# servers/audio_server/python_scripts/server/utils/logger.py
+
 from __future__ import annotations
 import logging
 from rich.logging import RichHandler
@@ -7,9 +8,9 @@ from rich.console import Console
 console = Console(stderr=True)
 
 def get_logger(name: str = "whisper_server") -> logging.Logger:
-    logger = logging.getLogger(name)
+    logger = logging.getLogger(name)  # ← WAS MISSING
     if logger.handlers:
-        return logger  # Already configured
+        return logger
 
     logger.setLevel(logging.INFO)
     handler = RichHandler(

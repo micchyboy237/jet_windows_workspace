@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Dict
 from concurrent.futures import ThreadPoolExecutor
 from .whisper_ct2_transcriber import WhisperCT2Transcriber, QuantizedModelSizes
-from .utils.logger import get_logger
+from ..utils.logger import get_logger
 
 log = get_logger("ct2_cache")
 

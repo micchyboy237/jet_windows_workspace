@@ -8,8 +8,8 @@ from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Request, 
 from faster_whisper import WhisperModel
 from pydantic import BaseModel
 from python_scripts.server.models.responses import TranscriptionResponse
-from python_scripts.server.transcribe_service import get_transcriber
-from python_scripts.server.whisper_ct2_transcriber import QuantizedModelSizes
+from python_scripts.server.services.transcribe_service import get_transcriber
+from python_scripts.server.services.whisper_ct2_transcriber import QuantizedModelSizes
 from python_scripts.server.utils.logger import get_logger
 from python_scripts.server.utils.streaming_model import get_streaming_model
 

@@ -89,22 +89,3 @@ def batch_translate_ja_to_en(
         for result in results
     ]
     return translations
-
-if __name__ == "__main__":
-    # Example usage (single)
-    japanese_text = "おい、そんな一気に冷たいものを食べると腹を壊す"
-    english_translation = translate_ja_to_en(japanese_text)
-    print("=== Single Translation Result ===")
-    print(f"Input: {japanese_text}")
-    print(f"Output: {english_translation}")
-
-    # Example usage (batch)
-    japanese_text = [
-        "おい、そんな一気に冷たいものを食べると腹を壊す",
-        "昨日、友達と一緒に映画を見に行きました。",
-        "日本は美しい国ですね！"
-    ]
-    english_translations = batch_translate_ja_to_en(japanese_text)
-    print("=== Batch Translation Results ===")
-    print(f"Input: {japanese_text}")
-    print(f"Outputs:\n{json.dumps(english_translations, indent=2)}")

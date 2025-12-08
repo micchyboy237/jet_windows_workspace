@@ -1,189 +1,184 @@
 # Client Usage Examples
 
-The server runs by default on `http://shawn-pc.local:8001`  
-Interactive Swagger UI: <http://shawn-pc.local:8001/docs>
+The server runs by default on `http://127.0.0.1:8001` (or your local network name)
+
+Interactive Swagger UI: <http://127.0.0.1:8001/docs>
+
+## Recommended Settings for Your Hardware (GTX 1660 + Windows 11)
+
+| Endpoint             | Model           | compute_type     | device | Notes                             |
+|----------------------|-----------------|------------------|--------|-----------------------------------|
+| `/transcribe`, `/translate` | `large-v3`   | `int8_float16`   | `cuda` | Best quality + fast on GTX 1660   |
+| Streaming endpoints  | `large-v3`      | `int8_float16`   | `cuda` | Low latency + high accuracy       |
+
+---
 
 ## 1. Health check
 
 ```bash
-curl http://shawn-pc.local:8001/
+curl http://127.0.0.1:8001/
 ```
 
-## 2. Transcribe a local audio file (CTranslate2 – highest quality)
+---
 
-### curl
+## 2. High-Quality Transcription (CTranslate2 – best accuracy)
+
+### cURL (Recommended for GTX 1660)
 ```bash
-curl -X POST "http://shawn-pc.local:8001/transcribe" \
-  -F "file=@/path/to/your/audio.wav" \
-  -F "model_size=large-v2" \
+curl -X POST "http://127.0.0.1:8001/transcribe" \
+  -F "file=@audio.wav" \
+  -F "model_size=large-v3" \
   -F "compute_type=int8_float16" \
-  -F "device=cuda"          # use "cpu" if no GPU
+  -F "device=cuda"
 ```
 
 ### Python (requests)
 ```python
 import requests
 
-url = "http://shawn-pc.local:8001/transcribe"
+url = "http://127.0.0.1:8001/transcribe"
 files = {"file": open("audio.wav", "rb")}
-params = {
-    "model_size": "large-v2",
-    "compute_type": "int8_float16",   # or "int8" on CPU
-    "device": "cuda",                 # or "cpu"
+data = {
+    "model_size": "large-v3",
+    "compute_type": "int8_float16",
+    "device": "cuda"
 }
-
-response = requests.post(url, files=files, params=params)
-print(response.json())
+response = requests.post(url, files=files, data=data)
+print(response.json()["transcription"])
 ```
 
 ### Python (httpx – async)
 ```python
-import httpx
+import httpx, asyncio
 
 async def transcribe():
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=None) as client:
         with open("audio.wav", "rb") as f:
             files = {"file": ("audio.wav", f, "audio/wav")}
-            params = {
-                "model_size": "large-v2",
+            data = {
+                "model_size": "large-v3",
                 "compute_type": "int8_float16",
                 "device": "cuda",
             }
-            r = await client.post("http://shawn-pc.local:8001/transcribe", files=files, params=params, timeout=None)
-            print(r.json())
+            r = await client.post("http://127.0.0.1:8001/transcribe", files=files, data=data)
+            print(r.json()["transcription"])
 
-import asyncio
 asyncio.run(transcribe())
 ```
 
+---
+
 ## 3. Translate to English (CTranslate2)
 
-Just change the endpoint to `/translate` – everything else stays the same.
+Same as above, just change endpoint:
 
 ```bash
-curl -X POST "http://shawn-pc.local:8001/translate" \
+curl -X POST "http://127.0.0.1:8001/translate" \
   -F "file=@audio_french.mp3" \
-  -F "model_size=large-v2" \
+  -F "model_size=large-v3" \
   -F "compute_type=int8_float16" \
   -F "device=cuda"
 ```
 
-Python example is identical except `url = "http://shawn-pc.local:8001/translate"`.
+### Python (requests)
+```python
+import requests
 
-## 4. Streaming transcription (faster-whisper – lower latency, single call)
+url = "http://127.0.0.1:8001/translate"
+files = {"file": open("audio_french.mp3", "rb")}
+data = {
+    "model_size": "large-v3",
+    "compute_type": "int8_float16",
+    "device": "cuda"
+}
+response = requests.post(url, files=files, data=data)
+print(response.json()["translation"])
+```
+
+### Python (httpx – async)
+```python
+import httpx, asyncio
+
+async def translate():
+    async with httpx.AsyncClient(timeout=None) as client:
+        with open("audio_french.mp3", "rb") as f:
+            files = {"file": ("audio_french.mp3", f, "audio/mp3")}
+            data = {
+                "model_size": "large-v3",
+                "compute_type": "int8_float16",
+                "device": "cuda",
+            }
+            r = await client.post("http://127.0.0.1:8001/translate", files=files, data=data)
+            print(r.json()["translation"])
+
+asyncio.run(translate())
+```
+---
+
+## 4. Low-Latency Streaming (faster-whisper)
 
 ```bash
-curl -X POST "http://shawn-pc.local:8001/transcribe_stream" \
+curl -X POST "http://127.0.0.1:8001/transcribe_stream" \
   -F "file=@short_clip.wav" \
   -F "task=transcribe" \
-  -F "language=es"           # optional, auto-detect if omitted
+  -F "model_size=large-v3" \
+  -F "compute_type=int8_float16" \
+  -F "device=cuda"
 ```
 
 ```python
-# Same as normal transcribe but endpoint is /transcribe_stream
 response = requests.post(
-    "http://shawn-pc.local:8001/transcribe_stream",
+    "http://127.0.0.1:8001/transcribe_stream",
     files={"file": open("short_clip.wav", "rb")},
-    data={"task": "translate", "language": None},
+    data={
+        "task": "transcribe",
+        "model_size": "large-v3",
+        "compute_type": "int8_float16",
+        "device": "cuda",
+    },
 )
 print(response.json()["text"])
 ```
 
-## 5. Real-time chunk streaming (raw PCM 16kHz float32)
+---
 
-Useful for microphone capture or processing audio in chunks.
+## 5. Real-time Chunk Streaming (raw PCM 16kHz float32)
 
-The endpoint expects **raw little-endian 16kHz float32** audio bytes  
-(no WAV header, no container).
+Perfect for live microphone or chunked processing.
 
-### From a pre-loaded NumPy array (advanced / microphone)
-```python
-import numpy as np
-import requests
-
-# Example: audio_np is float32, 16kHz, shape (N,)
-chunk_bytes = audio_np.tobytes()
-
-response = requests.post(
-    "http://shawn-pc.local:8001/transcribe_chunk",
-    params={"task": "transcribe"},
-    data=chunk_bytes,
-    headers={"Content-Type": "application/octet-stream"},
-    timeout=None,
-)
-print(response.json()["text"])
-```
-
-### Recommended: From any audio file (WAV, MP3, etc.) – easiest for testing
+### From any audio file (easiest testing)
 ```python
 import librosa
-import requests
 import numpy as np
+import requests
 
-def load_audio_for_chunk(file_path: str, sr: int = 16000) -> bytes:
-    """Load audio file and return raw 16kHz float32 bytes expected by /transcribe_chunk"""
-    audio, _ = librosa.load(file_path, sr=sr, mono=True)
-    audio = audio.astype(np.float32)
-    return audio.tobytes()
+def audio_to_raw_bytes(path: str) -> bytes:
+    audio, _ = librosa.load(path, sr=16000, mono=True)
+    return np.asarray(audio, dtype=np.float32).tobytes()
 
-# Usage
-file_path = "short_clip.wav"  # or .mp3, .m4a, .flac, etc.
-chunk_bytes = load_audio_for_chunk(file_path)
+chunk = audio_to_raw_bytes("short_clip.wav")
 
 response = requests.post(
-    "http://shawn-pc.local:8001/transcribe_chunk",
-    params={"task": "transcribe"},
-    data=chunk_bytes,
+    "http://127.0.0.1:8001/transcribe_chunk?task=transcribe",
+    data=chunk,
     headers={"Content-Type": "application/octet-stream"},
     timeout=None,
 )
 result = response.json()
 print("Text:", result["text"])
-print("Language:", result["language"], f"({result['language_probability']:.2f})")
-print("Duration:", f"{result['duration_sec']:.2f}s")
+print("Lang:", result["language"], f"({result['language_probability']:.2f})")
 ```
 
-### Async version (httpx)
-```python
-import httpx
-import librosa
-import numpy as np
-
-async def transcribe_chunk_file(file_path: str):
-    audio, _ = librosa.load(file_path, sr=16000, mono=True)
-    audio_bytes = np.asarray(audio, dtype=np.float32).tobytes()
-
-    async with httpx.AsyncClient(timeout=None) as client:
-        r = await client.post(
-            "http://shawn-pc.local:8001/transcribe_chunk?task=transcribe",
-            data=audio_bytes,
-            headers={"Content-Type": "application/octet-stream"},
-        )
-        print(r.json()["text"])
-
-# Run it
-import asyncio
-asyncio.run(transcribe_chunk_file("short_clip.wav"))
-```
-
-### cURL (from file → raw bytes via tool)
+### cURL + ffmpeg (one-liner)
 ```bash
-# Using ffmpeg to extract raw float32 16kHz (works on Windows/Linux/macOS)
 ffmpeg -i short_clip.wav -f f32le -acodec pcm_f32le -ar 16000 -ac 1 - | \
-curl -X POST "http://shawn-pc.local:8001/transcribe_chunk?task=transcribe" \
+curl -X POST "http://127.0.0.1:8001/transcribe_chunk?task=transcribe" \
   --data-binary @- \
   -H "Content-Type: application/octet-stream"
 ```
 
-> Tip: Use `task=translate` to translate non-English audio directly in streaming mode.
+> Use `task=translate` to translate non-English chunks directly.
 
-## Common query parameters
+---
 
-| Parameter      | Values                          | Description                                      |
-|----------------|---------------------------------|--------------------------------------------------|
-| `model_size`   | `tiny`, `base`, `small`, `medium`, `large-v2`, `large-v3` | Model accuracy vs speed trade-off |
-| `compute_type` | `int8`, `int8_float16`, `float16` (GPU only) | Quantization – `int8_float16` recommended for GTX 1660 |
-| `device`       | `cpu`, `cuda`                   | Inference device                                 |
-| `task`         | `transcribe`, `translate`       | Only for streaming endpoints                     |
-
-Enjoy the blazing-fast Whisper API!
+Enjoy blazing-fast, production-ready Whisper transcription!

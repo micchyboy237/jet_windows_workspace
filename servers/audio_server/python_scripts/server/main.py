@@ -14,10 +14,6 @@ from python_scripts.server.utils.logger import get_logger
 # Configure shared rich logger
 log = get_logger("main")
 
-# Optional: suppress overly verbose logs from libraries
-logging.getLogger("uvicorn").handlers.clear()
-logging.getLogger("uvicorn.access").handlers.clear()
-
 # Startup banner
 log.info("[bold green]Whisper CTranslate2 + faster-whisper Server Starting...[/bold green]")
 
