@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from rich.console import Console
 
 # Import routers
-from python_scripts.server.routers import transcription, health
+from python_scripts.server.routers import health, transcription, translation
 from python_scripts.server.utils.logger import get_logger
 
 # Configure shared rich logger
@@ -46,11 +46,11 @@ async def log_requests(request: Request, call_next):
 
     # Icon mapping for visual clarity
     icons = {
+        "/": "Health",
         "/transcribe": "Transcribe (CT2)",
-        "/translate": "Translate (CT2)",
         "/transcribe_stream": "Stream (faster-whisper)",
         "/transcribe_chunk": "Chunk (faster-whisper)",
-        "/": "Health",
+        "/translate": "Text → EN (Opus-MT)",
     }
     icon = icons.get(path, "Request")
 
@@ -113,6 +113,7 @@ async def log_requests(request: Request, call_next):
 # Include routers
 app.include_router(health.router)
 app.include_router(transcription.router)
+app.include_router(translation.router)
 
 
 # Final ready message

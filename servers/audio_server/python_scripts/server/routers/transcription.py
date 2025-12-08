@@ -2,6 +2,7 @@
 from __future__ import annotations
 import numpy as np
 import dataclasses
+import time
 from typing import Optional, Literal, Annotated
 from pathlib import Path
 from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Request, Depends
@@ -43,6 +44,10 @@ async def transcribe_audio(
     model_size: QuantizedModelSizes = Query("large-v3", description="CTranslate2 model size"),
     compute_type: str = Query("int8", description="Compute type for CTranslate2"),
     device: str = Query("cpu", description="Device for CTranslate2 (cpu/cuda)"),
+    translate: bool = Query(
+        False,
+        description="If true, also return an English translation of the transcription (post-processed with Opus MT)."
+    ),
 ):
     """High-quality transcription using CTranslate2 (recommended for final results)."""
     if not file.filename.lower().endswith((".wav", ".mp3", ".m4a", ".flac", ".ogg")):
@@ -64,62 +69,25 @@ async def transcribe_audio(
         t = get_transcriber(model_size, compute_type, device)
         result = t(tmp, detect_language=True, translate_to_english=False)
         log.info(f"[bold green]CT2[/] [dim]transcribed[/] → [white]{result['transcription'][:60]}...[/white]")
-        
+
+        # Optional post-process translation (same logic that was previously in /translate)
+        if translate and result["transcription"].strip():
+            try:
+                translated = translate_text(
+                    text=result["transcription"],
+                    device=device,  # reuse the same device that ran Whisper
+                )
+                result["translation"] = translated
+                log.info(f"[bold magenta]Translated[/] → [white]{translated[:60]}...[/white]")
+            except Exception as e:
+                log.error(f"[bold red]Post-process translation failed[/] → {e}")
+                # We do not fail the whole request – translation is optional
+                result["translation"] = None
+
         return TranscriptionResponse(**result)
     except Exception as e:
         log.error(f"[bold red]CT2[/] [dim]transcribe failed[/] → {e}")
         raise HTTPException(500, f"Transcription failed: {str(e)}")
-    finally:
-        if tmp.exists():
-            tmp.unlink()
-
-
-@router.post("/translate", response_model=TranscriptionResponse)
-async def translate_audio(
-    file: UploadFile = File(...),
-    model_size: QuantizedModelSizes = Query("large-v3", description="CTranslate2 model size"),
-    compute_type: str = Query("int8_float16", description="Compute type for CTranslate2"),
-    device: str = Query("cuda", description="Device for CTranslate2 (cpu/cuda)"),
-):
-    """Translate audio → English using Whisper (transcribe) + dedicated translation model."""
-    if not file.filename.lower().endswith((".wav", ".mp3", ".m4a", ".flac", ".ogg")):
-        raise HTTPException(400, "Unsupported file format. Use WAV, MP3, M4A, FLAC, or OGG.")
-
-    content = await file.read()
-    tmp = Path("temp_uploads") / file.filename
-    tmp.parent.mkdir(parents=True, exist_ok=True)
-    tmp.write_bytes(content)
-
-    try:
-        log.info(
-            f"[bold magenta]Translate (CT2 → Post-process)[/] [white]processing[/] "
-            f"[dim]→[/] [yellow]'{file.filename}'[/] "
-            f"[green]{len(content)/1024/1024:.2f} MB[/] | "
-            f"[cyan]{model_size}[/] | [blue]{device}[/]"
-        )
-
-        # Step 1: Transcribe in original language (no translation flag)
-        transcriber = get_transcriber(model_size, compute_type, device)
-        result = transcriber(tmp, detect_language=True, translate_to_english=False)
-
-        # Step 2: Translate the transcription text using the dedicated service
-        if result["transcription"] and result["transcription"].strip():
-            translated = translate_text(
-                text=result["transcription"],
-                device=device,  # reuse same device (cuda/cpu)
-            )
-            result["translation"] = translated
-        else:
-            result["translation"] = ""
-
-        log.info(
-            f"[bold green]CT2 → Translated[/] → [white]{result['translation'][:60]}...[/white]"
-        )
-        return TranscriptionResponse(**result)
-
-    except Exception as e:
-        log.error(f"[bold red]Translate pipeline failed[/] → {e}")
-        raise HTTPException(500, f"Translation failed: {str(e)}")
     finally:
         if tmp.exists():
             tmp.unlink()
