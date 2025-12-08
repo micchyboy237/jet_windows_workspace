@@ -1,6 +1,5 @@
 from typing import List
 
-import ctranslate2
 from transformers import AutoTokenizer
 
 from translator_types import (
@@ -45,8 +44,7 @@ def translate_ja_to_en(
         Translated English string (stripped whitespace).
     """
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-    # ctranslate2.Translator is the class itself
-    translator: Translator = ctranslate2.Translator(model_path, device=device)
+    translator = Translator(model_path, device=device)  # our thin wrapper
 
     # Tokenize → convert to subword tokens expected by CTranslate2
     source_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(text))
@@ -54,11 +52,14 @@ def translate_ja_to_en(
 
     results = translator.translate_batch(
         source_batch,
-        beam_size=beam_size,
-        max_decoding_length=max_decoding_length,
-        **options,
+        options=TranslationOptions(
+            beam_size=beam_size,
+            max_decoding_length=max_decoding_length,
+            **options,  # user overrides
+        ),
     )
 
+    # ctranslate2 returns a list of TranslationResult objects
     best_hypothesis: list[str] = results[0].hypotheses[0]
     translated = tokenizer.decode(tokenizer.convert_tokens_to_ids(best_hypothesis))
     return translated.strip()
@@ -98,7 +99,7 @@ def batch_translate_ja_to_en(
     """
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     # ctranslate2.Translator is the class itself; avoid instantiating a second time
-    translator: Translator = ctranslate2.Translator(model_path, device=device)
+    translator = Translator(model_path, device=device)  # our thin wrapper
 
     source_batch: list[list[str]] = [
         tokenizer.convert_ids_to_tokens(tokenizer.encode(text)) for text in texts
@@ -106,14 +107,17 @@ def batch_translate_ja_to_en(
 
     results = translator.translate_batch(
         source_batch,
-        beam_size=beam_size,
-        max_decoding_length=max_decoding_length,
-        max_batch_size=max_batch_size,
-        batch_type=batch_type,
-        **options,
+        options=TranslationOptions(
+            beam_size=beam_size,
+            max_decoding_length=max_decoding_length,
+            max_batch_size=max_batch_size,
+            batch_type=batch_type,
+            **options,
+        ),
     )
 
     translations = [
+        # result is now a real ctranslate2.TranslationResult → use attribute access
         tokenizer.decode(
             tokenizer.convert_tokens_to_ids(result.hypotheses[0])
         ).strip()
