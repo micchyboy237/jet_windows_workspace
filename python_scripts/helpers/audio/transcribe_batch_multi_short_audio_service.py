@@ -111,7 +111,7 @@ if __name__ == "__main__":
     files = resolve_audio_paths(audio_dir)
     files = files[:20]  # Temporarily limit for testing
 
-    transcriptions = batch_transcribe_files(files, max_workers=6, output_dir=output_dir, language=language)
+    transcriptions = batch_transcribe_files(files, max_workers=4, output_dir=output_dir, language=language)
 
     # Optional: print first transcription as preview
     if transcriptions:
