@@ -1,7 +1,9 @@
 from typing import Any, Dict, List, Sequence, Tuple
 from transformers import AutoTokenizer
 import threading
-from functools import lru_cache
+
+# Import helper functions and translation options defaults
+from translator_types.translator import translation_options_as_dict, _TRANSLATION_OPTIONS_DEFAULTS
 
 from translator_types import (
     Device,
@@ -95,15 +97,22 @@ def _translate_core(
         for text in source_texts
     ]
 
+    # Build full options dict with defaults filled in (missing keys → default)
+    full_opts: TranslationOptions = {
+        **_TRANSLATION_OPTIONS_DEFAULTS,  # from translator.py
+        "beam_size": beam_size,
+        "max_decoding_length": max_decoding_length,
+        "max_batch_size": max_batch_size,
+        "batch_type": batch_type,
+        **options,  # user-provided overrides (including return_logits_vocab etc.)
+    }
+
+    # Clean to only send non-default values to CTranslate2 (keeps signature clean)
+    cleaned_opts = translation_options_as_dict(full_opts)
+
     results = translator.translate_batch(
         source_batches,
-        options=TranslationOptions(
-            beam_size=beam_size,
-            max_decoding_length=max_decoding_length,
-            max_batch_size=max_batch_size,
-            batch_type=batch_type,
-            **options,
-        ),
+        **cleaned_opts,  # Note: no `options=` kwarg – pass directly as kwargs
     )
 
     translations = [
@@ -113,12 +122,12 @@ def _translate_core(
 
     translation_analysis = analyze_translation_results(results)
 
-    # FIXED LOGITS EXTRACTION
+    # Robust logits extraction with improved check
     logits_analysis = None
     if options.get("return_logits_vocab", False):
         logits_for_analysis = []
         for r in results:
-            if not hasattr(r, "logits") or not r.logits:
+            if not hasattr(r, "logits") or not r.logits or not r.logits[0]:
                 continue
             hyp_logits = r.logits[0]  # list of StorageView (one per generated token)
             try:
@@ -135,6 +144,7 @@ def _translate_core(
 
 def select_model_tokenizer(language: str):
     pass
+
 
 
 # ── Public APIs ─────────────────────────────────────────────────────────────

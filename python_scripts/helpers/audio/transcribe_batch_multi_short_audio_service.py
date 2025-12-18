@@ -20,7 +20,7 @@ log = logging.getLogger("transcribe")
 def transcribe_file(model: WhisperModel, audio_path: str, language: Optional[str] = None) -> str:
     """Transcribe a single file and return text."""
     log.info(f"Starting transcription: [bold cyan]{audio_path}[/bold cyan]")
-    segments, _ = model.transcribe(audio_path, language=language, beam_size=1)  # or keep 5
+    segments, _ = model.transcribe(audio_path, language=language)  # or keep 5
     text = " ".join(segment.text for segment in segments)
     log.info(f"Completed: [bold green]{audio_path}[/bold green]")
     return text
@@ -46,8 +46,13 @@ def batch_transcribe_files(
         log.warning("No audio files provided for transcription.")
         return []
 
-    log.info("Loading model [bold magenta]kotoba-tech/kotoba-whisper-v2.0-faster[/bold magenta] on CPU (int8, 12 threads)")
-    model = WhisperModel("kotoba-tech/kotoba-whisper-v2.0-faster", device="cuda", compute_type="int8")
+    # log.info("Loading model [bold magenta]kotoba-tech/kotoba-whisper-v2.0-faster[/bold magenta] on CPU (int8, 12 threads)")
+    model = WhisperModel(
+        "kotoba-tech/kotoba-whisper-v2.0-faster",
+        device="cuda",
+        compute_type="float32",
+        # cpu_threads=12,
+    )
 
     results: List[str] = [None] * len(audio_paths)  # Preserve order
     path_to_index = {path: idx for idx, path in enumerate(audio_paths)}
@@ -61,6 +66,7 @@ def batch_transcribe_files(
     with Progress(
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
+        TextColumn("[bold blue]{task.completed}/{task.total}[/bold blue]"),  # Added processed/total count
         "[progress.percentage]{task.percentage:>3.0f}%",
         TransferSpeedColumn(),
         TimeRemainingColumn(),
