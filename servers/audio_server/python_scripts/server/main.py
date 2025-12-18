@@ -44,45 +44,24 @@ async def log_requests(request: Request, call_next):
     path = request.url.path
     query = str(request.query_params) if request.query_params else ""
 
-    # Icon mapping for visual clarity
     icons = {
         "/": "Health",
         "/transcribe": "Transcribe (CT2)",
         "/transcribe_stream": "Stream (faster-whisper)",
         "/transcribe_chunk": "Chunk (faster-whisper)",
         "/translate": "Text → EN (Opus-MT)",
+        "/sample": "Sample (multipart/raw)",
     }
     icon = icons.get(path, "Request")
 
-    filename = "—"
-    file_size_mb = 0.0
-    is_multipart = False
-
+    # SAFE: only read headers, never touch request.body() or request.form()
     content_type = request.headers.get("content-type", "")
-    if content_type and content_type.startswith("multipart/form-data"):
-        try:
-            body = await request.body()
-            if body:
-                form = await request.form()
-                file = form.get("file")
-                if file and hasattr(file, "filename") and file.filename:
-                    filename = file.filename
-                    file_size_mb = len(body) / (1024 * 1024)
-                    is_multipart = True
+    is_multipart = content_type.startswith("multipart/form-data")
 
-                # Restore body for downstream consumption
-                async def receive():
-                    return {"type": "http.request", "body": body, "more_body": False}
-                request._receive = receive  # type: ignore
-        except Exception as e:
-            log.error(f"Could not parse form in middleware: {e}")
-
-    # Request incoming log
     if is_multipart:
         log.info(
             f"[bold cyan]{icon}[/] [white]{method} {path}[/] "
-            f"[dim]→[/] [yellow]'{filename}'[/] "
-            f"[green]{file_size_mb:.2f} MB[/] "
+            f"[dim]→ multipart/form-data[/] "
             f"[dim]from[/] [blue]{client_ip}[/] {query}"
         )
     else:
@@ -91,22 +70,12 @@ async def log_requests(request: Request, call_next):
             f"[dim]from[/] [blue]{client_ip}[/] {query or '[no params]'}"
         )
 
-    try:
-        response = await call_next(request)
-    except Exception as exc:
-        process_time = time.time() - start_time
-        log.exception(
-            f"[bold red]Exception[/] {method} {path} | {process_time:.3f}s → {exc}"
-        )
-        raise
-
+    response = await call_next(request)
     process_time = time.time() - start_time
     status_color = "[bold green]" if response.status_code < 400 else "[bold red]"
-
     log.info(
         f"{status_color}→ {response.status_code}[/] [dim]| {process_time:.3f}s[/]"
     )
-
     return response
 
 

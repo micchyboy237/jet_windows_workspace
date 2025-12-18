@@ -8,6 +8,7 @@ import numpy as np
 import transformers
 from typing import Literal, Optional, Tuple, List
 from pathlib import Path
+from ..utils.audio_utils import load_audio, AudioInput
 
 # Supported quantized Whisper models (int8 or int8_float16)
 QuantizedModelSizes = Literal[
@@ -66,15 +67,6 @@ class WhisperCT2Transcriber:
             # inter_threads=1,
         )
 
-    def load_audio(self, audio_path: str | Path, sr: int = 16000) -> np.ndarray:
-        """Load and resample audio to 16kHz mono."""
-        audio_path = Path(audio_path)
-        if not audio_path.exists():
-            raise FileNotFoundError(f"Audio file not found: {audio_path}")
-
-        audio, _ = librosa.load(audio_path, sr=sr, mono=True)
-        return np.asarray(audio, dtype=np.float32)
-
     def preprocess(self, audio: np.ndarray) -> ctranslate2.StorageView:
         """Convert raw audio waveform → log-Mel features expected by Whisper."""
         inputs = self.processor(audio, sampling_rate=16000, return_tensors="np")
@@ -108,7 +100,7 @@ class WhisperCT2Transcriber:
 
     def transcribe(
         self,
-        audio_path: str | Path,
+        audio: AudioInput,
         *,
         detect_language: bool = True,
         translate_to_english: bool = False,
@@ -118,13 +110,12 @@ class WhisperCT2Transcriber:
 
         Returns a dict with all results for easy inspection or further processing.
         """
-        # 1. Load & preprocess
-        audio = self.load_audio(audio_path)
-        features = self.preprocess(audio)
+        # 1. Load & preprocess (now audio_utils returns (audio_array, sr))
+        audio_array = load_audio(audio)  # ← now correctly unpacks (array, sr)
+        features = self.preprocess(audio_array)
 
         result = {
-            "audio_path": str(Path(audio_path).resolve()),
-            "duration_sec": len(audio) / 16000,
+            "duration_sec": len(audio_array) / 16000,
             "detected_language": None,
             "detected_language_prob": None,
             "transcription": None,
@@ -162,24 +153,5 @@ class WhisperCT2Transcriber:
         return result
 
     # Convenience aliases
-    def __call__(self, audio_path: str | Path, **kwargs) -> dict:
-        return self.transcribe(audio_path, **kwargs)
-    
-if __name__ == "__main__":
-    model_size: QuantizedModelSizes = "large-v2"
-    quantized_model_path = f"C:/Users/druiv/.cache/hf_ctranslate2_models/whisper-{model_size}-ct2"
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\data\1.wav"
-
-    transcriber = WhisperCT2Transcriber(
-        model_size=model_size,
-        model_dir=quantized_model_path
-    )
-
-    result = transcriber(
-        audio_path=audio_path,
-        translate_to_english=True
-    )
-
-    print(f"Detected: {result['detected_language']} ({result['detected_language_prob']})")
-    print("\nTranscription:\n", result["transcription"])
-    print("\nEnglish translation:\n", result["translation"])
+    def __call__(self, audio: AudioInput, **kwargs) -> dict:
+        return self.transcribe(audio, **kwargs)

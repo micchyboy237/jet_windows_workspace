@@ -1,0 +1,3 @@
+cd ~\.cache\venv\servers\jet_venv\
+.\Scripts\activate
+cd C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace

@@ -23,7 +23,7 @@ audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scr
 if not os.path.exists(quantized_model_path):
     raise FileNotFoundError(
         f"Quantized model not found at:\n{quantized_model_path}\n"
-        "Run: ct2-transformers-converter --model openai/whisper-large-v3 --output_dir <path> --quantization int8_float16"
+        "Run: ct2-transformers-converter --model openai/whisper-large-v3 --output_dir <path> --quantization int8"
     )
 
 processor = transformers.WhisperProcessor.from_pretrained(f"openai/whisper-{model_size}")

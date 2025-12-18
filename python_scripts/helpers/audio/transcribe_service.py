@@ -10,7 +10,7 @@ import transformers
 from typing import Any, Literal, Tuple
 from typing import Union
 import numpy.typing as npt
-from ..utils.logger import get_logger
+from utils.logger import get_logger
 
 log = get_logger("ct2_cache")
 

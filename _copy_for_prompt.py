@@ -48,36 +48,13 @@ include_files = [
     # "/Users/jethroestrada/Library/Application Support/Cursor/User/profiles/244a6bcd/settings.json",
     # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/pyrightconfig.json",
 
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/jet_python_modules/jet/adapters/llama_cpp/llm.py",
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/jet_python_modules/jet/adapters/llama_cpp/embeddings.py",
-
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/examples/Context-Engineering/00_COURSE/02_context_processing/implementations/refinement_loops.py",
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/examples/Context-Engineering/00_COURSE/01_context_retrieval_generation/templates/assembly_patterns.py",
-
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/examples/Context-Engineering/00_COURSE/05_memory_systems/00_memory_architectures.md",
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/examples/Context-Engineering/00_COURSE/01_context_retrieval_generation/00_overview.md",
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/examples/Context-Engineering/00_COURSE/02_context_processing/00_overview.md",
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/examples/Context-Engineering/00_COURSE/03_context_management/00_overview.md",
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/examples/Context-Engineering/00_COURSE/04_retrieval_augmented_generation/00_rag_fundamentals.md",
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/examples/Context-Engineering/00_COURSE/02_context_processing/labs/long_context_lab.py",
-
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/repo-libs/pydantic-ai/examples/pydantic_ai_examples/rag.py",
-
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/jet_python_modules/jet/audio/helpers/energy.py",
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/jet_python_modules/jet/audio/helpers/silence.py",
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/jet_python_modules/jet/audio/stream_mic.py",
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/jet_python_modules/jet/audio/record_mic.py", 
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/jet_python_modules/jet/audio/transcribers/audio_file_transcriber.py",
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/jet_python_modules/jet/audio/transcribers/audio_context_transcriber.py",
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/run_stream_device_output.py",
-
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/repo-libs/silero-vad/src/silero_vad/utils_vad.py",
-
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/jet_python_modules/jet/audio/speech/silero/silero_vad_stream.py",
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/transcribers/run_transcribe_audio_silero.py",
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/transcribers/generated/run_transcribe_audio_silero/segment_001/sound/insights",
-
-    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server",
+    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/services/transcribe_service.py",
+    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/services/translate_service.py",
+    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/main.py",
+    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/utils/audio_utils.py",
+    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/routers/transcription.py",
+    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/routers/translation.py",
+    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/models/responses.py",
 ]
 
 structure_include = [
@@ -91,18 +68,17 @@ exclude_content = []
 
 # Args defaults
 SHORTEN_FUNCTS = False 
-INCLUDE_FILE_STRUCTURE = True
+INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update client.md with python and curl usage examples
+- /transcribe_translate should have correct response format
+- Add new endpoint "/transcribe"
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """
-You don't use prior artifact knowledge and memory.
-You write step by step analysis before providing the new code or diff changes for updated code.
 """.strip()
 
 # For existing projects

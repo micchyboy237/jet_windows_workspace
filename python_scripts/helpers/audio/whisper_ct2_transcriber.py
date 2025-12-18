@@ -166,13 +166,15 @@ class WhisperCT2Transcriber:
         return self.transcribe(audio_path, **kwargs)
     
 if __name__ == "__main__":
-    model_size: QuantizedModelSizes = "large-v2"
+    model_size: QuantizedModelSizes = "small"
+    device = "cuda"
     quantized_model_path = f"C:/Users/druiv/.cache/hf_ctranslate2_models/whisper-{model_size}-ct2"
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\data\1.wav"
+    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\data\sound.wav"
 
     transcriber = WhisperCT2Transcriber(
         model_size=model_size,
-        model_dir=quantized_model_path
+        model_dir=quantized_model_path,
+        device=device,
     )
 
     result = transcriber(

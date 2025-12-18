@@ -57,28 +57,43 @@ def get_translator(
     return _TRANSLATOR_CACHE[key], _TOKENIZER_CACHE[key]
 
 
+from typing import List as ListType
+
 def translate_text(
-    text: str,
+    text: str | ListType[str],
     model_path: str = DEFAULT_MODEL_PATH,
     tokenizer_name: str = DEFAULT_TOKENIZER,
     device: str = "cuda",
     beam_size: int = 5,
-) -> str:
+) -> ListType[str]:
     """
-    Translate a single piece of text using the cached CTranslate2 model.
+    Translate one or multiple texts using the cached CTranslate2 model.
+    Returns list of translations (same order).
     """
-    if not text.strip():
-        return ""
+    texts = [text] if isinstance(text, str) else text
+    texts = [t.strip() for t in texts]
+    if not any(texts):
+        return [""] * len(texts)
 
     translator, tokenizer = get_translator(model_path, tokenizer_name, device)
 
-    source = tokenizer.encode(text)
-    source_tokens = tokenizer.convert_ids_to_tokens(source)
+    # Tokenize all texts
+    source_batches = [tokenizer.encode(t) for t in texts]
+    source_token_batches = [tokenizer.convert_ids_to_tokens(ids) for ids in source_batches]
+
+    # Batch translation
     results = translator.translate_batch(
-        [source_tokens],
+        source_token_batches,
         beam_size=beam_size,
         max_decoding_length=512,
     )
-    target_tokens = results[0].hypotheses[0]
-    translated = tokenizer.decode(tokenizer.convert_tokens_to_ids(target_tokens))
-    return translated.strip()
+
+    translated_texts = []
+    for result in results:
+        target_tokens = result.hypotheses[0]
+        translated = tokenizer.decode(tokenizer.convert_tokens_to_ids(target_tokens))
+        translated_texts.append(translated.strip())
+
+    log.info(f"[bold green]Translated[/] → {" ".join(translated_texts)}")
+
+    return translated_texts
