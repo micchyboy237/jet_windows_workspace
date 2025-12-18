@@ -1,6 +1,7 @@
-# jet/translators/translate_jp_en2.py
 from typing import Any, Dict, List, Sequence, Tuple
 from transformers import AutoTokenizer
+import threading
+from functools import lru_cache
 
 from translator_types import (
     Device,
@@ -8,6 +9,10 @@ from translator_types import (
     TranslationOptions,
     Translator,
 )
+
+# Global thread-safe cache for tokenizer and translator instances
+_model_cache: Dict[Tuple[str, Device], Tuple[AutoTokenizer, Translator]] = {}
+_cache_lock = threading.RLock()
 
 # ── Device auto-detection with memory safety ──────────────────────────────────
 import torch
@@ -17,6 +22,9 @@ from analyzer import (
     print_analysis_table,
     print_logits_insights,
 )
+from utils.logger import get_logger
+
+log = get_logger("ct2_cache")
 
 MIN_FREE_VRAM_GB = 2.0  # Safe threshold for quantized Opus-MT models
 
@@ -59,8 +67,28 @@ def _translate_core(
     batch_type: BatchType = "examples",
     **options: TranslationOptions,
 ) -> Tuple[List[str], List[Dict[str, Any]], Dict[str, Any] | None]:
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-    translator = Translator(model_path, device=device)
+    # Thread-safe global cache for tokenizer + translator pair
+    cache_key = (model_path, device)
+    with _cache_lock:
+        cached = _model_cache.get(cache_key)
+        if cached is None:
+            log.info(
+                f"[bold yellow]Loading translation model[/] "
+                f"[dim]→[/] [cyan]{model_path}[/] | [green]{device}[/] | [blue]{device}[/]"
+            )
+
+            tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+            translator = Translator(model_path, device=device)
+            _model_cache[cache_key] = (tokenizer, translator)
+
+            log.info(
+                f"[bold green]Translation model ready & cached[/] "
+                f"[dim]→[/] [bright_white]{cache_key}[/]"
+            )
+        else:
+            log.info(f"[dim]Translation model cache hit[/] → {cached}")
+
+            tokenizer, translator = cached
 
     source_batches: List[List[str]] = [
         tokenizer.convert_ids_to_tokens(tokenizer.encode(text))
