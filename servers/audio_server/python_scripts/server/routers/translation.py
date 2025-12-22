@@ -13,6 +13,7 @@ router = APIRouter()
 
 class TranslateRequest(BaseModel):
     text: str | List[str] = Field(..., description="Single text string or list of strings to translate")
+    device: str = Field("cuda", description="Device to run the translation model on (cpu/cuda)")
 
 class TranslateResponse(BaseModel):
     original: str
@@ -22,15 +23,15 @@ class BatchTranslateResponse(BaseModel):
     results: List[TranslateResponse]
 
 @router.post("/translate", response_model=TranslateResponse | BatchTranslateResponse)
-async def translate_text(
+async def translate(
     request: TranslateRequest,
-    device: str = Query("cuda", description="Device to run the translation model on (cpu/cuda)"),
 ):
     """
     Pure text-to-text translation using the cached Opus-MT CTranslate2 model.
     Now supports both single string and list of strings (batch translation).
     """
     texts = request.text if isinstance(request.text, list) else [request.text]
+    device = request.device
 
     if not any(t.strip() for t in texts):
         empty_result = TranslateResponse(original="", translation="")

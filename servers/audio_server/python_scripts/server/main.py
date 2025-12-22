@@ -1,13 +1,9 @@
 from __future__ import annotations
 import time
-import logging
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from rich.console import Console
 from python_scripts.server.routers import health, transcription, translation, batch_transcription
-# Import the startup function from the batch router
-from python_scripts.server.routers.batch_transcription import load_model as load_batch_model
-
+# from servers.audio_server.python_scripts.server.routers.batch_transcription2 import load_model as load_batch_model
 from python_scripts.server.utils.logger import get_logger
 
 log = get_logger("main")
@@ -45,6 +41,7 @@ async def log_requests(request: Request, call_next):
         "/translate": "Text → EN (Opus-MT)",
         "/sample": "Sample (multipart/raw)",
         "/batch_transcribe": "Batch Transcribe (multipart)",
+        "/batch_transcribe_translate": "Batch Transcribe+Translate (multipart)",
         "/batch_transcribe_bytes": "Batch Transcribe (bytes)",
     }
     icon = icons.get(path, "Request")
@@ -75,9 +72,9 @@ app.include_router(batch_transcription.router)
 app.include_router(translation.router)
 
 # Load the faster-whisper model at application startup
-@app.on_event("startup")
-async def startup_event():
-    await load_batch_model()
+# @app.on_event("startup")
+# async def startup_event():
+#     await load_batch_model()
 
 log.info("[bold green]Server ready — http://0.0.0.0:8001[/bold green]")
 log.info("[dim]Interactive docs:[/] [underline blue]http://127.0.0.1:8001/docs[/underline blue]")
