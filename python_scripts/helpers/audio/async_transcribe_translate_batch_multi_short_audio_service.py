@@ -40,7 +40,7 @@ def transcribe_and_translate_file(
 ) -> str:
     """Transcribe a single file to Japanese text, then translate to English."""
     log.info(f"Starting transcription + translation: [bold cyan]{audio_path}[/bold cyan]")
-    segments, _ = model.transcribe(audio_path, language=language or "ja", beam_size=5, vad_filter=True)
+    segments, _ = model.transcribe(audio_path, language=language or "ja", beam_size=5, vad_filter=False)
     ja_text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
     if not ja_text:
         log.warning(f"No Japanese text detected in {audio_path}")

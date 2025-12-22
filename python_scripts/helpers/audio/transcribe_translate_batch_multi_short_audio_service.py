@@ -60,7 +60,7 @@ def transcribe_and_translate_file(
     """Transcribe a single file to Japanese text, then translate to English."""
     log.info(f"Starting transcription + translation: [bold cyan]{audio_path}[/bold cyan]")
 
-    segments_iter, _ = model.transcribe(audio_path, language=language or "ja", beam_size=5, vad_filter=True)
+    segments_iter, _ = model.transcribe(audio_path, language=language or "ja", beam_size=5, vad_filter=False)
 
     segments: List[SegmentDict] = []
     for s in segments_iter:
