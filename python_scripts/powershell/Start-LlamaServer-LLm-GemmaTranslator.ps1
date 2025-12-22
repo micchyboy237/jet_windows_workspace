@@ -1,0 +1,1 @@
+llama-server -m C:\Users\druiv\.cache\llama.cpp\translators\gemma-2-2b-jpn-it-translate-Q4_K_M.gguf -c 2048 --override-kv tokenizer.ggml.add_bos_token=bool:false
