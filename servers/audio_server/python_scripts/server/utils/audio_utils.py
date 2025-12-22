@@ -83,3 +83,54 @@ def load_audio(
         y = librosa.resample(y, orig_sr=current_sr or sr, target_sr=sr)
 
     return y.squeeze()
+
+def resample_audio(
+    audio: npt.NDArray[np.float32],
+    orig_sr: int,
+    target_sr: int = 16000,
+) -> npt.NDArray[np.float32]:
+    """
+    Resample audio array to the target sample rate using linear interpolation.
+
+    This is a lightweight, dependency-free implementation suitable for real-time
+    or batch processing where adding heavy dependencies (e.g., librosa, torchaudio)
+    is undesirable.
+
+    Args:
+        audio: Input audio as float32 numpy array. Shape can be (samples,) or (channels, samples).
+        orig_sr: Original sample rate of the input audio.
+        target_sr: Desired sample rate (default: 16000 Hz, required by Whisper models).
+
+    Returns:
+        Resampled audio as float32 numpy array with the same number of channels.
+
+    Raises:
+        ValueError: If orig_sr or target_sr is <= 0, or if audio is empty.
+    """
+    if orig_sr <= 0 or target_sr <= 0:
+        raise ValueError("Sample rates must be positive integers.")
+    if audio.size == 0:
+        raise ValueError("Input audio array is empty.")
+
+    if orig_sr == target_sr:
+        return audio.copy()
+
+    # Compute the resampling ratio and new length
+    ratio = target_sr / orig_sr
+    old_length = audio.shape[-1]
+    new_length = int(np.round(old_length * ratio))
+
+    # Determine if mono or multi-channel
+    if audio.ndim == 1:
+        # Mono: (samples,)
+        old_indices = np.linspace(0, old_length - 1, new_length)
+        resampled = np.interp(old_indices, np.arange(old_length), audio)
+    else:
+        # Multi-channel: (channels, samples)
+        resampled_channels = []
+        for channel in audio:
+            old_indices = np.linspace(0, old_length - 1, new_length)
+            resampled_channels.append(np.interp(old_indices, np.arange(old_length), channel))
+        resampled = np.stack(resampled_channels)
+
+    return resampled.astype(np.float32)
