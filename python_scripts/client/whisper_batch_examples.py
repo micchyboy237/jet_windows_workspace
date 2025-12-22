@@ -8,7 +8,10 @@ from typing import List, Optional
 import httpx
 from pydantic import BaseModel, Field
 from rich import print as rprint
+from rich.console import Console
+from rich.logging import RichHandler
 from rich.table import Table
+import logging
 
 
 class TranscriptionSegment(BaseModel):
@@ -40,11 +43,26 @@ async def fetch_batch_transcribe(
     return [TranscriptionResponse(**item) for item in response.json()]
 
 
+# Rich logging setup
+console = Console()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(console=console, rich_tracebacks=True, markup=True)]
+)
+log = logging.getLogger("whisper_examples")
+
+
 async def example_simple_batch() -> None:
     """Example 1: Minimal reusable batch transcription (no context manager)."""
+    log.info("[bold magenta]Starting Example 1: Simple Batch Transcription[/]")
+    log.info("Fetching up to 4 WAV files from audio directory for basic transcription")
+
     base_url = "http://127.0.0.1:8001"
     audio_dir = Path(r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\generated\extract_parquet_data\audio")
     audio_files = list(audio_dir.glob("**/*.wav"))[:4]
+    log.info(f"Selected audio files: {[p.name for p in audio_files]}")
 
     async with httpx.AsyncClient(base_url=base_url, timeout=300.0) as client:
         results = await fetch_batch_transcribe(client, audio_files, translate=False)
@@ -66,13 +84,18 @@ async def example_simple_batch() -> None:
         table.add_row(path.name, f"{result.duration_sec:.1f}", lang, text_preview)
 
     rprint(table)
+    log.info("[bold green]Example 1 completed[/]\n")
 
 
 async def example_with_segments() -> None:
     """Example 2: Display per-segment transcription for each file."""
+    log.info("[bold magenta]Starting Example 2: Batch Transcription with Segments[/]")
+    log.info("Processing 2 files to display detailed timestamped segments")
+
     base_url = "http://127.0.0.1:8001"
     audio_dir = Path(r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\generated\extract_parquet_data\audio")
     audio_files = list(audio_dir.glob("**/*.wav"))[:2]  # Fewer files for clearer segment output
+    log.info(f"Selected audio files: {[p.name for p in audio_files]}")
 
     async with httpx.AsyncClient(base_url=base_url, timeout=300.0) as client:
         results = await fetch_batch_transcribe(client, audio_files, translate=False)
@@ -85,12 +108,18 @@ async def example_with_segments() -> None:
         else:
             rprint("  [dim]No segments available[/]")
 
+    log.info("[bold green]Example 2 completed[/]\n")
+
 
 async def example_translate_batch() -> None:
     """Example 3: Batch transcribe + translate (e.g., Japanese → English)."""
+    log.info("[bold magenta]Starting Example 3: Batch Transcribe + Translate[/]")
+    log.info("Performing transcription and translation on up to 3 audio files")
+
     base_url = "http://127.0.0.1:8001"
     audio_dir = Path(r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\generated\extract_parquet_data\audio")
     audio_files = list(audio_dir.glob("**/*.wav"))[:3]
+    log.info(f"Selected audio files: {[p.name for p in audio_files]}")
 
     async with httpx.AsyncClient(base_url=base_url, timeout=300.0) as client:
         results = await fetch_batch_transcribe(client, audio_files, translate=True)
@@ -106,13 +135,15 @@ async def example_translate_batch() -> None:
         table.add_row(path.name, orig, trans)
 
     rprint(table)
+    log.info("[bold green]Example 3 completed[/]\n")
 
 
 async def main() -> None:
-    rprint("[bold green]Running Whisper batch client examples...[/]")
+    log.info("[bold green]Running Whisper batch client examples...[/]\n")
     await example_simple_batch()
-    await example_with_segments()
-    await example_translate_batch()
+    # await example_with_segments()
+    # await example_translate_batch()
+    log.info("[bold green]All examples finished.[/]")
 
 
 if __name__ == "__main__":

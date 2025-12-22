@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import List
 
 from faster_whisper import WhisperModel, BatchedInferencePipeline
-from ..utils.audio_utils import load_audio, resample_audio
+from ..utils.audio_utils import load_audio
 from ..utils.logger import get_logger
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from rich.progress import Progress, TextColumn, BarColumn, TimeRemainingColumn, TransferSpeedColumn
@@ -45,7 +45,6 @@ def _get_batched_pipeline() -> BatchedInferencePipeline:
     model = _get_model()
     return BatchedInferencePipeline(
         model=model,
-        batch_size=4,  # Tune as needed for your GPU
     )
 
 def _transcribe_single(audio_bytes: bytes) -> TranscriptionResult:
@@ -80,12 +79,12 @@ def batch_transcribe_bytes(audio_bytes_list: List[bytes]) -> List[BatchResult]:
         try:
             pipeline = _get_batched_pipeline()
             audio_arrays = [
-                resample_audio(load_audio(ab), target_sr=16000)
+                load_audio(ab, 16000)
                 for ab in audio_bytes_list
             ]
             batch_results = pipeline.transcribe(
                 audio_arrays,
-                batch_size=4,
+                batch_size=8,
                 # vad_filter=True,  # Removed: allow outer logic to control VAD as needed
                 beam_size=5,
                 word_timestamps=False,
