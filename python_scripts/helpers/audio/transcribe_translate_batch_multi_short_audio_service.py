@@ -1,7 +1,8 @@
-from pathlib import Path
-from typing import List, Optional, AsyncGenerator, Generator, TypedDict
 import logging
 import asyncio
+import dataclasses
+from pathlib import Path
+from typing import List, Optional, AsyncGenerator, Generator, TypedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from rich.logging import RichHandler
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, TransferSpeedColumn
@@ -22,6 +23,24 @@ logging.basicConfig(
 )
 log = logging.getLogger("transcribe")
 
+class WordDict(TypedDict):
+    start: float
+    end: float
+    word: str
+    probability: float
+
+class SegmentDict(TypedDict):
+    id: int
+    seek: int
+    start: float
+    end: float
+    text: str
+    tokens: List[int]
+    avg_logprob: float
+    compression_ratio: float
+    no_speech_prob: float
+    words: Optional[List[WordDict]]
+    temperature: Optional[float]
 
 class TranslationResult(TypedDict):
     """TypedDict representing the result for a single processed file."""
@@ -40,11 +59,18 @@ def transcribe_and_translate_file(
 ) -> str:
     """Transcribe a single file to Japanese text, then translate to English."""
     log.info(f"Starting transcription + translation: [bold cyan]{audio_path}[/bold cyan]")
-    segments, _ = model.transcribe(audio_path, language=language or "ja", beam_size=5, vad_filter=True)
-    ja_text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+
+    segments_iter, _ = model.transcribe(audio_path, language=language or "ja", beam_size=5, vad_filter=True)
+
+    segments: List[SegmentDict] = []
+    for s in segments_iter:
+        segments.append(dataclasses.asdict(s))
+
+    ja_text = " ".join(segment["text"].strip() for segment in segments if segment["text"].strip())
     if not ja_text:
         log.warning(f"No Japanese text detected in {audio_path}")
         return ""
+
     # Tokenize Japanese text
     source_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(ja_text))
     # Translate batch (single sentence)
