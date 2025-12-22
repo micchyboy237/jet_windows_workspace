@@ -4,9 +4,8 @@ from __future__ import annotations
 from typing import List
 
 from fastapi import APIRouter, Request, HTTPException, UploadFile
-from pydantic import BaseModel
 
-from python_scripts.server.models.responses import TranscriptionResponse
+from python_scripts.server.models.responses import TranscriptionResponse, TranscriptionSegment
 from python_scripts.server.services.batch_transcription_service import (
     batch_transcribe_bytes,
     batch_transcribe_and_translate_bytes,
@@ -57,19 +56,28 @@ async def batch_transcribe(request: Request):
             if result["audio_bytes"]
             else 0.0
         )
-        responses.append(
-            TranscriptionResponse(
-                duration_sec=round(duration_sec, 3),
-                detected_language=result.get("language"),
-                detected_language_prob=(
-                    round(result.get("language_prob"), 4)
-                    if result.get("language_prob")
-                    else None
-                ),
-                transcription=result["text"].strip(),
-                translation=None,
-            )
+        response = TranscriptionResponse(
+            duration_sec=round(duration_sec, 3),
+            detected_language=result.get("language"),
+            detected_language_prob=(
+                round(result.get("language_prob"), 4)
+                if result.get("language_prob")
+                else None
+            ),
+            transcription=result["text"].strip(),
+            translation=None,
         )
+        # Attach segments if available (for streaming-capable clients)
+        if "segments" in result and result["segments"]:
+            response.segments = [
+                TranscriptionSegment(
+                    start=seg["start"],
+                    end=seg["end"],
+                    text=seg["text"],
+                )
+                for seg in result["segments"]
+            ]
+        responses.append(response)
 
     log.info(f"[bold green]Batch transcription completed[/] → {len(responses)} files")
     return responses
@@ -113,19 +121,28 @@ async def batch_transcribe_translate(request: Request):
             if result["audio_bytes"]
             else 0.0
         )
-        responses.append(
-            TranscriptionResponse(
-                duration_sec=round(duration_sec, 3),
-                detected_language=result.get("language"),
-                detected_language_prob=(
-                    round(result.get("language_prob"), 4)
-                    if result.get("language_prob")
-                    else None
-                ),
-                transcription=result["text"].strip(),
-                translation=result["translation"].strip() if result.get("translation") else None,
-            )
+        response = TranscriptionResponse(
+            duration_sec=round(duration_sec, 3),
+            detected_language=result.get("language"),
+            detected_language_prob=(
+                round(result.get("language_prob"), 4)
+                if result.get("language_prob")
+                else None
+            ),
+            transcription=result["text"].strip(),
+            translation=result["translation"].strip() if result.get("translation") else None,
         )
+        # Attach segments if available
+        if "segments" in result and result["segments"]:
+            response.segments = [
+                TranscriptionSegment(
+                    start=seg["start"],
+                    end=seg["end"],
+                    text=seg["text"],
+                )
+                for seg in result["segments"]
+            ]
+        responses.append(response)
 
     log.info(f"[bold green]Batch transcribe+translate completed[/] → {len(responses)} files")
     return responses

@@ -1,5 +1,10 @@
+from typing import List, Optional
 from pydantic import BaseModel
-from typing import Optional
+
+class TranscriptionSegment(BaseModel):
+    start: float
+    end: float
+    text: str
 
 class TranscriptionResponse(BaseModel):
     duration_sec: float
@@ -7,3 +12,4 @@ class TranscriptionResponse(BaseModel):
     detected_language_prob: Optional[float] = None
     transcription: str
     translation: Optional[str] = None
+    segments: Optional[List[TranscriptionSegment]] = None  # Added: per-segment breakdown

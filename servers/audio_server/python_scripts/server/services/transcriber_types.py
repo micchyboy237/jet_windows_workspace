@@ -14,6 +14,12 @@ class TranscriptionResult(TypedDict):
     segments: Optional[list[dict]]  # type: ignore
 
 
+class TranscriptionAudioResult(TypedDict):
+     audio_bytes: Optional[bytes]
+     language: Optional[str]
+     language_prob: Optional[float]
+     text: str
+
 class BatchResult(TypedDict):
     """
     Result structure used by batch byte-based transcription endpoints.
@@ -24,3 +30,4 @@ class BatchResult(TypedDict):
     language_prob: Optional[float]
     text: str
     translation: Optional[str]
+    segments: Optional[list[dict]]

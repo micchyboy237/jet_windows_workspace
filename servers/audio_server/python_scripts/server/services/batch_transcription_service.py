@@ -1,7 +1,6 @@
 # servers/audio_server/python_scripts/server/services/batch_transcription_service.py
 from __future__ import annotations
 
-import numpy as np
 from typing import List
 
 from faster_whisper import WhisperModel, BatchedInferencePipeline
@@ -49,12 +48,10 @@ def _get_batched_pipeline() -> BatchedInferencePipeline:
         batch_size=4,  # Tune as needed for your GPU
     )
 
-
 def _transcribe_single(audio_bytes: bytes) -> TranscriptionResult:
     """Internal helper to transcribe a single audio byte stream."""
     result = transcribe_audio(audio_bytes)
     return result
-
 
 def batch_transcribe_bytes(audio_bytes_list: List[bytes]) -> List[BatchResult]:
     """
@@ -89,15 +86,24 @@ def batch_transcribe_bytes(audio_bytes_list: List[bytes]) -> List[BatchResult]:
             batch_results = pipeline.transcribe(
                 audio_arrays,
                 batch_size=4,
-                vad_filter=True,
+                # vad_filter=True,  # Removed: allow outer logic to control VAD as needed
                 beam_size=5,
                 word_timestamps=False,
                 suppress_blank=True,
                 temperature=0.0,
             )
             for idx, (segments_gen, info) in enumerate(batch_results):
-                # The transcribe method yields (generator of Segment, TranscriptionInfo) per input
                 segments = list(segments_gen)
+                # Collect per-segment details for potential future use (e.g., streaming or timed output)
+                segment_list = [
+                    {
+                        "start": seg.start,
+                        "end": seg.end,
+                        "text": seg.text.strip(),
+                    }
+                    for seg in segments
+                    if seg.text.strip()
+                ]
                 full_text = " ".join(seg.text.strip() for seg in segments).strip()
                 results.append(
                     BatchResult(
@@ -105,6 +111,7 @@ def batch_transcribe_bytes(audio_bytes_list: List[bytes]) -> List[BatchResult]:
                         language=info.language,
                         language_prob=info.language_probability,
                         text=full_text,
+                        segments=segment_list,  # Added: individual segments with timestamps
                         translation=None,
                     )
                 )
@@ -121,12 +128,15 @@ def batch_transcribe_bytes(audio_bytes_list: List[bytes]) -> List[BatchResult]:
                     idx = futures[future]
                     try:
                         result = future.result()
+                        # Try to construct a segments list if possible (for consistency)
+                        segments_val = result.get("segments") if isinstance(result, dict) else getattr(result, "segments", None)
                         results.append(
                             BatchResult(
                                 audio_bytes=audio_bytes_list[idx],
                                 language=result.get("language"),
                                 language_prob=result.get("language_prob"),
                                 text=result["text"],
+                                segments=segments_val,
                                 translation=None,
                             )
                         )
@@ -138,6 +148,7 @@ def batch_transcribe_bytes(audio_bytes_list: List[bytes]) -> List[BatchResult]:
                                 language=None,
                                 language_prob=None,
                                 text="",
+                                segments=None,
                                 translation=None,
                             )
                         )
@@ -146,7 +157,6 @@ def batch_transcribe_bytes(audio_bytes_list: List[bytes]) -> List[BatchResult]:
 
     log.info("[bold green]Batch transcription completed[/bold green]")
     return results
-
 
 def batch_transcribe_and_translate_bytes(audio_bytes_list: List[bytes]) -> List[BatchResult]:
     """
