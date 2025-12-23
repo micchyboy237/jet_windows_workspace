@@ -2,7 +2,14 @@ from __future__ import annotations
 import time
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from python_scripts.server.routers import health, transcription, translation, batch_transcription, batch_translation
+from python_scripts.server.routers import (
+    health,
+    transcription,
+    translation,
+    batch_transcription,
+    batch_translation,
+    asr,
+)
 # from servers.audio_server.python_scripts.server.routers.batch_transcription2 import load_model as load_batch_model
 from python_scripts.server.utils.logger import get_logger
 
@@ -71,6 +78,7 @@ app.include_router(transcription.router)
 app.include_router(translation.router)
 app.include_router(batch_transcription.router)
 app.include_router(batch_translation.router)
+app.include_router(asr.router)
 
 # Load the faster-whisper model at application startup
 # @app.on_event("startup")

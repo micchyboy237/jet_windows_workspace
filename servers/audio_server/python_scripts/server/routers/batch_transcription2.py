@@ -178,14 +178,3 @@ def process_batch(
 
     log.info("[bold green]Batch transcription completed[/bold green]")
     return results
-
-# Exposed startup function called from main.py
-async def load_model() -> None:
-    global model
-    log.info("Loading model [bold magenta]kotoba-tech/kotoba-whisper-v2.0-faster[/bold magenta] (CUDA float32)")
-    model = WhisperModel(
-        "kotoba-tech/kotoba-whisper-v2.0-faster",
-        device="cuda",
-        compute_type="float32",
-    )
-    log.info("[bold green]Model loaded successfully[/bold green]")

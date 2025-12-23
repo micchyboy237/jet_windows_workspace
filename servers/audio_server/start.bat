@@ -10,7 +10,7 @@ echo.
 echo ========================================================
 echo  Whisper CTranslate2 FastAPI Server
 echo  Starting on http://127.0.0.1:8001
-echo  GPU: CUDA + int8_float16 (GTX 1660 optimized)
+echo  GPU: CUDA + int8 (GTX 1660 optimized)
 echo ========================================================
 echo.
 echo Open the interactive docs at:
