@@ -38,24 +38,24 @@ app = FastAPI(
 )
 
 
-@app.on_event("startup")
-async def load_models():
-    global whisper_model, translator, tokenizer
-    log.info("Loading models on startup...")
-    whisper_model = WhisperModel(
-        "kotoba-tech/kotoba-whisper-v2.0-faster",
-        device="cuda",
-        compute_type="float32",
-        num_workers=4,
-    )
-    translator = Translator(
-        TRANSLATOR_MODEL_PATH,
-        device="cpu",
-        compute_type="int8",
-        inter_threads=8,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER)
-    log.info("All models loaded and ready.")
+# @app.on_event("startup")
+# async def load_models():
+#     global whisper_model, translator, tokenizer
+#     log.info("Loading models on startup...")
+#     whisper_model = WhisperModel(
+#         "kotoba-tech/kotoba-whisper-v2.0-faster",
+#         device="cuda",
+#         compute_type="float32",
+#         num_workers=4,
+#     )
+#     translator = Translator(
+#         TRANSLATOR_MODEL_PATH,
+#         device="cpu",
+#         compute_type="int8",
+#         inter_threads=8,
+#     )
+#     tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER)
+#     log.info("All models loaded and ready.")
 
 
 # Reusable core function (unchanged)

@@ -104,6 +104,62 @@ async def stream_batch_translation(
                 messages = INITIAL_MESSAGES + messages[-6:]
 
 
+async def translate_text(text: str) -> str:
+    """
+    Translates a single Japanese text to English using the local LLM.
+    Maintains minimal conversation context for consistent translation style.
+    
+    Returns the complete translated string.
+    """
+    request = TranslationRequest(sentences=[text])
+    full_translation = ""
+    
+    async for line in stream_batch_translation(request):
+        if line.startswith("data: "):
+            data_str = line[len("data: "):].strip()
+            if not data_str:
+                continue
+            try:
+                event = json.loads(data_str)
+                if "done" in event:
+                    full_translation = event["done"].strip()
+            except json.JSONDecodeError:
+                pass
+    
+    return full_translation
+
+
+async def translate_batch_texts(texts: List[str]) -> List[str]:
+    """
+    Translates a list of Japanese texts sequentially to English,
+    preserving conversation context across sentences for better coherence.
+    
+    Returns a list of complete translated strings in the same order.
+    """
+    request = TranslationRequest(sentences=texts)
+    results: List[str] = []
+    current_translation = ""
+    current_sentence = ""
+    
+    async for line in stream_batch_translation(request):
+        if line.startswith("data: "):
+            data_str = line[len("data: "):].strip()
+            if not data_str:
+                continue
+            try:
+                event = json.loads(data_str)
+                if "partial" in event:
+                    current_translation += event["partial"]
+                    current_sentence = event["sentence"]
+                elif "done" in event:
+                    results.append(event["done"].strip())
+                    current_translation = ""
+            except json.JSONDecodeError:
+                pass
+    
+    return results
+
+
 if __name__ == "__main__":
     import asyncio
     from rich.console import Console
@@ -174,6 +230,15 @@ if __name__ == "__main__":
                     pass
 
     async def main() -> None:
+        single = await translate_text("こんにちは、世界！")
+        print("Single:", single)
+        
+        batch = await translate_batch_texts([
+            "昨日は楽しかったですね。",
+            "今日はどんな予定ですか？"
+        ])
+        print("Batch:", batch)
+
         await demo_single_sentence()
         console.print("\n" + "="*80 + "\n")
         await demo_batch_story()

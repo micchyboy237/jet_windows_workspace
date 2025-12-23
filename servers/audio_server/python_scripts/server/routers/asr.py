@@ -1,182 +1,144 @@
-from __future__ import annotations
-
 import asyncio
 import logging
-from typing import AsyncGenerator, Literal
+import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Dict, Optional, List, Any
 
 import numpy as np
-import numpy.typing as npt
+import dataclasses
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from faster_whisper import WhisperModel
-from faster_whisper.transcribe import Segment as TranscriptionSegment
+from faster_whisper.transcribe import Segment
 from rich.logging import RichHandler
+from transformers import AutoTokenizer
+from python_scripts.server.services.translator_types import Translator
+from python_scripts.server.services.cache_service import (
+    load_transcriber_model,
+    load_translator_model,
+    load_translator_tokenizer,
+)
+from python_scripts.server.services.translator.batch_translation_service import translate_text, translate_batch_texts
+# Remove pydub dependency – use numpy + scipy instead
 
-from python_scripts.server.services.cache_service import load_model
+# Shared constants from existing code
+TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
+TRANSLATOR_TOKENIZER = "Helsinki-NLP/opus-mt-ja-en"
+WHISPER_MODEL_NAME = "kotoba-tech/kotoba-whisper-v2.0-faster"
 
-router = APIRouter(prefix="/asr", tags=["asr", "speech-recognition", "translation"])
-
-# Logging configuration
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
-    handlers=[RichHandler(rich_tracebacks=True, markup=True)],
+    format="%(message)s",
+    handlers=[RichHandler(show_time=True, show_path=False, markup=True)],
 )
-log = logging.getLogger("asr_router")
+log = logging.getLogger("live_subtitles_server")
+
+router = APIRouter(tags=["asr", "speech-recognition", "translation"])
+
+executor: Optional[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=4)
 
 
-ResultType = Literal["partial", "final"]
+def transcribe_and_translate_chunk(audio_bytes: bytes, loop: asyncio.AbstractEventLoop) -> str:
+    """Offloaded heavy work: transcribe JA audio chunk → translate to EN, and return JSON."""
+
+    whisper_model = load_transcriber_model()
+
+    audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
+    if len(audio_np) > 0:
+        duration_sec = len(audio_np) / 16000
+        log.info(f"Processing audio with duration {duration_sec:.3f}s")
+
+    segments, info = whisper_model.transcribe(
+        audio_np,
+        language="ja",
+        beam_size=5,
+        vad_filter=True,
+        word_timestamps=False,
+    )
+
+    if hasattr(info, "vad_duration_removed") and info.vad_duration_removed is not None:
+        removed_sec = info.vad_duration_removed
+        log.info(f"VAD filter removed {removed_sec:.3f}s of audio")
+    else:
+        log.info("VAD filter applied (no duration removed reported)")
+
+    segment_infos: List[dict] = []
+    ja_texts: List[str] = []
+    for seg in segments:
+        text = seg.text.strip()
+        if text:
+            segment_infos.append(dataclasses.asdict(seg))
+            ja_texts.append(text)
+
+    if not ja_texts:
+        return json.dumps({"segments": [], "en_text": "", "en_segment_texts": []})
+
+    ja_text = " ".join(ja_texts)
+
+    # The main event loop is running in the FastAPI/Uvicorn thread.
+    # We are currently in a worker thread → use run_coroutine_threadsafe to schedule
+    # the async translation coroutines on the main loop.
+
+    en_texts_future = asyncio.run_coroutine_threadsafe(translate_batch_texts(ja_texts), loop)
+    en_text_future = asyncio.run_coroutine_threadsafe(translate_text(ja_text), loop)
+
+    en_texts: List[str] = en_texts_future.result()
+    en_text: str = en_text_future.result()
+
+    return json.dumps({
+        "segments": segment_infos,
+        "en_text": en_text.strip(),
+        "en_segment_texts": en_texts,
+    })
 
 
-async def streaming_asr_inference(
-    audio_chunks: AsyncGenerator[bytes, None],
-) -> AsyncGenerator[dict[str, object], None]:
-    """
-    Perform streaming Japanese → English translation using faster-whisper.
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[WebSocket, asyncio.Queue] = {}
 
-    Processes incoming raw mono 16kHz PCM16 audio chunks:
-      - Buffers until a minimum duration is reached.
-      - Runs translation with VAD-aware segmentation.
-      - Yields partial hypotheses and final translated segments.
-      - Maintains overlap context from the last detected speech segment.
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections[websocket] = asyncio.Queue()
 
-    Args:
-        audio_chunks: Async generator yielding raw PCM16 bytes.
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.pop(websocket, None)
 
-    Yields:
-        JSON-serializable dicts with keys depending on result type:
-          - partial results: {"partial": str, "final": False}
-          - final results:   {"english": str, "final": True, "start": float, "end": float}
-    """
-    buffer: list[npt.NDArray[np.float32]] = []
-    sample_rate: int = 16000
-    chunk_duration_sec: float = 5.0
-    min_buffer_sec: float = 0.250
-
-    chunk_count: int = 0
-
-    model: WhisperModel = await load_model()
-
-    async for chunk_bytes in audio_chunks:
-        # Convert int16 bytes → float32 in range [-1.0, 1.0]
-        audio_np: npt.NDArray[np.float32] = (
-            np.frombuffer(chunk_bytes, dtype=np.int16).astype(np.float32) / 32767.0
-        )
-
-        buffer.append(audio_np)
-        current_duration: float = len(buffer) * chunk_duration_sec
-        chunk_count += 1
-
-        log.debug(
-            f"[bold cyan]Received chunk {chunk_count}[/] – buffer duration: {current_duration:.2f}s"
-        )
-
-        if current_duration < min_buffer_sec:
-            continue
-
-        # Concatenate for inference
-        full_audio: npt.NDArray[np.float32] = np.concatenate(buffer)
-
-        log.info(
-            f"[bold green]Running inference on {current_duration:.2f}s buffer ({len(full_audio)} samples)[/]"
-        )
-
-        segments: tuple[list[TranscriptionSegment], object]
-        segments, _ = model.transcribe(
-            full_audio,
-            language="ja",
-            task="translate",
-            beam_size=5,
-            temperature=0.0,
-            without_timestamps=False,
-            vad_filter=True,  # Explicitly enable VAD for better silence handling
-            log_progress=True,
-        )
-
-        segments_list: list[TranscriptionSegment] = list(segments)
-
-        if segments_list:
-            for seg in segments_list:
-                cleaned_text: str = seg.text.strip()
-
-                # Note: faster-whisper transcribe() yields only final segments.
-                # True token-level partials would require a custom streaming decoder.
-                yield {"partial": cleaned_text, "final": False}
-
-                yield {
-                    "english": cleaned_text,
-                    "final": True,
-                    "start": seg.start,
-                    "end": seg.end,
-                }
-
-            # Keep overlap from last speech segment for context
-            last_end: float = segments_list[-1].end
-            overlap_samples: int = int(last_end * sample_rate)
-
-            if 0 < overlap_samples < len(full_audio):
-                buffer = [full_audio[overlap_samples:]]
-                log.debug(
-                    f"[dim]Kept overlap of {len(buffer[0])/sample_rate:.2f}s for context[/]"
-                )
-            else:
-                buffer = []
-                log.debug("[dim]Buffer cleared after processing[/]")
-        else:
-            # No speech detected → clear buffer and send empty partial
-            buffer = []
-            log.debug("[dim]No speech — buffer cleared[/]")
-            yield {"partial": "", "final": False}
+    async def send_text(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
 
 
-@router.websocket("/live-jp-en")
-async def live_japanese_to_english_websocket(websocket: WebSocket) -> None:
-    """
-    WebSocket endpoint for live streaming Japanese → English translation.
+manager = ConnectionManager()
 
-    Client sends raw 16kHz mono PCM16 audio chunks.
-    Server responds with JSON objects containing partial/final translations.
-    """
-    await websocket.accept()
 
-    audio_queue: asyncio.Queue[bytes] = asyncio.Queue()
-
-    log.info("[bold blue]WebSocket connection accepted – starting audio receive/process tasks[/]")
-
-    async def receive_audio() -> None:
-        """Receive audio chunks from the client."""
-        received_count: int = 0
-        while True:
-            try:
-                audio_bytes: bytes = await websocket.receive_bytes()
-                received_count += 1
-                log.debug(
-                    f"[cyan]← Client chunk {received_count} ({len(audio_bytes)} bytes)[/]"
-                )
-                await audio_queue.put(audio_bytes)
-            except WebSocketDisconnect:
-                log.info("[yellow]Client disconnected during receive[/]")
-                break
-
-    async def process_and_send() -> None:
-        """Consume queued audio and stream ASR results back to the client."""
-        sent_count: int = 0
-
-        async def audio_generator() -> AsyncGenerator[bytes, None]:
-            while True:
-                chunk = await audio_queue.get()
-                yield chunk
-
-        async for result in streaming_asr_inference(audio_generator()):
-            sent_count += 1
-            final_str: str = "[bold green]FINAL[/]" if result.get("final") else "[dim]partial[/]"
-            text_preview: str = (
-                result.get("english", result.get("partial", ""))[:60] + "..."
-                if result.get("english") or result.get("partial")
-                else ""
-            )
-            log.debug(f"[magenta]→ Result {sent_count} {final_str}: {text_preview}[/]")
-            await websocket.send_json(result)
-
+@router.websocket("/ws/live-subtitles")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    log.info(f"New client connected: {websocket.client}")
     try:
-        await asyncio.gather(receive_audio(), process_and_send())
+        while True:
+            data = await websocket.receive_bytes()
+            # Expect raw PCM s16le, 16kHz, mono bytes
+            loop = asyncio.get_running_loop()
+            future = loop.run_in_executor(
+                executor,
+                transcribe_and_translate_chunk,
+                data,
+                loop,   # ← pass main loop explicitly
+            )
+            # Put result in per-connection queue for ordered delivery
+            await manager.active_connections[websocket].put(future)
+
+            # Drain queue in order
+            while not manager.active_connections[websocket].empty():
+                fut = await manager.active_connections[websocket].get()
+                result_json = await fut
+                if result_json.strip():
+                    await manager.send_text(result_json, websocket)
     except WebSocketDisconnect:
-        log.info("[yellow]WebSocket disconnected – cleanup complete[/]")
+        manager.disconnect(websocket)
+        log.info(f"Client disconnected: {websocket.client}")
+    except Exception as e:
+        log.error(f"Error in WebSocket: {e}")
+        await websocket.close()
