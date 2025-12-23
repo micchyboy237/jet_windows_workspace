@@ -1,8 +1,9 @@
 import asyncio
 import logging
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -54,34 +55,56 @@ async def startup_event():
     executor = ThreadPoolExecutor(max_workers=4)  # n parallel workers
     log.info("[bold green]Server ready – accepting WebSocket connections[/bold green]")
 
-from scipy.io import wavfile
 
 def transcribe_and_translate_chunk(audio_bytes: bytes) -> str:
-    """Offloaded heavy work: transcribe JA audio chunk → translate to EN."""
-    # Save bytes to temporary WAV (faster-whisper expects file path)
-    temp_path = Path("temp_chunk.wav")
-    # Convert raw PCM s16le (16kHz, mono) bytes → int16 numpy array → write WAV
-    audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
-    wavfile.write(temp_path, 16000, audio_np)
+    """Offloaded heavy work: transcribe JA audio chunk → translate to EN, and return JSON with segment info."""
+    # Convert raw PCM s16le (16kHz, mono) bytes → float32 numpy array in [-1.0, 1.0]
+    audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
 
-    segments, _ = whisper_model.transcribe(
-        str(temp_path),
+    # Log VAD-applied duration for visibility (matches existing log pattern)
+    if len(audio_np) > 0:
+        duration_sec = len(audio_np) / 16000
+        log.info(f"Processing audio with duration {duration_sec:.3f}s")
+
+    segments, info = whisper_model.transcribe(
+        audio_np,
         language="ja",
         beam_size=5,
-        vad_filter=True,  # Helps with short/live chunks
+        vad_filter=True,  # Helps remove silence in short/live chunks
+        word_timestamps=False,  # Not needed for subtitle text
     )
-    ja_text = " ".join(s.text.strip() for s in segments if s.text.strip())
 
-    temp_path.unlink()  # Cleanup
+    if hasattr(info, "vad_duration_removed") and info.vad_duration_removed is not None:
+        removed_sec = info.vad_duration_removed
+        log.info(f"VAD filter removed {removed_sec:.3f}s of audio")
+    else:
+        log.info("VAD filter applied (no duration removed reported)")
+
+    # Gather each segment for subtitles
+    segment_infos: List[Dict[str, Any]] = []
+    ja_texts: List[str] = []
+    for seg in segments:
+        text = seg.text.strip()
+        if text:
+            segment_infos.append({
+                "start": seg.start,
+                "end": seg.end,
+                "text": text,
+            })
+            ja_texts.append(text)
+    ja_text = " ".join(ja_texts)
 
     if not ja_text:
-        return ""
+        return json.dumps({"segments": [], "en_text": ""})
 
     source_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(ja_text))
     results = translator.translate_batch([source_tokens])
     en_tokens = results[0].hypotheses[0]
     en_text = tokenizer.decode(tokenizer.convert_tokens_to_ids(en_tokens), skip_special_tokens=True)
-    return en_text
+    return json.dumps({
+        "segments": segment_infos,
+        "en_text": en_text.strip(),
+    })
 
 
 class ConnectionManager:
@@ -120,9 +143,9 @@ async def websocket_endpoint(websocket: WebSocket):
             # Drain queue in order
             while not manager.active_connections[websocket].empty():
                 fut = await manager.active_connections[websocket].get()
-                en_text = await fut
-                if en_text.strip():
-                    await manager.send_text(en_text.strip(), websocket)
+                result_json = await fut
+                if result_json.strip():
+                    await manager.send_text(result_json, websocket)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         log.info(f"Client disconnected: {websocket.client}")

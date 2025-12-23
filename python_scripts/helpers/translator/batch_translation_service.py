@@ -65,6 +65,8 @@ async def stream_batch_translation(
                 "prompt": prompt,
                 "n_predict": 1200,
                 "stream": True,  # Important: enable streaming from the local LLM
+                # "temperature": 0.0,
+                # "top_p": 1.0,
             }
 
             # Stream response from local LLM
