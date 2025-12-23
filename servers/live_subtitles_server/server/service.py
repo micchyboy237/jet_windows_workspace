@@ -9,14 +9,15 @@ log = logging.getLogger("subtitle_server")
 class TranscriptionSession:
     def __init__(
         self,
-        model_name: str = "distil-large-v3",  # Excellent balance: ~6x faster than large-v3, near accuracy
-        compute_type: str = "float16",       # GTX 1660 supports fp16 well
+        model_name: str = "large-v3",  # Excellent balance: ~6x faster than large-v3, near accuracy
+        device: str = "cuda",
+        compute_type: str = "int8",       # GTX 1660 supports fp16 well
         language: str = "ja",                # Change if needed; None for auto-detect
     ):
         log.info(f"Loading faster-whisper model '{model_name}' on CUDA ({compute_type})...")
         self.model = WhisperModel(
             model_name,
-            device="cuda",
+            device=device,
             compute_type=compute_type,
         )
         log.info("Model loaded")
