@@ -14,9 +14,11 @@ Write-Host " 9. gemma-2-2b-jpn-it-translate-Q4_K_M (custom translator)"
 Write-Host "10. Fiendish_LLAMA_3B-Q4_K_M              (uncensored)" -ForegroundColor Magenta
 Write-Host "11. Llama-3.2-3B-Instruct-uncensored-Q4_K_M (uncensored)" -ForegroundColor Magenta
 Write-Host "12. nano_imp_1b-q8_0                        (uncensored/tiny)" -ForegroundColor Magenta
-Write-Host "13. WizardLM-7B-uncensored-Q4_K_M           (uncensored)`n" -ForegroundColor Magenta
+Write-Host "13. WizardLM-7B-uncensored-Q4_K_M           (uncensored)" -ForegroundColor Magenta
+Write-Host "14. dolphin-2_6-phi-2-Q4_K_M                (uncensored/small)" -ForegroundColor Magenta
+Write-Host "15. Impish_LLAMA_4B-Q4_K_M                  (uncensored)`n" -ForegroundColor Magenta
 
-$modelChoice = Read-Host "Enter the number of your choice (1-13)"
+$modelChoice = Read-Host "Enter the number of your choice (1-15)"
 
 switch ($modelChoice) {
     "1" { $modelName = "bartowski_Hermes-3-Llama-3.1-8B-GGUF_Hermes-3-Llama-3.1-8B-Q4_K_M.gguf"; $ub = 8192;  $gpu = 35; $jinja = $true;  $mmproj = $null; $extraOverrides = "" }
@@ -39,6 +41,8 @@ switch ($modelChoice) {
     "11" { $modelName = "nsfw\Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf"; $ub = 8192;  $gpu = 999; $jinja = $true;  $mmproj = $null; $extraOverrides = "" }
     "12" { $modelName = "nsfw\nano_imp_1b-q8_0.gguf";                        $ub = 4096;  $gpu = 999; $jinja = $false; $mmproj = $null; $extraOverrides = "" }
     "13" { $modelName = "nsfw\WizardLM-7B-uncensored.Q4_K_M.gguf";           $ub = 8192;  $gpu = 40;  $jinja = $true;  $mmproj = $null; $extraOverrides = "" }
+    "14" { $modelName = "nsfw\dolphin-2_6-phi-2.Q4_K_M.gguf";                $ub = 4096;  $gpu = 999; $jinja = $false; $mmproj = $null; $extraOverrides = "" }
+    "15" { $modelName = "nsfw\SicariusSicariiStuff_Impish_LLAMA_4B-Q4_K_M.gguf"; $ub = 8192;  $gpu = 999; $jinja = $true;  $mmproj = $null; $extraOverrides = "" }
     default { Write-Host "Invalid choice!" -ForegroundColor Red; exit 1 }
 }
 
