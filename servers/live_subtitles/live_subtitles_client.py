@@ -18,6 +18,8 @@ from rich.logging import RichHandler
 import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
 import numpy as np  # needed for saving wav with frombuffer
 
+import datetime
+
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
@@ -54,6 +56,16 @@ class Config:
 config = Config()
 
 # =============================
+# SRT global state for subtitle syncing
+# =============================
+
+# Global SRT sequence counter (1-based)
+srt_sequence = 1
+
+# Track when each segment actually started (wall-clock time)
+segment_start_wallclock: dict[int, float] = {}  # segment_num → time.time()
+
+# =============================
 # Initialize Silero VAD - STATIC INFO ONLY
 # =============================
 
@@ -71,7 +83,7 @@ recent_rtts: Deque[ProcessingTime] = deque(maxlen=config.max_rtt_history)
 pending_sends: deque[float] = deque()  # One entry per sent chunk
 
 # =============================
-# Audio capture + streaming (fixed duplicate append + better flow -- with segment & silence tracking)
+# Audio capture + streaming (with segment & silence tracking)
 # =============================
 
 async def stream_microphone(ws) -> None:
@@ -89,12 +101,11 @@ async def stream_microphone(ws) -> None:
     silence_start_time: float | None = None
     max_silence_seconds: float = 1.5  # Stop segment after 1.5s silence
 
-    # Add these inside the stream_microphone function, near other segment tracking variables
     segments_dir = os.path.join(OUTPUT_DIR, "segments")
     os.makedirs(segments_dir, exist_ok=True)
     current_segment_num: int | None = None
     current_segment_buffer: bytearray | None = None
-    speech_chunks_in_segment: int = 0  # <---- NEW COUNTER
+    speech_chunks_in_segment: int = 0
 
     pcm_buffer = bytearray()
     chunks_sent = 0
@@ -134,6 +145,7 @@ async def stream_microphone(ws) -> None:
                             speech_start_time = time.monotonic()
                             # Start new segment
                             current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
+                            segment_start_wallclock[current_segment_num] = time.time()
                             current_segment_buffer = bytearray()
                             speech_chunks_in_segment = 0  # reset for new segment
                             log.info("[speech] Speech started | segment_%04d", current_segment_num)
@@ -252,27 +264,104 @@ async def stream_microphone(ws) -> None:
                 log.info("Final avg server processing time: %.3fs", sum(recent_rtts) / len(recent_rtts))
 
 # =============================
-# Subtitles/RTT receiver (unchanged logic, but compatible with above)
+# Subtitle SRT writing helpers
+# =============================
+
+def write_srt_block(
+    sequence: int,
+    start_sec: float,
+    duration_sec: float,
+    ja: str,
+    en: str,
+    file_path: str | os.PathLike
+) -> None:
+    """Append one subtitle block to an SRT file."""
+    start_dt = datetime.datetime.fromtimestamp(start_sec)
+    end_dt   = datetime.datetime.fromtimestamp(start_sec + duration_sec)
+
+    start_str = start_dt.strftime("%H:%M:%S") + f",{int((start_dt.microsecond / 1000)) :03d}"
+    end_str   = end_dt.strftime("%H:%M:%S")   + f",{int((end_dt.microsecond / 1000))   :03d}"
+
+    block = (
+        f"{sequence}\n"
+        f"{start_str} --> {end_str}\n"
+        f"{ja.strip()}\n"
+        f"{en.strip()}\n"
+        "\n"
+    )
+
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(block)
+
+    log.info("[SRT] Appended block #%d to %s", sequence, os.path.basename(file_path))
+
+# =============================
+# Subtitles/RTT receiver with SRT writing
 # =============================
 
 async def receive_subtitles(ws) -> None:
-    async for msg in ws:
-        data = json.loads(msg)
+    global srt_sequence
 
-        if data.get("type") == "subtitle":
+    all_srt_path = os.path.join(OUTPUT_DIR, "all_subtitles.srt")
+
+    async for msg in ws:
+        try:
+            data = json.loads(msg)
+            if data.get("type") != "subtitle":
+                continue
+
             ja = data.get("transcription", "").strip()
             en = data.get("translation", "").strip()
+            utterance_id = data.get("utterance_id")
+            duration_sec = data.get("duration_sec", 0.0)
 
             if pending_sends:
                 rtt = time.monotonic() - pending_sends.popleft()
                 recent_rtts.append(rtt)
 
-            if ja or en:
-                log.info("[subtitle] JA: %s", ja)
-                if en:
-                    log.info("[subtitle] EN: %s", en)
-            else:
+            if not (ja or en):
                 log.debug("[subtitle] Empty transcription received")
+                continue
+
+            log.info("[subtitle] JA: %s", ja)
+            if en:
+                log.info("[subtitle] EN: %s", en)
+
+            # Find which segment this belongs to (utterance_id == segment_num)
+            segment_num = utterance_id + 1   # usually 0-based from server → 1-based folder
+            segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
+
+            start_time = segment_start_wallclock.get(segment_num)
+            if start_time is None:
+                log.warning("[SRT] No start time recorded for segment_%04d — using current time", segment_num)
+                start_time = time.time() - duration_sec
+
+            # Write per-segment SRT
+            per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
+            write_srt_block(
+                sequence=srt_sequence,
+                start_sec=start_time,
+                duration_sec=duration_sec,
+                ja=ja,
+                en=en,
+                file_path=per_seg_srt
+            )
+
+            # Append to global SRT
+            write_srt_block(
+                sequence=srt_sequence,
+                start_sec=start_time,
+                duration_sec=duration_sec,
+                ja=ja,
+                en=en,
+                file_path=all_srt_path
+            )
+
+            srt_sequence += 1
+
+        except Exception as e:
+            log.exception("[subtitle receive] Error processing message: %s", e)
 
 # =============================
 # Main with reconnection logic
