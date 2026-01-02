@@ -247,8 +247,8 @@ async def stream_microphone(ws) -> None:
                     #         time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
                     #         f" | avg_rtt: {avg_rtt:.3f}s" if avg_rtt is not None else ""
                     #     )
-                if processed > 0:
-                    log.debug("Processed %d speech chunk(s) this cycle", processed)
+                # if processed > 0:
+                #     log.debug("Processed %d speech chunk(s) this cycle", processed)
                 # Periodic status update
                 if total_chunks_processed % 100 == 0:
                     status = "SPEAKING" if speech_start_time else "SILENCE"
