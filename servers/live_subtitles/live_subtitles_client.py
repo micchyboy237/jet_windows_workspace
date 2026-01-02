@@ -1,18 +1,27 @@
 # live_subtitles_client.py
 
+import os
+import shutil
 import asyncio
 import base64
 import json
 import logging
 import time
 from collections import deque
+from dataclasses import dataclass
 from typing import Deque
 
 import sounddevice as sd
 import websockets
 from pysilero_vad import SileroVoiceActivityDetector
-
 from rich.logging import RichHandler
+import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
+import numpy as np  # needed for saving wav with frombuffer
+
+OUTPUT_DIR = os.path.join(
+    os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
+shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # =============================
 # Logging setup
@@ -27,53 +36,70 @@ logging.basicConfig(
 log = logging.getLogger("mic-streamer")
 
 # =============================
-# Configuration
+# Configuration (now flexible)
 # =============================
 
-WS_URL = "ws://192.168.68.150:8765"
+@dataclass(frozen=True)
+class Config:
+    ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
+    sample_rate: int = 16000
+    channels: int = 1
+    dtype: str = "int16"
+    vad_threshold: float = 0.3
+    vad_model_path: str | None = None  # allow custom model if needed
+    max_rtt_history: int = 10
+    reconnect_attempts: int = 5
+    reconnect_delay: float = 3.0
 
-SAMPLE_RATE = 16000
-CHANNELS = 1
-DTYPE = "int16"
-
-VAD_THRESHOLD = 0.5  # speech probability threshold
+config = Config()
 
 # =============================
-# Initialize Silero VAD
+# Initialize Silero VAD - STATIC INFO ONLY
 # =============================
 
-vad = SileroVoiceActivityDetector()  # model_path uses default
-
-VAD_CHUNK_SAMPLES = vad.chunk_samples()
-VAD_CHUNK_BYTES = vad.chunk_bytes()
-
+# Use static constants - safe without instance
+VAD_CHUNK_SAMPLES = SileroVoiceActivityDetector.chunk_samples()
+VAD_CHUNK_BYTES = SileroVoiceActivityDetector.chunk_bytes()
 log.info("[VAD] chunk_samples=%s, chunk_bytes=%s", VAD_CHUNK_SAMPLES, VAD_CHUNK_BYTES)
 
 # =============================
-# RTT tracking for batched responses
+# RTT tracking – fixed & improved
 # =============================
 
-# Keep a short history of recent processing times (in seconds)
 ProcessingTime = float
-recent_rtts: Deque[ProcessingTime] = deque(maxlen=10)
-
-# Queue of pending send timestamps – one entry per chunk sent
-# Server flushes in batches, so we pop the oldest when a subtitle arrives
-pending_sends: deque[float] = deque()
-
-last_send_start = None
+recent_rtts: Deque[ProcessingTime] = deque(maxlen=config.max_rtt_history)
+pending_sends: deque[float] = deque()  # One entry per sent chunk
 
 # =============================
-# Audio capture + streaming
+# Audio capture + streaming (fixed duplicate append + better flow -- with segment & silence tracking)
 # =============================
 
 async def stream_microphone(ws) -> None:
-    """
-    Capture mic audio, apply VAD, send speech-only PCM frames, track send times.
-    """
+    # Lazy instantiate VAD only when streaming starts
+    model_path = config.vad_model_path
+    if model_path is None:
+        # Use bundled default as per library design
+        from pysilero_vad import _DEFAULT_MODEL_PATH
+        model_path = _DEFAULT_MODEL_PATH
+    vad = SileroVoiceActivityDetector(model_path)
+
+    # Speech segment tracking
+    speech_start_time: float | None = None
+    current_speech_seconds: float = 0.0
+    silence_start_time: float | None = None
+    max_silence_seconds: float = 1.5  # Stop segment after 1.5s silence
+
+    # Add these inside the stream_microphone function, near other segment tracking variables
+    segments_dir = os.path.join(OUTPUT_DIR, "segments")
+    os.makedirs(segments_dir, exist_ok=True)
+    current_segment_num: int | None = None
+    current_segment_buffer: bytearray | None = None
+    speech_chunks_in_segment: int = 0  # <---- NEW COUNTER
+
     pcm_buffer = bytearray()
     chunks_sent = 0
     chunks_detected = 0
+    total_chunks_processed = 0
 
     def audio_callback(indata, frames: int, time_, status) -> None:
         nonlocal pcm_buffer
@@ -82,88 +108,154 @@ async def stream_microphone(ws) -> None:
         pcm_buffer.extend(bytes(indata))
 
     with sd.RawInputStream(
-        samplerate=SAMPLE_RATE,
+        samplerate=config.sample_rate,
         blocksize=VAD_CHUNK_SAMPLES,
-        channels=CHANNELS,
-        dtype=DTYPE,
+        channels=config.channels,
+        dtype=config.dtype,
         callback=audio_callback,
-    ):
+    ) as stream:
         log.info("[microphone] Microphone streaming started")
-
         try:
             while True:
                 await asyncio.sleep(0.01)
-
                 processed = 0
                 while len(pcm_buffer) >= VAD_CHUNK_BYTES:
                     chunk = bytes(pcm_buffer[:VAD_CHUNK_BYTES])
                     del pcm_buffer[:VAD_CHUNK_BYTES]
+                    total_chunks_processed += 1
 
                     speech_prob: float = vad(chunk)
-
-                    if speech_prob >= VAD_THRESHOLD:
+                    if speech_prob >= config.vad_threshold:
                         chunks_detected += 1
                         processed += 1
-
-                        # Record send start time for RTT measurement
+                        # Reset silence timer
+                        silence_start_time = None
+                        if speech_start_time is None:
+                            speech_start_time = time.monotonic()
+                            # Start new segment
+                            current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
+                            current_segment_buffer = bytearray()
+                            speech_chunks_in_segment = 0  # reset for new segment
+                            log.info("[speech] Speech started | segment_%04d", current_segment_num)
+                        # Append chunk to current segment buffer
+                        if current_segment_buffer is not None:
+                            current_segment_buffer.extend(chunk)
+                            speech_chunks_in_segment += 1  # count chunk in segment
                         send_start = time.monotonic()
-                        global last_send_start
-                        last_send_start = send_start
                         pending_sends.append(send_start)
-
                         payload = {
                             "type": "audio",
-                            "sample_rate": SAMPLE_RATE,
+                            "sample_rate": config.sample_rate,
                             "pcm": base64.b64encode(chunk).decode("ascii"),
                         }
-
                         try:
                             await ws.send(json.dumps(payload))
                             chunks_sent += 1
-
-                            # Calculate round-trip processing time (client send → subtitle received)
-                            # This is updated in receive_subtitles() when a subtitle arrives
-                            if recent_rtts:
-                                avg_rtt = sum(recent_rtts) / len(recent_rtts)
-                                log.info(
-                                    "[speech → server] Detected & sent chunk #%d (prob=%.2f) | "
-                                    "Avg server processing: %.2f s",
-                                    chunks_sent, speech_prob, avg_rtt
-                                )
-                            else:
-                                log.info(
-                                    "[speech → server] Detected & sent chunk #%d (prob=%.2f) | "
-                                    "Awaiting first response...",
-                                    chunks_sent, speech_prob
-                                )
-
                         except websockets.ConnectionClosed:
-                            log.warning("Connection closed while sending audio chunk")
+                            log.warning("WebSocket closed during send")
                             return
-                        pending_sends.append(send_start)  # in case the above log branch was taken
+                    else:
+                        # Silence chunk
+                        if speech_start_time is not None and silence_start_time is None:
+                            silence_start_time = time.monotonic()
+                        # Check if silence too long → end segment
+                        if (speech_start_time is not None and silence_start_time is not None
+                            and time.monotonic() - silence_start_time > max_silence_seconds):
+                            # Compute precise duration using number of samples in the segment buffer
+                            if current_segment_buffer is not None:
+                                num_samples = len(current_segment_buffer) // 2  # int16 = 2 bytes
+                                duration = num_samples / config.sample_rate
+                            else:
+                                num_samples = 0
+                                duration = 0.0
 
-                    # Silence chunks are skipped silently (debug if needed)
+                            log.info(
+                                "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
+                                duration, speech_chunks_in_segment
+                            )
 
+                            # Save segment audio + metadata
+                            if current_segment_num is not None and current_segment_buffer is not None:
+                                segment_dir = os.path.join(segments_dir, f"segment_{current_segment_num:04d}")
+                                os.makedirs(segment_dir, exist_ok=True)
+
+                                # Compute precise duration from audio length
+                                num_samples = len(current_segment_buffer) // 2  # int16 = 2 bytes per sample
+                                duration = num_samples / config.sample_rate
+
+                                wav_path = os.path.join(segment_dir, "sound.wav")
+                                wavfile.write(
+                                    wav_path,
+                                    config.sample_rate,
+                                    np.frombuffer(current_segment_buffer, dtype=np.int16)
+                                )
+
+                                metadata = {
+                                    "segment_id": current_segment_num,
+                                    "duration_seconds": round(duration, 3),
+                                    "approx_time_duration_seconds": round(time.monotonic() - speech_start_time, 3),
+                                    "num_chunks": speech_chunks_in_segment,
+                                    "num_samples": num_samples,
+                                    "start_time_monotonic": speech_start_time,
+                                    "end_time_monotonic": time.monotonic(),
+                                    "sample_rate": config.sample_rate,
+                                    "channels": config.channels,
+                                }
+                                meta_path = os.path.join(segment_dir, "metadata.json")
+                                with open(meta_path, "w", encoding="utf-8") as f:
+                                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+                                log.info("[save] Segment saved → %s | precise_duration: %.3fs", segment_dir, duration)
+
+                            # Signal end of utterance to server
+                            try:
+                                await ws.send(json.dumps({"type": "end_of_utterance"}))
+                                log.info("[speech → server] Sent end_of_utterance marker")
+                            except websockets.ConnectionClosed:
+                                log.warning("WebSocket closed while sending end marker")
+                                return
+
+                            speech_start_time = None
+                            silence_start_time = None
+                            current_segment_num = None
+                            current_segment_buffer = None
+                            speech_chunks_in_segment = 0  # reset counter
+
+                    if speech_prob >= config.vad_threshold:
+                        avg_rtt = sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
+                        log.info(
+                            "[speech → server] Sent chunk %d | prob: %.3f | segment: %.2fs%s",
+                            chunks_sent,
+                            speech_prob,
+                            time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
+                            f" | avg_rtt: {avg_rtt:.3f}s" if avg_rtt is not None else ""
+                        )
                 if processed > 0:
                     log.debug("Processed %d speech chunk(s) this cycle", processed)
-
+                # Periodic status update
+                if total_chunks_processed % 100 == 0:
+                    status = "SPEAKING" if speech_start_time else "SILENCE"
+                    seg_dur = time.monotonic() - speech_start_time if speech_start_time else 0.0
+                    log.info(
+                        "[status] chunks_processed: %d | sent: %d | detected: %d | state: %s | seg: %.2fs",
+                        total_chunks_processed, chunks_sent, chunks_detected, status, seg_dur
+                    )
         except asyncio.CancelledError:
             log.info("[task] Streaming task cancelled")
             raise
         finally:
             log.info(
-                "[microphone] Microphone streaming stopped | "
-                "Speech chunks detected: %d | Sent to server: %d",
-                chunks_detected, chunks_sent
+                "[microphone] Stopped | Processed: %d | Detected: %d | Sent: %d",
+                total_chunks_processed, chunks_detected, chunks_sent
             )
             if recent_rtts:
-                log.info("Average server processing time: %.2f s", sum(recent_rtts) / len(recent_rtts))
+                log.info("Final avg server processing time: %.3fs", sum(recent_rtts) / len(recent_rtts))
 
+# =============================
+# Subtitles/RTT receiver (unchanged logic, but compatible with above)
+# =============================
 
 async def receive_subtitles(ws) -> None:
-    """
-    Receive partial/final subtitles from server and measure processing latency.
-    """
     async for msg in ws:
         data = json.loads(msg)
 
@@ -171,11 +263,9 @@ async def receive_subtitles(ws) -> None:
             ja = data.get("transcription", "").strip()
             en = data.get("translation", "").strip()
 
-            # Record server processing time (time from last chunk send to subtitle receipt)
             if pending_sends:
                 rtt = time.monotonic() - pending_sends.popleft()
                 recent_rtts.append(rtt)
-                # last_send_start = None
 
             if ja or en:
                 log.info("[subtitle] JA: %s", ja)
@@ -184,37 +274,47 @@ async def receive_subtitles(ws) -> None:
             else:
                 log.debug("[subtitle] Empty transcription received")
 
-
 # =============================
-# Main entrypoint
+# Main with reconnection logic
 # =============================
 
 async def main() -> None:
-    try:
-        async with websockets.connect(
-            WS_URL,
-            max_size=None,
-            compression=None,
-            ping_interval=30,      # Increase to 30s for high traffic
-            ping_timeout=30,       # Wait 30s for pong
-            close_timeout=10,      # Reduce close timeout
-        ) as ws:
-            log.info("Connected to %s", WS_URL)
-            await asyncio.gather(
-                stream_microphone(ws),
-                receive_subtitles(ws),
-            )
-    except websockets.ConnectionClosedOK:
-        log.info("Connection closed normally by server")
-    except websockets.ConnectionClosedError as e:
-        log.warning("Connection closed abnormally: %s", e)
-    except KeyboardInterrupt:
-        log.info("Interrupted by user")
-    except Exception as e:
-        log.exception("Unexpected error: %s", e)
-    finally:
-        log.info("Client shutdown complete")
+    attempt = 0
+    while True:
+        try:
+            async with websockets.connect(
+                config.ws_url,
+                max_size=None,
+                compression=None,
+                ping_interval=30,
+                ping_timeout=30,
+                close_timeout=10,
+            ) as ws:
+                attempt = 0  # reset on success
+                log.info("Connected to %s", config.ws_url)
+                await asyncio.gather(
+                    stream_microphone(ws),
+                    receive_subtitles(ws),
+                )
+                break  # normal exit
 
+        except (websockets.ConnectionClosedOK, websockets.ConnectionClosedError):
+            log.warning("Connection closed")
+        except OSError as e:
+            log.error("Network error: %s", e)
+        except Exception as e:
+            log.exception("Unexpected error: %s", e)
+
+        attempt += 1
+        if attempt >= config.reconnect_attempts:
+            log.error("Max reconnection attempts reached. Exiting.")
+            break
+
+        delay = config.reconnect_delay * (2 ** (attempt - 1))  # exponential backoff
+        log.info("Reconnecting in %.1fs (attempt %d/%d)...", delay, attempt, config.reconnect_attempts)
+        await asyncio.sleep(delay)
+
+    log.info("Client shutdown complete")
 
 if __name__ == "__main__":
     asyncio.run(main())

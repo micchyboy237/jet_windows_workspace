@@ -11,14 +11,17 @@ from utils.audio_utils import resolve_audio_paths
 from transformers import AutoTokenizer
 from translator_types import Translator
 
-# ──────────────────────────────────────────────────────────────────────────────
-# CONFIG / CONSTANTS
-# ──────────────────────────────────────────────────────────────────────────────
-
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER = "Helsinki-NLP/opus-mt-ja-en"
 
-log = logging.getLogger(__name__)
+# Configure rich logging once at module level
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True, markup=True)]
+)
+log = logging.getLogger("transcribe")
 
 class WordDict(TypedDict):
     start: float
@@ -44,85 +47,39 @@ class TranslationResult(TypedDict):
     index: int
     audio_path: str
     translation: str
-    success: bool
+    success: bool  # True if translation succeeded and produced non-empty text
 
-# ──────────────────────────────────────────────────────────────────────────────
-# CORE PROCESSING FUNCTIONS
-# ──────────────────────────────────────────────────────────────────────────────
 
-def transcribe_to_japanese(
+def transcribe_and_translate_file(
     model: WhisperModel,
+    translator: Translator,
+    tokenizer: "AutoTokenizer",
     audio_path: str,
     language: Optional[str] = None,
 ) -> str:
-    """Perform only the GPU-heavy transcription step → returns raw Japanese text."""
-    log.info(f"Starting transcription: [bold cyan]{audio_path}[/bold cyan]")
-    segments_iter, _ = model.transcribe(
-        audio_path,
-        language=language or "ja",
-        beam_size=5,
-        vad_filter=False,
-    )
-    segments: List[SegmentDict] = [dataclasses.asdict(s) for s in segments_iter]
+    """Transcribe a single file to Japanese text, then translate to English."""
+    log.info(f"Starting transcription + translation: [bold cyan]{audio_path}[/bold cyan]")
 
-    ja_text = " ".join(
-        segment["text"].strip() for segment in segments if segment["text"].strip()
-    ).strip()
+    segments_iter, _ = model.transcribe(audio_path, language=language or "ja", beam_size=5, vad_filter=False)
 
+    segments: List[SegmentDict] = []
+    for s in segments_iter:
+        segments.append(dataclasses.asdict(s))
+
+    ja_text = " ".join(segment["text"].strip() for segment in segments if segment["text"].strip())
     if not ja_text:
         log.warning(f"No Japanese text detected in {audio_path}")
         return ""
 
-    log.debug(f"Transcribed Japanese (len={len(ja_text)}): {ja_text[:80]}...")
-    return ja_text
-
-
-def translate_to_english(
-    translator: Translator,
-    tokenizer: AutoTokenizer,
-    japanese_text: str,
-) -> str:
-    """Translate Japanese text to English using OPUS-MT (CPU operation)."""
-    if not japanese_text:
-        return ""
-
-    source_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(japanese_text))
+    # Tokenize Japanese text
+    source_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(ja_text))
+    # Translate batch (single sentence)
     results = translator.translate_batch([source_tokens])
-    en_tokens = results[0].hypotheses[0]
-    en_text = tokenizer.decode(
-        tokenizer.convert_tokens_to_ids(en_tokens),
-        skip_special_tokens=True
-    )
+    en_tokens = results[0].hypotheses[0]  # Best hypothesis
+    en_text = tokenizer.decode(tokenizer.convert_tokens_to_ids(en_tokens), skip_special_tokens=True)
+    log.info(f"Completed: [bold green]{audio_path}[/bold green]")
     return en_text
 
-
-def process_single_result(
-    path: str,
-    ja_text: str,
-    translator: Translator,
-    tokenizer: AutoTokenizer,
-    output_path: Optional[Path],
-    idx: int,
-) -> TranslationResult:
-    """Handle translation + saving + result creation (called after transcription)."""
-    en_text = translate_to_english(translator, tokenizer, ja_text)
-    success = bool(en_text.strip())
-
-    if output_path and success:
-        txt_path = output_path / f"{Path(path).stem}_en.txt"
-        txt_path.write_text(en_text, encoding="utf-8")
-        log.debug(f"Saved translation: [dim]{txt_path}[/dim]")
-
-    return TranslationResult(
-        index=idx,
-        audio_path=path,
-        translation=en_text,
-        success=success,
-    )
-
-# ──────────────────────────────────────────────────────────────────────────────
-# BATCH PROCESSORS
-# ──────────────────────────────────────────────────────────────────────────────
 
 def batch_transcribe_and_translate_files(
     audio_paths: List[str],
@@ -132,7 +89,7 @@ def batch_transcribe_and_translate_files(
 ) -> Generator[TranslationResult, None, None]:
     """
     Synchronous generator that yields TranslationResult as soon as each file completes.
-    Transcription runs in threads; translation runs in main thread.
+    Provides immediate feedback without requiring async/await.
     """
     if not audio_paths:
         log.warning("No audio files provided.")
@@ -175,8 +132,10 @@ def batch_transcribe_and_translate_files(
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
                 executor.submit(
-                    transcribe_to_japanese,
+                    transcribe_and_translate_file,
                     whisper_model,
+                    translator,
+                    tokenizer,
                     path,
                     language,
                 ): path
@@ -187,21 +146,23 @@ def batch_transcribe_and_translate_files(
                 path = futures[future]
                 idx = path_to_index[path]
                 try:
-                    ja_text = future.result()
-                    result = process_single_result(
-                        path=path,
-                        ja_text=ja_text,
-                        translator=translator,
-                        tokenizer=tokenizer,
-                        output_path=output_path,
-                        idx=idx,
+                    result = future.result()
+                    success = bool(result.strip())
+
+                    if output_path:
+                        txt_path = output_path / f"{Path(path).stem}_en.txt"
+                        txt_path.write_text(result, encoding="utf-8")
+                        log.debug(f"Saved: [dim]{txt_path}[/dim]")
+
+                    yield TranslationResult(
+                        index=idx,
+                        audio_path=path,
+                        translation=result,
+                        success=success,
                     )
-                    status = "[bold green]Success[/bold green]" if result["success"] else "[bold red]Failed[/bold red]"
-                    log.info(f"{status} #{idx+1}: {Path(path).name}")
-                    log.info(f"Preview: {result['translation'][:120]}{'...' if len(result['translation']) > 120 else ''}")
-                    yield result
                 except Exception as exc:
                     log.error(f"[bold red]Failed[/bold red] {path}: {exc}")
+
                     yield TranslationResult(
                         index=idx,
                         audio_path=path,
@@ -221,7 +182,9 @@ async def batch_transcribe_and_translate_files_async(
     language: Optional[str] = "ja",
 ) -> AsyncGenerator[TranslationResult, None]:
     """
-    Async generator version with the same separation of transcription/translation.
+    Async generator that yields a typed TranslationResult dictionary
+    as soon as each file is processed.
+    Provides immediate user feedback while maintaining parallel execution.
     """
     if not audio_paths:
         log.warning("No audio files provided.")
@@ -249,7 +212,6 @@ async def batch_transcribe_and_translate_files_async(
         log.info(f"Translations will be saved to: [bold yellow]{output_path.resolve()}[/bold yellow]")
 
     loop = asyncio.get_event_loop()
-
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         with Progress(
             TextColumn("[progress.description]{task.description}"),
@@ -265,8 +227,10 @@ async def batch_transcribe_and_translate_files_async(
             tasks = {
                 loop.run_in_executor(
                     executor,
-                    transcribe_to_japanese,
+                    transcribe_and_translate_file,
                     whisper_model,
+                    translator,
+                    tokenizer,
                     path,
                     language,
                 ): (idx, path)
@@ -278,18 +242,25 @@ async def batch_transcribe_and_translate_files_async(
                 for future in done:
                     idx, path = tasks.pop(future)
                     try:
-                        ja_text = future.result()
-                        result = process_single_result(
-                            path=path,
-                            ja_text=ja_text,
-                            translator=translator,
-                            tokenizer=tokenizer,
-                            output_path=output_path,
-                            idx=idx,
+                        result = future.result()
+                        success = bool(result.strip())
+
+                        if output_path:
+                            txt_path = output_path / f"{Path(path).stem}_en.txt"
+                            txt_path.write_text(result, encoding="utf-8")
+                            log.debug(f"Saved: [dim]{txt_path}[/dim]")
+
+                        log.info(f"Completed: [bold green]{path}[/bold green]")
+
+                        yield TranslationResult(
+                            index=idx,
+                            audio_path=path,
+                            translation=result,
+                            success=success,
                         )
-                        yield result
                     except Exception as exc:
                         log.error(f"[bold red]Failed[/bold red] {path}: {exc}")
+
                         yield TranslationResult(
                             index=idx,
                             audio_path=path,
@@ -311,13 +282,26 @@ if __name__ == "__main__":
 
     audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server\recordings"
     files = resolve_audio_paths(audio_dir)
-    files = files[:5]  # for testing
+    files = files[:5]  # Temporarily limit for testing
 
     print("=== Synchronous Generator Version ===")
     for result in batch_transcribe_and_translate_files(
         files, max_workers=4, output_dir=str(OUTPUT_DIR), language="ja"
     ):
         status = "[bold green]Success[/bold green]" if result["success"] else "[bold red]Failed[/bold red]"
+        print(f"\n{status} #[bold cyan]{result['index'] + 1}[/bold cyan]: {Path(result['audio_path']).name}")
         preview = result["translation"][:300] + ("..." if len(result["translation"]) > 300 else "")
-        print(f"{status} #{result['index']+1}: {Path(result['audio_path']).name}")
         print(f"Preview: {preview}\n")
+
+    # Uncomment to test async version
+    # print("=== Async Version ===")
+    # async def main():
+    #     async for result in batch_transcribe_and_translate_files_async(
+    #         files, max_workers=4, output_dir=str(OUTPUT_DIR), language="ja"
+    #     ):
+    #         status = "[bold green]Success[/bold green]" if result["success"] else "[bold red]Failed[/bold red]"
+    #         print(f"\n{status} #[bold cyan]{result['index'] + 1}[/bold cyan]: {Path(result['audio_path']).name}")
+    #         preview = result["translation"][:300] + ("..." if len(result["translation"]) > 300 else "")
+    #         print(f"Preview: {preview}\n")
+    
+    # asyncio.run(main())

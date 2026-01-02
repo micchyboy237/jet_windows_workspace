@@ -1,184 +1,224 @@
 # live_subtitles_server.py
+"""
+Modern WebSocket live subtitles server (compatible with websockets ≥ 12.0 / 14.0+)
+Receives Japanese audio chunks, buffers until end-of-utterance, transcribes & translates.
+"""
 
 import asyncio
-import time
 import base64
 import json
-from typing import List
+import logging
+import time
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Optional
 
 import numpy as np
-import websockets
-from websockets.server import WebSocketServerProtocol
+import scipy.io.wavfile as wavfile
 from faster_whisper import WhisperModel
-
 from rich.logging import RichHandler
+from transformers import AutoTokenizer
 
-import logging
+# Reuse your existing translator setup
+from translator_types import Translator  # adjust import if needed
 
-# =============================
+TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
+TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
+
 # Logging setup
-# =============================
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
     datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True, markup=True)],
+    handlers=[RichHandler(rich_tracebacks=True, markup=True)]
 )
-log = logging.getLogger("asr-server")
+logger = logging.getLogger("live-sub-server")
 
-# =============================
-# Configuration
-# =============================
+# ───────────────────────────────────────────────
+# Load models once at startup
+# ───────────────────────────────────────────────
 
-HOST = "0.0.0.0"
-PORT = 8765
-
-SAMPLE_RATE = 16000
-BYTES_PER_SAMPLE = 2  # PCM16
-MIN_FLUSH_SECONDS = 0.5  # Reduce to 0.5 s (~16 chunks) – faster cycle, still enough context for reliable transcription
-
-# =============================
-# Load ASR model (production)
-# =============================
-
-asr_model = WhisperModel(
-    "large-v3",
+logger.info("Loading Whisper model kotoba-tech/kotoba-whisper-v2.0-faster ...")
+whisper_model = WhisperModel(
+    "kotoba-tech/kotoba-whisper-v2.0-faster",
     device="cuda",
-    compute_type="int8",
+    compute_type="float32",
 )
-log.info("[ASR] Whisper model 'large-v3' loaded (device=cuda, compute_type=int8)")
 
-# =============================
-# Utilities
-# =============================
+logger.info("Loading OPUS-MT ja→en tokenizer & translator ...")
+tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER_NAME)
+translator = Translator(
+    TRANSLATOR_MODEL_PATH,
+    device="cpu",
+    compute_type="int8",
+    inter_threads=4,  # tune to your cores
+)
 
-def pcm16_bytes_to_float32(pcm: bytes) -> np.ndarray:
-    """Convert PCM16 bytes → float32 numpy array"""
-    audio = np.frombuffer(pcm, dtype=np.int16)
-    return audio.astype(np.float32) / 32768.0
+logger.info("Models loaded.")
+
+# ───────────────────────────────────────────────
+# Per-connection state
+# ───────────────────────────────────────────────
+
+class ConnectionState:
+    def __init__(self, client_id: str):
+        self.client_id = client_id
+        self.buffer = bytearray()
+        self.sample_rate: Optional[int] = None
+        self.utterance_count = 0
+        self.last_chunk_time = time.monotonic()
+
+    def append_chunk(self, pcm_bytes: bytes, sample_rate: int):
+        if self.sample_rate is None:
+            self.sample_rate = sample_rate
+        elif self.sample_rate != sample_rate:
+            logger.warning(f"Sample rate changed for {self.client_id} — keeping first")
+        self.buffer.extend(pcm_bytes)
+        self.last_chunk_time = time.monotonic()
+
+    def clear_buffer(self):
+        self.buffer.clear()
+
+    def get_duration_sec(self) -> float:
+        if not self.buffer or self.sample_rate is None:
+            return 0.0
+        return len(self.buffer) / 2 / self.sample_rate  # int16
 
 
-# =============================
-# Client handler
-# =============================
+# Global state
+connected_states: dict[asyncio.StreamWriter, ConnectionState] = {}
+executor = ThreadPoolExecutor(max_workers=3)  # conservative — GTX 1660
 
-# =============================
-# Server improvements (live_subtitles_server.py)
-# =============================
 
-async def handle_client(ws: WebSocketServerProtocol) -> None:
-    """
-    Receives PCM16 audio frames (speech-only),
-    runs streaming ASR,
-    sends partial/final subtitles.
-    """
+def transcribe_and_translate(audio_bytes: bytes, sr: int) -> tuple[str, str]:
+    """Blocking function — run in executor."""
+    start = time.monotonic()
 
-    log.info("[client:%s] Connected", ws.remote_address)
+    # Optional: save temp file for easier debugging
+    temp_path = Path(f"temp_utterance_{int(time.time()*1000)}.wav")
+    arr = np.frombuffer(audio_bytes, dtype=np.int16)
+    wavfile.write(str(temp_path), sr, arr)
 
-    audio_buffer: List[bytes] = []
-    buffered_samples = 0
-    chunks_received = 0
-    asr_calls = 0
-    last_flush_time = time.monotonic()
+    # Transcribe
+    segments, info = whisper_model.transcribe(
+        str(temp_path),
+        language="ja",
+        beam_size=5,
+        vad_filter=False,
+    )
+    ja_text = " ".join(s.text.strip() for s in segments if s.text.strip()).strip()
 
-    try:
-        async for message in ws:
-            data = json.loads(message)
-
-            if data.get("type") != "audio":
-                continue
-
-            pcm_chunk = base64.b64decode(data["pcm"])
-            chunk_samples = len(pcm_chunk) // BYTES_PER_SAMPLE
-            audio_buffer.append(pcm_chunk)
-            buffered_samples += chunk_samples
-            chunks_received += 1
-            log.debug("[client:%s] Received chunk #%d (%d samples → total %.3f s)",
-                      ws.remote_address, chunks_received, chunk_samples, buffered_samples / SAMPLE_RATE)
-
-            buffered_seconds = buffered_samples / SAMPLE_RATE
-
-            log.debug(
-                "[buffer] Buffered %.3f seconds (%d chunks)",
-                buffered_seconds, len(audio_buffer)
-            )
-
-            # ---- ASR flush condition ----
-            if buffered_seconds < MIN_FLUSH_SECONDS:
-                continue
-
-            flush_start = time.monotonic()
-            log.info("[asr:%s] Starting transcription on %.3f s buffer (%d chunks)",
-                     ws.remote_address, buffered_seconds, len(audio_buffer))
-
-            # ---- Run ASR ----
-            pcm_all = b"".join(audio_buffer)
-            audio_f32 = pcm16_bytes_to_float32(pcm_all)
-
-            segments, info = asr_model.transcribe(
-                audio_f32,
-                language="ja",
-                vad_filter=False,                  # client already did VAD
-                condition_on_previous_text=True,   # Keep context across flushes
-                word_timestamps=False,             # Keep simple for now (no timestamps needed)
-                beam_size=5,
-                without_timestamps=True,
-                temperature=0.0,
-                log_prob_threshold=-0.5,           # Slightly stricter than -1.0 to reduce empty results
-                no_speech_threshold=0.6,           # Default is 0.6 – keep or lower if too silent
-            )
-
-            text = "".join(seg.text for seg in segments).strip()
-            asr_calls += 1
-
-            processing_time = time.monotonic() - flush_start
-            log.info("[asr:%s] Completed in %.2f s → Raw text: %r", ws.remote_address, processing_time, text)
-
-            if text:
-                log.info("[client:%s] Transcription: %s", ws.remote_address, text)
-                await ws.send(json.dumps({
-                    "type": "subtitle",
-                    "transcription": text,
-                }))
-
-            # Buffer cleared only after successful transcription
-            audio_buffer.clear()
-            buffered_samples = 0
-            last_flush_time = time.monotonic()
-            log.debug("[buffer:%s] Cleared after flush", ws.remote_address)
-    except websockets.exceptions.ConnectionClosedOK:
-        log.info("[client:%s] Disconnected normally", ws.remote_address)
-    except websockets.exceptions.ConnectionClosedError as e:
-        log.warning("[client:%s] Disconnected abnormally: %s", ws.remote_address, e)
-    except Exception:
-        log.exception("[client:%s] Unexpected error", ws.remote_address)
-    finally:
-        uptime = time.monotonic() - last_flush_time if 'last_flush_time' in locals() else 0
-        log.info(
-            "[client:%s] Session ended – chunks: %d, ASR calls: %d, uptime: %.1f s",
-            ws.remote_address, chunks_received, asr_calls, uptime
+    # Translate
+    if not ja_text:
+        en_text = ""
+    else:
+        src_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(ja_text))
+        results = translator.translate_batch([src_tokens])
+        en_tokens = results[0].hypotheses[0]
+        en_text = tokenizer.decode(
+            tokenizer.convert_tokens_to_ids(en_tokens),
+            skip_special_tokens=True
         )
 
+    duration = time.monotonic() - start
+    preview_ja = ja_text[:60] + ("..." if len(ja_text) > 60 else "")
+    preview_en = en_text[:60] + ("..." if len(en_text) > 60 else "")
+    logger.info(
+        "[process] %s → ja: %s | en: %s | took %.2fs",
+        temp_path.name, preview_ja, preview_en, duration
+    )
 
-# =============================
-# Server entrypoint
-# =============================
+    temp_path.unlink(missing_ok=True)
+    return ja_text, en_text
 
-async def main() -> None:
-    async with websockets.serve(
-        handle_client,
-        host=HOST,
-        port=PORT,
-        max_size=None,
-        compression=None,
-        ping_interval=30,  # Match client for high traffic
-        ping_timeout=30,
-        close_timeout=10,
-    ):
-        print(f"🚀 WebSocket server running at ws://{HOST}:{PORT}")
-        await asyncio.Future()  # run forever
+
+async def handler(websocket):
+    """
+    Modern websockets handler (websockets.asyncio.server style)
+    Receives messages from one client.
+    """
+    client_id = f"{id(websocket):x}"[:8]
+    state = ConnectionState(client_id)
+    connected_states[websocket] = state
+
+    logger.info(f"New client connected: {client_id}")
+
+    try:
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                msg_type = data.get("type")
+
+                if msg_type == "audio":
+                    pcm_b64 = data["pcm"]
+                    sr = data.get("sample_rate", 16000)
+                    pcm_bytes = base64.b64decode(pcm_b64)
+                    state.append_chunk(pcm_bytes, sr)
+                    logger.debug(f"[{client_id}] added {len(pcm_bytes)} bytes")
+
+                elif msg_type == "end_of_utterance":
+                    if not state.buffer:
+                        logger.debug(f"[{client_id}] end-of-utterance but empty buffer")
+                        continue
+
+                    duration = state.get_duration_sec()
+                    logger.info(f"[{client_id}] End of utterance — {duration:.2f}s")
+
+                    # Offload heavy work to thread
+                    loop = asyncio.get_running_loop()
+                    ja, en = await loop.run_in_executor(
+                        executor,
+                        transcribe_and_translate,
+                        bytes(state.buffer),
+                        state.sample_rate
+                    )
+
+                    # Send result back
+                    payload = {
+                        "type": "subtitle",
+                        "transcription": ja,
+                        "translation": en,
+                        "utterance_id": state.utterance_count,
+                        "duration_sec": round(duration, 3),
+                    }
+                    await websocket.send(json.dumps(payload))
+
+                    state.utterance_count += 1
+                    state.clear_buffer()
+
+                else:
+                    logger.warning(f"[{client_id}] Unknown message type: {msg_type}")
+
+            except json.JSONDecodeError:
+                logger.warning(f"[{client_id}] Invalid JSON received")
+            except Exception as e:
+                logger.exception(f"[{client_id}] Message handler error: {e}")
+
+    except Exception as e:
+        logger.exception(f"[{client_id}] Connection error: {e}")
+    finally:
+        connected_states.pop(websocket, None)
+        logger.info(f"[{client_id}] Disconnected")
+
+
+async def main():
+    from websockets.asyncio.server import serve
+
+    async with serve(
+        handler,
+        host="0.0.0.0",
+        port=8765,
+        # Optional: add ping/pong keep-alive
+        ping_interval=20,
+        ping_timeout=60,
+    ) as server:
+        logger.info(f"WebSocket server listening on ws://0.0.0.0:8765")
+        await server.serve_forever()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Server shutdown requested")

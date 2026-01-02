@@ -11,8 +11,6 @@ model = WhisperModel(
 # Wrap for batched inference (supports VAD for better chunking)
 batched_model = BatchedInferencePipeline(
     model=model,
-    # use_vad_model=False,  # Optional: improves silence handling
-    # chunk_length=30      # Seconds per chunk (30 is standard for Whisper)
 )
 
 # Load audio (numpy array expected; supports file paths or arrays)
