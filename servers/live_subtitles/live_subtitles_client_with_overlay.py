@@ -9,7 +9,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque
+from typing import Any, Deque
 
 import sounddevice as sd
 import websockets
@@ -52,7 +52,8 @@ class Config:
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
-    vad_threshold: float = 0.5
+    vad_threshold: float = 0.3
+    max_silence_seconds: float = 0.5   # seconds of silence before ending segment
     vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
@@ -104,7 +105,12 @@ async def stream_microphone(ws) -> None:
     speech_start_time: float | None = None
     current_speech_seconds: float = 0.0
     silence_start_time: float | None = None
-    max_silence_seconds: float = 1.5  # Stop segment after 1.5s silence
+    max_vad_confidence: float = 0.0           # ← new
+    last_vad_confidence: float = 0.0          # ← new
+    first_vad_confidence: float = 0.0         # ← new: confidence of the first speech chunk
+    min_vad_confidence: float = 1.0           # ← new: lowest confidence during speech
+    vad_confidence_sum: float = 0.0           # ← new: for average calculation
+    speech_chunk_count: int = 0               # ← new: number of speech chunks (for avg)
 
     segments_dir = os.path.join(OUTPUT_DIR, "segments")
     os.makedirs(segments_dir, exist_ok=True)
@@ -144,6 +150,12 @@ async def stream_microphone(ws) -> None:
                     if speech_prob >= config.vad_threshold:
                         chunks_detected += 1
                         processed += 1
+                        # Track best & latest VAD score for this segment
+                        last_vad_confidence = speech_prob
+                        if speech_prob > max_vad_confidence:
+                            max_vad_confidence = speech_prob
+                        if speech_prob < min_vad_confidence:
+                            min_vad_confidence = speech_prob
                         # Reset silence timer
                         silence_start_time = None
                         if speech_start_time is None:
@@ -153,11 +165,20 @@ async def stream_microphone(ws) -> None:
                             segment_start_wallclock[current_segment_num] = time.time()
                             current_segment_buffer = bytearray()
                             speech_chunks_in_segment = 0  # reset for new segment
+                            max_vad_confidence = 0.0                # ← reset
+                            last_vad_confidence = 0.0               # ← reset
+                            first_vad_confidence = speech_prob      # ← capture first speech prob
+                            min_vad_confidence = speech_prob       # ← initialize min with first value
+                            vad_confidence_sum = 0.0               # ← reset
+                            speech_chunk_count = 0                  # ← reset
                             log.info("[speech] Speech started | segment_%04d", current_segment_num)
                         # Append chunk to current segment buffer
                         if current_segment_buffer is not None:
                             current_segment_buffer.extend(chunk)
                             speech_chunks_in_segment += 1  # count chunk in segment
+                        # Accumulate for average
+                        vad_confidence_sum += speech_prob
+                        speech_chunk_count += 1
                         send_start = time.monotonic()
                         pending_sends.append(send_start)
                         payload = {
@@ -177,7 +198,7 @@ async def stream_microphone(ws) -> None:
                             silence_start_time = time.monotonic()
                         # Check if silence too long → end segment
                         if (speech_start_time is not None and silence_start_time is not None
-                            and time.monotonic() - silence_start_time > max_silence_seconds):
+                            and time.monotonic() - silence_start_time > config.max_silence_seconds):
                             # Compute precise duration using number of samples in the segment buffer
                             if current_segment_buffer is not None:
                                 num_samples = len(current_segment_buffer) // 2  # int16 = 2 bytes
@@ -207,16 +228,28 @@ async def stream_microphone(ws) -> None:
                                     np.frombuffer(current_segment_buffer, dtype=np.int16)
                                 )
 
+                                start_monotonic = speech_start_time
+                                end_monotonic = time.monotonic()
                                 metadata = {
                                     "segment_id": current_segment_num,
-                                    "duration_seconds": round(duration, 3),
-                                    "approx_time_duration_seconds": round(time.monotonic() - speech_start_time, 3),
+                                    "duration_seconds": round(duration, 2),
                                     "num_chunks": speech_chunks_in_segment,
                                     "num_samples": num_samples,
-                                    "start_time_monotonic": speech_start_time,
-                                    "end_time_monotonic": time.monotonic(),
+                                    "start_sec": round(end_monotonic - start_monotonic, 3)
+                                        if start_monotonic is not None
+                                        else 0.000,
+                                    "end_sec": round(end_monotonic, 3),
                                     "sample_rate": config.sample_rate,
                                     "channels": config.channels,
+                                    "vad_confidence": {
+                                        "first": round(first_vad_confidence, 4),
+                                        "last": round(last_vad_confidence, 4),
+                                        "min": round(min_vad_confidence, 4),
+                                        "max": round(max_vad_confidence, 4),
+                                        "ave": round(vad_confidence_sum / speech_chunk_count, 4)
+                                            if speech_chunk_count > 0
+                                            else 0.0,
+                                    },
                                 }
                                 meta_path = os.path.join(segment_dir, "metadata.json")
                                 with open(meta_path, "w", encoding="utf-8") as f:
@@ -319,6 +352,7 @@ async def receive_subtitles(ws) -> None:
             ja = data.get("transcription", "").strip()
             en = data.get("translation", "").strip()
             utterance_id = data.get("utterance_id")
+            confidence = data.get("confidence")          # float | None
             duration_sec = data.get("duration_sec", 0.0)
 
             if pending_sends:
@@ -344,6 +378,19 @@ async def receive_subtitles(ws) -> None:
 
             # Write per-segment SRT
             per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
+            meta_path = os.path.join(segment_dir, "metadata.json")
+
+            # Update existing metadata with server confidence (if file exists)
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta: dict[str, Any] = json.load(f)
+                    meta["translation_confidence"] = confidence if confidence is not None else None
+                    with open(meta_path, "w", encoding="utf-8") as f:
+                        json.dump(meta, f, indent=2, ensure_ascii=False)
+                except Exception as e:
+                    log.warning("[metadata] Failed to update confidence in %s: %s", meta_path, e)
+
             write_srt_block(
                 sequence=srt_sequence,
                 start_sec=start_time,
@@ -365,13 +412,35 @@ async def receive_subtitles(ws) -> None:
 
             srt_sequence += 1
 
-            # Display the segment on the live overlay
+            # Optional: warn on low confidence results
+            if confidence is not None and confidence < 0.40:
+                preview = (ja or en)[:60] + "..." if len(ja or en) > 60 else (ja or en)
+                log.warning("[low-conf] utt %d | conf=%.3f | %s", utterance_id, confidence, preview)
+
+            # Prepare values for overlay with required rounding and extra info
+            display_start = round(start_time, 2)
+            display_end = round(start_time + duration_sec, 2)
+            display_duration = round(duration_sec, 2)
+
+            # Retrieve average VAD confidence from saved metadata (if available)
+            avg_vad_conf = 0.0
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                    avg_vad_conf = meta.get("vad_confidence", {}).get("ave", 0.0)
+                except Exception:
+                    pass
+
             overlay.add_message(
+                source_text=ja,
                 translated_text=en,
-                # source_text=ja,
-                start_sec=start_time,
-                end_sec=start_time + duration_sec,
-                duration_sec=duration_sec,
+                start_sec=display_start,
+                end_sec=display_end,
+                duration_sec=display_duration,
+                segment_number=segment_num,
+                avg_vad_confidence=round(avg_vad_conf, 3),
+                translation_confidence=round(confidence, 3) if confidence is not None else None,
             )
 
         except Exception as e:
