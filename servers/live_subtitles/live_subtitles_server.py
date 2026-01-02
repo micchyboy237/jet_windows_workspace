@@ -11,7 +11,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from datetime import datetime, timezone  # ← UPDATED
 
@@ -22,6 +22,7 @@ from rich.logging import RichHandler
 from transformers import AutoTokenizer
 
 from translator_types import Translator  # adjust import if needed
+from utils import split_sentences_ja
 import threading  # <-- Added for thread info in logging
 
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
@@ -139,16 +140,31 @@ def transcribe_and_translate(
     )
     ja_text = " ".join(s.text.strip() for s in segments if s.text.strip()).strip()
 
-    if not ja_text:
-        en_text = ""
-    else:
-        src_tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(ja_text))
-        results = translator.translate_batch([src_tokens])
-        en_tokens = results[0].hypotheses[0]
-        en_text = tokenizer.decode(
-            tokenizer.convert_tokens_to_ids(en_tokens),
-            skip_special_tokens=True
-        )
+    # ── Split Japanese text into sentences before translation ────────────────
+
+    sentences_ja: List[str] = split_sentences_ja(ja_text)
+    en_sentences: List[str] = []
+
+    if sentences_ja:
+        batch_src_tokens = []
+        for sent in sentences_ja:
+            if sent.strip():
+                tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(sent))
+                batch_src_tokens.append(tokens)
+
+        if batch_src_tokens:
+            results = translator.translate_batch(batch_src_tokens)
+            for hyp in results:
+                en_tokens = hyp.hypotheses[0]
+                en_sent = tokenizer.decode(
+                    tokenizer.convert_tokens_to_ids(en_tokens),
+                    skip_special_tokens=True
+                ).strip()
+                if en_sent:
+                    en_sentences.append(en_sent)
+
+    en_text = "\n".join(en_sentences)
+
     # ───────────────────────────────────────────────────────────
 
     processing_finished_at = datetime.now(timezone.utc)
