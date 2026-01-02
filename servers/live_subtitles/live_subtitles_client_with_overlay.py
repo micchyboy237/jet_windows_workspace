@@ -238,17 +238,17 @@ async def stream_microphone(ws) -> None:
                             current_segment_buffer = None
                             speech_chunks_in_segment = 0  # reset counter
 
-                    # if speech_prob >= config.vad_threshold:
-                    #     avg_rtt = sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
-                    #     log.info(
-                    #         "[speech → server] Sent chunk %d | prob: %.3f | segment: %.2fs%s",
-                    #         chunks_sent,
-                    #         speech_prob,
-                    #         time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
-                    #         f" | avg_rtt: {avg_rtt:.3f}s" if avg_rtt is not None else ""
-                    #     )
-                # if processed > 0:
-                #     log.debug("Processed %d speech chunk(s) this cycle", processed)
+                    if speech_prob >= config.vad_threshold:
+                        avg_rtt = sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
+                        log.info(
+                            "[speech → server] Sent chunk %d | prob: %.3f | segment: %.2fs%s",
+                            chunks_sent,
+                            speech_prob,
+                            time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
+                            f" | avg_rtt: {avg_rtt:.3f}s" if avg_rtt is not None else ""
+                        )
+                if processed > 0:
+                    log.debug("Processed %d speech chunk(s) this cycle", processed)
                 # Periodic status update
                 if total_chunks_processed % 100 == 0:
                     status = "SPEAKING" if speech_start_time else "SILENCE"
@@ -368,7 +368,7 @@ async def receive_subtitles(ws) -> None:
             # Display the segment on the live overlay
             overlay.add_message(
                 translated_text=en,
-                source_text=ja,
+                # source_text=ja,
                 start_sec=start_time,
                 end_sec=start_time + duration_sec,
                 duration_sec=duration_sec,
