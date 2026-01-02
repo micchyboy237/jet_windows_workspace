@@ -1,4 +1,4 @@
-# live_subtitles_client.py
+# live_subtitles_client_with_overlay.py
 
 import os
 import shutil
@@ -19,6 +19,11 @@ import scipy.io.wavfile as wavfile  # Add this import at the top with other impo
 import numpy as np  # needed for saving wav with frombuffer
 
 import datetime
+
+import sys
+from threading import Thread
+from PyQt6.QtWidgets import QApplication
+from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
@@ -360,6 +365,15 @@ async def receive_subtitles(ws) -> None:
 
             srt_sequence += 1
 
+            # Display the segment on the live overlay
+            overlay.add_message(
+                translated_text=en,
+                source_text=ja,
+                start_sec=start_time,
+                end_sec=start_time + duration_sec,
+                duration_sec=duration_sec,
+            )
+
         except Exception as e:
             log.exception("[subtitle receive] Error processing message: %s", e)
 
@@ -406,4 +420,12 @@ async def main() -> None:
     log.info("Client shutdown complete")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    app = QApplication([])  # Re-uses existing instance if any
+    overlay = LiveSubtitlesOverlay.create(app=app, title="Live Japanese Subtitles")
+    
+    def recording_thread() -> None:
+        asyncio.run(main())
+    
+    Thread(target=recording_thread, daemon=True).start()
+    # Start Qt event loop – this keeps the overlay responsive and visible
+    sys.exit(app.exec())
