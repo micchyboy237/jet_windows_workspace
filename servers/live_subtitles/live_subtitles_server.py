@@ -103,7 +103,7 @@ executor = ThreadPoolExecutor(max_workers=3)  # conservative — GTX 1660
 DEFAULT_OUT_DIR: Optional[Path] = None  # ← change to Path("utterances") if you want default permanent storage
 
 # ───────────────────────────────────────────────
-# Updated transcribe_and_translate — extra timing params
+# Updated transcribe_and_translate — add confidence score
 # ───────────────────────────────────────────────
 def transcribe_and_translate(
     audio_bytes: bytes,
@@ -113,7 +113,7 @@ def transcribe_and_translate(
     end_of_utterance_received_at: datetime,        # NEW: when end marker was received (UTC)
     received_at: Optional[datetime] = None,        # NEW: when first chunk received (UTC, optional)
     out_dir: Optional[Path] = None,
-) -> tuple[str, str]:
+) -> tuple[str, str, float]:
     """Blocking function — run in executor."""
     processing_started_at = datetime.now(timezone.utc)
 
@@ -132,15 +132,28 @@ def transcribe_and_translate(
     wavfile.write(str(audio_path), sr, arr)
 
     # ─── Heavy work ─────────────────────────────────────────────
-    segments, info = whisper_model.transcribe(
+    segments, info = whisper_model.transcribe(  # type: ignore
         str(audio_path),
         language="ja",
         beam_size=5,
         vad_filter=False,
+        # return_timestamps=True,          # uncomment if you later need segment-level timing
     )
-    ja_text = " ".join(s.text.strip() for s in segments if s.text.strip()).strip()
 
-    # ── Split Japanese text into sentences before translation ────────────────
+    # Single pass over the generator to avoid exhaustion issues
+    ja_text_parts: list[str] = []
+    best_logprob: float = float('-inf')
+    best_segment = None
+
+    for segment in segments:
+        text = segment.text.strip()
+        if text:
+            ja_text_parts.append(text)
+        if segment.avg_logprob > best_logprob:
+            best_logprob = segment.avg_logprob
+            best_segment = segment
+
+    ja_text = " ".join(ja_text_parts).strip()
 
     sentences_ja: List[str] = split_sentences_ja(ja_text)
     en_sentences: List[str] = []
@@ -165,7 +178,17 @@ def transcribe_and_translate(
 
     en_text = "\n".join(en_sentences)
 
-    # ───────────────────────────────────────────────────────────
+    # Confidence from the best segment found during iteration
+    if best_segment is not None:
+        confidence = float(np.exp(best_logprob))
+        avg_logprob = best_logprob
+    else:
+        confidence = 0.0
+        avg_logprob = float('-inf')
+
+    logger.info(
+        "[confidence] avg_logprob=%.4f → conf=%.3f | ja=%s", avg_logprob, confidence, ja_text[:70] + "..." if len(ja_text) > 70 else ja_text
+    )
 
     processing_finished_at = datetime.now(timezone.utc)
     processing_duration = (processing_finished_at - processing_started_at).total_seconds()
@@ -185,6 +208,8 @@ def transcribe_and_translate(
         "audio_duration_seconds": round(len(audio_bytes) / 2 / sr, 3),
         "sample_rate": sr,
         "transcription_ja": ja_text,
+        "confidence": round(confidence, 4),
+        "avg_logprob": round(avg_logprob, 4) if best_segment else None,
         "translation_en": en_text,
     }
 
@@ -209,10 +234,12 @@ def transcribe_and_translate(
     if not out_dir:
         audio_path.unlink(missing_ok=True)
 
-    return ja_text, en_text
+    return ja_text, en_text, confidence
+
 
 # ───────────────────────────────────────────────
-# Updated handler — new timestamp logic for queue and processing
+# Updated handler — new timestamp logic for queue and processing,
+# and propagate confidence score in response.
 # ───────────────────────────────────────────────
 async def handler(websocket):
     """
@@ -251,7 +278,7 @@ async def handler(websocket):
 
                     # Offload heavy work to thread, pass timestamps
                     loop = asyncio.get_running_loop()
-                    ja, en = await loop.run_in_executor(
+                    ja, en, confidence = await loop.run_in_executor(
                         executor,
                         transcribe_and_translate,
                         bytes(state.buffer),
@@ -259,8 +286,8 @@ async def handler(websocket):
                         state.client_id,
                         state.utterance_count,
                         state.end_of_utterance_received_at,
-                        state.first_chunk_received_at,  # may be None if not set
-                        DEFAULT_OUT_DIR,
+                        state.first_chunk_received_at,   # received_at (positional)
+                        DEFAULT_OUT_DIR,                # out_dir (positional)
                     )
 
                     # Send result back
@@ -270,6 +297,7 @@ async def handler(websocket):
                         "translation": en,
                         "utterance_id": state.utterance_count,
                         "duration_sec": round(duration, 3),
+                        "confidence": round(float(confidence), 4),
                     }
                     await websocket.send(json.dumps(payload))
 
@@ -313,7 +341,7 @@ if __name__ == "__main__":
         "UTTERANCE_OUT_DIR",
         Path(__file__).parent / "generated" / Path(__file__).stem
     )
-    shutil.rmtree(out_dir_str)
+    shutil.rmtree(out_dir_str, ignore_errors=True)
     if out_dir_str:
         DEFAULT_OUT_DIR = Path(out_dir_str).resolve()
         logger.info(f"Permanent utterance storage enabled: {DEFAULT_OUT_DIR}")
