@@ -202,7 +202,7 @@ def transcribe_and_translate(
         language="ja",
         beam_size=5,
         vad_filter=False,
-        condition_on_previous_text=True,
+        condition_on_previous_text=False,
     )
 
     ja_text_parts = []
