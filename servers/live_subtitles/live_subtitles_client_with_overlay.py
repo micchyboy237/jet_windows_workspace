@@ -119,6 +119,12 @@ async def stream_microphone(ws) -> None:
     vad_confidence_sum: float = 0.0           # ← new: for average calculation
     speech_chunk_count: int = 0               # ← new: number of speech chunks (for avg)
 
+    # ← NEW: audio energy tracking
+    speech_energy_sum: float = 0.0          # sum of RMS values for speech chunks
+    speech_energy_sum_squares: float = 0.0  # sum of squares for variance / std dev
+    max_energy: float = 0.0                 # peak RMS in segment
+    min_energy: float = float("inf")        # lowest RMS in speech chunk
+
     segments_dir = os.path.join(OUTPUT_DIR, "segments")
     os.makedirs(segments_dir, exist_ok=True)
     current_segment_num: int | None = None
@@ -177,7 +183,12 @@ async def stream_microphone(ws) -> None:
                             first_vad_confidence = speech_prob      # ← capture first speech prob
                             min_vad_confidence = speech_prob       # ← initialize min with first value
                             vad_confidence_sum = 0.0               # ← reset
-                            speech_chunk_count = 0                  # ← reset
+                            speech_chunk_count = 0                 # ← reset
+                            # ← NEW resets
+                            speech_energy_sum = 0.0
+                            speech_energy_sum_squares = 0.0
+                            max_energy = 0.0
+                            min_energy = float("inf")
                             log.info("[speech] Speech started | segment_%04d", current_segment_num)
                             speech_duration_sec = 0.0
                         # Append chunk to current segment buffer
@@ -187,6 +198,17 @@ async def stream_microphone(ws) -> None:
                         # Accumulate for average
                         vad_confidence_sum += speech_prob
                         speech_chunk_count += 1
+
+                        # ← NEW: compute RMS energy for this chunk
+                        chunk_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
+                        rms = np.sqrt(np.mean(chunk_np ** 2))
+                        if rms > max_energy:
+                            max_energy = rms
+                        if rms < min_energy:
+                            min_energy = rms
+                        speech_energy_sum += rms
+                        speech_energy_sum_squares += rms ** 2
+
                         send_start = time.monotonic()
                         pending_sends.append(send_start)
                         speech_duration_sec += VAD_CHUNK_SAMPLES / config.sample_rate
@@ -270,6 +292,23 @@ async def stream_microphone(ws) -> None:
                                             if speech_chunk_count > 0
                                             else 0.0,
                                     },
+                                    "audio_energy": {
+                                        # ← CHANGED: explicitly convert numpy float32 → Python float
+                                        "rms_min": float(round(min_energy, 4)) if min_energy != float("inf") else 0.0,
+                                        "rms_max": float(round(max_energy, 4)),
+                                        "rms_ave": float(round(speech_energy_sum / speech_chunk_count, 4))
+                                            if speech_chunk_count > 0
+                                            else 0.0,
+                                        "rms_std": float(round(
+                                            np.sqrt(
+                                                (speech_energy_sum_squares / speech_chunk_count)
+                                                - (speech_energy_sum / speech_chunk_count) ** 2
+                                            ),
+                                            4,
+                                        ))
+                                        if speech_chunk_count > 0
+                                        else 0.0,
+                                    },
                                 }
                                 speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
                                 with open(speech_meta_path, "w", encoding="utf-8") as f:
@@ -314,13 +353,42 @@ async def stream_microphone(ws) -> None:
 
                     if speech_prob >= config.vad_threshold:
                         avg_rtt = sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
+                        
+                        energy_info = ""
+                        if speech_chunk_count > 0:
+                            avg_rms   = speech_energy_sum / speech_chunk_count
+                            rms_std   = np.sqrt(
+                                (speech_energy_sum_squares / speech_chunk_count) -
+                                (speech_energy_sum / speech_chunk_count) ** 2
+                            )
+                            energy_info = (
+                                f" | rms: avg={avg_rms:.4f} ±{rms_std:.4f} "
+                                f"[min={min_energy:.4f} max={max_energy:.4f}]"
+                            )
+
                         log.info(
-                            "[speech → server] Sent chunk %d | prob: %.3f | segment: %.2fs%s",
+                            "[speech → server] Sent chunk %d | VAD=%.3f | dur=%.2fs%s%s",
                             chunks_sent,
                             speech_prob,
                             time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
-                            f" | avg_rtt: {avg_rtt:.3f}s" if avg_rtt is not None else ""
+                            f" | RTT={avg_rtt:.3f}s" if avg_rtt is not None else "",
+                            energy_info
                         )
+                    else:
+                        # Silence chunk – compute energy and always log speech_prob for VAD debugging
+                        chunk_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
+                        rms = np.sqrt(np.mean(chunk_np ** 2))
+                        if rms > 50.0:  # audible low-level sound (breath, noise, etc.)
+                            log.debug(
+                                "[no speech] Chunk has audible energy | rms=%.4f | speech_prob=%.3f | samples=%d",
+                                rms, speech_prob, len(chunk_np)
+                            )
+                        else:
+                            # log.debug(
+                            #     "[silence] True silence chunk | speech_prob=%.3f | rms=%.4f",
+                            #     speech_prob, rms
+                            # )
+                            pass
                 if processed > 0:
                     log.debug("Processed %d speech chunk(s) this cycle", processed)
                 # Periodic status update
