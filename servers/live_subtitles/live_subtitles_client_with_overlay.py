@@ -249,14 +249,15 @@ async def stream_microphone(ws) -> None:
                                     np.frombuffer(current_segment_buffer, dtype=np.int16)
                                 )
 
-                                # Save wall-clock based timings in metadata for segment
+                                # Use relative seconds from stream start (fallback to current segment start time if stream_start_time isn't set)
+                                base_time = stream_start_time or segment_start_wallclock[current_segment_num]
                                 metadata = {
                                     "segment_id": current_segment_num,
-                                    "duration_seconds": round(duration, 2),
+                                    "duration_sec": round(duration, 3),
                                     "num_chunks": speech_chunks_in_segment,
                                     "num_samples": num_samples,
-                                    "start_sec": round(segment_start_wallclock[current_segment_num], 3),
-                                    "end_sec":   round(time.time(), 3),   # wall-clock end
+                                    "start_sec": round(segment_start_wallclock[current_segment_num] - base_time, 3),
+                                    "end_sec": round(time.time() - base_time, 3),
                                     "sample_rate": config.sample_rate,
                                     "channels": config.channels,
                                     "vad_confidence": {
@@ -281,9 +282,14 @@ async def stream_microphone(ws) -> None:
                                             all_meta = json.load(f)
                                     except Exception:
                                         pass  # start fresh if corrupted
+                                base_time = stream_start_time or segment_start_wallclock[current_segment_num]
+                                relative_start = segment_start_wallclock[current_segment_num] - base_time
                                 all_meta.append({
                                     "segment_id": current_segment_num,
                                     **metadata,
+                                    "start_sec": round(relative_start, 3),
+                                    "end_sec": round(relative_start + duration, 3),
+                                    "duration_sec": round(duration, 3),
                                     "segment_dir": f"segment_{current_segment_num:04d}",
                                     "wav_path": str(wav_path),
                                     "meta_path": str(meta_path),
