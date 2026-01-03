@@ -29,7 +29,7 @@ OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-ALL_META_PATH = os.path.join(OUTPUT_DIR, "all_speech_meta.json")
+ALL_SPEECH_META_PATH = os.path.join(OUTPUT_DIR, "all_speech_meta.json")
 ALL_TRANSLATION_META_PATH = os.path.join(OUTPUT_DIR, "all_translation_meta.json")
 
 # =============================
@@ -276,16 +276,16 @@ async def stream_microphone(ws) -> None:
                                     json.dump(metadata, f, indent=2, ensure_ascii=False)
 
                                 # Append to central all_speech_meta.json
-                                all_meta = []
-                                if os.path.exists(ALL_META_PATH):
+                                all_speech_meta = []
+                                if os.path.exists(ALL_SPEECH_META_PATH):
                                     try:
-                                        with open(ALL_META_PATH, "r", encoding="utf-8") as f:
-                                            all_meta = json.load(f)
+                                        with open(ALL_SPEECH_META_PATH, "r", encoding="utf-8") as f:
+                                            all_speech_meta = json.load(f)
                                     except Exception:
                                         pass  # start fresh if corrupted
                                 base_time = stream_start_time or segment_start_wallclock[current_segment_num]
                                 relative_start = segment_start_wallclock[current_segment_num] - base_time
-                                all_meta.append({
+                                all_speech_meta.append({
                                     "segment_id": current_segment_num,
                                     **metadata,
                                     "start_sec": round(relative_start, 3),
@@ -295,8 +295,8 @@ async def stream_microphone(ws) -> None:
                                     "wav_path": str(wav_path),
                                     "meta_path": str(speech_meta_path),
                                 })
-                                with open(ALL_META_PATH, "w", encoding="utf-8") as f:
-                                    json.dump(all_meta, f, indent=2, ensure_ascii=False)
+                                with open(ALL_SPEECH_META_PATH, "w", encoding="utf-8") as f:
+                                    json.dump(all_speech_meta, f, indent=2, ensure_ascii=False)
 
                             # Signal end of utterance to server
                             try:
