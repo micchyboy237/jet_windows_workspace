@@ -56,4 +56,4 @@ if res:
     print("🎼 Cleaned transcription:")
     print(cleaned_text)
 else:
-    log.warning("No transcription result returned")
+    print("No transcription result returned")
