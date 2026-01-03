@@ -9,7 +9,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Deque
+from typing import Deque
 
 import sounddevice as sd
 import websockets
@@ -391,105 +391,124 @@ async def receive_subtitles(ws) -> None:
             if data.get("type") != "subtitle":
                 continue
 
-            ja = data.get("transcription", "").strip()
-            en = data.get("translation", "").strip()
+            ja = data.get("transcription_ja", "").strip()
+            en = data.get("translation_en", "").strip()
             utterance_id = data.get("utterance_id")
             duration_sec = data.get("duration_sec", 0.0)
-            confidence = data.get("confidence")
-            server_meta = data.get("meta")
+
+            # New fields from server
+            trans_conf = data.get("transcription_confidence")
+            trans_quality = data.get("transcription_quality")
+            transl_conf = data.get("translation_confidence")    # normalized 0.0–1.0
+            transl_quality = data.get("translation_quality")
+
+            server_meta = data.get("meta", {})
 
             if pending_sends:
                 rtt = time.monotonic() - pending_sends.popleft()
                 recent_rtts.append(rtt)
 
             if not (ja or en):
-                log.debug("[subtitle] Empty transcription received")
+                log.debug("[subtitle] Empty result received")
                 continue
 
             log.info("[subtitle] JA: %s", ja)
             if en:
                 log.info("[subtitle] EN: %s", en)
 
-            # Find which segment this belongs to (utterance_id == segment_num)
-            segment_num = utterance_id + 1   # usually 0-based from server → 1-based folder
-            segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
+            # Log quality & confidence info
+            log.info(
+                "[quality] Transc: conf=%.3f | %s | Transl: conf=%.3f | %s",
+                trans_conf if trans_conf is not None else 0.0,
+                trans_quality or "N/A",
+                transl_conf if transl_conf is not None else 0.0,
+                transl_quality or "N/A"
+            )
 
+            if trans_conf is not None and trans_conf < 0.50:
+                log.warning("[low-transc-conf] utt %d | conf=%.3f | %s", utterance_id, trans_conf, ja[:60])
+
+            if transl_conf is not None and transl_conf < 0.70:
+                log.warning("[low-transl-conf] utt %d | conf=%.3f | %s", utterance_id, transl_conf, en[:60])
+
+            # Find segment
+            segment_num = utterance_id + 1
+            segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
             start_time = segment_start_wallclock.get(segment_num)
             if start_time is None:
-                log.warning("[SRT] No start time recorded for segment_%04d — using current time", segment_num)
+                log.warning("[SRT] No start time for segment_%04d", segment_num)
                 start_time = time.time() - duration_sec
 
-            # Write per-segment SRT
-            per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
-            speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
-            translation_meta_path = os.path.join(segment_dir, "translation_meta.json")
-
-            # ======= Updated logic for translation_meta.json (creation/update/merge) =======
-            # Compose translation metadata dictionary (new values)
-            translation_meta: dict[str, Any] = {
-                "segment_id": segment_num,
-                "utterance_id": utterance_id,
-                "transcription": ja,
-                "translation": en,
-                "duration_sec": round(duration_sec, 3),
-                "confidence": confidence if confidence is not None else None,
-                "meta": server_meta or {},
-                # start_sec and end_sec below, after computing relative times
-            }
-
-            # === Fix: Convert to relative seconds from stream start ===
+            # Relative timing
             if stream_start_time is None:
-                # First subtitle ever → assume stream started at this segment's start
                 stream_start_time = start_time
                 relative_start = 0.0
             else:
                 relative_start = start_time - stream_start_time
-
             relative_end = relative_start + duration_sec
 
-            # Include relative seconds in the translation meta
-            translation_meta["start_sec"] = round(relative_start, 3)
-            translation_meta["end_sec"] = round(relative_end, 3)
+            # Prepare per-segment paths
+            per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
+            speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
+            translation_meta_path = os.path.join(segment_dir, "translation_meta.json")
 
-            # Load existing translation_meta if present, and merge (existing fields preserved,
-            # new/updated values from above overwrite)
+            # ── Build translation metadata ──────────────────────────────────────
+            translation_meta = {
+                "segment_id": segment_num,
+                "utterance_id": utterance_id,
+                "start_sec": round(relative_start, 3),
+                "end_sec": round(relative_end, 3),
+                "duration_sec": round(duration_sec, 3),
+                "transcription": {
+                    "text_ja": ja,
+                    "confidence": round(trans_conf, 4) if trans_conf is not None else None,
+                    "quality_label": trans_quality,
+                },
+                "translation": {
+                    "text_en": en,
+                    "confidence": round(transl_conf, 4) if transl_conf is not None else None,
+                    "quality_label": transl_quality,
+                },
+                "server_meta": server_meta,
+            }
+
+            # Merge with existing file if present
             if os.path.exists(translation_meta_path):
                 try:
                     with open(translation_meta_path, "r", encoding="utf-8") as f:
                         existing = json.load(f)
-                    translation_meta.update(existing)  # merge: new values override old
+                    def merge_dicts(target, source):
+                        for k, v in source.items():
+                            if isinstance(v, dict) and k in target and isinstance(target[k], dict):
+                                merge_dicts(target[k], v)
+                            else:
+                                target[k] = v
+                    merge_dicts(existing, translation_meta)
+                    translation_meta = existing
                 except Exception as e:
-                    log.warning("[metadata] Failed to read existing translation_meta: %s", e)
+                    log.warning("Failed to load existing translation_meta: %s", e)
 
-            # Always write the merged translation_meta.json (even if just created)
-            try:
-                with open(translation_meta_path, "w", encoding="utf-8") as f:
-                    json.dump(translation_meta, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                log.warning("[metadata] Failed to write translation_meta.json: %s", e)
+            # Write per-segment translation meta
+            with open(translation_meta_path, "w", encoding="utf-8") as f:
+                json.dump(translation_meta, f, indent=2, ensure_ascii=False)
 
-            # ======= Optionally append to all_translation_meta.json (global index) =======
-            try:
-                all_translation_meta = []
-                if os.path.exists(ALL_TRANSLATION_META_PATH):
-                    try:
-                        with open(ALL_TRANSLATION_META_PATH, "r", encoding="utf-8") as f:
-                            all_translation_meta = json.load(f)
-                    except Exception:
-                        pass
+            # Append to global all_translation_meta.json
+            all_translation = []
+            if os.path.exists(ALL_TRANSLATION_META_PATH):
+                try:
+                    with open(ALL_TRANSLATION_META_PATH, "r", encoding="utf-8") as f:
+                        all_translation = json.load(f)
+                except Exception:
+                    pass
+            all_translation.append({
+                **translation_meta,
+                "segment_dir": f"segment_{segment_num:04d}",
+                "translation_meta_path": str(translation_meta_path),
+            })
+            with open(ALL_TRANSLATION_META_PATH, "w", encoding="utf-8") as f:
+                json.dump(all_translation, f, indent=2, ensure_ascii=False)
 
-                all_translation_meta.append({
-                    **translation_meta,
-                    "segment_dir": f"segment_{segment_num:04d}",
-                    "translation_meta_path": str(translation_meta_path),
-                })
-
-                with open(ALL_TRANSLATION_META_PATH, "w", encoding="utf-8") as f:
-                    json.dump(all_translation_meta, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                log.warning("[metadata] Failed to update all_translation_meta.json: %s", e)
-
-            # Write per-segment SRT
+            # ── SRT output ──────────────────────────────────────────────────────
             write_srt_block(
                 sequence=srt_sequence,
                 start_sec=start_time,
@@ -498,8 +517,6 @@ async def receive_subtitles(ws) -> None:
                 en=en,
                 file_path=per_seg_srt
             )
-
-            # Append to global SRT
             write_srt_block(
                 sequence=srt_sequence,
                 start_sec=start_time,
@@ -508,20 +525,9 @@ async def receive_subtitles(ws) -> None:
                 en=en,
                 file_path=all_srt_path
             )
-
             srt_sequence += 1
 
-            # Optional: warn on low confidence results
-            if confidence is not None and confidence < 0.40:
-                preview = (ja or en)[:60] + "..." if len(ja or en) > 60 else (ja or en)
-                log.warning("[low-conf] utt %d | conf=%.3f | %s", utterance_id, confidence, preview)
-
-            # Prepare values for overlay: relative, human-readable seconds
-            display_start = round(relative_start, 2)
-            display_end = round(relative_end, 2)
-            display_duration = round(duration_sec, 2)
-
-            # Retrieve average VAD confidence from saved metadata (if available)
+            # ── Overlay ─────────────────────────────────────────────────────────
             avg_vad_conf = 0.0
             if os.path.exists(speech_meta_path):
                 try:
@@ -531,6 +537,10 @@ async def receive_subtitles(ws) -> None:
                 except Exception:
                     pass
 
+            display_start = round(relative_start, 2)
+            display_end = round(relative_end, 2)
+            display_duration = round(duration_sec, 2)
+
             overlay.add_message(
                 source_text=ja,
                 translated_text=en,
@@ -539,11 +549,16 @@ async def receive_subtitles(ws) -> None:
                 duration_sec=display_duration,
                 segment_number=segment_num,
                 avg_vad_confidence=round(avg_vad_conf, 3),
-                translation_confidence=round(confidence, 3) if confidence is not None else None,
+                transcription_confidence=round(trans_conf, 3) if trans_conf is not None else None,
+                transcription_quality=trans_quality,
+                translation_confidence=round(transl_conf, 3) if transl_conf is not None else None,
+                translation_quality=transl_quality,
             )
 
+        except json.JSONDecodeError:
+            log.warning("[receive] Invalid JSON received")
         except Exception as e:
-            log.exception("[subtitle receive] Error processing message: %s", e)
+            log.exception("[receive] Error processing subtitle message: %s", e)
 
 # =============================
 # Main with reconnection logic
