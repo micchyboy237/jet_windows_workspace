@@ -14,7 +14,7 @@ batched_model = BatchedInferencePipeline(
 )
 
 # Load audio (numpy array expected; supports file paths or arrays)
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\data\sound.wav"
+audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server\utterance_1c2d9158_0002_20260102_201650.wav"
 audio = decode_audio(audio_path)  # Or use your own loader (e.g., torchaudio)
 
 # Transcribe with batching

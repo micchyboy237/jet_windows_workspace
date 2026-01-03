@@ -1,13 +1,25 @@
-from typing import List
+from typing import List, Union, Tuple
+from typing import cast
 
 from transformers import AutoTokenizer
 
-from translators.translator_types import (
+from translator_types import (
     Device,
     BatchType,
     TranslationOptions,
     Translator,
 )
+
+# Near top of file, add this small helper
+def quality_label(log_prob: float | None) -> str:
+    if log_prob is None:
+        return "N/A"
+    if log_prob > -0.40:
+        return "High"
+    elif log_prob > -0.80:
+        return "Medium"
+    else:
+        return "Low"
 
 # ── Device auto-detection with memory safety ──────────────────────────────────
 import torch
@@ -59,7 +71,7 @@ def translate_ja_to_en(
     max_decoding_length: int = 512,
     device: Device | None = None,  # ← now optional!
     **options: TranslationOptions,
-) -> str:
+) -> Union[str, Tuple[str, float]]:
     """
     Translate a single Japanese sentence to English using a quantized Opus-MT model.
 
@@ -76,7 +88,7 @@ def translate_ja_to_en(
                    (e.g. ``return_scores=True``, ``sampling_temperature=0.8``).
 
     Returns:
-        Translated English string (stripped whitespace).
+        Translated English string (stripped whitespace) or (string, score) if return_scores is True.
     """
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
@@ -94,16 +106,27 @@ def translate_ja_to_en(
     results = translator.translate_batch(
         source_batch,
         options=TranslationOptions(
-            beam_size=beam_size,
-            max_decoding_length=max_decoding_length,
-            **options,  # user overrides
+            **{
+                "beam_size": beam_size,
+                "max_decoding_length": max_decoding_length,
+                **options
+            },  # user overrides
         ),
     )
 
     # ctranslate2 returns a list of TranslationResult objects
     best_hypothesis: list[str] = results[0].hypotheses[0]
     translated = tokenizer.decode(tokenizer.convert_tokens_to_ids(best_hypothesis))
-    return translated.strip()
+    translation = translated.strip()  # type: str
+
+    # Use direct attribute access — TranslationResult has public .scores when requested
+    if options.get("return_scores", False) and hasattr(results[0], "scores") and results[0].scores:
+        score = results[0].scores[0]  # log-prob of the best hypothesis
+        return translation, score
+
+    return translation
+
+    # Returns: str if return_scores=False, Tuple[str, float] otherwise (when scores available)
 
 
 # ── Batch Translation ────────────────────────────────────────────────────────
@@ -118,7 +141,7 @@ def batch_translate_ja_to_en(
     max_batch_size: int = 32,
     batch_type: BatchType = "examples",
     **options: TranslationOptions,
-) -> List[str]:
+) -> Union[List[str], List[Tuple[str, float]]]:
     """
     Efficient batch translation of Japanese to English.
 
@@ -136,14 +159,13 @@ def batch_translate_ja_to_en(
         **options: Any additional :class:`TranslationOptions`.
 
     Returns:
-        List of English translations in the same order.
+        List of English translations or (translation, score) pairs if return_scores is True.
     """
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
 
     if device is None or device == "auto":
         device = detect_device()
 
-    # ctranslate2.Translator is the class itself; avoid instantiating a second time
     translator = Translator(model_path, device=device)  # our thin wrapper
 
     source_batch: list[list[str]] = [
@@ -162,41 +184,78 @@ def batch_translate_ja_to_en(
     )
 
     translations = [
-        # result is now a real ctranslate2.TranslationResult → use attribute access
         tokenizer.decode(
             tokenizer.convert_tokens_to_ids(result.hypotheses[0])
         ).strip()
-        for result in results
+        for result in results  # type: ignore
     ]
+    # If return_scores was requested, pair each translation with its score
+    if options.get("return_scores", False):
+        out = []
+        for trans, result in zip(translations, results):
+            score = result.scores[0] if hasattr(result, "scores") and result.scores else None
+            out.append((trans, score))
+        return out
+
     return translations
 
+    # Returns: Union[List[str], List[Tuple[str, float | None]]]
 
-# ── Example Usage ─────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────
+# Then update the three printing sections in __main__:
+
 if __name__ == "__main__":
+    common_opts = dict(return_scores=True, beam_size=5)
+
     ja_example = "おい、そんな一気に冷たいものを食べると腹を壊すぞ！"
 
     print("=== Single Translation ===")
-    print(f"JA:  {ja_example}")
-    # No device argument → automatically uses GPU if available
-    print(f"EN:  {translate_ja_to_en(ja_example, beam_size=5)}")
+    print(f"JA: {ja_example}")
+    result_single = translate_ja_to_en(ja_example, **common_opts)
+    # Single (default beam)
+    if isinstance(result_single, tuple):
+        en, score = result_single
+        print(f"EN: {en}")
+        print(f"   (log-prob: {score:.4f} | quality: {quality_label(score)})")
+    else:
+        print(f"EN: {result_single}")
+
+    print("\n=== Single Translation (longer beam) ===")
+    result_longer = translate_ja_to_en(
+        ja_example,
+        **{
+            "beam_size": 8,
+            **common_opts
+        }  # type: ignore  # mypy knows it's tuple due to return_scores=True
+    )
+    # Single (longer beam)
+    en_long, score_long = cast(Tuple[str, float], result_longer)
+    print(f"JA: {ja_example}")
+    print(f"EN: {en_long}")
+    print(f"   (log-prob: {score_long:.4f} | quality: {quality_label(score_long)})")
 
     ja_batch = [
         "昨日、友達と一緒に映画を見に行きました。",
         "日本は美しい国ですね！",
         "今日の天気はとても良いです。",
     ]
-
     print("\n=== Batch Translation ===")
-    en_batch = batch_translate_ja_to_en(
+    results_batch = batch_translate_ja_to_en(
         ja_batch,
-        beam_size=4,
         max_batch_size=16,
-        return_scores=True,
         sampling_temperature=0.9,
         replace_unknowns=True,
-        # device=None → auto-detect (will use GPU on your Windows machine)
+        **{
+            "beam_size": 4,
+            **common_opts
+        }
     )
 
-    for ja, en in zip(ja_batch, en_batch):
+    # Batch
+    for ja, item in zip(ja_batch, results_batch):
+        en, score = item
         print(f"JA → {ja}")
-        print(f"EN → {en}\n")
+        print(f"EN → {en}")
+        print(f"   (log-prob: {score:.4f} | quality: {quality_label(score)})")
+        print()

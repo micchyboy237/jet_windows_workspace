@@ -4,7 +4,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from audio.ffmpeg_mic_recorder import record_mic_stream
+from ffmpeg_mic_recorder import record_mic_stream
 
 import sys
 import threading

@@ -1,3 +1,5 @@
+# transcribe_translate_batch_multi_short_audio_service
+
 import logging
 import asyncio
 import dataclasses
@@ -39,12 +41,29 @@ class SegmentDict(TypedDict):
     words: Optional[List[WordDict]]
     temperature: Optional[float]
 
-class TranslationResult(TypedDict):
-    """TypedDict representing the result for a single processed file."""
+class DetailedTranslationResult(TypedDict):
+    """Enhanced result with full transcription details, timing, and quality metrics."""
     index: int
     audio_path: str
-    translation: str
+    japanese_text: str                  # Raw transcribed Japanese
+    translation: str                    # English translation
     success: bool
+
+    # Timing (in milliseconds)
+    start_ms: int
+    end_ms: int
+    duration_ms: int
+
+    # Quality scores (normalized where possible)
+    avg_logprob: float                  # Higher is better
+    no_speech_prob: float               # Lower is better
+    compression_ratio: float            # Closer to 1.0 is better
+
+    # Full segment list for advanced use / debugging
+    segments: List[SegmentDict]
+
+# For backward compatibility as in the diff:
+TranslationResult = DetailedTranslationResult
 
 # ──────────────────────────────────────────────────────────────────────────────
 # CORE PROCESSING FUNCTIONS
@@ -54,8 +73,11 @@ def transcribe_to_japanese(
     model: WhisperModel,
     audio_path: str,
     language: Optional[str] = None,
-) -> str:
-    """Perform only the GPU-heavy transcription step → returns raw Japanese text."""
+) -> tuple[str, List[SegmentDict]]:
+    """
+    Perform transcription and return both the concatenated Japanese text
+    and the full list of segments with timing and quality metrics.
+    """
     log.info(f"Starting transcription: [bold cyan]{audio_path}[/bold cyan]")
     segments_iter, _ = model.transcribe(
         audio_path,
@@ -71,10 +93,9 @@ def transcribe_to_japanese(
 
     if not ja_text:
         log.warning(f"No Japanese text detected in {audio_path}")
-        return ""
 
     log.debug(f"Transcribed Japanese (len={len(ja_text)}): {ja_text[:80]}...")
-    return ja_text
+    return ja_text, segments
 
 
 def translate_to_english(
@@ -98,13 +119,15 @@ def translate_to_english(
 
 def process_single_result(
     path: str,
-    ja_text: str,
+    transcription_result: tuple[str, List[SegmentDict]],
     translator: Translator,
     tokenizer: AutoTokenizer,
     output_path: Optional[Path],
     idx: int,
-) -> TranslationResult:
-    """Handle translation + saving + result creation (called after transcription)."""
+) -> DetailedTranslationResult:
+    """Create enriched result with timing, scores, and full segment data."""
+    ja_text, segments = transcription_result
+
     en_text = translate_to_english(translator, tokenizer, ja_text)
     success = bool(en_text.strip())
 
@@ -113,11 +136,32 @@ def process_single_result(
         txt_path.write_text(en_text, encoding="utf-8")
         log.debug(f"Saved translation: [dim]{txt_path}[/dim]")
 
-    return TranslationResult(
+    # Derive timing and aggregate scores
+    if segments:
+        start_ms = int(min(seg["start"] for seg in segments) * 1000)
+        end_ms = int(max(seg["end"] for seg in segments) * 1000)
+        duration_ms = end_ms - start_ms
+
+        avg_logprob = float(sum(seg["avg_logprob"] for seg in segments) / len(segments))
+        no_speech_prob = float(sum(seg["no_speech_prob"] for seg in segments) / len(segments))
+        compression_ratio = float(sum(seg["compression_ratio"] for seg in segments) / len(segments))
+    else:
+        start_ms = end_ms = duration_ms = 0
+        avg_logprob = no_speech_prob = compression_ratio = 0.0
+
+    return DetailedTranslationResult(
         index=idx,
         audio_path=path,
+        japanese_text=ja_text,
         translation=en_text,
         success=success,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        duration_ms=duration_ms,
+        avg_logprob=avg_logprob,
+        no_speech_prob=no_speech_prob,
+        compression_ratio=compression_ratio,
+        segments=segments,
     )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -187,10 +231,10 @@ def batch_transcribe_and_translate_files(
                 path = futures[future]
                 idx = path_to_index[path]
                 try:
-                    ja_text = future.result()
+                    transcription_result = future.result()
                     result = process_single_result(
                         path=path,
-                        ja_text=ja_text,
+                        transcription_result=transcription_result,
                         translator=translator,
                         tokenizer=tokenizer,
                         output_path=output_path,
@@ -198,15 +242,33 @@ def batch_transcribe_and_translate_files(
                     )
                     status = "[bold green]Success[/bold green]" if result["success"] else "[bold red]Failed[/bold red]"
                     log.info(f"{status} #{idx+1}: {Path(path).name}")
-                    log.info(f"Preview: {result['translation'][:120]}{'...' if len(result['translation']) > 120 else ''}")
+                    log.info(f"Japanese : {result['japanese_text']}")
+                    log.info(f"English  : {result['translation']}")
+                    log.info(
+                        f"Timing   : {result['start_ms']}ms → {result['end_ms']}ms "
+                        f"({result['duration_ms']}ms)"
+                    )
+                    log.info(
+                        f"Scores   : logprob={result['avg_logprob']:.3f} | "
+                        f"no_speech={result['no_speech_prob']:.3f} | "
+                        f"compression={result['compression_ratio']:.2f}"
+                    )
                     yield result
                 except Exception as exc:
                     log.error(f"[bold red]Failed[/bold red] {path}: {exc}")
                     yield TranslationResult(
                         index=idx,
                         audio_path=path,
+                        japanese_text="",
                         translation="",
                         success=False,
+                        start_ms=0,
+                        end_ms=0,
+                        duration_ms=0,
+                        avg_logprob=0.0,
+                        no_speech_prob=0.0,
+                        compression_ratio=0.0,
+                        segments=[],
                     )
                 finally:
                     progress.update(task, advance=1)
@@ -278,10 +340,10 @@ async def batch_transcribe_and_translate_files_async(
                 for future in done:
                     idx, path = tasks.pop(future)
                     try:
-                        ja_text = future.result()
+                        transcription_result = future.result()
                         result = process_single_result(
                             path=path,
-                            ja_text=ja_text,
+                            transcription_result=transcription_result,
                             translator=translator,
                             tokenizer=tokenizer,
                             output_path=output_path,
@@ -293,8 +355,16 @@ async def batch_transcribe_and_translate_files_async(
                         yield TranslationResult(
                             index=idx,
                             audio_path=path,
+                            japanese_text="",
                             translation="",
                             success=False,
+                            start_ms=0,
+                            end_ms=0,
+                            duration_ms=0,
+                            avg_logprob=0.0,
+                            no_speech_prob=0.0,
+                            compression_ratio=0.0,
+                            segments=[],
                         )
                     finally:
                         progress.update(task, advance=1)
@@ -309,8 +379,8 @@ if __name__ == "__main__":
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 
-    audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server\recordings"
-    files = resolve_audio_paths(audio_dir)
+    audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server"
+    files = resolve_audio_paths(audio_dir, recursive=True)
     files = files[:5]  # for testing
 
     print("=== Synchronous Generator Version ===")
@@ -318,6 +388,16 @@ if __name__ == "__main__":
         files, max_workers=4, output_dir=str(OUTPUT_DIR), language="ja"
     ):
         status = "[bold green]Success[/bold green]" if result["success"] else "[bold red]Failed[/bold red]"
-        preview = result["translation"][:300] + ("..." if len(result["translation"]) > 300 else "")
         print(f"{status} #{result['index']+1}: {Path(result['audio_path']).name}")
-        print(f"Preview: {preview}\n")
+        print(f"Japanese : {result['japanese_text']}")
+        print(f"English  : {result['translation']}")
+        print(
+            f"Timing   : {result['start_ms']}ms → {result['end_ms']}ms "
+            f"({result['duration_ms']}ms)"
+        )
+        print(
+            f"Scores   : logprob={result['avg_logprob']:.3f} | "
+            f"no_speech={result['no_speech_prob']:.3f} | "
+            f"compression={result['compression_ratio']:.2f}"
+        )
+        print()
