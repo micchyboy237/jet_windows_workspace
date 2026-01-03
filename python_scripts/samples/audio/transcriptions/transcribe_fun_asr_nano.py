@@ -1,12 +1,16 @@
+from pathlib import Path
+
 from funasr import AutoModel
 
+BASE_DIR = Path(__file__).resolve().parent
+REMOTE_CODE_PATH = BASE_DIR / "custom_model_fun_asr_nano.py"
 
 def main():
     model_dir = "FunAudioLLM/Fun-ASR-Nano-2512"
     model = AutoModel(
         model=model_dir,
-        trust_remote_code=True,
-        remote_code="./model.py",
+        trust_remote_code=False,
+        remote_code=str(REMOTE_CODE_PATH),
         device="cuda:0",
     )
 
@@ -32,7 +36,7 @@ def main():
         trust_remote_code=True,
         vad_model="fsmn-vad",
         vad_kwargs={"max_single_segment_time": 30000},
-        remote_code="./model.py",
+        remote_code=str(REMOTE_CODE_PATH),
         device="cuda:0",
     )
     res = model.generate(input=[wav_path], cache={}, batch_size=1)
