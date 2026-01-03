@@ -9,6 +9,7 @@ import base64
 import json
 import logging
 import time
+import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, List
@@ -132,28 +133,43 @@ def transcribe_and_translate(
     wavfile.write(str(audio_path), sr, arr)
 
     # ─── Heavy work ─────────────────────────────────────────────
-    segments, info = whisper_model.transcribe(  # type: ignore
+    segments, info = whisper_model.transcribe(
         str(audio_path),
         language="ja",
         beam_size=5,
         vad_filter=False,
-        # return_timestamps=True,          # uncomment if you later need segment-level timing
+        condition_on_previous_text=True,
+        # word_timestamps=False,           # ← keep False unless you really need word-level
     )
 
-    # Single pass over the generator to avoid exhaustion issues
-    ja_text_parts: list[str] = []
-    best_logprob: float = float('-inf')
-    best_segment = None
+    ja_text_parts = []
+    logprob_sum = 0.0
+    token_count = 0
 
+    segments_list = []
     for segment in segments:
+        segments_list.append(
+            {k: v for k, v in dataclasses.asdict(segment).items() if k != "tokens"}
+        )
         text = segment.text.strip()
         if text:
             ja_text_parts.append(text)
-        if segment.avg_logprob > best_logprob:
-            best_logprob = segment.avg_logprob
-            best_segment = segment
+
+        if getattr(segment, "avg_logprob", None) is not None:  # can be None in some edge cases
+            # Number of tokens ≈ number of characters / 2 is a cheap proxy for Japanese
+            # Better: count real tokens if you have tokenizer, but expensive
+            approx_tokens = max(1, len(text) // 2)   # or len(text.split()) if romaji-like
+            logprob_sum += segment.avg_logprob * approx_tokens
+            token_count += approx_tokens
 
     ja_text = " ".join(ja_text_parts).strip()
+
+    if token_count > 0:
+        avg_logprob = logprob_sum / token_count
+        confidence = float(np.exp(avg_logprob))
+    else:
+        avg_logprob = float('-inf')
+        confidence = 0.0
 
     sentences_ja: List[str] = split_sentences_ja(ja_text)
     en_sentences: List[str] = []
@@ -178,14 +194,6 @@ def transcribe_and_translate(
 
     en_text = "\n".join(en_sentences)
 
-    # Confidence from the best segment found during iteration
-    if best_segment is not None:
-        confidence = float(np.exp(best_logprob))
-        avg_logprob = best_logprob
-    else:
-        confidence = 0.0
-        avg_logprob = float('-inf')
-
     logger.info(
         "[confidence] avg_logprob=%.4f → conf=%.3f | ja=%s", avg_logprob, confidence, ja_text[:70] + "..." if len(ja_text) > 70 else ja_text
     )
@@ -209,8 +217,9 @@ def transcribe_and_translate(
         "sample_rate": sr,
         "transcription_ja": ja_text,
         "confidence": round(confidence, 4),
-        "avg_logprob": round(avg_logprob, 4) if best_segment else None,
+        "avg_logprob": round(avg_logprob, 4) if token_count > 0 else None,
         "translation_en": en_text,
+        "segments": segments_list,
     }
 
     # Logging preview
@@ -234,7 +243,7 @@ def transcribe_and_translate(
     if not out_dir:
         audio_path.unlink(missing_ok=True)
 
-    return ja_text, en_text, confidence
+    return ja_text, en_text, confidence, meta
 
 
 # ───────────────────────────────────────────────
@@ -278,7 +287,7 @@ async def handler(websocket):
 
                     # Offload heavy work to thread, pass timestamps
                     loop = asyncio.get_running_loop()
-                    ja, en, confidence = await loop.run_in_executor(
+                    ja, en, confidence, meta = await loop.run_in_executor(
                         executor,
                         transcribe_and_translate,
                         bytes(state.buffer),
@@ -298,6 +307,7 @@ async def handler(websocket):
                         "utterance_id": state.utterance_count,
                         "duration_sec": round(duration, 3),
                         "confidence": round(float(confidence), 4),
+                        "meta": meta,
                     }
                     await websocket.send(json.dumps(payload))
 
@@ -337,12 +347,9 @@ async def main():
 if __name__ == "__main__":
     import os
     import shutil
-    out_dir_str = os.getenv(
-        "UTTERANCE_OUT_DIR",
-        Path(__file__).parent / "generated" / Path(__file__).stem
-    )
-    shutil.rmtree(out_dir_str, ignore_errors=True)
+    out_dir_str = os.getenv("UTTERANCE_OUT_DIR")
     if out_dir_str:
+        shutil.rmtree(out_dir_str, ignore_errors=True)
         DEFAULT_OUT_DIR = Path(out_dir_str).resolve()
         logger.info(f"Permanent utterance storage enabled: {DEFAULT_OUT_DIR}")
     else:
