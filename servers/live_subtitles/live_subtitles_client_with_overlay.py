@@ -29,7 +29,8 @@ OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-ALL_META_PATH = os.path.join(OUTPUT_DIR, "all_metadata.json")
+ALL_META_PATH = os.path.join(OUTPUT_DIR, "all_speech_meta.json")
+ALL_TRANSLATION_META_PATH = os.path.join(OUTPUT_DIR, "all_translation_meta.json")
 
 # =============================
 # Logging setup
@@ -270,11 +271,11 @@ async def stream_microphone(ws) -> None:
                                             else 0.0,
                                     },
                                 }
-                                meta_path = os.path.join(segment_dir, "metadata.json")
-                                with open(meta_path, "w", encoding="utf-8") as f:
+                                speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
+                                with open(speech_meta_path, "w", encoding="utf-8") as f:
                                     json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-                                # Append to central all_metadata.json
+                                # Append to central all_speech_meta.json
                                 all_meta = []
                                 if os.path.exists(ALL_META_PATH):
                                     try:
@@ -292,7 +293,7 @@ async def stream_microphone(ws) -> None:
                                     "duration_sec": round(duration, 3),
                                     "segment_dir": f"segment_{current_segment_num:04d}",
                                     "wav_path": str(wav_path),
-                                    "meta_path": str(meta_path),
+                                    "meta_path": str(speech_meta_path),
                                 })
                                 with open(ALL_META_PATH, "w", encoding="utf-8") as f:
                                     json.dump(all_meta, f, indent=2, ensure_ascii=False)
@@ -393,8 +394,9 @@ async def receive_subtitles(ws) -> None:
             ja = data.get("transcription", "").strip()
             en = data.get("translation", "").strip()
             utterance_id = data.get("utterance_id")
-            confidence = data.get("confidence")          # float | None
             duration_sec = data.get("duration_sec", 0.0)
+            confidence = data.get("confidence")
+            server_meta = data.get("meta")
 
             if pending_sends:
                 rtt = time.monotonic() - pending_sends.popleft()
@@ -419,19 +421,75 @@ async def receive_subtitles(ws) -> None:
 
             # Write per-segment SRT
             per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
-            meta_path = os.path.join(segment_dir, "metadata.json")
+            speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
+            translation_meta_path = os.path.join(segment_dir, "translation_meta.json")
 
-            # Update existing metadata with server confidence (if file exists)
-            if os.path.exists(meta_path):
+            # ======= Updated logic for translation_meta.json (creation/update/merge) =======
+            # Compose translation metadata dictionary (new values)
+            translation_meta: dict[str, Any] = {
+                "segment_id": segment_num,
+                "utterance_id": utterance_id,
+                "transcription": ja,
+                "translation": en,
+                "duration_sec": round(duration_sec, 3),
+                "confidence": confidence if confidence is not None else None,
+                "meta": server_meta or {},
+                # start_sec and end_sec below, after computing relative times
+            }
+
+            # === Fix: Convert to relative seconds from stream start ===
+            if stream_start_time is None:
+                # First subtitle ever → assume stream started at this segment's start
+                stream_start_time = start_time
+                relative_start = 0.0
+            else:
+                relative_start = start_time - stream_start_time
+
+            relative_end = relative_start + duration_sec
+
+            # Include relative seconds in the translation meta
+            translation_meta["start_sec"] = round(relative_start, 3)
+            translation_meta["end_sec"] = round(relative_end, 3)
+
+            # Load existing translation_meta if present, and merge (existing fields preserved,
+            # new/updated values from above overwrite)
+            if os.path.exists(translation_meta_path):
                 try:
-                    with open(meta_path, "r", encoding="utf-8") as f:
-                        meta: dict[str, Any] = json.load(f)
-                    meta["translation_confidence"] = confidence if confidence is not None else None
-                    with open(meta_path, "w", encoding="utf-8") as f:
-                        json.dump(meta, f, indent=2, ensure_ascii=False)
+                    with open(translation_meta_path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                    translation_meta.update(existing)  # merge: new values override old
                 except Exception as e:
-                    log.warning("[metadata] Failed to update confidence in %s: %s", meta_path, e)
+                    log.warning("[metadata] Failed to read existing translation_meta: %s", e)
 
+            # Always write the merged translation_meta.json (even if just created)
+            try:
+                with open(translation_meta_path, "w", encoding="utf-8") as f:
+                    json.dump(translation_meta, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                log.warning("[metadata] Failed to write translation_meta.json: %s", e)
+
+            # ======= Optionally append to all_translation_meta.json (global index) =======
+            try:
+                all_translation_meta = []
+                if os.path.exists(ALL_TRANSLATION_META_PATH):
+                    try:
+                        with open(ALL_TRANSLATION_META_PATH, "r", encoding="utf-8") as f:
+                            all_translation_meta = json.load(f)
+                    except Exception:
+                        pass
+
+                all_translation_meta.append({
+                    **translation_meta,
+                    "segment_dir": f"segment_{segment_num:04d}",
+                    "translation_meta_path": str(translation_meta_path),
+                })
+
+                with open(ALL_TRANSLATION_META_PATH, "w", encoding="utf-8") as f:
+                    json.dump(all_translation_meta, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                log.warning("[metadata] Failed to update all_translation_meta.json: %s", e)
+
+            # Write per-segment SRT
             write_srt_block(
                 sequence=srt_sequence,
                 start_sec=start_time,
@@ -458,16 +516,6 @@ async def receive_subtitles(ws) -> None:
                 preview = (ja or en)[:60] + "..." if len(ja or en) > 60 else (ja or en)
                 log.warning("[low-conf] utt %d | conf=%.3f | %s", utterance_id, confidence, preview)
 
-            # === Fix: Convert to relative seconds from stream start ===
-            if stream_start_time is None:
-                # First subtitle ever → assume stream started at this segment's start
-                stream_start_time = start_time
-                relative_start = 0.0
-            else:
-                relative_start = start_time - stream_start_time
-
-            relative_end = relative_start + duration_sec
-
             # Prepare values for overlay: relative, human-readable seconds
             display_start = round(relative_start, 2)
             display_end = round(relative_end, 2)
@@ -475,9 +523,9 @@ async def receive_subtitles(ws) -> None:
 
             # Retrieve average VAD confidence from saved metadata (if available)
             avg_vad_conf = 0.0
-            if os.path.exists(meta_path):
+            if os.path.exists(speech_meta_path):
                 try:
-                    with open(meta_path, "r", encoding="utf-8") as f:
+                    with open(speech_meta_path, "r", encoding="utf-8") as f:
                         meta = json.load(f)
                     avg_vad_conf = meta.get("vad_confidence", {}).get("ave", 0.0)
                 except Exception:
