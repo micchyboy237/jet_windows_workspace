@@ -209,7 +209,6 @@ if __name__ == "__main__":
 
     audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server_for_test"
     audio_paths = resolve_audio_paths(audio_dir, recursive=True)
-    audio_paths = audio_paths[:5]
 
     if not audio_paths:
         rprint("[red]No audio files found in the directory![/red]")
