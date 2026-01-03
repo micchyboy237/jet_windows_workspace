@@ -29,6 +29,7 @@ OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+ALL_META_PATH = os.path.join(OUTPUT_DIR, "all_metadata.json")
 
 # =============================
 # Logging setup
@@ -49,6 +50,7 @@ log = logging.getLogger("mic-streamer")
 @dataclass(frozen=True)
 class Config:
     ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
+    min_speech_duration: float = 0.0          # seconds; ignore shorter speech bursts
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
@@ -64,6 +66,9 @@ config = Config()
 # =============================
 # SRT global state for subtitle syncing
 # =============================
+
+# Global: when the recording stream actually began (wall-clock)
+stream_start_time: float | None = None
 
 # Global SRT sequence counter (1-based)
 srt_sequence = 1
@@ -107,6 +112,7 @@ async def stream_microphone(ws) -> None:
     silence_start_time: float | None = None
     max_vad_confidence: float = 0.0           # ← new
     last_vad_confidence: float = 0.0          # ← new
+    speech_duration_sec: float = 0.0
     first_vad_confidence: float = 0.0         # ← new: confidence of the first speech chunk
     min_vad_confidence: float = 1.0           # ← new: lowest confidence during speech
     vad_confidence_sum: float = 0.0           # ← new: for average calculation
@@ -172,6 +178,7 @@ async def stream_microphone(ws) -> None:
                             vad_confidence_sum = 0.0               # ← reset
                             speech_chunk_count = 0                  # ← reset
                             log.info("[speech] Speech started | segment_%04d", current_segment_num)
+                            speech_duration_sec = 0.0
                         # Append chunk to current segment buffer
                         if current_segment_buffer is not None:
                             current_segment_buffer.extend(chunk)
@@ -181,6 +188,7 @@ async def stream_microphone(ws) -> None:
                         speech_chunk_count += 1
                         send_start = time.monotonic()
                         pending_sends.append(send_start)
+                        speech_duration_sec += VAD_CHUNK_SAMPLES / config.sample_rate
                         payload = {
                             "type": "audio",
                             "sample_rate": config.sample_rate,
@@ -207,6 +215,19 @@ async def stream_microphone(ws) -> None:
                                 num_samples = 0
                                 duration = 0.0
 
+                            if speech_duration_sec < config.min_speech_duration:
+                                log.info(
+                                    "[speech] Segment too short (%.3fs < %.3fs) — discarded",
+                                    speech_duration_sec, config.min_speech_duration
+                                )
+                                # Reset without sending or saving
+                                speech_start_time = None
+                                silence_start_time = None
+                                current_segment_num = None
+                                current_segment_buffer = None
+                                speech_chunks_in_segment = 0
+                                continue
+
                             log.info(
                                 "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
                                 duration, speech_chunks_in_segment
@@ -228,17 +249,14 @@ async def stream_microphone(ws) -> None:
                                     np.frombuffer(current_segment_buffer, dtype=np.int16)
                                 )
 
-                                start_monotonic = speech_start_time
-                                end_monotonic = time.monotonic()
+                                # Save wall-clock based timings in metadata for segment
                                 metadata = {
                                     "segment_id": current_segment_num,
                                     "duration_seconds": round(duration, 2),
                                     "num_chunks": speech_chunks_in_segment,
                                     "num_samples": num_samples,
-                                    "start_sec": round(end_monotonic - start_monotonic, 3)
-                                        if start_monotonic is not None
-                                        else 0.000,
-                                    "end_sec": round(end_monotonic, 3),
+                                    "start_sec": round(segment_start_wallclock[current_segment_num], 3),
+                                    "end_sec":   round(time.time(), 3),   # wall-clock end
                                     "sample_rate": config.sample_rate,
                                     "channels": config.channels,
                                     "vad_confidence": {
@@ -255,7 +273,23 @@ async def stream_microphone(ws) -> None:
                                 with open(meta_path, "w", encoding="utf-8") as f:
                                     json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-                                # log.info("[save] Segment saved → %s | precise_duration: %.3fs", segment_dir, duration)
+                                # Append to central all_metadata.json
+                                all_meta = []
+                                if os.path.exists(ALL_META_PATH):
+                                    try:
+                                        with open(ALL_META_PATH, "r", encoding="utf-8") as f:
+                                            all_meta = json.load(f)
+                                    except Exception:
+                                        pass  # start fresh if corrupted
+                                all_meta.append({
+                                    "segment_id": current_segment_num,
+                                    **metadata,
+                                    "segment_dir": f"segment_{current_segment_num:04d}",
+                                    "wav_path": str(wav_path),
+                                    "meta_path": str(meta_path),
+                                })
+                                with open(ALL_META_PATH, "w", encoding="utf-8") as f:
+                                    json.dump(all_meta, f, indent=2, ensure_ascii=False)
 
                             # Signal end of utterance to server
                             try:
@@ -340,6 +374,7 @@ def write_srt_block(
 
 async def receive_subtitles(ws) -> None:
     global srt_sequence
+    global stream_start_time
 
     all_srt_path = os.path.join(OUTPUT_DIR, "all_subtitles.srt")
 
@@ -417,9 +452,19 @@ async def receive_subtitles(ws) -> None:
                 preview = (ja or en)[:60] + "..." if len(ja or en) > 60 else (ja or en)
                 log.warning("[low-conf] utt %d | conf=%.3f | %s", utterance_id, confidence, preview)
 
-            # Prepare values for overlay with required rounding and extra info
-            display_start = round(start_time, 2)
-            display_end = round(start_time + duration_sec, 2)
+            # === Fix: Convert to relative seconds from stream start ===
+            if stream_start_time is None:
+                # First subtitle ever → assume stream started at this segment's start
+                stream_start_time = start_time
+                relative_start = 0.0
+            else:
+                relative_start = start_time - stream_start_time
+
+            relative_end = relative_start + duration_sec
+
+            # Prepare values for overlay: relative, human-readable seconds
+            display_start = round(relative_start, 2)
+            display_end = round(relative_end, 2)
             display_duration = round(duration_sec, 2)
 
             # Retrieve average VAD confidence from saved metadata (if available)
