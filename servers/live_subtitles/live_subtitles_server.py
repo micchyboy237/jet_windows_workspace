@@ -13,8 +13,7 @@ import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, List
-
-from datetime import datetime, timezone  # ← UPDATED
+from datetime import datetime, timezone
 
 import numpy as np
 import scipy.io.wavfile as wavfile
@@ -24,7 +23,7 @@ from transformers import AutoTokenizer
 
 from translator_types import Translator  # adjust import if needed
 from utils import split_sentences_ja
-import threading  # <-- Added for thread info in logging
+import threading
 
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
@@ -37,6 +36,70 @@ logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True, markup=True)]
 )
 logger = logging.getLogger("live-sub-server")
+
+# ───────────────────────────────────────────────
+# Quality/certainty labelers (see context section)
+# ───────────────────────────────────────────────
+
+import math
+from math import isfinite  # for safe float rounding
+
+def transcription_quality_label(avg_logprob: float) -> str:
+    """
+    Quality label for transcription confidence based on average log-probability.
+    Higher (less negative) = better.
+    """
+    if not isfinite(avg_logprob):
+        return "N/A"
+    if avg_logprob > -0.3:
+        return "Very High"
+    elif avg_logprob > -0.7:
+        return "High"
+    elif avg_logprob > -1.2:
+        return "Medium"
+    elif avg_logprob > -2.0:
+        return "Low"
+    else:
+        return "Very Low"
+
+
+def translation_quality_label(log_prob: float | None) -> str:
+    """
+    Quality label for translation confidence based on cumulative log-probability.
+    Higher (less negative) = better. Negative values are normal.
+    """
+    if log_prob is None or not isfinite(log_prob):
+        return "N/A"
+    if log_prob > -0.4:
+        return "High"
+    elif log_prob > -1.0:
+        return "Good"
+    elif log_prob > -2.0:
+        return "Medium"
+    else:
+        return "Low"
+
+def translation_confidence_score(
+    log_prob: float | None,
+    num_tokens: int | None = None,
+    min_tokens: int = 1,
+    fallback: float = 0.0
+) -> float:
+    """
+    Convert cumulative translation log-prob to a normalized confidence score [0.0, 1.0].
+    
+    Uses length-normalized per-token probability (geometric mean).
+    """
+    if log_prob is None or not isinstance(log_prob, (int, float)) or num_tokens is None or num_tokens <= 0:
+        return fallback
+    
+    # Avoid division by unrealistically small numbers
+    effective_tokens = max(min_tokens, num_tokens)
+    
+    per_token_prob = math.exp(log_prob / effective_tokens)
+    
+    # Soft clip to [0, 1] (models rarely reach exactly 1.0)
+    return float(min(1.0, max(0.0, per_token_prob)))
 
 # ───────────────────────────────────────────────
 # Load models once at startup
@@ -61,7 +124,7 @@ translator = Translator(
 logger.info("Models loaded.")
 
 # ───────────────────────────────────────────────
-# Per-connection state (extended with timestamps)
+# Per-connection state (with timestamps)
 # ───────────────────────────────────────────────
 
 class ConnectionState:
@@ -71,8 +134,8 @@ class ConnectionState:
         self.sample_rate: Optional[int] = None
         self.utterance_count = 0
         self.last_chunk_time = time.monotonic()
-        self.first_chunk_received_at: Optional[datetime] = None  # ← NEW
-        self.end_of_utterance_received_at: Optional[datetime] = None  # ← NEW
+        self.first_chunk_received_at: Optional[datetime] = None
+        self.end_of_utterance_received_at: Optional[datetime] = None
 
     def append_chunk(self, pcm_bytes: bytes, sample_rate: int):
         if self.sample_rate is None:
@@ -104,17 +167,18 @@ executor = ThreadPoolExecutor(max_workers=3)  # conservative — GTX 1660
 DEFAULT_OUT_DIR: Optional[Path] = None  # ← change to Path("utterances") if you want default permanent storage
 
 # ───────────────────────────────────────────────
-# Updated transcribe_and_translate — add confidence score
+# Transcribe and translate with quality/confidence
 # ───────────────────────────────────────────────
+
 def transcribe_and_translate(
     audio_bytes: bytes,
     sr: int,
     client_id: str,
     utterance_idx: int,
-    end_of_utterance_received_at: datetime,        # NEW: when end marker was received (UTC)
-    received_at: Optional[datetime] = None,        # NEW: when first chunk received (UTC, optional)
+    end_of_utterance_received_at: datetime,        # when end marker was received (UTC)
+    received_at: Optional[datetime] = None,        # when first chunk received (UTC, optional)
     out_dir: Optional[Path] = None,
-) -> tuple[str, str, float]:
+) -> tuple[str, str, float, dict]:
     """Blocking function — run in executor."""
     processing_started_at = datetime.now(timezone.utc)
 
@@ -132,77 +196,113 @@ def transcribe_and_translate(
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
     wavfile.write(str(audio_path), sr, arr)
 
-    # ─── Heavy work ─────────────────────────────────────────────
+    # ─── Transcription ─────────────────────────────────────────────
     segments, info = whisper_model.transcribe(
         str(audio_path),
         language="ja",
         beam_size=5,
         vad_filter=False,
         condition_on_previous_text=True,
-        # word_timestamps=False,           # ← keep False unless you really need word-level
     )
 
     ja_text_parts = []
     logprob_sum = 0.0
-    token_count = 0
+    token_count_proxy = 0
 
     segments_list = []
     for segment in segments:
-        segments_list.append(
-            {k: v for k, v in dataclasses.asdict(segment).items() if k != "tokens"}
-        )
+        # Exclude tokens from metadata to keep JSON clean
+        segment_dict = {k: v for k, v in dataclasses.asdict(segment).items() if k != "tokens"}
+        segments_list.append(segment_dict)
+
         text = segment.text.strip()
         if text:
             ja_text_parts.append(text)
 
-        if getattr(segment, "avg_logprob", None) is not None:  # can be None in some edge cases
-            # Number of tokens ≈ number of characters / 2 is a cheap proxy for Japanese
-            # Better: count real tokens if you have tokenizer, but expensive
-            approx_tokens = max(1, len(text) // 2)   # or len(text.split()) if romaji-like
-            logprob_sum += segment.avg_logprob * approx_tokens
-            token_count += approx_tokens
+        if hasattr(segment, "avg_logprob") and segment.avg_logprob is not None:
+            # Prefer exact token count if available
+            if hasattr(segment, "tokens") and isinstance(segment.tokens, list):
+                segment_token_count = len(segment.tokens)
+            else:
+                # Fallback to original approximation for Japanese
+                segment_token_count = max(1, len(text) // 2)
+
+            logprob_sum += segment.avg_logprob * segment_token_count
+            token_count_proxy += segment_token_count
 
     ja_text = " ".join(ja_text_parts).strip()
 
-    if token_count > 0:
-        avg_logprob = logprob_sum / token_count
-        confidence = float(np.exp(avg_logprob))
+    if token_count_proxy > 0:
+        avg_logprob = logprob_sum / token_count_proxy
+        transcription_confidence = float(np.exp(avg_logprob))
     else:
         avg_logprob = float('-inf')
-        confidence = 0.0
+        transcription_confidence = 0.0
 
+    transcription_quality = transcription_quality_label(avg_logprob)
+
+    # ─── Translation ───────────────────────────────────────────────
     sentences_ja: List[str] = split_sentences_ja(ja_text)
     en_sentences: List[str] = []
+    translation_logprob: float | None = None
+    translation_confidence: float | None = None
 
     if sentences_ja:
-        batch_src_tokens = []
-        for sent in sentences_ja:
-            if sent.strip():
-                tokens = tokenizer.convert_ids_to_tokens(tokenizer.encode(sent))
-                batch_src_tokens.append(tokens)
+        batch_src_tokens = [
+            tokenizer.convert_ids_to_tokens(tokenizer.encode(sent.strip()))
+            for sent in sentences_ja if sent.strip()
+        ]
 
         if batch_src_tokens:
-            results = translator.translate_batch(batch_src_tokens)
-            for hyp in results:
-                en_tokens = hyp.hypotheses[0]
+            results = translator.translate_batch(
+                batch_src_tokens,
+                return_scores=True,          # Enable score extraction
+                beam_size=4,
+                max_decoding_length=512,
+            )
+
+            for result in results:
+                hyp = result.hypotheses[0]
                 en_sent = tokenizer.decode(
-                    tokenizer.convert_tokens_to_ids(en_tokens),
+                    tokenizer.convert_tokens_to_ids(hyp),
                     skip_special_tokens=True
                 ).strip()
                 if en_sent:
                     en_sentences.append(en_sent)
 
+                # Take score from first/best hypothesis
+                if hasattr(result, "scores") and result.scores:
+                    # For multi-sentence → take the first one (or average/min later if needed)
+                    translation_logprob = result.scores[0]
+                    num_output_tokens = len(hyp)  # exact number of output tokens
+                    translation_confidence = translation_confidence_score(
+                        translation_logprob, num_output_tokens, min_tokens=3
+                    )
+
     en_text = "\n".join(en_sentences)
 
+    translation_quality = translation_quality_label(translation_logprob)
+
+    # ─── Logging ──────────────────────────────────────────────────
     logger.info(
-        "[confidence] avg_logprob=%.4f → conf=%.3f | ja=%s", avg_logprob, confidence, ja_text[:70] + "..." if len(ja_text) > 70 else ja_text
+        "[transcription] avg_logprob=%.4f → conf=%.3f | quality=%s | ja=%s",
+        avg_logprob,
+        transcription_confidence,
+        transcription_quality,
+        ja_text[:70] + "..." if len(ja_text) > 70 else ja_text
+    )
+    logger.info(
+        "[translation]   log_prob=%s → quality=%s | en=%s",
+        f"{translation_logprob:.4f}" if translation_logprob is not None else "N/A",
+        translation_quality,
+        en_text[:70] + "..." if len(en_text) > 70 else en_text
     )
 
     processing_finished_at = datetime.now(timezone.utc)
     processing_duration = (processing_finished_at - processing_started_at).total_seconds()
     queue_wait_duration = (processing_started_at - end_of_utterance_received_at).total_seconds()
 
-    # ─── Build metadata ────────────────────────────────────────
+    # ─── Build metadata ───────────────────────────────────────────
     meta = {
         "client_id": client_id,
         "utterance_index": utterance_idx,
@@ -215,10 +315,18 @@ def transcribe_and_translate(
         "processing_duration_seconds": round(processing_duration, 3),
         "audio_duration_seconds": round(len(audio_bytes) / 2 / sr, 3),
         "sample_rate": sr,
-        "transcription_ja": ja_text,
-        "confidence": round(confidence, 4),
-        "avg_logprob": round(avg_logprob, 4) if token_count > 0 else None,
-        "translation_en": en_text,
+        "transcription": {
+            "text_ja": ja_text,
+            "avg_logprob": round(avg_logprob, 4) if isfinite(avg_logprob) else None,
+            "confidence": round(transcription_confidence, 4),
+            "quality_label": transcription_quality,
+        },
+        "translation": {
+            "text_en": en_text,
+            "log_prob": round(translation_logprob, 4) if translation_logprob is not None else None,
+            "confidence": round(translation_confidence, 4) if 'translation_confidence' in locals() else None,
+            "quality_label": translation_quality,
+        },
         "segments": segments_list,
     }
 
@@ -243,13 +351,13 @@ def transcribe_and_translate(
     if not out_dir:
         audio_path.unlink(missing_ok=True)
 
-    return ja_text, en_text, confidence, meta
+    return ja_text, en_text, transcription_confidence, meta
 
 
 # ───────────────────────────────────────────────
-# Updated handler — new timestamp logic for queue and processing,
-# and propagate confidence score in response.
+# Handler (with quality & confidence in payload)
 # ───────────────────────────────────────────────
+
 async def handler(websocket):
     """
     Modern websockets handler (websockets.asyncio.server style)
@@ -287,7 +395,7 @@ async def handler(websocket):
 
                     # Offload heavy work to thread, pass timestamps
                     loop = asyncio.get_running_loop()
-                    ja, en, confidence, meta = await loop.run_in_executor(
+                    ja, en, transcription_confidence, meta = await loop.run_in_executor(
                         executor,
                         transcribe_and_translate,
                         bytes(state.buffer),
@@ -295,21 +403,25 @@ async def handler(websocket):
                         state.client_id,
                         state.utterance_count,
                         state.end_of_utterance_received_at,
-                        state.first_chunk_received_at,   # received_at (positional)
-                        DEFAULT_OUT_DIR,                # out_dir (positional)
+                        state.first_chunk_received_at,   # received_at
+                        DEFAULT_OUT_DIR,
                     )
 
-                    # Send result back
+                    # Payload follows updated context (includes quality/conf/logprob)
                     payload = {
                         "type": "subtitle",
-                        "transcription": ja,
-                        "translation": en,
+                        "transcription_ja": meta["transcription"]["text_ja"],
+                        "translation_en": meta["translation"]["text_en"],
                         "utterance_id": state.utterance_count,
                         "duration_sec": round(duration, 3),
-                        "confidence": round(float(confidence), 4),
+                        "transcription_confidence": meta["transcription"]["confidence"],
+                        "transcription_quality": meta["transcription"]["quality_label"],
+                        "translation_logprob": meta["translation"]["log_prob"],
+                        "translation_confidence": meta["translation"].get("confidence"),
+                        "translation_quality": meta["translation"]["quality_label"],
                         "meta": meta,
                     }
-                    await websocket.send(json.dumps(payload))
+                    await websocket.send(json.dumps(payload, ensure_ascii=False))
 
                     state.utterance_count += 1
                     state.clear_buffer()
@@ -331,12 +443,10 @@ async def handler(websocket):
 
 async def main():
     from websockets.asyncio.server import serve
-
     async with serve(
         handler,
         host="0.0.0.0",
         port=8765,
-        # Optional: add ping/pong keep-alive
         ping_interval=20,
         ping_timeout=60,
     ) as server:
