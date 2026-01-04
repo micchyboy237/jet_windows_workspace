@@ -17,6 +17,7 @@ from pysilero_vad import SileroVoiceActivityDetector
 from rich.logging import RichHandler
 import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
 import numpy as np  # needed for saving wav with frombuffer
+import matplotlib.pyplot as plt  # for optional probability/RMS plots
 
 import datetime
 
@@ -51,12 +52,12 @@ log = logging.getLogger("mic-streamer")
 @dataclass(frozen=True)
 class Config:
     ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
-    min_speech_duration: float = 0.0          # seconds; ignore shorter speech bursts
+    min_speech_duration: float = 0.25          # seconds; ignore shorter speech bursts
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
     vad_threshold: float = 0.3
-    max_silence_seconds: float = 0.5   # seconds of silence before ending segment
+    min_silence_duration: float = 0.1   # seconds of silence before ending segment
     vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
@@ -157,6 +158,12 @@ async def stream_microphone(ws) -> None:
     non_speech_max_energy: float = 0.0
     non_speech_min_energy: float = float("inf")
 
+    # Per-chunk lists for saving detailed probabilities and RMS
+    speech_probs: list[float] = []
+    speech_rms_list: list[float] = []
+    non_speech_probs: list[float] = []
+    non_speech_rms_list: list[float] = []
+
     # Buffer and stats
     pcm_buffer = bytearray()
     chunks_sent = 0
@@ -214,6 +221,14 @@ async def stream_microphone(ws) -> None:
                             speech_start_time = time.monotonic()
                             current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
                             segment_start_wallclock[current_segment_num] = time.time()
+                            # Set stream_start_time on the very first speech detection,
+                            # even if the utterance may later be discarded due to short duration.
+                            # This ensures correct relative timing for all subsequent subtitles.
+                            global stream_start_time
+                            if stream_start_time is None:
+                                stream_start_time = segment_start_wallclock[current_segment_num]
+                                log.info("[timing] stream_start_time initialized to %.3f (first speech onset)",
+                                         stream_start_time)
                             current_segment_buffer = bytearray()
                             speech_chunks_in_segment = 0
                             max_vad_confidence = speech_prob
@@ -228,12 +243,19 @@ async def stream_microphone(ws) -> None:
                             min_energy = rms
                             log.info("[speech] Speech started | segment_%04d", current_segment_num)
                             speech_duration_sec = 0.0
+                            # Reset collection lists for new speech segment
+                            speech_probs = []
+                            speech_rms_list = []
 
                         if current_segment_buffer is not None:
                             current_segment_buffer.extend(chunk)
                             speech_chunks_in_segment += 1
                         vad_confidence_sum += speech_prob
                         speech_chunk_count += 1
+
+                        # Collect per-chunk data for later saving
+                        speech_probs.append(speech_prob)
+                        speech_rms_list.append(rms)
 
                         max_energy = max(max_energy, rms)
                         min_energy = min(min_energy, rms)
@@ -289,9 +311,17 @@ async def stream_microphone(ws) -> None:
 
                                 log.info("[non-speech] Non-speech segment started | segment_%04d", current_non_speech_num)
 
+                                # Reset collection lists for new non-speech segment
+                                non_speech_probs = []
+                                non_speech_rms_list = []
+
                             if current_non_speech_buffer is not None:
                                 current_non_speech_buffer.extend(chunk)
                                 non_speech_chunks_in_segment += 1
+
+                                # Collect per-chunk data for non-speech
+                                non_speech_probs.append(speech_prob)
+                                non_speech_rms_list.append(rms)
 
                             # Accumulate energy stats
                             non_speech_energy_sum += rms
@@ -368,17 +398,51 @@ async def stream_microphone(ws) -> None:
                                         "[non-speech] Saved segment_%04d | start=%.3f end=%.3f dur=%.2fs | chunks=%d | peak_rms=%.4f | rms_avg=%.4f",
                                         current_non_speech_num, start_sec, end_sec, duration, non_speech_chunks_in_segment, peak_rms, avg_rms
                                     )
-                                # Reset for next period
-                                non_speech_start_time = None
-                                current_non_speech_num = None
-                                current_non_speech_buffer = None
-                                non_speech_chunks_in_segment = 0
-                                peak_rms = 0.0
-                                non_speech_wallclock.pop(current_non_speech_num, None)
 
-                        # Speech end detection by silence duration
+                                    # Save non-speech probabilities and RMS
+                                    non_probs_path = os.path.join(seg_dir, "non_speech_probabilities.json")
+                                    with open(non_probs_path, "w", encoding="utf-8") as f:
+                                        json.dump([round(p, 4) for p in non_speech_probs], f, indent=2)
+
+                                    non_rms_path = os.path.join(seg_dir, "non_speech_rms.json")
+                                    with open(non_rms_path, "w", encoding="utf-8") as f:
+                                        json.dump([round(r, 4) for r in non_speech_rms_list], f, indent=2)
+
+                                    # Optional simple plots
+                                    if len(non_speech_probs) > 1:
+                                        time_axis = np.arange(len(non_speech_probs)) * (VAD_CHUNK_SAMPLES / config.sample_rate)
+                                        plt.figure(figsize=(8, 3))
+                                        plt.plot(time_axis, non_speech_probs, color="gray")
+                                        plt.ylim(0, 1)
+                                        plt.xlabel("Time (s)")
+                                        plt.ylabel("VAD Probability")
+                                        plt.title(f"Non-Speech VAD Probability – segment_{current_non_speech_num:04d}")
+                                        plt.grid(True, alpha=0.3)
+                                        plt.tight_layout()
+                                        plt.savefig(os.path.join(seg_dir, "non_speech_probability_plot.png"))
+                                        plt.close()
+
+                                        plt.figure(figsize=(8, 3))
+                                        plt.plot(time_axis, non_speech_rms_list, color="red")
+                                        plt.xlabel("Time (s)")
+                                        plt.ylabel("RMS")
+                                        plt.title(f"Non-Speech RMS – segment_{current_non_speech_num:04d}")
+                                        plt.grid(True, alpha=0.3)
+                                        plt.tight_layout()
+                                        plt.savefig(os.path.join(seg_dir, "non_speech_rms_plot.png"))
+                                        plt.close()
+
+                                    # Reset for next period
+                                    non_speech_start_time = None
+                                    current_non_speech_num = None
+                                    current_non_speech_buffer = None
+                                    non_speech_chunks_in_segment = 0
+                                    peak_rms = 0.0
+                                    non_speech_probs = []
+                                    non_speech_rms_list = []
+                                    non_speech_wallclock.pop(current_non_speech_num, None)
                         if (speech_start_time is not None and silence_start_time is not None
-                                and time.monotonic() - silence_start_time > config.max_silence_seconds):
+                                and time.monotonic() - silence_start_time > config.min_silence_duration):
                             if current_segment_buffer is not None:
                                 num_samples = len(current_segment_buffer) // 2
                                 duration = num_samples / config.sample_rate
@@ -407,6 +471,9 @@ async def stream_microphone(ws) -> None:
                                         "[non-speech] Merged short speech burst (%.3fs) into ongoing non-speech segment_%04d",
                                         speech_duration_sec, current_non_speech_num
                                     )
+                                # Discard collected probs/RMS for the short burst
+                                speech_probs = []
+                                speech_rms_list = []
                                 speech_start_time = None
                                 silence_start_time = None
                                 current_segment_num = None
@@ -485,6 +552,39 @@ async def stream_microphone(ws) -> None:
                                     with open(ALL_SPEECH_META_PATH, "w", encoding="utf-8") as f:
                                         json.dump(all_speech_meta, f, indent=2, ensure_ascii=False)
 
+                                    # Save speech probabilities and RMS
+                                    probs_path = os.path.join(segment_dir, "speech_probabilities.json")
+                                    with open(probs_path, "w", encoding="utf-8") as f:
+                                        json.dump([round(p, 4) for p in speech_probs], f, indent=2)
+
+                                    rms_path = os.path.join(segment_dir, "speech_rms.json")
+                                    with open(rms_path, "w", encoding="utf-8") as f:
+                                        json.dump([round(r, 4) for r in speech_rms_list], f, indent=2)
+
+                                    # Optional simple plots
+                                    if len(speech_probs) > 1:
+                                        time_axis = np.arange(len(speech_probs)) * (VAD_CHUNK_SAMPLES / config.sample_rate)
+                                        plt.figure(figsize=(8, 3))
+                                        plt.plot(time_axis, speech_probs)
+                                        plt.ylim(0, 1)
+                                        plt.xlabel("Time (s)")
+                                        plt.ylabel("VAD Probability")
+                                        plt.title(f"Speech VAD Probability – segment_{current_segment_num:04d}")
+                                        plt.grid(True, alpha=0.3)
+                                        plt.tight_layout()
+                                        plt.savefig(os.path.join(segment_dir, "speech_probability_plot.png"))
+                                        plt.close()
+
+                                        plt.figure(figsize=(8, 3))
+                                        plt.plot(time_axis, speech_rms_list, color="orange")
+                                        plt.xlabel("Time (s)")
+                                        plt.ylabel("RMS")
+                                        plt.title(f"Speech RMS – segment_{current_segment_num:04d}")
+                                        plt.grid(True, alpha=0.3)
+                                        plt.tight_layout()
+                                        plt.savefig(os.path.join(segment_dir, "speech_rms_plot.png"))
+                                        plt.close()
+
                                 # After saving a valid speech segment, ensure non-speech starts fresh
                                 non_speech_start_time = None
                                 current_non_speech_num = None
@@ -505,6 +605,8 @@ async def stream_microphone(ws) -> None:
                                 current_segment_num = None
                                 current_segment_buffer = None
                                 speech_chunks_in_segment = 0
+                                speech_probs = []
+                                speech_rms_list = []
                                 # non-speech reset already handled above for normal speech case
 
                     # --- Logging (after both branches) ---
