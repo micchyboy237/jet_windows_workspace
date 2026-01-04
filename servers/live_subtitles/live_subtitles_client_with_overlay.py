@@ -77,6 +77,9 @@ srt_sequence = 1
 # Track when each segment actually started (wall-clock time)
 segment_start_wallclock: dict[int, float] = {}  # segment_num → time.time()
 
+# Track when each non-speech segment actually started (wall-clock time)
+non_speech_wallclock: dict[int, float] = {}  # segment_num → time.time()
+
 # =============================
 # Initialize Silero VAD - STATIC INFO ONLY
 # =============================
@@ -99,38 +102,62 @@ pending_sends: deque[float] = deque()  # One entry per sent chunk
 # =============================
 
 async def stream_microphone(ws) -> None:
-    # Lazy instantiate VAD only when streaming starts
+    """
+    Capture microphone, detect speech/silence, and stream audio chunks to websocket.
+    Segments are saved to disk for both speech and non-speech (with energy filtering).
+    Tracks VAD confidence, energy, and logs detailed info.
+    """
+    # Lazy init VAD model path
     model_path = config.vad_model_path
     if model_path is None:
-        # Use bundled default as per library design
         from pysilero_vad import _DEFAULT_MODEL_PATH
         model_path = _DEFAULT_MODEL_PATH
     vad = SileroVoiceActivityDetector(model_path)
 
-    # Speech segment tracking
+    # --- Internal state for speech tracking ---
     speech_start_time: float | None = None
-    current_speech_seconds: float = 0.0
     silence_start_time: float | None = None
-    max_vad_confidence: float = 0.0           # ← new
-    last_vad_confidence: float = 0.0          # ← new
     speech_duration_sec: float = 0.0
-    first_vad_confidence: float = 0.0         # ← new: confidence of the first speech chunk
-    min_vad_confidence: float = 1.0           # ← new: lowest confidence during speech
-    vad_confidence_sum: float = 0.0           # ← new: for average calculation
-    speech_chunk_count: int = 0               # ← new: number of speech chunks (for avg)
+    current_speech_seconds: float = 0.0
 
-    # ← NEW: audio energy tracking
-    speech_energy_sum: float = 0.0          # sum of RMS values for speech chunks
-    speech_energy_sum_squares: float = 0.0  # sum of squares for variance / std dev
-    max_energy: float = 0.0                 # peak RMS in segment
-    min_energy: float = float("inf")        # lowest RMS in speech chunk
+    # VAD confidence stats
+    max_vad_confidence = 0.0
+    last_vad_confidence = 0.0
+    min_vad_confidence = 1.0
+    first_vad_confidence = 0.0
+    vad_confidence_sum = 0.0
+    speech_chunk_count = 0
 
+    # Energy tracking for speech
+    speech_energy_sum = 0.0
+    speech_energy_sum_squares = 0.0
+    max_energy = 0.0
+    min_energy = float("inf")
+
+    # --- File/segment tracking ---
     segments_dir = os.path.join(OUTPUT_DIR, "segments")
     os.makedirs(segments_dir, exist_ok=True)
+    non_speech_dir = os.path.join(OUTPUT_DIR, "non_speech_segments")
+    os.makedirs(non_speech_dir, exist_ok=True)
+
     current_segment_num: int | None = None
     current_segment_buffer: bytearray | None = None
     speech_chunks_in_segment: int = 0
 
+    # Non-speech segment tracking
+    current_non_speech_num: int | None = None
+    current_non_speech_buffer: bytearray | None = None
+    non_speech_chunks_in_segment: int = 0
+    non_speech_start_time: float | None = None  # monotonic time when current non-speech began
+    peak_rms: float = 0.0
+
+    # Energy tracking for non-speech (mirrors speech stats)
+    non_speech_energy_sum: float = 0.0
+    non_speech_energy_sum_squares: float = 0.0
+    non_speech_max_energy: float = 0.0
+    non_speech_min_energy: float = float("inf")
+
+    # Buffer and stats
     pcm_buffer = bytearray()
     chunks_sent = 0
     chunks_detected = 0
@@ -156,64 +183,67 @@ async def stream_microphone(ws) -> None:
                 processed = 0
                 while len(pcm_buffer) >= VAD_CHUNK_BYTES:
                     chunk = bytes(pcm_buffer[:VAD_CHUNK_BYTES])
-
-                    # ← NEW: compute RMS energy for this chunk
                     chunk_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
-                    rms = np.sqrt(np.mean(chunk_np ** 2))
+                    rms = float(np.sqrt(np.mean(chunk_np ** 2)))
+                    has_sound = rms > 50.0
+
+                    # Peak RMS per non-speech segment
+                    if speech_start_time is None:
+                        if non_speech_start_time is not None:
+                            peak_rms = max(peak_rms, rms) if 'peak_rms' in locals() else rms
+                        else:
+                            peak_rms = rms
 
                     del pcm_buffer[:VAD_CHUNK_BYTES]
                     total_chunks_processed += 1
 
                     speech_prob: float = vad(chunk)
                     if speech_prob >= config.vad_threshold:
-                        chunks_detected += 1
                         processed += 1
-                        # Track best & latest VAD score for this segment
+                        chunks_detected += 1
+
+                        # VAD stats
                         last_vad_confidence = speech_prob
-                        if speech_prob > max_vad_confidence:
-                            max_vad_confidence = speech_prob
-                        if speech_prob < min_vad_confidence:
-                            min_vad_confidence = speech_prob
-                        # Reset silence timer
+                        max_vad_confidence = max(max_vad_confidence, speech_prob)
+                        min_vad_confidence = min(min_vad_confidence, speech_prob)
+
                         silence_start_time = None
+
                         if speech_start_time is None:
+                            # Start of a speech segment
                             speech_start_time = time.monotonic()
-                            # Start new segment
                             current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
                             segment_start_wallclock[current_segment_num] = time.time()
                             current_segment_buffer = bytearray()
-                            speech_chunks_in_segment = 0  # reset for new segment
-                            max_vad_confidence = 0.0                # ← reset
-                            last_vad_confidence = 0.0               # ← reset
-                            first_vad_confidence = speech_prob      # ← capture first speech prob
-                            min_vad_confidence = speech_prob       # ← initialize min with first value
-                            vad_confidence_sum = 0.0               # ← reset
-                            speech_chunk_count = 0                 # ← reset
-                            # ← NEW resets
+                            speech_chunks_in_segment = 0
+                            max_vad_confidence = speech_prob
+                            last_vad_confidence = speech_prob
+                            first_vad_confidence = speech_prob
+                            min_vad_confidence = speech_prob
+                            vad_confidence_sum = 0.0
+                            speech_chunk_count = 0
                             speech_energy_sum = 0.0
                             speech_energy_sum_squares = 0.0
-                            max_energy = 0.0
-                            min_energy = float("inf")
+                            max_energy = rms
+                            min_energy = rms
                             log.info("[speech] Speech started | segment_%04d", current_segment_num)
                             speech_duration_sec = 0.0
-                        # Append chunk to current segment buffer
+
                         if current_segment_buffer is not None:
                             current_segment_buffer.extend(chunk)
-                            speech_chunks_in_segment += 1  # count chunk in segment
-                        # Accumulate for average
+                            speech_chunks_in_segment += 1
                         vad_confidence_sum += speech_prob
                         speech_chunk_count += 1
 
-                        if rms > max_energy:
-                            max_energy = rms
-                        if rms < min_energy:
-                            min_energy = rms
+                        max_energy = max(max_energy, rms)
+                        min_energy = min(min_energy, rms)
                         speech_energy_sum += rms
                         speech_energy_sum_squares += rms ** 2
 
                         send_start = time.monotonic()
                         pending_sends.append(send_start)
                         speech_duration_sec += VAD_CHUNK_SAMPLES / config.sample_rate
+
                         payload = {
                             "type": "audio",
                             "sample_rate": config.sample_rate,
@@ -225,16 +255,132 @@ async def stream_microphone(ws) -> None:
                         except websockets.ConnectionClosed:
                             log.warning("WebSocket closed during send")
                             return
+
+                        # Reset non-speech state
+                        non_speech_start_time = None
+                        current_non_speech_num = None
+                        non_speech_wallclock.pop(current_non_speech_num, None)
+                        current_non_speech_buffer = None
+                        non_speech_chunks_in_segment = 0
+                        peak_rms = 0.0
+
                     else:
-                        # Silence chunk
+                        # Silence chunk handling
                         if speech_start_time is not None and silence_start_time is None:
                             silence_start_time = time.monotonic()
-                        # Check if silence too long → end segment
+
+                        # Non-speech segment management
+                        if speech_start_time is None:
+                            if non_speech_start_time is None:
+                                non_speech_start_time = time.monotonic()
+                                current_non_speech_num = (
+                                    len([d for d in os.listdir(non_speech_dir) if d.startswith("segment_")]) + 1
+                                )
+                                non_speech_wallclock[current_non_speech_num] = time.time()
+                                current_non_speech_buffer = bytearray()
+                                non_speech_chunks_in_segment = 0
+                                peak_rms = rms
+
+                                # Reset energy stats
+                                non_speech_energy_sum = 0.0
+                                non_speech_energy_sum_squares = 0.0
+                                non_speech_max_energy = rms
+                                non_speech_min_energy = rms
+
+                                log.info("[non-speech] Non-speech segment started | segment_%04d", current_non_speech_num)
+
+                            if current_non_speech_buffer is not None:
+                                current_non_speech_buffer.extend(chunk)
+                                non_speech_chunks_in_segment += 1
+
+                            # Accumulate energy stats
+                            non_speech_energy_sum += rms
+                            non_speech_energy_sum_squares += rms ** 2
+                            non_speech_max_energy = max(non_speech_max_energy, rms)
+                            non_speech_min_energy = min(non_speech_min_energy, rms)
+                            peak_rms = max(peak_rms, rms)
+
+                            # Save: ≥3s or noise ≥1s
+                            elapsed = time.monotonic() - non_speech_start_time
+                            if elapsed >= 3.0 or (rms > 100.0 and elapsed >= 1.0):
+                                if current_non_speech_buffer and non_speech_chunks_in_segment > 0:
+                                    num_samples = len(current_non_speech_buffer) // 2
+                                    duration = num_samples / config.sample_rate
+
+                                    # Calculate wallclock-relative start/end (consistent with speech)
+                                    base_time = stream_start_time or time.time()
+                                    non_speech_wallclock_start = non_speech_wallclock.get(current_non_speech_num, time.time())
+                                    start_sec = round(non_speech_wallclock_start - base_time, 3)
+                                    end_sec = round(start_sec + duration, 3)
+
+                                    # Energy averages / std
+                                    chunk_count = non_speech_chunks_in_segment or 1
+                                    avg_rms = non_speech_energy_sum / chunk_count
+                                    rms_std = np.sqrt(
+                                        (non_speech_energy_sum_squares / chunk_count) - (avg_rms ** 2)
+                                    ) if chunk_count > 1 else 0.0
+
+                                    # Save only if audible
+                                    if not has_sound and peak_rms <= 50.0:
+                                        log.info(
+                                            "[non-speech] Skipping save of pure silence segment_%04d | peak_rms=%.4f",
+                                            current_non_speech_num, peak_rms
+                                        )
+                                        non_speech_start_time = None
+                                        current_non_speech_num = None
+                                        current_non_speech_buffer = None
+                                        non_speech_chunks_in_segment = 0
+                                        peak_rms = 0.0
+                                        non_speech_wallclock.pop(current_non_speech_num, None)
+                                        continue
+
+                                    seg_dir = os.path.join(non_speech_dir, f"segment_{current_non_speech_num:04d}")
+                                    os.makedirs(seg_dir, exist_ok=True)
+                                    wav_path = os.path.join(seg_dir, "sound.wav")
+                                    wavfile.write(
+                                        wav_path, config.sample_rate,
+                                        np.frombuffer(current_non_speech_buffer, dtype=np.int16)
+                                    )
+
+                                    metadata = {
+                                        "segment_id": current_non_speech_num,
+                                        "type": "non_speech",
+                                        "start_sec": start_sec,
+                                        "end_sec": end_sec,
+                                        "duration_sec": round(duration, 3),
+                                        "num_chunks": non_speech_chunks_in_segment,
+                                        "num_samples": num_samples,
+                                        "rms_last_chunk": float(round(rms, 4)),
+                                        "peak_rms": float(round(peak_rms, 4)),
+                                        "has_audible_sound": has_sound,
+                                        "audio_energy": {
+                                            "rms_min": float(round(non_speech_min_energy, 4)),
+                                            "rms_max": float(round(non_speech_max_energy, 4)),
+                                            "rms_ave": float(round(avg_rms, 4)),
+                                            "rms_std": float(round(rms_std, 4)),
+                                        },
+                                    }
+                                    meta_path = os.path.join(seg_dir, "metadata.json")
+                                    with open(meta_path, "w", encoding="utf-8") as f:
+                                        json.dump(metadata, f, indent=2)
+
+                                    log.info(
+                                        "[non-speech] Saved segment_%04d | start=%.3f end=%.3f dur=%.2fs | chunks=%d | peak_rms=%.4f | rms_avg=%.4f",
+                                        current_non_speech_num, start_sec, end_sec, duration, non_speech_chunks_in_segment, peak_rms, avg_rms
+                                    )
+                                # Reset for next period
+                                non_speech_start_time = None
+                                current_non_speech_num = None
+                                current_non_speech_buffer = None
+                                non_speech_chunks_in_segment = 0
+                                peak_rms = 0.0
+                                non_speech_wallclock.pop(current_non_speech_num, None)
+
+                        # Speech end detection by silence duration
                         if (speech_start_time is not None and silence_start_time is not None
-                            and time.monotonic() - silence_start_time > config.max_silence_seconds):
-                            # Compute precise duration using number of samples in the segment buffer
+                                and time.monotonic() - silence_start_time > config.max_silence_seconds):
                             if current_segment_buffer is not None:
-                                num_samples = len(current_segment_buffer) // 2  # int16 = 2 bytes
+                                num_samples = len(current_segment_buffer) // 2
                                 duration = num_samples / config.sample_rate
                             else:
                                 num_samples = 0
@@ -245,129 +391,136 @@ async def stream_microphone(ws) -> None:
                                     "[speech] Segment too short (%.3fs < %.3fs) — discarded",
                                     speech_duration_sec, config.min_speech_duration
                                 )
-                                # Reset without sending or saving
+                                # Short burst → treat as noise and merge into ongoing non-speech if present
+                                if (current_non_speech_buffer is not None and non_speech_start_time is not None):
+                                    current_non_speech_buffer.extend(current_segment_buffer or b"")
+                                    non_speech_chunks_in_segment += speech_chunks_in_segment
+
+                                    # Merge energy stats
+                                    non_speech_energy_sum += speech_energy_sum
+                                    non_speech_energy_sum_squares += speech_energy_sum_squares
+                                    non_speech_max_energy = max(non_speech_max_energy, max_energy)
+                                    non_speech_min_energy = min(non_speech_min_energy, min_energy if min_energy != float("inf") else non_speech_min_energy)
+                                    peak_rms = max(peak_rms, max_energy)
+
+                                    log.info(
+                                        "[non-speech] Merged short speech burst (%.3fs) into ongoing non-speech segment_%04d",
+                                        speech_duration_sec, current_non_speech_num
+                                    )
                                 speech_start_time = None
                                 silence_start_time = None
                                 current_segment_num = None
                                 current_segment_buffer = None
                                 speech_chunks_in_segment = 0
                                 continue
-
-                            log.info(
-                                "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
-                                duration, speech_chunks_in_segment
-                            )
-
-                            # Save segment audio + metadata
-                            if current_segment_num is not None and current_segment_buffer is not None:
-                                segment_dir = os.path.join(segments_dir, f"segment_{current_segment_num:04d}")
-                                os.makedirs(segment_dir, exist_ok=True)
-
-                                # Compute precise duration from audio length
-                                num_samples = len(current_segment_buffer) // 2  # int16 = 2 bytes per sample
-                                duration = num_samples / config.sample_rate
-
-                                wav_path = os.path.join(segment_dir, "sound.wav")
-                                wavfile.write(
-                                    wav_path,
-                                    config.sample_rate,
-                                    np.frombuffer(current_segment_buffer, dtype=np.int16)
+                            else:
+                                # Normal (long enough) speech segment → save it (existing code unchanged)
+                                log.info(
+                                    "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
+                                    duration, speech_chunks_in_segment
                                 )
+                                # Save segment/metadata
+                                if current_segment_num and current_segment_buffer:
+                                    segment_dir = os.path.join(segments_dir, f"segment_{current_segment_num:04d}")
+                                    os.makedirs(segment_dir, exist_ok=True)
+                                    wav_path = os.path.join(segment_dir, "sound.wav")
+                                    wavfile.write(
+                                        wav_path,
+                                        config.sample_rate,
+                                        np.frombuffer(current_segment_buffer, dtype=np.int16)
+                                    )
+                                    base_time = stream_start_time or segment_start_wallclock[current_segment_num]
+                                    relative_start = round(segment_start_wallclock[current_segment_num] - base_time, 3)
+                                    relative_end = round(relative_start + duration, 3)
+                                    metadata = {
+                                        "segment_id": current_segment_num,
+                                        "duration_sec": round(duration, 3),
+                                        "num_chunks": speech_chunks_in_segment,
+                                        "num_samples": num_samples,
+                                        "start_sec": relative_start,
+                                        "end_sec": relative_end,
+                                        "sample_rate": config.sample_rate,
+                                        "channels": config.channels,
+                                        "vad_confidence": {
+                                            "first": round(first_vad_confidence, 4),
+                                            "last": round(last_vad_confidence, 4),
+                                            "min": round(min_vad_confidence, 4),
+                                            "max": round(max_vad_confidence, 4),
+                                            "ave": round(vad_confidence_sum / speech_chunk_count, 4)
+                                            if speech_chunk_count else 0.0,
+                                        },
+                                        "audio_energy": {
+                                            "rms_min": float(round(min_energy, 4)) if min_energy != float("inf") else 0.0,
+                                            "rms_max": float(round(max_energy, 4)),
+                                            "rms_ave": float(round(speech_energy_sum / speech_chunk_count, 4))
+                                            if speech_chunk_count else 0.0,
+                                            "rms_std": float(round(
+                                                np.sqrt(
+                                                    (speech_energy_sum_squares / speech_chunk_count) -
+                                                    (speech_energy_sum / speech_chunk_count) ** 2
+                                                ),
+                                                4
+                                            )) if speech_chunk_count else 0.0,
+                                        },
+                                    }
+                                    speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
+                                    with open(speech_meta_path, "w", encoding="utf-8") as f:
+                                        json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-                                # Use relative seconds from stream start (fallback to current segment start time if stream_start_time isn't set)
-                                base_time = stream_start_time or segment_start_wallclock[current_segment_num]
-                                metadata = {
-                                    "segment_id": current_segment_num,
-                                    "duration_sec": round(duration, 3),
-                                    "num_chunks": speech_chunks_in_segment,
-                                    "num_samples": num_samples,
-                                    "start_sec": round(segment_start_wallclock[current_segment_num] - base_time, 3),
-                                    "end_sec": round(time.time() - base_time, 3),
-                                    "sample_rate": config.sample_rate,
-                                    "channels": config.channels,
-                                    "vad_confidence": {
-                                        "first": round(first_vad_confidence, 4),
-                                        "last": round(last_vad_confidence, 4),
-                                        "min": round(min_vad_confidence, 4),
-                                        "max": round(max_vad_confidence, 4),
-                                        "ave": round(vad_confidence_sum / speech_chunk_count, 4)
-                                            if speech_chunk_count > 0
-                                            else 0.0,
-                                    },
-                                    "audio_energy": {
-                                        # ← CHANGED: explicitly convert numpy float32 → Python float
-                                        "rms_min": float(round(min_energy, 4)) if min_energy != float("inf") else 0.0,
-                                        "rms_max": float(round(max_energy, 4)),
-                                        "rms_ave": float(round(speech_energy_sum / speech_chunk_count, 4))
-                                            if speech_chunk_count > 0
-                                            else 0.0,
-                                        "rms_std": float(round(
-                                            np.sqrt(
-                                                (speech_energy_sum_squares / speech_chunk_count)
-                                                - (speech_energy_sum / speech_chunk_count) ** 2
-                                            ),
-                                            4,
-                                        ))
-                                        if speech_chunk_count > 0
-                                        else 0.0,
-                                    },
-                                }
-                                speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
-                                with open(speech_meta_path, "w", encoding="utf-8") as f:
-                                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+                                    all_speech_meta = []
+                                    if os.path.exists(ALL_SPEECH_META_PATH):
+                                        try:
+                                            with open(ALL_SPEECH_META_PATH, "r", encoding="utf-8") as f:
+                                                all_speech_meta = json.load(f)
+                                        except Exception:
+                                            pass
+                                    all_speech_meta.append({
+                                        "segment_id": current_segment_num,
+                                        **metadata,
+                                        "duration_sec": round(duration, 3),
+                                        "segment_dir": f"segment_{current_segment_num:04d}",
+                                        "wav_path": str(wav_path),
+                                        "meta_path": str(speech_meta_path),
+                                    })
+                                    with open(ALL_SPEECH_META_PATH, "w", encoding="utf-8") as f:
+                                        json.dump(all_speech_meta, f, indent=2, ensure_ascii=False)
 
-                                # Append to central all_speech_meta.json
-                                all_speech_meta = []
-                                if os.path.exists(ALL_SPEECH_META_PATH):
-                                    try:
-                                        with open(ALL_SPEECH_META_PATH, "r", encoding="utf-8") as f:
-                                            all_speech_meta = json.load(f)
-                                    except Exception:
-                                        pass  # start fresh if corrupted
-                                base_time = stream_start_time or segment_start_wallclock[current_segment_num]
-                                relative_start = segment_start_wallclock[current_segment_num] - base_time
-                                all_speech_meta.append({
-                                    "segment_id": current_segment_num,
-                                    **metadata,
-                                    "start_sec": round(relative_start, 3),
-                                    "end_sec": round(relative_start + duration, 3),
-                                    "duration_sec": round(duration, 3),
-                                    "segment_dir": f"segment_{current_segment_num:04d}",
-                                    "wav_path": str(wav_path),
-                                    "meta_path": str(speech_meta_path),
-                                })
-                                with open(ALL_SPEECH_META_PATH, "w", encoding="utf-8") as f:
-                                    json.dump(all_speech_meta, f, indent=2, ensure_ascii=False)
+                                # After saving a valid speech segment, ensure non-speech starts fresh
+                                non_speech_start_time = None
+                                current_non_speech_num = None
+                                current_non_speech_buffer = None
+                                non_speech_chunks_in_segment = 0
+                                peak_rms = 0.0
+                                non_speech_wallclock.pop(current_non_speech_num or 0, None)
 
-                            # Signal end of utterance to server
-                            try:
-                                await ws.send(json.dumps({"type": "end_of_utterance"}))
-                                log.info("[speech → server] Sent end_of_utterance marker")
-                            except websockets.ConnectionClosed:
-                                log.warning("WebSocket closed while sending end marker")
-                                return
+                                # Notify server
+                                try:
+                                    await ws.send(json.dumps({"type": "end_of_utterance"}))
+                                    log.info("[speech → server] Sent end_of_utterance marker")
+                                except websockets.ConnectionClosed:
+                                    log.warning("WebSocket closed while sending end marker")
+                                    return
+                                speech_start_time = None
+                                silence_start_time = None
+                                current_segment_num = None
+                                current_segment_buffer = None
+                                speech_chunks_in_segment = 0
+                                # non-speech reset already handled above for normal speech case
 
-                            speech_start_time = None
-                            silence_start_time = None
-                            current_segment_num = None
-                            current_segment_buffer = None
-                            speech_chunks_in_segment = 0  # reset counter
-
+                    # --- Logging (after both branches) ---
                     if speech_prob >= config.vad_threshold:
                         avg_rtt = sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
-                        
-                        energy_info = ""
-                        if speech_chunk_count > 0:
-                            avg_rms   = speech_energy_sum / speech_chunk_count
-                            rms_std   = np.sqrt(
+                        if speech_chunk_count:
+                            avg_rms = speech_energy_sum / speech_chunk_count
+                            rms_std = np.sqrt(
                                 (speech_energy_sum_squares / speech_chunk_count) -
                                 (speech_energy_sum / speech_chunk_count) ** 2
                             )
                             energy_info = (
-                                f" | rms: avg={avg_rms:.4f} ±{rms_std:.4f} "
-                                f"[min={min_energy:.4f} max={max_energy:.4f}]"
+                                f" | rms: avg={avg_rms:.4f} ±{rms_std:.4f} [min={min_energy:.4f} max={max_energy:.4f}]"
                             )
-
+                        else:
+                            energy_info = ""
                         log.info(
                             "[speech → server] Sent chunk %d | rms=%.4f | speech_prob=%.3f | dur=%.2fs%s%s",
                             chunks_sent,
@@ -378,21 +531,12 @@ async def stream_microphone(ws) -> None:
                             energy_info
                         )
                     else:
-                        # Silence chunk – compute energy and always log speech_prob for VAD debugging
-                        if rms > 50.0:  # audible low-level sound (breath, noise, etc.)
-                            log.debug(
-                                "[no speech] Chunk has audible energy | rms=%.4f | speech_prob=%.3f | samples=%d",
-                                rms, speech_prob, len(chunk_np)
-                            )
-                        else:
-                            # log.debug(
-                            #     "[silence] True silence chunk | speech_prob=%.3f | rms=%.4f",
-                            #     speech_prob, rms
-                            # )
-                            pass
+                        # VAD debug
+                        if rms > 50.0:
+                            log.debug("[no speech] Chunk has audible energy | rms=%.4f | speech_prob=%.3f | samples=%d",
+                                      rms, speech_prob, len(chunk_np))
                 if processed > 0:
                     log.debug("Processed %d speech chunk(s) this cycle", processed)
-                # Periodic status update
                 if total_chunks_processed % 100 == 0:
                     status = "SPEAKING" if speech_start_time else "SILENCE"
                     seg_dur = time.monotonic() - speech_start_time if speech_start_time else 0.0
