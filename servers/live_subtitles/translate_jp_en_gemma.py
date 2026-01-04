@@ -69,6 +69,12 @@ def get_llm() -> Llama:
                     cache_type_v=CACHE_TYPE_V,
                     verbose=False,
                     tokenizer_kwargs={"add_bos_token": TOK_ADD_BOS},
+                    # ─── New performance flags ───
+                    n_batch=512,                   # Higher = faster generation (512 is safe on 6GB VRAM)
+                    n_threads=6,                   # Match your Ryzen 5 3600 (6 cores / 12 threads)
+                    n_threads_batch=6,
+                    use_mlock=True,                # Prevents swapping (faster, more stable)
+                    use_mmap=True,                 # Default but explicit
                 )
                 console.print("[bold green]Gemma model loaded and ready[/bold green]")
     return _llm_instance
@@ -80,10 +86,10 @@ def translate_text(
     text: str,
     max_tokens: int = 512,
     logprobs: int | None = None,
-    temperature: float = 0.7,
+    temperature: float = 0.2,
     top_p: float = 0.9,
-    top_k: int = 40,
-    repeat_penalty: float = 1.1,
+    top_k: int = 20,
+    repeat_penalty: float = 1.05,
     stop: Union[str, list[str], None] = ["\n\n", "English:", "</s>"],
     echo: bool = False,
 ) -> CreateCompletionResponse:
