@@ -4,6 +4,8 @@ Modern WebSocket live subtitles server (compatible with websockets ≥ 12.0 / 14
 Receives Japanese audio chunks, buffers until end-of-utterance, transcribes & translates.
 """
 
+from translate_jp_en_gemma import get_llm, translate_text
+
 import asyncio
 import base64
 import json
@@ -20,6 +22,7 @@ import scipy.io.wavfile as wavfile
 from faster_whisper import WhisperModel
 from rich.logging import RichHandler
 from transformers import AutoTokenizer
+import os
 
 from translator_types import Translator  # adjust import if needed
 from utils import split_sentences_ja
@@ -27,6 +30,10 @@ import threading
 
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
+
+# Toggle between OPUS-MT (old) and Gemma (new)
+# USE_GEMMA_TRANSLATOR = os.getenv("USE_GEMMA_TRANSLATOR", "true").lower() in ("true", "1", "yes", "on")
+USE_GEMMA_TRANSLATOR = True
 
 # Logging setup
 logging.basicConfig(
@@ -112,14 +119,17 @@ whisper_model = WhisperModel(
     compute_type="float32",
 )
 
-logger.info("Loading OPUS-MT ja→en tokenizer & translator ...")
-tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER_NAME)
-translator = Translator(
-    TRANSLATOR_MODEL_PATH,
-    device="cpu",
-    compute_type="int8",
-    inter_threads=4,  # tune to your cores
-)
+if not USE_GEMMA_TRANSLATOR:
+    logger.info("Loading OPUS-MT ja→en tokenizer & translator ...")
+    tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER_NAME)
+    translator = Translator(
+        TRANSLATOR_MODEL_PATH,
+        device="cpu",
+        compute_type="int8",
+        inter_threads=4,  # tune to your cores
+    )
+else:
+    get_llm()
 
 logger.info("Models loaded.")
 
@@ -165,6 +175,51 @@ connected_states: dict[asyncio.StreamWriter, ConnectionState] = {}
 executor = ThreadPoolExecutor(max_workers=3)  # conservative — GTX 1660
 
 DEFAULT_OUT_DIR: Optional[Path] = None  # ← change to Path("utterances") if you want default permanent storage
+
+# ───────────────────────────────────────────────
+# New: Gemma translation logic
+# ───────────────────────────────────────────────
+
+def translate_with_gemma(sentences_ja: List[str]) -> tuple[str, float | None]:
+    """
+    Translate list of Japanese sentences using Gemma model.
+    Returns combined English text and approximate average log-prob (or None).
+    """
+    if not sentences_ja:
+        return "", None
+
+    en_sentences: List[str] = []
+    logprobs_sum = 0.0
+    token_count = 0
+
+    for sent in sentences_ja:
+        if not sent.strip():
+            continue
+        try:
+            response = translate_text(
+                text=sent.strip(),
+                max_tokens=256,
+                temperature=0.0,          # greedy
+                logprobs=1,               # request top-1 logprobs
+            )
+            choice = response["choices"][0]
+            translated = choice["text"].strip()
+            if translated:
+                en_sentences.append(translated)
+
+            # Extract logprobs if available
+            if (lp_data := choice.get("logprobs")):
+                lp_values = [v for v in lp_data.get("token_logprobs", []) if v is not None]
+                if lp_values:
+                    logprobs_sum += sum(lp_values)
+                    token_count += len(lp_values)
+        except Exception as e:
+            logger.error(f"Gemma translation error for '{sent[:50]}...': {e}")
+            continue
+
+    en_text = "\n".join(en_sentences).strip()
+    avg_logprob = logprobs_sum / token_count if token_count > 0 else None
+    return en_text, avg_logprob
 
 # ───────────────────────────────────────────────
 # Transcribe and translate with quality/confidence
@@ -244,42 +299,54 @@ def transcribe_and_translate(
     # ─── Translation ───────────────────────────────────────────────
     sentences_ja: List[str] = split_sentences_ja(ja_text)
     en_sentences: List[str] = []
+    en_text: str = ""
     translation_logprob: float | None = None
     translation_confidence: float | None = None
 
     if sentences_ja:
-        batch_src_tokens = [
-            tokenizer.convert_ids_to_tokens(tokenizer.encode(sent.strip()))
-            for sent in sentences_ja if sent.strip()
-        ]
+        if USE_GEMMA_TRANSLATOR:
+            en_text, translation_logprob = translate_with_gemma(sentences_ja)
+        else:
+            # Original OPUS-MT logic (kept as fallback)
+            batch_src_tokens = [
+                tokenizer.convert_ids_to_tokens(tokenizer.encode(sent.strip()))
+                for sent in sentences_ja if sent.strip()
+            ]
 
-        if batch_src_tokens:
-            results = translator.translate_batch(
-                batch_src_tokens,
-                return_scores=True,          # Enable score extraction
-                beam_size=4,
-                max_decoding_length=512,
-            )
+            if batch_src_tokens:
+                results = translator.translate_batch(
+                    batch_src_tokens,
+                    return_scores=True,          # Enable score extraction
+                    beam_size=4,
+                    max_decoding_length=512,
+                )
 
-            for result in results:
-                hyp = result.hypotheses[0]
-                en_sent = tokenizer.decode(
-                    tokenizer.convert_tokens_to_ids(hyp),
-                    skip_special_tokens=True
-                ).strip()
-                if en_sent:
-                    en_sentences.append(en_sent)
+                for result in results:
+                    hyp = result.hypotheses[0]
+                    en_sent = tokenizer.decode(
+                        tokenizer.convert_tokens_to_ids(hyp),
+                        skip_special_tokens=True
+                    ).strip()
+                    if en_sent:
+                        en_sentences.append(en_sent)
 
-                # Take score from first/best hypothesis
-                if hasattr(result, "scores") and result.scores:
-                    # For multi-sentence → take the first one (or average/min later if needed)
-                    translation_logprob = result.scores[0]
-                    num_output_tokens = len(hyp)  # exact number of output tokens
-                    translation_confidence = translation_confidence_score(
-                        translation_logprob, num_output_tokens, min_tokens=3
-                    )
+                    # Take score from first/best hypothesis
+                    if hasattr(result, "scores") and result.scores:
+                        translation_logprob = result.scores[0]
+                        num_output_tokens = len(hyp)
+                        translation_confidence = translation_confidence_score(
+                            translation_logprob, num_output_tokens, min_tokens=3
+                        )
+            en_text = "\n".join(en_sentences)
 
-    en_text = "\n".join(en_sentences)
+    # Common post-processing for confidence (works for both translators)
+    if translation_logprob is not None:
+        est_tokens = max(1, int(len(en_text.split()) * 1.3))
+        translation_confidence = translation_confidence_score(
+            translation_logprob, est_tokens, min_tokens=3
+        )
+    else:
+        translation_confidence = None
 
     translation_quality = translation_quality_label(translation_logprob)
 
@@ -294,7 +361,7 @@ def transcribe_and_translate(
     logger.info(
         "[translation]   log_prob=%s → quality=%s | en=%s",
         f"{translation_logprob:.4f}" if translation_logprob is not None else "N/A",
-        translation_quality,
+        translation_quality_label(translation_logprob),
         en_text[:70] + "..." if len(en_text) > 70 else en_text
     )
 
@@ -324,7 +391,7 @@ def transcribe_and_translate(
         "translation": {
             "text_en": en_text,
             "log_prob": round(translation_logprob, 4) if translation_logprob is not None else None,
-            "confidence": round(translation_confidence, 4) if 'translation_confidence' in locals() else None,
+            "confidence": round(translation_confidence, 4) if translation_confidence is not None else None,
             "quality_label": translation_quality,
         },
         "segments": segments_list,
@@ -455,7 +522,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    import os
     import shutil
     out_dir_str = os.getenv("UTTERANCE_OUT_DIR")
     if out_dir_str:

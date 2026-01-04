@@ -207,7 +207,7 @@ def print_results(results: List[Dict]):
 if __name__ == "__main__":
     from utils import resolve_audio_paths
 
-    audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server_for_test"
+    audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server_spyxfamily_intro"
     audio_paths = resolve_audio_paths(audio_dir, recursive=True)
 
     if not audio_paths:
