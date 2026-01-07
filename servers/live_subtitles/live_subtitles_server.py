@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 import numpy as np
 import scipy.io.wavfile as wavfile
 from faster_whisper import WhisperModel
-from preprocessors import normalize_loudness
 from rich.logging import RichHandler
 from transformers import AutoTokenizer
 
@@ -179,7 +178,6 @@ def transcribe_and_translate(
     end_of_utterance_received_at: datetime,        # when end marker was received (UTC)
     received_at: Optional[datetime] = None,        # when first chunk received (UTC, optional)
     out_dir: Optional[Path] = None,
-    enable_preprocessing: bool = False,
 ) -> tuple[str, str, float, dict]:
     """Blocking function — run in executor."""
     processing_started_at = datetime.now(timezone.utc)
@@ -194,31 +192,9 @@ def transcribe_and_translate(
     else:
         audio_path = Path(f"temp_{stem}.wav")
 
+    # Write audio
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
-
-    audio_float = arr.astype(np.float32) / 32768.0  # int16 → normalized float [-1, 1]
-
-    if enable_preprocessing:
-        # Preprocessing pipeline — easily extensible
-        preprocessors = [
-            lambda a, fs: normalize_loudness(
-                a, fs,
-                target_lufs=-18.0,           # ← tune this value as needed
-                min_lufs_threshold=-50.0,    # avoid boosting near-silent chunks too much
-            ),
-            # Future: add more steps here, e.g. high-pass filter, noise gate, etc.
-        ]
-
-        logger.debug(f"[{client_id}] Applying {len(preprocessors)} preprocessor(s)")
-        for proc in preprocessors:
-            audio_float = proc(audio_float, sr)
-
-    # Convert back to int16 for file writing & whisper compatibility
-    wavfile.write(
-        str(audio_path),
-        sr,
-        (audio_float * 32767).astype(np.int16)
-    )
+    wavfile.write(str(audio_path), sr, arr)
 
     # ─── Transcription ─────────────────────────────────────────────
     segments, info = whisper_model.transcribe(
@@ -226,7 +202,7 @@ def transcribe_and_translate(
         language="ja",
         beam_size=5,
         vad_filter=False,
-        condition_on_previous_text=True,
+        condition_on_previous_text=False,
     )
 
     ja_text_parts = []
@@ -427,9 +403,8 @@ async def handler(websocket):
                         state.client_id,
                         state.utterance_count,
                         state.end_of_utterance_received_at,
-                        state.first_chunk_received_at,  # was: received_at
+                        state.first_chunk_received_at,   # received_at
                         DEFAULT_OUT_DIR,
-                        True,      # set enable_preprocessing to True
                     )
 
                     # Payload follows updated context (includes quality/conf/logprob)
