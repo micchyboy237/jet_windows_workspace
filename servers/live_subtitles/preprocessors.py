@@ -267,96 +267,6 @@ def normalize_loudness(
     return normalized_audio
 
 
-if __name__ == "__main__":
-    import argparse
-    import sys
-    import soundfile as sf
-    import shutil
-    from pathlib import Path
-    from rich import print as rprint
-
-    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    INPUT_AUDIO = "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/generated/run_record_mic/recording_missav_5mins.wav"
-    OUTPUT_AUDIO = OUTPUT_DIR / (Path(INPUT_AUDIO).stem + "_norm" + Path(INPUT_AUDIO).suffix)
-
-    parser = argparse.ArgumentParser(
-        description="Normalize loudness of a WAV file to target LUFS (ITU-R BS.1770-4)."
-    )
-    parser.add_argument(
-        "input",
-        type=Path,
-        nargs="?",  # Make positional input optional
-        default=Path(INPUT_AUDIO),
-        help="Input WAV file path"
-    )
-    parser.add_argument(
-        "output",
-        type=Path,
-        nargs="?",  # Make it optional
-        default=OUTPUT_AUDIO,
-        help="Output WAV file path (default: <input>_norm.wav)"
-    )
-    parser.add_argument(
-        "-t",
-        "--target",
-        type=float,
-        default=-14.0,
-        help="Target integrated loudness in LUFS (default: -14.0)",
-    )
-    parser.add_argument(
-        "--dtype",
-        type=str,
-        choices=["float32", "float64", "int16", "int32"],
-        default=None,
-        help="Output data type: float32, float64, int16, int32. "
-             "If not specified, automatically matches the input file's native subtype when possible "
-             "(e.g., int16 input → int16 output). Falls back to float32.",
-    )
-
-    args = parser.parse_args()
-
-    input_path: Path = args.input
-    if not input_path.is_file():
-        rprint(f"[red]Error: Input file not found: {input_path}[/red]")
-        sys.exit(1)
-
-    output_path = args.output or input_path.with_name(f"{input_path.stem}_norm{input_path.suffix}")
-
-    rprint(f"[bold]Loading audio:[/bold] {input_path}")
-    audio, sr = sf.read(input_path, always_2d=False)
-    audio = np.asarray(audio, dtype=np.float32)
-
-    # Measure original loudness
-    meter = pyln.Meter(sr)
-    try:
-        original_lufs = meter.integrated_loudness(audio)
-    except Exception:
-        original_lufs = float("-inf")
-
-    rprint(f"[bold]Normalizing[/bold] to {args.target} LUFS...")
-    normalized_audio = normalize_loudness(
-        audio,
-        sr,
-        target_lufs=args.target,
-        return_dtype=args.dtype,
-        mode="speech",
-    )
-
-    # Measure final loudness
-    try:
-        final_lufs = meter.integrated_loudness(normalized_audio)
-    except Exception:
-        final_lufs = float("-inf")
-
-    rprint(f"[green]Original:[/green] {original_lufs:.2f} LUFS → [green]Normalized:[/green] {final_lufs:.2f} LUFS")
-    rprint(f"[bold]Writing output:[/bold] {output_path}")
-    sf.write(output_path, normalized_audio, sr)
-    rprint("[bold green]Done![/bold green]")
-
-
 # Allow flexible input types
 AudioInput = Union[
     str,
@@ -450,3 +360,93 @@ def has_sound(
     """
     rms_energy = get_audio_energy(audio)
     return rms_energy > threshold
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+    import soundfile as sf
+    import shutil
+    from pathlib import Path
+    from rich import print as rprint
+
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    INPUT_AUDIO = "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/generated/run_record_mic/recording_missav_5mins.wav"
+    OUTPUT_AUDIO = OUTPUT_DIR / (Path(INPUT_AUDIO).stem + "_norm" + Path(INPUT_AUDIO).suffix)
+
+    parser = argparse.ArgumentParser(
+        description="Normalize loudness of a WAV file to target LUFS (ITU-R BS.1770-4)."
+    )
+    parser.add_argument(
+        "input",
+        type=Path,
+        nargs="?",  # Make positional input optional
+        default=Path(INPUT_AUDIO),
+        help="Input WAV file path"
+    )
+    parser.add_argument(
+        "output",
+        type=Path,
+        nargs="?",  # Make it optional
+        default=OUTPUT_AUDIO,
+        help="Output WAV file path (default: <input>_norm.wav)"
+    )
+    parser.add_argument(
+        "-t",
+        "--target",
+        type=float,
+        default=-14.0,
+        help="Target integrated loudness in LUFS (default: -14.0)",
+    )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        choices=["float32", "float64", "int16", "int32"],
+        default=None,
+        help="Output data type: float32, float64, int16, int32. "
+             "If not specified, automatically matches the input file's native subtype when possible "
+             "(e.g., int16 input → int16 output). Falls back to float32.",
+    )
+
+    args = parser.parse_args()
+
+    input_path: Path = args.input
+    if not input_path.is_file():
+        rprint(f"[red]Error: Input file not found: {input_path}[/red]")
+        sys.exit(1)
+
+    output_path = args.output or input_path.with_name(f"{input_path.stem}_norm{input_path.suffix}")
+
+    rprint(f"[bold]Loading audio:[/bold] {input_path}")
+    audio, sr = sf.read(input_path, always_2d=False)
+    audio = np.asarray(audio, dtype=np.float32)
+
+    # Measure original loudness
+    meter = pyln.Meter(sr)
+    try:
+        original_lufs = meter.integrated_loudness(audio)
+    except Exception:
+        original_lufs = float("-inf")
+
+    rprint(f"[bold]Normalizing[/bold] to {args.target} LUFS...")
+    normalized_audio = normalize_loudness(
+        audio,
+        sr,
+        target_lufs=args.target,
+        return_dtype=args.dtype,
+        mode="speech",
+    )
+
+    # Measure final loudness
+    try:
+        final_lufs = meter.integrated_loudness(normalized_audio)
+    except Exception:
+        final_lufs = float("-inf")
+
+    rprint(f"[green]Original:[/green] {original_lufs:.2f} LUFS → [green]Normalized:[/green] {final_lufs:.2f} LUFS")
+    rprint(f"[bold]Writing output:[/bold] {output_path}")
+    sf.write(output_path, normalized_audio, sr)
+    rprint("[bold green]Done![/bold green]")
