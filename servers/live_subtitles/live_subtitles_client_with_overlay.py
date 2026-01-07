@@ -17,6 +17,9 @@ from pysilero_vad import SileroVoiceActivityDetector
 from rich.logging import RichHandler
 import scipy.io.wavfile as wavfile
 import numpy as np
+import matplotlib
+
+matplotlib.use('Agg')  # Non-interactive backend – prevents GUI thread warnings
 import matplotlib.pyplot as plt
 
 import datetime
@@ -29,7 +32,7 @@ from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
 from pathlib import Path
 from typing import List, Tuple
 
-from preprocessors import normalize_loudness
+from preprocessors import normalize_loudness, get_audio_energy, has_sound
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
@@ -310,16 +313,17 @@ async def stream_microphone(ws) -> None:
                     # Hard clip to prevent distortion
                     agc_chunk_float = np.clip(agc_chunk_float, -1.0, 1.0)
 
-                    # Use AGC-processed audio for RMS and VAD decisions
-                    rms = float(np.sqrt(np.mean(agc_chunk_float ** 2)))
-                    has_sound = rms > 50.0
+                    # Use standardized, tested preprocessors for consistent energy and audibility detection
+                    # agc_chunk_float is normalized float32 in [-1, 1]
+                    chunk_energy = get_audio_energy(agc_chunk_float)
+                    chunk_has_sound = has_sound(agc_chunk_float)  # default threshold ≈ -40 dBFS (RMS > 0.01)
 
-                    # Peak RMS per non-speech segment
+                    # Peak RMS/Energy per non-speech segment
                     if speech_start_time is None:
                         if non_speech_start_time is not None:
-                            peak_rms = max(peak_rms, rms) if 'peak_rms' in locals() else rms
+                            peak_rms = max(peak_rms, chunk_energy)
                         else:
-                            peak_rms = rms
+                            peak_rms = chunk_energy
 
                     del pcm_buffer[:VAD_CHUNK_BYTES]
                     total_chunks_processed += 1
@@ -366,8 +370,8 @@ async def stream_microphone(ws) -> None:
                             speech_chunk_count = 0
                             speech_energy_sum = 0.0
                             speech_energy_sum_squares = 0.0
-                            max_energy = rms
-                            min_energy = rms
+                            max_energy = chunk_energy
+                            min_energy = chunk_energy
                             log.info("[speech] Speech started | segment_%04d", current_segment_num)
                             speech_duration_sec = 0.0
                             # Reset collection lists for new speech segment
@@ -382,20 +386,20 @@ async def stream_microphone(ws) -> None:
 
                         # Collect per-chunk data for later saving
                         speech_probs.append(speech_prob)
-                        speech_rms_list.append(rms)
+                        speech_rms_list.append(chunk_energy)
 
-                        max_energy = max(max_energy, rms)
-                        min_energy = min(min_energy, rms)
-                        speech_energy_sum += rms
-                        speech_energy_sum_squares += rms ** 2
+                        max_energy = max(max_energy, chunk_energy)
+                        min_energy = min(min_energy, chunk_energy)
+                        speech_energy_sum += chunk_energy
+                        speech_energy_sum_squares += chunk_energy ** 2
 
                         # Accumulate only — no per-chunk send anymore
                         speech_duration_sec += VAD_CHUNK_SAMPLES / config.sample_rate
 
                         # No per-chunk logging of sends anymore
-                        if rms > 50.0 and speech_prob < config.vad_threshold:
+                        if chunk_energy > 0.01 and speech_prob < config.vad_threshold:
                             log.debug("[no speech] Chunk has audible energy | rms=%.4f | speech_prob=%.3f | samples=%d",
-                                      rms, speech_prob, len(chunk_np))
+                                      chunk_energy, speech_prob, len(chunk_np))
 
                         # Reset non-speech state
                         non_speech_start_time = None
@@ -420,15 +424,15 @@ async def stream_microphone(ws) -> None:
                                 non_speech_wallclock[current_non_speech_num] = time.time()
                                 current_non_speech_buffer = bytearray()
                                 non_speech_chunks_in_segment = 0
-                                peak_rms = rms
+                                peak_rms = chunk_energy
 
                                 # Reset energy stats
                                 non_speech_energy_sum = 0.0
                                 non_speech_energy_sum_squares = 0.0
-                                non_speech_max_energy = rms
-                                non_speech_min_energy = rms
+                                non_speech_max_energy = chunk_energy
+                                non_speech_min_energy = chunk_energy
 
-                                if has_sound:
+                                if chunk_has_sound:
                                     log.info("[non-speech] Non-speech segment started | segment_%04d", current_non_speech_num)
 
                                 # Reset collection lists for new non-speech segment
@@ -441,18 +445,18 @@ async def stream_microphone(ws) -> None:
 
                                 # Collect per-chunk data for non-speech
                                 non_speech_probs.append(speech_prob)
-                                non_speech_rms_list.append(rms)
+                                non_speech_rms_list.append(chunk_energy)
 
                             # Accumulate energy stats
-                            non_speech_energy_sum += rms
-                            non_speech_energy_sum_squares += rms ** 2
-                            non_speech_max_energy = max(non_speech_max_energy, rms)
-                            non_speech_min_energy = min(non_speech_min_energy, rms)
-                            peak_rms = max(peak_rms, rms)
+                            non_speech_energy_sum += chunk_energy
+                            non_speech_energy_sum_squares += chunk_energy ** 2
+                            non_speech_max_energy = max(non_speech_max_energy, chunk_energy)
+                            non_speech_min_energy = min(non_speech_min_energy, chunk_energy)
+                            peak_rms = max(peak_rms, chunk_energy)
 
-                            # Save: ≥3s or noise ≥1s
+                            # Save: ≥3s or sound ≥1s
                             elapsed = time.monotonic() - non_speech_start_time
-                            if elapsed >= 3.0 or (rms > 100.0 and elapsed >= 1.0):
+                            if elapsed >= 3.0 or (chunk_has_sound and elapsed >= 1.0):
                                 if current_non_speech_buffer and non_speech_chunks_in_segment > 0:
                                     num_samples = len(current_non_speech_buffer) // 2
                                     duration = num_samples / config.sample_rate
@@ -470,12 +474,26 @@ async def stream_microphone(ws) -> None:
                                         (non_speech_energy_sum_squares / chunk_count) - (avg_rms ** 2)
                                     ) if chunk_count > 1 else 0.0
 
-                                    # Save only if audible
-                                    if not has_sound and peak_rms > 0.0 and peak_rms <= 50.0:
-                                        log.info(
-                                            "[non-speech] Skipping save of pure silence segment_%04d | peak_rms=%.4f",
-                                            current_non_speech_num, peak_rms
+                                    # Decide whether the entire accumulated non-speech segment is worth saving.
+                                    # Reconstruct the full buffer as normalized float to use the same preprocessors.
+                                    if current_non_speech_buffer:
+                                        full_non_speech_np = (
+                                            np.frombuffer(current_non_speech_buffer, dtype=np.int16)
+                                            .astype(np.float32)
+                                            / 32768.0
                                         )
+                                        segment_has_sound = has_sound(full_non_speech_np)
+                                        segment_energy = get_audio_energy(full_non_speech_np)
+                                    else:
+                                        segment_has_sound = False
+                                        segment_energy = 0.0
+
+                                    # Skip saving if the whole segment is effectively silent
+                                    if not segment_has_sound and segment_energy <= 0.001:
+                                        # log.info(
+                                        #     "[non-speech] Skipping save of pure silence segment_%04d | energy=%.6f",
+                                        #     current_non_speech_num, segment_energy
+                                        # )
                                         non_speech_start_time = None
                                         current_non_speech_num = None
                                         current_non_speech_buffer = None
@@ -517,14 +535,16 @@ async def stream_microphone(ws) -> None:
                                         "duration_sec": round(duration, 3),
                                         "num_chunks": non_speech_chunks_in_segment,
                                         "num_samples": num_samples,
-                                        "rms_last_chunk": float(round(rms, 4)),
+                                        "rms_last_chunk": float(round(chunk_energy, 4)),
                                         "peak_rms": float(round(peak_rms, 4)),
-                                        "has_audible_sound": has_sound,
+                                        "has_audible_sound": segment_has_sound,
                                         "audio_energy": {
                                             "rms_min": float(round(non_speech_min_energy, 4)),
                                             "rms_max": float(round(non_speech_max_energy, 4)),
                                             "rms_ave": float(round(avg_rms, 4)),
                                             "rms_std": float(round(rms_std, 4)),
+                                            # Global RMS computed consistently with preprocessors
+                                            "global_rms": float(round(segment_energy, 6)),
                                         },
                                     }
                                     meta_path = os.path.join(seg_dir, "metadata.json")

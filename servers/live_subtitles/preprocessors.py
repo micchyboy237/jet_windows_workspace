@@ -355,3 +355,98 @@ if __name__ == "__main__":
     rprint(f"[bold]Writing output:[/bold] {output_path}")
     sf.write(output_path, normalized_audio, sr)
     rprint("[bold green]Done![/bold green]")
+
+
+# Allow flexible input types
+AudioInput = Union[
+    str,
+    bytes,
+    os.PathLike,
+    npt.NDArray[np.floating | np.integer],
+    "torch.Tensor",
+]
+
+def get_audio_energy(audio: AudioInput) -> float:
+    """
+    Compute the root mean square (RMS) energy of a given audio input.
+    The RMS is calculated across all samples and channels, providing a single
+    measure of overall signal energy.
+
+    Args:
+        audio: AudioInput
+            Audio signal as NumPy array, torch.Tensor, file path (str/os.PathLike),
+            or raw bytes (WAV-compatible).
+
+    Returns:
+        float: RMS energy value.
+            - For normalized audio (range [-1, 1]), typically [0.0, 0.707] for typical signals.
+            - Returns 0.0 for silent/empty audio.
+
+    Raises:
+        ValueError: If the input type is not supported.
+    """
+    import numpy as np
+    import soundfile as sf
+    import os
+    from io import BytesIO
+    try:
+        import torch
+    except ImportError:
+        torch = None
+
+    # Load audio to np.float32 array
+    if isinstance(audio, np.ndarray):
+        audio_np = np.asarray(audio, dtype=np.float32)
+    elif torch is not None and isinstance(audio, torch.Tensor):
+        audio_np = audio.detach().cpu().float().numpy()
+    elif isinstance(audio, (str, os.PathLike)):
+        audio_np, _ = sf.read(str(audio), always_2d=False)
+        audio_np = np.asarray(audio_np, dtype=np.float32)
+    elif isinstance(audio, bytes):
+        with BytesIO(audio) as buf:
+            audio_np, _ = sf.read(buf, always_2d=False)
+        audio_np = np.asarray(audio_np, dtype=np.float32)
+    else:
+        raise ValueError(f"Unsupported audio input type: {type(audio)!r}")
+
+    # Handle empty or zero-length audio
+    if audio_np.size == 0:
+        return 0.0
+
+    # Compute global RMS across all samples and all channels (standard in audio)
+    # We explicitly flatten to avoid any ambiguity
+    flattened = audio_np.reshape(-1)
+    mean_square = np.mean(np.square(flattened))
+    rms = float(np.sqrt(mean_square))
+    return rms
+
+def has_sound(
+    audio: AudioInput,
+    *,
+    threshold: float = 0.01
+) -> bool:
+    """
+    Determine if the audio contains perceptible sound.
+
+    Uses RMS energy to decide. Audio with RMS energy above the threshold
+    is considered to have sound (e.g., speech, music). Below the threshold
+    it is treated as silence or near-silence.
+
+    Args:
+        audio: AudioInput
+            Same supported formats as :func:`get_audio_energy`.
+        threshold: float, optional
+            RMS threshold above which audio is considered to have sound.
+            Default is 0.01, which corresponds to approximately -40 dBFS
+            (a common practical value for distinguishing silence from content).
+
+    Returns:
+        bool: True if the audio has perceptible sound, False otherwise.
+
+    Example:
+        >>> has_sound("speech.wav")          # True for normal speech
+        >>> has_sound("silent.wav")          # False
+        >>> has_sound(noisy_but_quiet, threshold=0.005)  # more sensitive
+    """
+    rms_energy = get_audio_energy(audio)
+    return rms_energy > threshold
