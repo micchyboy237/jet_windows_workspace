@@ -45,16 +45,15 @@ exclude_files = [
     # "*.md",
 ]
 include_files = [
-    # "/Users/jethroestrada/Library/Application Support/Cursor/User/profiles/244a6bcd/settings.json",
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/pyrightconfig.json",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Examples\.vscode\launch.json",
 
-    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/services/transcribe_service.py",
-    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/services/translate_service.py",
-    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/main.py",
-    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/utils/audio_utils.py",
-    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/routers/transcription.py",
-    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/routers/translation.py",
-    "C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/audio_server/python_scripts/server/models/responses.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
+
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\preprocessors.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\tests\test_normalize_loudness.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\tests\__init__.py",
+
+    r"",
 ]
 
 structure_include = [
@@ -71,11 +70,19 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-- /transcribe_translate should have correct response format
-- Add new endpoint "/transcribe"
+Update to use this as audio input type
+AudioInput = Union[
+    str,
+    bytes,
+    os.PathLike,
+    npt.NDArray[np.floating | np.integer],
+    "torch.Tensor",
+]
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
+- Write step by step analysis
+- Provide a single diff for each updated file
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """
