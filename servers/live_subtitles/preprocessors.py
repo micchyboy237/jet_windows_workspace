@@ -1,3 +1,5 @@
+# preprocessors.py
+
 """
 Standalone loudness normalization utility.
 
@@ -9,7 +11,8 @@ performance, clipping prevention, and graceful fallback for silent/failed cases.
 from __future__ import annotations
 
 import logging
-from typing import Union, Optional
+from typing import Union
+from typing import Optional, Literal
 import os
 
 import numpy as np
@@ -34,6 +37,7 @@ AudioInput = Union[
     "torch.Tensor",
 ]
 
+VALID_DTYPE_STRINGS = Literal["float32", "float64", "int16", "int32"]
 
 def normalize_loudness(
     audio: AudioInput,
@@ -41,6 +45,9 @@ def normalize_loudness(
     target_lufs: float = -14.0,
     min_lufs_threshold: float = -70.0,
     headroom_factor: float = 1.05,
+    mode: Optional[Literal["general", "speech"]] = None,
+    max_loudness_threshold: Optional[float] = None,
+    return_dtype: Optional[Union[VALID_DTYPE_STRINGS, np.dtype]] = None,
 ) -> np.ndarray:
     """
     Normalize audio to a target integrated loudness (LUFS).
@@ -58,6 +65,18 @@ def normalize_loudness(
                             to avoid amplifying pure noise/silence.
         headroom_factor: Multiplier applied after normalization to prevent clipping
                          (default 1.05 → ~0.87 peak).
+        mode: Optional preset mode.
+              - "speech": Optimized for spoken word – louder target (-13.0 LUFS)
+                and minimal headroom (1.0) for maximum clarity.
+              - "general" or None: Standard music/streaming settings.
+        max_loudness_threshold: Optional upper bound (in LUFS).
+            If provided and measured loudness exceeds this value,
+            normalization will not amplify (only attenuate if needed).
+            Useful to prevent boosting already-loud speech content.
+        return_dtype: Desired dtype of returned array.
+            - None: preserve input dtype if ndarray, else float32
+            - "float32", "float64", np.float32, np.float64
+            - "int16", "int32", np.int16, np.int32 → scales [-1,1] → integer range
 
     Returns:
         Normalized audio array with the same shape as input.
@@ -68,6 +87,7 @@ def normalize_loudness(
         RuntimeError: If audio loading fails (for path/bytes inputs).
     """
     # Load and unify input to np.float32 ndarray
+    original_dtype = None
     if isinstance(audio, (str, os.PathLike)):
         # File path input
         audio_path = str(audio)
@@ -82,10 +102,11 @@ def normalize_loudness(
         loaded_audio = audio.cpu().numpy()
     elif isinstance(audio, np.ndarray):
         loaded_audio = audio
+        original_dtype = loaded_audio.dtype
     else:
         raise TypeError(f"Unsupported audio input type: {type(audio)}")
 
-    # Convert to float32
+    # Convert to float32 for processing
     if not isinstance(loaded_audio, np.ndarray) or loaded_audio.dtype != np.float32:
         loaded_audio = np.asarray(loaded_audio, dtype=np.float32)
 
@@ -106,30 +127,144 @@ def normalize_loudness(
         meter = pyln.Meter(sample_rate)
         _METER_CACHE[sample_rate] = meter
 
+    # --- main LUFS logic + short-audio fallback ---
+    # Prepare variables for fallback use
+    effective_target_lufs = target_lufs
+    effective_headroom_factor = headroom_factor
+    apply_peak_norm = False
+
+    if mode == "speech":
+        if target_lufs == -14.0:
+            effective_target_lufs = -13.0
+        effective_headroom_factor = 1.0
+        apply_peak_norm = True
+        logger.debug("Speech mode activated: target_lufs=%.1f, headroom_factor=1.0", effective_target_lufs)
+    elif mode == "general":
+        pass
+    elif mode is not None:
+        raise ValueError(f"Invalid mode: {mode!r}. Allowed: 'general', 'speech', or None.")
+
     try:
         measured_lufs = meter.integrated_loudness(audio)
         logger.debug(f"Measured integrated loudness: {measured_lufs:.2f} LUFS")
     except Exception as exc:
-        logger.warning(f"LUFS measurement failed ({exc}), returning original audio")
-        return audio.copy()  # Return copy to avoid modifying input arrays/tensors
+        # pyloudnorm raises ValueError when audio is shorter than one gating block (~0.4s)
+        if "Audio must have length greater than the block size" in str(exc):
+            logger.info(
+                "Audio too short for reliable LUFS measurement (< ~0.4s). "
+                "Falling back to peak normalization."
+            )
+            # Use same headroom logic as main path
 
-    if measured_lufs <= min_lufs_threshold:
-        logger.debug("Audio too quiet – skipping loudness normalization")
-        return audio.copy()
+            peak = np.max(np.abs(audio))
+            if peak == 0:
+                logger.debug("Silent audio detected in short clip fallback")
+                return audio.copy()
 
-    try:
-        normalized = pyln.normalize.loudness(audio, measured_lufs, target_lufs)
-    except Exception as exc:
-        logger.warning(f"LUFS normalization failed ({exc}), returning original audio")
-        return audio.copy()
+            normalized = audio / peak  # bring peak to 1.0
+            # Apply headroom (same as main path)
+            normalized /= effective_headroom_factor
 
-    # Prevent clipping with headroom
-    peak = np.max(np.abs(normalized))
-    if peak > 1.0:
-        normalized /= peak * headroom_factor
-        logger.debug(f"Applied headroom – post-norm peak reduced to {np.max(np.abs(normalized)):.3f}")
+            # Speech mode secondary peak boost
+            if apply_peak_norm:
+                current_peak = np.max(np.abs(normalized))
+                if current_peak < 0.95:
+                    target_peak = 0.99
+                    gain = target_peak / current_peak
+                    normalized *= gain
+                    logger.debug(
+                        "Speech mode (short audio): applied secondary peak normalization "
+                        "(gain=%.3f, final peak=%.3f)", gain, np.max(np.abs(normalized))
+                    )
+                normalized = np.clip(normalized, -1.0, 1.0)
 
-    return normalized.copy()  # Safe return (original input unchanged)
+            normalized_audio = normalized.astype(np.float32).copy()
+            # Shared dtype handling is applied later
+        else:
+            logger.warning(f"Unexpected LUFS measurement failure ({exc}), returning original audio")
+            return audio.copy()
+    else:
+        if measured_lufs <= min_lufs_threshold:
+            logger.debug("Audio too quiet – skipping loudness normalization")
+            return audio.copy()
+
+        # Optional cap: prevent amplification of already-loud content
+        if max_loudness_threshold is not None:
+            if measured_lufs > max_loudness_threshold:
+                effective_target_lufs = min(effective_target_lufs, measured_lufs)
+                logger.debug(
+                    "Measured loudness %.2f exceeds max threshold %.2f – "
+                    "preventing amplification (effective target: %.2f)",
+                    measured_lufs, max_loudness_threshold, effective_target_lufs
+                )
+
+        try:
+            normalized = pyln.normalize.loudness(audio, measured_lufs, effective_target_lufs)
+        except Exception as exc:
+            logger.warning(f"LUFS normalization failed ({exc}), returning original audio")
+            return audio.copy()
+
+        peak = np.max(np.abs(normalized))
+        if peak > 1.0:
+            normalized /= peak * effective_headroom_factor
+            logger.debug(f"Applied headroom – post-norm peak reduced to {np.max(np.abs(normalized)):.3f}")
+        else:
+            if apply_peak_norm:
+                current_peak = np.max(np.abs(normalized))
+                if current_peak < 0.95:
+                    target_peak = 0.99
+                    gain = target_peak / current_peak
+                    normalized *= gain
+                    logger.debug(
+                        "Speech mode: applied secondary peak normalization (gain=%.3f, final peak=%.3f)",
+                        gain,
+                        np.max(np.abs(normalized))
+                    )
+                normalized = np.clip(normalized, -1.0, 1.0)
+
+        normalized_audio = normalized.astype(np.float32).copy()
+
+    # Shared final dtype handling (works for both LUFS-path and peak fallback)
+    ALLOWED_OUTPUT_TYPES = {np.float32, np.float64, np.int16, np.int32}
+
+    if return_dtype is not None:
+        target_dtype = np.dtype(return_dtype)
+        target_type = target_dtype.type
+
+        if target_type not in ALLOWED_OUTPUT_TYPES:
+            raise ValueError(
+                f"Unsupported return_dtype: {return_dtype!r}. "
+                "Supported: 'float32', 'float64', 'int16', 'int32' (or their np.dtype equivalents)."
+            )
+
+        if target_type is np.float64:
+            normalized_audio = normalized_audio.astype(np.float64)
+        elif target_type is np.int16:
+            normalized_audio = np.clip(normalized_audio, -1.0, 1.0)
+            normalized_audio = (normalized_audio * 32767.0).astype(np.int16)
+        elif target_type is np.int32:
+            normalized_audio = np.clip(normalized_audio, -1.0, 1.0)
+            normalized_audio = (normalized_audio * 2147483647.0).astype(np.int32)
+        # else: np.float32 is default
+    else:
+        if original_dtype is not None:
+            if np.issubdtype(original_dtype, np.floating):
+                normalized_audio = normalized_audio.astype(original_dtype)
+            elif np.issubdtype(original_dtype, np.integer):
+                if original_dtype == np.int16:
+                    normalized_audio = np.clip(normalized_audio, -1.0, 1.0)
+                    normalized_audio = (normalized_audio * 32767.0).astype(np.int16)
+                elif original_dtype == np.int32:
+                    normalized_audio = np.clip(normalized_audio, -1.0, 1.0)
+                    normalized_audio = (normalized_audio * 2147483647.0).astype(np.int32)
+                else:
+                    normalized_audio = normalized_audio.astype(np.float32)
+            else:
+                normalized_audio = normalized_audio.astype(np.float32)
+        else:
+            normalized_audio = normalized_audio.astype(np.float32)
+
+    return normalized_audio
 
 
 if __name__ == "__main__":
@@ -144,7 +279,7 @@ if __name__ == "__main__":
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    INPUT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_5mins.wav"
+    INPUT_AUDIO = "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/generated/run_record_mic/recording_missav_5mins.wav"
     OUTPUT_AUDIO = OUTPUT_DIR / (Path(INPUT_AUDIO).stem + "_norm" + Path(INPUT_AUDIO).suffix)
 
     parser = argparse.ArgumentParser(
@@ -171,6 +306,16 @@ if __name__ == "__main__":
         default=-14.0,
         help="Target integrated loudness in LUFS (default: -14.0)",
     )
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        choices=["float32", "float64", "int16", "int32"],
+        default=None,
+        help="Output data type: float32, float64, int16, int32. "
+             "If not specified, automatically matches the input file's native subtype when possible "
+             "(e.g., int16 input → int16 output). Falls back to float32.",
+    )
+
     args = parser.parse_args()
 
     input_path: Path = args.input
@@ -192,7 +337,13 @@ if __name__ == "__main__":
         original_lufs = float("-inf")
 
     rprint(f"[bold]Normalizing[/bold] to {args.target} LUFS...")
-    normalized_audio = normalize_loudness(audio, sr, target_lufs=args.target)
+    normalized_audio = normalize_loudness(
+        audio,
+        sr,
+        target_lufs=args.target,
+        return_dtype=args.dtype,
+        mode="speech",
+    )
 
     # Measure final loudness
     try:

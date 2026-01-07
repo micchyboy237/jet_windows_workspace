@@ -15,9 +15,9 @@ import sounddevice as sd
 import websockets
 from pysilero_vad import SileroVoiceActivityDetector
 from rich.logging import RichHandler
-import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
-import numpy as np  # needed for saving wav with frombuffer
-import matplotlib.pyplot as plt  # for optional probability/RMS plots
+import scipy.io.wavfile as wavfile
+import numpy as np
+import matplotlib.pyplot as plt
 
 import datetime
 
@@ -26,12 +26,100 @@ from threading import Thread
 from PyQt6.QtWidgets import QApplication
 from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
 
+from pathlib import Path
+from typing import List, Tuple
+
+from preprocessors import normalize_loudness
+
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 ALL_SPEECH_META_PATH = os.path.join(OUTPUT_DIR, "all_speech_meta.json")
 ALL_TRANSLATION_META_PATH = os.path.join(OUTPUT_DIR, "all_translation_meta.json")
+
+# ===================================================================
+# Progressive full_sound.wav builder (standalone & reusable)
+# ===================================================================
+
+def write_full_sound_wav(output_dir: Path, sample_rate: int) -> None:
+    """
+    Rebuild <output_dir>/full_sound.wav by concatenating all saved audible segments
+    (speech + audible non-speech) in chronological order based on start_sec.
+
+    Args:
+        output_dir: Base output directory containing 'segments' and 'non_speech_segments'
+        sample_rate: Audio sample rate in Hz (e.g., 16000)
+    """
+    segments_dir = output_dir / "segments"
+    non_speech_dir = output_dir / "non_speech_segments"
+    full_wav_path = output_dir / "full_sound.wav"
+
+    audio_segments: List[Tuple[float, np.ndarray]] = []
+
+    def load_segment(base_dir: Path, seg_id: int) -> None:
+        seg_dir = base_dir / f"segment_{seg_id:04d}"
+        wav_path = seg_dir / "sound.wav"
+        meta_path = seg_dir / "speech_meta.json" if base_dir == segments_dir else seg_dir / "metadata.json"
+
+        if not wav_path.exists() or not meta_path.exists():
+            return
+
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            start_sec = meta.get("start_sec", 0.0)
+
+            _, audio = wavfile.read(wav_path)
+            if audio.ndim > 1:  # ensure mono
+                audio = audio[:, 0]
+            if audio.dtype != np.int16:
+                audio = audio.astype(np.int16)
+            audio_segments.append((start_sec, audio))
+        except Exception as e:
+            log.warning("Failed to load %s/segment_%04d for full_sound: %s", base_dir.name, seg_id, e)
+
+    # Load speech segments
+    if segments_dir.exists():
+        for seg_path in sorted(segments_dir.iterdir()):
+            if seg_path.is_dir() and seg_path.name.startswith("segment_"):
+                try:
+                    seg_id = int(seg_path.name.split("_")[1])
+                    load_segment(segments_dir, seg_id)
+                except ValueError:
+                    pass
+
+    # Load audible non-speech segments
+    if non_speech_dir.exists():
+        for seg_path in sorted(non_speech_dir.iterdir()):
+            if seg_path.is_dir() and seg_path.name.startswith("segment_"):
+                try:
+                    seg_id = int(seg_path.name.split("_")[1])
+                    load_segment(non_speech_dir, seg_id)
+                except ValueError:
+                    pass
+
+    if not audio_segments:
+        if full_wav_path.exists():
+            full_wav_path.unlink()  # remove stale file if no segments
+        return
+
+    # Sort chronologically by start_sec
+    audio_segments.sort(key=lambda x: x[0])
+
+    # Concatenate all audio
+    full_audio = np.concatenate([audio for _, audio in audio_segments])
+
+    # Write full recording
+    try:
+        wavfile.write(full_wav_path, sample_rate, full_audio)
+        duration = len(full_audio) / sample_rate
+        log.info(
+            "[full_sound] Updated full_sound.wav | duration=%.2fs | segments=%d",
+            duration, len(audio_segments)
+        )
+    except Exception as e:
+        log.error("[full_sound] Failed to write full_sound.wav: %s", e)
 
 # =============================
 # Logging setup
@@ -166,8 +254,8 @@ async def stream_microphone(ws) -> None:
 
     # Buffer and stats
     pcm_buffer = bytearray()
-    chunks_sent = 0
-    chunks_detected = 0
+    utterances_sent = 0  # now counts full utterances sent, not individual chunks
+    speech_chunks_detected = 0
     total_chunks_processed = 0
 
     def audio_callback(indata, frames: int, time_, status) -> None:
@@ -207,7 +295,7 @@ async def stream_microphone(ws) -> None:
                     speech_prob: float = vad(chunk)
                     if speech_prob >= config.vad_threshold:
                         processed += 1
-                        chunks_detected += 1
+                        speech_chunks_detected += 1
 
                         # VAD stats
                         last_vad_confidence = speech_prob
@@ -262,21 +350,13 @@ async def stream_microphone(ws) -> None:
                         speech_energy_sum += rms
                         speech_energy_sum_squares += rms ** 2
 
-                        send_start = time.monotonic()
-                        pending_sends.append(send_start)
+                        # Accumulate only — no per-chunk send anymore
                         speech_duration_sec += VAD_CHUNK_SAMPLES / config.sample_rate
 
-                        payload = {
-                            "type": "audio",
-                            "sample_rate": config.sample_rate,
-                            "pcm": base64.b64encode(chunk).decode("ascii"),
-                        }
-                        try:
-                            await ws.send(json.dumps(payload))
-                            chunks_sent += 1
-                        except websockets.ConnectionClosed:
-                            log.warning("WebSocket closed during send")
-                            return
+                        # No per-chunk logging of sends anymore
+                        if rms > 50.0 and speech_prob < config.vad_threshold:
+                            log.debug("[no speech] Chunk has audible energy | rms=%.4f | speech_prob=%.3f | samples=%d",
+                                      rms, speech_prob, len(chunk_np))
 
                         # Reset non-speech state
                         non_speech_start_time = None
@@ -367,10 +447,27 @@ async def stream_microphone(ws) -> None:
                                     seg_dir = os.path.join(non_speech_dir, f"segment_{current_non_speech_num:04d}")
                                     os.makedirs(seg_dir, exist_ok=True)
                                     wav_path = os.path.join(seg_dir, "sound.wav")
-                                    wavfile.write(
-                                        wav_path, config.sample_rate,
-                                        np.frombuffer(current_non_speech_buffer, dtype=np.int16)
-                                    )
+                                    audio_int16 = np.frombuffer(current_non_speech_buffer, dtype=np.int16)
+                                    try:
+                                        normalized_audio = normalize_loudness(
+                                            audio_int16,
+                                            sample_rate=config.sample_rate,
+                                            return_dtype="int16",
+                                            mode=None,  # general mode: -14 LUFS with headroom
+                                        )
+                                        audio_to_save = normalized_audio.astype(np.int16)
+                                        log.info(
+                                            "[non-speech] Applied loudness normalization to segment_%04d (target -14 LUFS)",
+                                            current_non_speech_num
+                                        )
+                                    except Exception as e:
+                                        log.warning(
+                                            "[non-speech] Loudness normalization failed for segment_%04d (%s) – saving original",
+                                            current_non_speech_num, e
+                                        )
+                                        audio_to_save = audio_int16
+
+                                    wavfile.write(wav_path, config.sample_rate, audio_to_save)
 
                                     metadata = {
                                         "segment_id": current_non_speech_num,
@@ -398,6 +495,9 @@ async def stream_microphone(ws) -> None:
                                         "[non-speech] Saved segment_%04d | start=%.3f end=%.3f dur=%.2fs | chunks=%d | peak_rms=%.4f | rms_avg=%.4f",
                                         current_non_speech_num, start_sec, end_sec, duration, non_speech_chunks_in_segment, peak_rms, avg_rms
                                     )
+
+                                    # Progressively update the full concatenated audio
+                                    write_full_sound_wav(Path(OUTPUT_DIR), config.sample_rate)
 
                                     # Save non-speech probabilities and RMS
                                     non_probs_path = os.path.join(seg_dir, "non_speech_probabilities.json")
@@ -491,11 +591,36 @@ async def stream_microphone(ws) -> None:
                                     segment_dir = os.path.join(segments_dir, f"segment_{current_segment_num:04d}")
                                     os.makedirs(segment_dir, exist_ok=True)
                                     wav_path = os.path.join(segment_dir, "sound.wav")
-                                    wavfile.write(
-                                        wav_path,
-                                        config.sample_rate,
-                                        np.frombuffer(current_segment_buffer, dtype=np.int16)
-                                    )
+                                    # Convert buffer to numpy array
+                                    audio_int16 = np.frombuffer(current_segment_buffer, dtype=np.int16)
+
+                                    # Normalize loudness on the full segment for consistent saved volume
+                                    # Use float32 intermediate, return int16 to preserve original format
+                                    try:
+                                        normalized_audio = normalize_loudness(
+                                            audio_int16,
+                                            sample_rate=config.sample_rate,
+                                            return_dtype="int16",
+                                            mode="speech",
+                                        )
+                                        # Ensure we write int16
+                                        audio_to_save = normalized_audio.astype(np.int16)
+                                        log.info(
+                                            "[speech] Applied loudness normalization to segment_%04d (target -14 LUFS)",
+                                            current_segment_num
+                                        )
+                                    except Exception as e:
+                                        log.warning(
+                                            "[speech] Loudness normalization failed for segment_%04d (%s) – saving original",
+                                            current_segment_num, e
+                                        )
+                                        audio_to_save = audio_int16
+
+                                    wavfile.write(wav_path, config.sample_rate, audio_to_save)
+
+                                    # Progressively update the full concatenated audio
+                                    write_full_sound_wav(Path(OUTPUT_DIR), config.sample_rate)
+
                                     base_time = stream_start_time or segment_start_wallclock[current_segment_num]
                                     relative_start = round(segment_start_wallclock[current_segment_num] - base_time, 3)
                                     relative_end = round(relative_start + duration, 3)
@@ -600,6 +725,49 @@ async def stream_microphone(ws) -> None:
                                 except websockets.ConnectionClosed:
                                     log.warning("WebSocket closed while sending end marker")
                                     return
+                                # Send the complete accumulated segment as one message
+                                if current_segment_buffer is not None and speech_chunks_in_segment > 0:
+                                    # Extract raw audio for potential fallback
+                                    raw_audio_int16 = np.frombuffer(current_segment_buffer, dtype=np.int16)
+                                    try:
+                                        normalized_audio = normalize_loudness(
+                                            raw_audio_int16,
+                                            sample_rate=config.sample_rate,
+                                            return_dtype="int16",
+                                            mode="speech",  # same as local save: -13 LUFS + peak norm
+                                        )
+                                        audio_to_send = normalized_audio.astype(np.int16)
+                                        log.info(
+                                            "[speech → server] Applied loudness normalization before sending segment_%04d (target -13 LUFS, speech mode)",
+                                            current_segment_num
+                                        )
+                                    except Exception as e:
+                                        log.warning(
+                                            "[speech → server] Loudness normalization failed for segment_%04d (%s) – sending original raw audio",
+                                            current_segment_num, e
+                                        )
+                                        audio_to_send = raw_audio_int16
+
+                                    # Convert back to bytes for transmission
+                                    full_pcm = audio_to_send.tobytes()
+                                    payload = {
+                                        "type": "audio",
+                                        "sample_rate": config.sample_rate,
+                                        "pcm": base64.b64encode(full_pcm).decode("ascii"),
+                                    }
+                                    try:
+                                        await ws.send(json.dumps(payload))
+                                        utterances_sent += 1
+                                        duration_sec = len(full_pcm) / 2 / config.sample_rate
+                                        log.info(
+                                            "[speech → server] Sent complete utterance segment_%04d | duration=%.2fs | chunks=%d | size=%d bytes | normalized=%s",
+                                            current_segment_num, duration_sec, speech_chunks_in_segment, len(full_pcm),
+                                            "yes" if audio_to_send is normalized_audio else "no (fallback)"
+                                        )
+                                    except websockets.ConnectionClosed:
+                                        log.warning("WebSocket closed while sending full segment")
+                                        return
+
                                 speech_start_time = None
                                 silence_start_time = None
                                 current_segment_num = None
@@ -610,33 +778,9 @@ async def stream_microphone(ws) -> None:
                                 # non-speech reset already handled above for normal speech case
 
                     # --- Logging (after both branches) ---
-                    if speech_prob >= config.vad_threshold:
-                        avg_rtt = sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
-                        if speech_chunk_count:
-                            avg_rms = speech_energy_sum / speech_chunk_count
-                            rms_std = np.sqrt(
-                                (speech_energy_sum_squares / speech_chunk_count) -
-                                (speech_energy_sum / speech_chunk_count) ** 2
-                            )
-                            energy_info = (
-                                f" | rms: avg={avg_rms:.4f} ±{rms_std:.4f} [min={min_energy:.4f} max={max_energy:.4f}]"
-                            )
-                        else:
-                            energy_info = ""
-                        log.info(
-                            "[speech → server] Sent chunk %d | rms=%.4f | speech_prob=%.3f | dur=%.2fs%s%s",
-                            chunks_sent,
-                            rms,
-                            speech_prob,
-                            time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
-                            f" | RTT={avg_rtt:.3f}s" if avg_rtt is not None else "",
-                            energy_info
-                        )
-                    else:
-                        # VAD debug
-                        if rms > 50.0:
-                            log.debug("[no speech] Chunk has audible energy | rms=%.4f | speech_prob=%.3f | samples=%d",
-                                      rms, speech_prob, len(chunk_np))
+                    # Per instructions, no per-chunk logging of sends anymore
+                    # Log audible non-speech chunk only (already done above)
+
                 if processed > 0:
                     log.debug("Processed %d speech chunk(s) this cycle", processed)
                 if total_chunks_processed % 100 == 0:
@@ -644,7 +788,7 @@ async def stream_microphone(ws) -> None:
                     seg_dur = time.monotonic() - speech_start_time if speech_start_time else 0.0
                     log.info(
                         "[status] chunks_processed: %d | sent: %d | detected: %d | state: %s | seg: %.2fs",
-                        total_chunks_processed, chunks_sent, chunks_detected, status, seg_dur
+                        total_chunks_processed, utterances_sent, speech_chunks_detected, status, seg_dur
                     )
         except asyncio.CancelledError:
             log.info("[task] Streaming task cancelled")
@@ -652,7 +796,7 @@ async def stream_microphone(ws) -> None:
         finally:
             log.info(
                 "[microphone] Stopped | Processed: %d | Detected: %d | Sent: %d",
-                total_chunks_processed, chunks_detected, chunks_sent
+                total_chunks_processed, speech_chunks_detected, utterances_sent
             )
             if recent_rtts:
                 log.info("Final avg server processing time: %.3fs", sum(recent_rtts) / len(recent_rtts))
