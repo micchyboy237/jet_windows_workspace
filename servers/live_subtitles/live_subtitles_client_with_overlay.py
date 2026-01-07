@@ -140,16 +140,18 @@ log = logging.getLogger("mic-streamer")
 @dataclass(frozen=True)
 class Config:
     ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
-    min_speech_duration: float = 0.25          # seconds; ignore shorter speech bursts
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
-    vad_threshold: float = 0.3
-    min_silence_duration: float = 0.1   # seconds of silence before ending segment
-    vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
     reconnect_delay: float = 3.0
+    vad_model_path: str | None = None  # allow custom model if needed
+    vad_threshold: float = 0.3
+    min_speech_duration: float = 0.15          # seconds; ignore shorter speech bursts
+    min_silence_duration: float = 0.3   # seconds of silence before ending segment
+    speech_pad_ms: int = 700                    # NEW: Padding added after silence to avoid cutting off trailing sounds
+    max_speech_duration_s: float = float("inf") # NEW: Maximum length of a single utterance (force split if exceeded)
 
 config = Config()
 
@@ -222,6 +224,11 @@ async def stream_microphone(ws) -> None:
     speech_energy_sum_squares = 0.0
     max_energy = 0.0
     min_energy = float("inf")
+
+    # NEW variables for speech_pad and max duration handling
+    speech_pad_seconds: float = config.speech_pad_ms / 1000.0
+    padding_start_time: float | None = None      # When padding period began after min_silence
+    forced_end_time: float | None = None         # Absolute time to force-end due to max_speech_duration_s
 
     # --- File/segment tracking ---
     segments_dir = os.path.join(OUTPUT_DIR, "segments")
@@ -305,8 +312,15 @@ async def stream_microphone(ws) -> None:
                         silence_start_time = None
 
                         if speech_start_time is None:
-                            # Start of a speech segment
                             speech_start_time = time.monotonic()
+                            # Initialize forced end time if max duration is finite
+                            forced_end_time = (
+                                speech_start_time + config.max_speech_duration_s
+                                if config.max_speech_duration_s != float("inf")
+                                else None
+                            )
+                            padding_start_time = None
+                            # Start of a speech segment
                             current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
                             segment_start_wallclock[current_segment_num] = time.time()
                             # Set stream_start_time on the very first speech detection,
@@ -541,241 +555,279 @@ async def stream_microphone(ws) -> None:
                                     non_speech_probs = []
                                     non_speech_rms_list = []
                                     non_speech_wallclock.pop(current_non_speech_num, None)
-                        if (speech_start_time is not None and silence_start_time is not None
-                                and time.monotonic() - silence_start_time > config.min_silence_duration):
-                            if current_segment_buffer is not None:
-                                num_samples = len(current_segment_buffer) // 2
-                                duration = num_samples / config.sample_rate
-                            else:
-                                num_samples = 0
-                                duration = 0.0
+                    # === NEW END-OF-UTTERANCE LOGIC ===
+                    current_time = time.monotonic()
+                    end_utterance = False
+                    end_reason = ""
 
-                            if speech_duration_sec < config.min_speech_duration:
+                    # Trigger 1: Silence-based end with optional speech padding
+                    if speech_start_time is not None and silence_start_time is not None:
+                        silence_dur = current_time - silence_start_time
+                        if silence_dur > config.min_silence_duration:
+                            if padding_start_time is None:
+                                padding_start_time = current_time  # start padding timer
+                            elif current_time - padding_start_time >= speech_pad_seconds:
+                                end_utterance = True
+                                end_reason = "padding_complete"
+
+                    # Trigger 2: Max speech duration reached (force split)
+                    if forced_end_time is not None and current_time >= forced_end_time:
+                        end_utterance = True
+                        end_reason = "max_duration"
+
+                    if end_utterance:
+                        if current_segment_buffer is not None:
+                            num_samples = len(current_segment_buffer) // 2
+                            duration = num_samples / config.sample_rate
+                        else:
+                            num_samples = 0
+                            duration = 0.0
+
+                        speech_duration_sec = duration  # for min_speech check
+
+                        if duration < config.min_speech_duration:
+                            log.info(
+                                "[speech] Segment too short (%.3fs < %.3fs) — discarded",
+                                speech_duration_sec, config.min_speech_duration
+                            )
+                            # Short burst → treat as noise and merge into ongoing non-speech if present
+                            if (current_non_speech_buffer is not None and non_speech_start_time is not None):
+                                current_non_speech_buffer.extend(current_segment_buffer or b"")
+                                non_speech_chunks_in_segment += speech_chunks_in_segment
+
+                                # Merge energy stats
+                                non_speech_energy_sum += speech_energy_sum
+                                non_speech_energy_sum_squares += speech_energy_sum_squares
+                                non_speech_max_energy = max(non_speech_max_energy, max_energy)
+                                non_speech_min_energy = min(non_speech_min_energy, min_energy if min_energy != float("inf") else non_speech_min_energy)
+                                peak_rms = max(peak_rms, max_energy)
+
                                 log.info(
-                                    "[speech] Segment too short (%.3fs < %.3fs) — discarded",
-                                    speech_duration_sec, config.min_speech_duration
+                                    "[non-speech] Merged short speech burst (%.3fs) into ongoing non-speech segment_%04d",
+                                    speech_duration_sec, current_non_speech_num
                                 )
-                                # Short burst → treat as noise and merge into ongoing non-speech if present
-                                if (current_non_speech_buffer is not None and non_speech_start_time is not None):
-                                    current_non_speech_buffer.extend(current_segment_buffer or b"")
-                                    non_speech_chunks_in_segment += speech_chunks_in_segment
+                            # Discard collected probs/RMS for the short burst
+                            speech_probs = []
+                            speech_rms_list = []
 
-                                    # Merge energy stats
-                                    non_speech_energy_sum += speech_energy_sum
-                                    non_speech_energy_sum_squares += speech_energy_sum_squares
-                                    non_speech_max_energy = max(non_speech_max_energy, max_energy)
-                                    non_speech_min_energy = min(non_speech_min_energy, min_energy if min_energy != float("inf") else non_speech_min_energy)
-                                    peak_rms = max(peak_rms, max_energy)
+                            # Full reset after discard
+                            speech_start_time = None
+                            silence_start_time = None
+                            padding_start_time = None
+                            forced_end_time = None
+                            current_segment_num = None
+                            current_segment_buffer = None
+                            speech_chunks_in_segment = 0
+                            continue
 
-                                    log.info(
-                                        "[non-speech] Merged short speech burst (%.3fs) into ongoing non-speech segment_%04d",
-                                        speech_duration_sec, current_non_speech_num
-                                    )
-                                # Discard collected probs/RMS for the short burst
-                                speech_probs = []
-                                speech_rms_list = []
-                                speech_start_time = None
-                                silence_start_time = None
-                                current_segment_num = None
-                                current_segment_buffer = None
-                                speech_chunks_in_segment = 0
-                                continue
-                            else:
-                                # Normal (long enough) speech segment → save it (existing code unchanged)
-                                log.info(
-                                    "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
-                                    duration, speech_chunks_in_segment
-                                )
-                                # Save segment/metadata
-                                if current_segment_num and current_segment_buffer:
-                                    segment_dir = os.path.join(segments_dir, f"segment_{current_segment_num:04d}")
-                                    os.makedirs(segment_dir, exist_ok=True)
-                                    wav_path = os.path.join(segment_dir, "sound.wav")
-                                    # Convert buffer to numpy array
-                                    audio_int16 = np.frombuffer(current_segment_buffer, dtype=np.int16)
+                        else:
+                            # Normal (long enough) speech segment → save it
+                            log.info(
+                                "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
+                                duration, speech_chunks_in_segment
+                            )
+                            log.info(
+                                "[speech] End reason: %s | pad_ms=%d | max_s=%s",
+                                end_reason,
+                                config.speech_pad_ms,
+                                config.max_speech_duration_s if config.max_speech_duration_s != float("inf") else "inf"
+                            )
 
-                                    # Normalize loudness on the full segment for consistent saved volume
-                                    # Use float32 intermediate, return int16 to preserve original format
-                                    try:
-                                        normalized_audio = normalize_loudness(
-                                            audio_int16,
-                                            sample_rate=config.sample_rate,
-                                            return_dtype="int16",
-                                            mode="speech",
-                                        )
-                                        # Ensure we write int16
-                                        audio_to_save = normalized_audio.astype(np.int16)
-                                        log.info(
-                                            "[speech] Applied loudness normalization to segment_%04d (target -14 LUFS)",
-                                            current_segment_num
-                                        )
-                                    except Exception as e:
-                                        log.warning(
-                                            "[speech] Loudness normalization failed for segment_%04d (%s) – saving original",
-                                            current_segment_num, e
-                                        )
-                                        audio_to_save = audio_int16
+                            # === ALL ORIGINAL SEGMENT SAVING AND SENDING CODE (unchanged) ===
+                            if current_segment_num and current_segment_buffer:
+                                segment_dir = os.path.join(segments_dir, f"segment_{current_segment_num:04d}")
+                                os.makedirs(segment_dir, exist_ok=True)
+                                wav_path = os.path.join(segment_dir, "sound.wav")
+                                audio_int16 = np.frombuffer(current_segment_buffer, dtype=np.int16)
 
-                                    wavfile.write(wav_path, config.sample_rate, audio_to_save)
-
-                                    # Progressively update the full concatenated audio
-                                    write_full_sound_wav(Path(OUTPUT_DIR), config.sample_rate)
-
-                                    base_time = stream_start_time or segment_start_wallclock[current_segment_num]
-                                    relative_start = round(segment_start_wallclock[current_segment_num] - base_time, 3)
-                                    relative_end = round(relative_start + duration, 3)
-                                    metadata = {
-                                        "segment_id": current_segment_num,
-                                        "duration_sec": round(duration, 3),
-                                        "num_chunks": speech_chunks_in_segment,
-                                        "num_samples": num_samples,
-                                        "start_sec": relative_start,
-                                        "end_sec": relative_end,
-                                        "sample_rate": config.sample_rate,
-                                        "channels": config.channels,
-                                        "vad_confidence": {
-                                            "first": round(first_vad_confidence, 4),
-                                            "last": round(last_vad_confidence, 4),
-                                            "min": round(min_vad_confidence, 4),
-                                            "max": round(max_vad_confidence, 4),
-                                            "ave": round(vad_confidence_sum / speech_chunk_count, 4)
-                                            if speech_chunk_count else 0.0,
-                                        },
-                                        "audio_energy": {
-                                            "rms_min": float(round(min_energy, 4)) if min_energy != float("inf") else 0.0,
-                                            "rms_max": float(round(max_energy, 4)),
-                                            "rms_ave": float(round(speech_energy_sum / speech_chunk_count, 4))
-                                            if speech_chunk_count else 0.0,
-                                            "rms_std": float(round(
-                                                np.sqrt(
-                                                    (speech_energy_sum_squares / speech_chunk_count) -
-                                                    (speech_energy_sum / speech_chunk_count) ** 2
-                                                ),
-                                                4
-                                            )) if speech_chunk_count else 0.0,
-                                        },
-                                    }
-                                    speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
-                                    with open(speech_meta_path, "w", encoding="utf-8") as f:
-                                        json.dump(metadata, f, indent=2, ensure_ascii=False)
-
-                                    all_speech_meta = []
-                                    if os.path.exists(ALL_SPEECH_META_PATH):
-                                        try:
-                                            with open(ALL_SPEECH_META_PATH, "r", encoding="utf-8") as f:
-                                                all_speech_meta = json.load(f)
-                                        except Exception:
-                                            pass
-                                    all_speech_meta.append({
-                                        "segment_id": current_segment_num,
-                                        **metadata,
-                                        "duration_sec": round(duration, 3),
-                                        "segment_dir": f"segment_{current_segment_num:04d}",
-                                        "wav_path": str(wav_path),
-                                        "meta_path": str(speech_meta_path),
-                                    })
-                                    with open(ALL_SPEECH_META_PATH, "w", encoding="utf-8") as f:
-                                        json.dump(all_speech_meta, f, indent=2, ensure_ascii=False)
-
-                                    # Save speech probabilities and RMS
-                                    probs_path = os.path.join(segment_dir, "speech_probabilities.json")
-                                    with open(probs_path, "w", encoding="utf-8") as f:
-                                        json.dump([round(p, 4) for p in speech_probs], f, indent=2)
-
-                                    rms_path = os.path.join(segment_dir, "speech_rms.json")
-                                    with open(rms_path, "w", encoding="utf-8") as f:
-                                        json.dump([round(r, 4) for r in speech_rms_list], f, indent=2)
-
-                                    # Optional simple plots
-                                    if len(speech_probs) > 1:
-                                        time_axis = np.arange(len(speech_probs)) * (VAD_CHUNK_SAMPLES / config.sample_rate)
-                                        plt.figure(figsize=(8, 3))
-                                        plt.plot(time_axis, speech_probs)
-                                        plt.ylim(0, 1)
-                                        plt.xlabel("Time (s)")
-                                        plt.ylabel("VAD Probability")
-                                        plt.title(f"Speech VAD Probability – segment_{current_segment_num:04d}")
-                                        plt.grid(True, alpha=0.3)
-                                        plt.tight_layout()
-                                        plt.savefig(os.path.join(segment_dir, "speech_probability_plot.png"))
-                                        plt.close()
-
-                                        plt.figure(figsize=(8, 3))
-                                        plt.plot(time_axis, speech_rms_list, color="orange")
-                                        plt.xlabel("Time (s)")
-                                        plt.ylabel("RMS")
-                                        plt.title(f"Speech RMS – segment_{current_segment_num:04d}")
-                                        plt.grid(True, alpha=0.3)
-                                        plt.tight_layout()
-                                        plt.savefig(os.path.join(segment_dir, "speech_rms_plot.png"))
-                                        plt.close()
-
-                                # After saving a valid speech segment, ensure non-speech starts fresh
-                                non_speech_start_time = None
-                                current_non_speech_num = None
-                                current_non_speech_buffer = None
-                                non_speech_chunks_in_segment = 0
-                                peak_rms = 0.0
-                                non_speech_wallclock.pop(current_non_speech_num or 0, None)
-
-                                # Notify server
                                 try:
-                                    await ws.send(json.dumps({"type": "end_of_utterance"}))
-                                    log.info("[speech → server] Sent end_of_utterance marker")
+                                    normalized_audio = normalize_loudness(
+                                        audio_int16,
+                                        sample_rate=config.sample_rate,
+                                        return_dtype="int16",
+                                        mode="speech",
+                                    )
+                                    audio_to_save = normalized_audio.astype(np.int16)
+                                    log.info(
+                                        "[speech] Applied loudness normalization to segment_%04d (target -14 LUFS)",
+                                        current_segment_num
+                                    )
+                                except Exception as e:
+                                    log.warning(
+                                        "[speech] Loudness normalization failed for segment_%04d (%s) – saving original",
+                                        current_segment_num, e
+                                    )
+                                    audio_to_save = audio_int16
+
+                                wavfile.write(wav_path, config.sample_rate, audio_to_save)
+                                write_full_sound_wav(Path(OUTPUT_DIR), config.sample_rate)
+
+                                base_time = stream_start_time or segment_start_wallclock[current_segment_num]
+                                relative_start = round(segment_start_wallclock[current_segment_num] - base_time, 3)
+                                relative_end = round(relative_start + duration, 3)
+                                metadata = {
+                                    "segment_id": current_segment_num,
+                                    "duration_sec": round(duration, 3),
+                                    "num_chunks": speech_chunks_in_segment,
+                                    "num_samples": num_samples,
+                                    "start_sec": relative_start,
+                                    "end_sec": relative_end,
+                                    "sample_rate": config.sample_rate,
+                                    "channels": config.channels,
+                                    "vad_confidence": {
+                                        "first": round(first_vad_confidence, 4),
+                                        "last": round(last_vad_confidence, 4),
+                                        "min": round(min_vad_confidence, 4),
+                                        "max": round(max_vad_confidence, 4),
+                                        "ave": round(vad_confidence_sum / speech_chunk_count, 4)
+                                        if speech_chunk_count else 0.0,
+                                    },
+                                    "audio_energy": {
+                                        "rms_min": float(round(min_energy, 4)) if min_energy != float("inf") else 0.0,
+                                        "rms_max": float(round(max_energy, 4)),
+                                        "rms_ave": float(round(speech_energy_sum / speech_chunk_count, 4))
+                                        if speech_chunk_count else 0.0,
+                                        "rms_std": float(round(
+                                            np.sqrt(
+                                                (speech_energy_sum_squares / speech_chunk_count) -
+                                                (speech_energy_sum / speech_chunk_count) ** 2
+                                            ),
+                                            4
+                                        )) if speech_chunk_count else 0.0,
+                                    },
+                                }
+                                speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
+                                with open(speech_meta_path, "w", encoding="utf-8") as f:
+                                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+                                all_speech_meta = []
+                                if os.path.exists(ALL_SPEECH_META_PATH):
+                                    try:
+                                        with open(ALL_SPEECH_META_PATH, "r", encoding="utf-8") as f:
+                                            all_speech_meta = json.load(f)
+                                    except Exception:
+                                        pass
+                                all_speech_meta.append({
+                                    "segment_id": current_segment_num,
+                                    **metadata,
+                                    "duration_sec": round(duration, 3),
+                                    "segment_dir": f"segment_{current_segment_num:04d}",
+                                    "wav_path": str(wav_path),
+                                    "meta_path": str(speech_meta_path),
+                                })
+                                with open(ALL_SPEECH_META_PATH, "w", encoding="utf-8") as f:
+                                    json.dump(all_speech_meta, f, indent=2, ensure_ascii=False)
+
+                                probs_path = os.path.join(segment_dir, "speech_probabilities.json")
+                                with open(probs_path, "w", encoding="utf-8") as f:
+                                    json.dump([round(p, 4) for p in speech_probs], f, indent=2)
+
+                                rms_path = os.path.join(segment_dir, "speech_rms.json")
+                                with open(rms_path, "w", encoding="utf-8") as f:
+                                    json.dump([round(r, 4) for r in speech_rms_list], f, indent=2)
+
+                                if len(speech_probs) > 1:
+                                    time_axis = np.arange(len(speech_probs)) * (VAD_CHUNK_SAMPLES / config.sample_rate)
+                                    plt.figure(figsize=(8, 3))
+                                    plt.plot(time_axis, speech_probs)
+                                    plt.ylim(0, 1)
+                                    plt.xlabel("Time (s)")
+                                    plt.ylabel("VAD Probability")
+                                    plt.title(f"Speech VAD Probability – segment_{current_segment_num:04d}")
+                                    plt.grid(True, alpha=0.3)
+                                    plt.tight_layout()
+                                    plt.savefig(os.path.join(segment_dir, "speech_probability_plot.png"))
+                                    plt.close()
+
+                                    plt.figure(figsize=(8, 3))
+                                    plt.plot(time_axis, speech_rms_list, color="orange")
+                                    plt.xlabel("Time (s)")
+                                    plt.ylabel("RMS")
+                                    plt.title(f"Speech RMS – segment_{current_segment_num:04d}")
+                                    plt.grid(True, alpha=0.3)
+                                    plt.tight_layout()
+                                    plt.savefig(os.path.join(segment_dir, "speech_rms_plot.png"))
+                                    plt.close()
+
+                            non_speech_start_time = None
+                            current_non_speech_num = None
+                            current_non_speech_buffer = None
+                            non_speech_chunks_in_segment = 0
+                            peak_rms = 0.0
+                            non_speech_wallclock.pop(current_non_speech_num or 0, None)
+
+                            try:
+                                await ws.send(json.dumps({"type": "end_of_utterance"}))
+                                log.info("[speech → server] Sent end_of_utterance marker")
+                            except websockets.ConnectionClosed:
+                                log.warning("WebSocket closed while sending end marker")
+                                return
+
+                            if current_segment_buffer is not None and speech_chunks_in_segment > 0:
+                                raw_audio_int16 = np.frombuffer(current_segment_buffer, dtype=np.int16)
+                                try:
+                                    normalized_audio = normalize_loudness(
+                                        raw_audio_int16,
+                                        sample_rate=config.sample_rate,
+                                        return_dtype="int16",
+                                        mode="speech",
+                                    )
+                                    audio_to_send = normalized_audio.astype(np.int16)
+                                    log.info(
+                                        "[speech → server] Applied loudness normalization before sending segment_%04d (target -13 LUFS, speech mode)",
+                                        current_segment_num
+                                    )
+                                except Exception as e:
+                                    log.warning(
+                                        "[speech → server] Loudness normalization failed for segment_%04d (%s) – sending original raw audio",
+                                        current_segment_num, e
+                                    )
+                                    audio_to_send = raw_audio_int16
+
+                                full_pcm = audio_to_send.tobytes()
+                                payload = {
+                                    "type": "audio",
+                                    "sample_rate": config.sample_rate,
+                                    "pcm": base64.b64encode(full_pcm).decode("ascii"),
+                                }
+                                try:
+                                    await ws.send(json.dumps(payload))
+                                    utterances_sent += 1
+                                    duration_sec = len(full_pcm) / 2 / config.sample_rate
+                                    log.info(
+                                        "[speech → server] Sent complete utterance segment_%04d | duration=%.2fs | chunks=%d | size=%d bytes | normalized=%s",
+                                        current_segment_num, duration_sec, speech_chunks_in_segment, len(full_pcm),
+                                        "yes" if audio_to_send is normalized_audio else "no (fallback)"
+                                    )
                                 except websockets.ConnectionClosed:
-                                    log.warning("WebSocket closed while sending end marker")
+                                    log.warning("WebSocket closed while sending full segment")
                                     return
-                                # Send the complete accumulated segment as one message
-                                if current_segment_buffer is not None and speech_chunks_in_segment > 0:
-                                    # Extract raw audio for potential fallback
-                                    raw_audio_int16 = np.frombuffer(current_segment_buffer, dtype=np.int16)
-                                    try:
-                                        normalized_audio = normalize_loudness(
-                                            raw_audio_int16,
-                                            sample_rate=config.sample_rate,
-                                            return_dtype="int16",
-                                            mode="speech",  # same as local save: -13 LUFS + peak norm
-                                        )
-                                        audio_to_send = normalized_audio.astype(np.int16)
-                                        log.info(
-                                            "[speech → server] Applied loudness normalization before sending segment_%04d (target -13 LUFS, speech mode)",
-                                            current_segment_num
-                                        )
-                                    except Exception as e:
-                                        log.warning(
-                                            "[speech → server] Loudness normalization failed for segment_%04d (%s) – sending original raw audio",
-                                            current_segment_num, e
-                                        )
-                                        audio_to_send = raw_audio_int16
 
-                                    # Convert back to bytes for transmission
-                                    full_pcm = audio_to_send.tobytes()
-                                    payload = {
-                                        "type": "audio",
-                                        "sample_rate": config.sample_rate,
-                                        "pcm": base64.b64encode(full_pcm).decode("ascii"),
-                                    }
-                                    try:
-                                        await ws.send(json.dumps(payload))
-                                        utterances_sent += 1
-                                        duration_sec = len(full_pcm) / 2 / config.sample_rate
-                                        log.info(
-                                            "[speech → server] Sent complete utterance segment_%04d | duration=%.2fs | chunks=%d | size=%d bytes | normalized=%s",
-                                            current_segment_num, duration_sec, speech_chunks_in_segment, len(full_pcm),
-                                            "yes" if audio_to_send is normalized_audio else "no (fallback)"
-                                        )
-                                    except websockets.ConnectionClosed:
-                                        log.warning("WebSocket closed while sending full segment")
-                                        return
-
+                            # === STATE RESET AFTER SUCCESSFUL SEGMENT ===
+                            if end_reason != "max_duration":
+                                # Normal end → full reset
                                 speech_start_time = None
                                 silence_start_time = None
-                                current_segment_num = None
-                                current_segment_buffer = None
-                                speech_chunks_in_segment = 0
-                                speech_probs = []
-                                speech_rms_list = []
-                                # non-speech reset already handled above for normal speech case
+                                padding_start_time = None
+                                forced_end_time = None
+                            else:
+                                # Forced split → continue speaking, start new segment immediately
+                                speech_start_time = current_time
+                                silence_start_time = None
+                                padding_start_time = None
+                                forced_end_time = (
+                                    current_time + config.max_speech_duration_s
+                                    if config.max_speech_duration_s != float("inf")
+                                    else None
+                                )
+                                log.info("[speech] Forced split — starting new segment immediately")
+
+                            current_segment_num = None
+                            current_segment_buffer = None
+                            speech_chunks_in_segment = 0
+                            speech_probs = []
+                            speech_rms_list = []
+                            # non-speech reset already handled above for normal speech case
 
                     # --- Logging (after both branches) ---
                     # Per instructions, no per-chunk logging of sends anymore
