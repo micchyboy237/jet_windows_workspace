@@ -22,7 +22,7 @@ pipe = pipeline(
     # return_timestamps=False,     # uncomment if you don't need word-level timestamps
 )
 
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\data\sound.wav"
+audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
 
 # Run transcription
 result = pipe(audio_path, return_timestamps=True,generate_kwargs=generate_kwargs)

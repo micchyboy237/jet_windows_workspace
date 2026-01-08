@@ -379,9 +379,8 @@ if __name__ == "__main__":
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 
-    audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server"
+    audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\jet_scripts\modules\generated\speech_segmentation\segments"
     files = resolve_audio_paths(audio_dir, recursive=True)
-    files = files[:5]  # for testing
 
     print("=== Synchronous Generator Version ===")
     for result in batch_transcribe_and_translate_files(

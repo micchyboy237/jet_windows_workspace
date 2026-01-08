@@ -19,7 +19,7 @@ MODEL_PATH = (
     r"C:\Users\druiv\.cache\llama.cpp\translators\gemma-2-2b-jpn-it-translate-Q4_K_M.gguf"
 )
 
-CTX_SIZE        = 2048
+CTX_SIZE        = 1024
 GPU_LAYERS      = -1
 CACHE_TYPE_K    = "q8_0"
 CACHE_TYPE_V    = "q8_0"

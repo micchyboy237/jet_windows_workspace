@@ -159,9 +159,8 @@ if __name__ == "__main__":
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 
-    audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\generated\extract_parquet_data\audio"
-    files = resolve_audio_paths(audio_dir)
-    files = files[:5]  # Temporarily limit for testing
+    audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\jet_scripts\modules\generated\speech_segmentation\segments"
+    files = resolve_audio_paths(audio_dir, recursive=True)
 
     async def main():
         async for result in batch_transcribe_and_translate_files_async(

@@ -72,7 +72,7 @@ def transcribe_progressive(
 #   Usage example
 # ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server\utterance_1c2d9158_0002_20260102_201650.wav"
+    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server_spyxfamily_intro\utterance_1d825427_0001_20260104_061420.wav"
 
     # Load model once (reuse for multiple calls)
     model = WhisperModel(

@@ -9,6 +9,6 @@ pipe = pipeline(
     device="cuda",
 )
 
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\data\sound.wav"
+audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
 result = pipe(audio_path)
 print(result)
