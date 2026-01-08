@@ -35,6 +35,11 @@ ALL_TRANSLATION_META_PATH = os.path.join(OUTPUT_DIR, "all_translation_meta.json"
 ALL_SPEECH_PROBS_INDEX_PATH = os.path.join(OUTPUT_DIR, "all_speech_probs.json")
 ALL_PROBS_PATH = os.path.join(OUTPUT_DIR, "all_probs.json")
 
+CONTINUOUS_AUDIO_MAX_SECONDS = 320.0  # a bit more than 5 min
+audio_buffer: deque[tuple[float, bytes]] = deque()   # (monotonic_time, chunk)
+audio_total_samples: int = 0
+LAST_5MIN_WAV = os.path.join(OUTPUT_DIR, "last_5_mins.wav")
+
 # =============================
 # Logging setup
 # =============================
@@ -54,7 +59,7 @@ log = logging.getLogger("mic-streamer")
 @dataclass(frozen=True)
 class Config:
     ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
-    min_speech_duration: float = 0.0          # seconds; ignore shorter speech bursts
+    min_speech_duration: float = 0.25          # seconds; ignore shorter speech bursts
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
@@ -109,6 +114,9 @@ async def stream_microphone(ws) -> None:
         from pysilero_vad import _DEFAULT_MODEL_PATH
         model_path = _DEFAULT_MODEL_PATH
     vad = SileroVoiceActivityDetector(model_path)
+
+    # Declare globals that are modified inside this function
+    global audio_total_samples, audio_buffer
 
     # Speech segment tracking
     speech_start_time: float | None = None
@@ -185,12 +193,28 @@ async def stream_microphone(ws) -> None:
                     has_sound = rms > 50.0
 
                     # Skip processing if there is no sufficiently loud sound in the audio chunk
-                    if not has_sound:
-                        continue
+                    # if not has_sound:
+                    #     continue
 
                     speech_prob: float = vad(chunk)
 
                     all_prob_history.append(speech_prob)
+
+                    # Always add to continuous buffer (audible speech or non_speech)
+                    chunk_time = time.monotonic()
+                    audio_buffer.append((chunk_time, chunk, speech_prob, rms))
+                    audio_total_samples += len(chunk) // 2   # int16
+
+                    # Trim old data
+                    while audio_total_samples / config.sample_rate > CONTINUOUS_AUDIO_MAX_SECONDS:
+                        if audio_buffer:
+                            _, old_chunk, _, _ = audio_buffer.popleft()
+                            audio_total_samples -= len(old_chunk) // 2
+
+                    # Write file every ~60 chunks
+                    if total_chunks_processed % 60 == 0 and total_chunks_processed > 0:
+                        _write_last_5min_wav()
+
 
                     if len(all_prob_history) % 100 == 0:
                         # Save all probs
@@ -468,6 +492,12 @@ async def stream_microphone(ws) -> None:
             if all_prob_history:
                 _append_to_global_all_probs(all_prob_history)
                 log.info("Flushed %d remaining probabilities on stream shutdown", len(all_prob_history))
+
+            # Final save of continuous audio
+            if audio_buffer:
+                log.info("[continuous] Final save of last_5_mins.wav on shutdown")
+                _write_last_5min_wav()
+
             # Optional: also flush speech_prob_history if segment is active
             if speech_start_time is not None and speech_prob_history:
                 log.warning("Active speech segment was interrupted — saving partial prob history")
@@ -734,9 +764,10 @@ async def main() -> None:
 
     log.info("Client shutdown complete")
 
+
 def _append_to_global_speech_probs_index(
     segment_num: int,
-    duration_sec: float,
+    duration: float,
     segment_start_wallclock: dict[int, float],
     base_time: float,
     probs_path: str,
@@ -756,7 +787,8 @@ def _append_to_global_speech_probs_index(
     entry = {
         "segment_id": segment_num,
         "start_sec": round(relative_start, 3),
-        "duration_sec": round(duration_sec, 3),
+        "end_sec": round(relative_start + duration, 3),
+        "duration_sec": round(duration, 3),
         "prob_count": len(speech_prob_history),  # ← fix: use actual count
         "probs_path": str(probs_path),
         "segment_dir": f"segment_{segment_num:04d}",
@@ -766,6 +798,7 @@ def _append_to_global_speech_probs_index(
 
     with open(ALL_SPEECH_PROBS_INDEX_PATH, "w", encoding="utf-8") as f:
         json.dump(all_probs_index, f, indent=2, ensure_ascii=False)
+
 
 def _append_to_global_all_probs(
     new_probs: list[float]
@@ -783,6 +816,18 @@ def _append_to_global_all_probs(
 
     with open(ALL_PROBS_PATH, "w", encoding="utf-8") as f:
         json.dump(all_probs, f, indent=2, ensure_ascii=False)
+
+
+def _write_last_5min_wav():
+   if not audio_buffer:
+         return
+   all_bytes = bytearray()
+   for _, chunk, _, _ in audio_buffer:
+         all_bytes.extend(chunk)
+   arr = np.frombuffer(all_bytes, dtype=np.int16)
+   wavfile.write(LAST_5MIN_WAV, config.sample_rate, arr)
+   log.debug("[continuous] Updated last_5_mins.wav — %.1f seconds", 
+               len(arr) / config.sample_rate)
 
 
 if __name__ == "__main__":
