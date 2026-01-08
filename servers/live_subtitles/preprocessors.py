@@ -371,11 +371,10 @@ if __name__ == "__main__":
     from rich import print as rprint
 
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    # shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    INPUT_AUDIO = "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/generated/run_record_mic/recording_missav_5mins.wav"
-    OUTPUT_AUDIO = OUTPUT_DIR / (Path(INPUT_AUDIO).stem + "_norm" + Path(INPUT_AUDIO).suffix)
+    DEFAULT_INPUT_AUDIO = "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/audio/generated/run_record_mic/recording_missav_5mins.wav"
 
     parser = argparse.ArgumentParser(
         description="Normalize loudness of a WAV file to target LUFS (ITU-R BS.1770-4)."
@@ -384,14 +383,14 @@ if __name__ == "__main__":
         "input",
         type=Path,
         nargs="?",  # Make positional input optional
-        default=Path(INPUT_AUDIO),
+        default=DEFAULT_INPUT_AUDIO,
         help="Input WAV file path"
     )
     parser.add_argument(
         "output",
         type=Path,
         nargs="?",  # Make it optional
-        default=OUTPUT_AUDIO,
+        default=None,
         help="Output WAV file path (default: <input>_norm.wav)"
     )
     parser.add_argument(
@@ -413,12 +412,19 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if args.input is None:
+        rprint("[red]Error: input audio path is required[/red]")
+        sys.exit(1)
+
     input_path: Path = args.input
     if not input_path.is_file():
         rprint(f"[red]Error: Input file not found: {input_path}[/red]")
         sys.exit(1)
 
-    output_path = args.output or input_path.with_name(f"{input_path.stem}_norm{input_path.suffix}")
+    if args.output:
+        output_path = args.output
+    else:
+        output_path = OUTPUT_DIR / f"{input_path.stem}_norm{input_path.suffix}"
 
     rprint(f"[bold]Loading audio:[/bold] {input_path}")
     audio, sr = sf.read(input_path, always_2d=False)
