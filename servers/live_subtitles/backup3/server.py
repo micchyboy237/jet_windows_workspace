@@ -1,35 +1,45 @@
 import asyncio
 import websockets
-from typing import AsyncIterator
-from protocol import AudioChunk, TextResult
+from protocol import TextResult
 from rich.console import Console
 
 console = Console()
 
 
-async def fake_transcribe_japanese_to_english(chunk: bytes) -> str:
-    # Placeholder: swap in Whisper, faster-whisper, Deepgram, etc.
-    return f"TRANSCRIBED(ja)->en: {len(chunk)} bytes"
+class SpeechToText:
+    async def transcribe(self, pcm_bytes: bytes) -> str:
+        # TODO: swap real model
+        return f"(final ja->en) {len(pcm_bytes)} bytes"
 
 
-async def process_stream(websocket) -> None:
-    console.log("[server] connection accepted")
+async def process_stream(ws):
+    stt = SpeechToText()
+    buffer: list[bytes] = []
+    console.log("[server] connected")
 
-    async for message in websocket:
-        if not isinstance(message, (bytes, bytearray)):
-            continue  # ignore non-bytes frames
+    async for raw in ws:
+        msg = raw.decode("utf-8", errors="ignore")
 
-        # Convert raw bytes to text (placeholder)
-        text = await fake_transcribe_japanese_to_english(message)
+        if msg == "start":
+            buffer.clear()
+            continue
 
-        payload: TextResult = {"type": "text", "text": text}
-        await websocket.send(payload["text"].encode("utf-8"))
+        if msg == "end":
+            pcm = b"".join(buffer)
+            buffer.clear()
+            text = await stt.transcribe(pcm)
+            payload: TextResult = {"type": "text", "text": text}
+            await ws.send(payload["text"])
+            continue
+
+        # else: speech
+        buffer.append(raw)
 
 
-async def main() -> None:
+async def main():
     async with websockets.serve(process_stream, "0.0.0.0", 8765):
-        console.log("[server] listening on ws://0.0.0.0:8765")
-        await asyncio.Future()  # run forever
+        console.log("server ready")
+        await asyncio.Future()
 
 
 if __name__ == "__main__":
