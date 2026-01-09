@@ -200,10 +200,11 @@ async def stream_microphone(ws) -> None:
 
                     all_prob_history.append(speech_prob)
 
-                    # Always add to continuous buffer (audible speech or non_speech)
-                    chunk_time = time.monotonic()
-                    audio_buffer.append((chunk_time, chunk, speech_prob, rms))
-                    audio_total_samples += len(chunk) // 2   # int16
+                    if has_sound:
+                        # Always add to continuous buffer (audible speech or non_speech)
+                        chunk_time = time.monotonic()
+                        audio_buffer.append((chunk_time, chunk, speech_prob, rms))
+                        audio_total_samples += len(chunk) // 2   # int16
 
                     # Trim old data
                     while audio_total_samples / config.sample_rate > CONTINUOUS_AUDIO_MAX_SECONDS:
