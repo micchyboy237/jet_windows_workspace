@@ -146,6 +146,7 @@ async def stream_microphone(ws) -> None:
     audio_queue: queue.Queue[bytes] = queue.Queue(maxsize=100)
     speech_prob_history: list[float] = []           # ← NEW: per-segment VAD probs
     all_prob_history: list[float] = []
+    chunk_type: Literal["speech", "non_speech", "silent"] = "silent"
     chunks_sent = 0
     chunks_detected = 0
     total_chunks_processed = 0
@@ -200,7 +201,6 @@ async def stream_microphone(ws) -> None:
 
                     all_prob_history.append(speech_prob)
 
-                    chunk_type: Literal["speech", "non_speech", "silent"]
                     if not has_sound:
                         chunk_type = "silent"
                     elif speech_prob >= config.vad_threshold:
