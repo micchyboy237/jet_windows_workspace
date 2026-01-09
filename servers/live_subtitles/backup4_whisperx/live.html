@@ -1,0 +1,58 @@
+<!-- live.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Live JA→EN ASR</title>
+</head>
+<body>
+  <button id="start">Start</button>
+  <button id="stop">Stop</button>
+  <pre id="output"></pre>
+
+  <script>
+    let ws = null;
+    let mediaRecorder = null;
+
+    document.getElementById("start").onclick = async () => {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+      ws = new WebSocket("ws://localhost:8765/live");
+
+      processor.onaudioprocess = e => {
+        if (ws.readyState === WebSocket.OPEN) {
+          const input = e.inputBuffer.getChannelData(0);
+          const int16 = new Int16Array(input.length);
+          for (let i = 0; i < input.length; i++) {
+            int16[i] = Math.max(-1, Math.min(1, input[i])) * 0x7FFF;
+          }
+          ws.send(int16.buffer);
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      ws.onmessage = e => {
+        const data = JSON.parse(e.data);
+        if (data.type === "subtitle_update") {
+          document.getElementById("output").textContent =
+            data.srt_block || "Waiting for speech...";
+        }
+      };
+
+      document.getElementById("start").disabled = true;
+      document.getElementById("stop").disabled = false;
+    };
+
+    document.getElementById("stop").onclick = () => {
+      ws?.close();
+      document.getElementById("start").disabled = false;
+      document.getElementById("stop").disabled = true;
+    };
+  </script>
+</body>
+</html>
