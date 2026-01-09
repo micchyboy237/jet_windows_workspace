@@ -10,7 +10,7 @@ import time
 import queue
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque
+from typing import Deque, Literal
 
 import sounddevice as sd
 import websockets
@@ -196,20 +196,28 @@ async def stream_microphone(ws) -> None:
                     # if not has_sound:
                     #     continue
 
-                    speech_prob: float = vad(chunk)
+                    speech_prob: float = vad(chunk) if has_sound else 0.0
 
                     all_prob_history.append(speech_prob)
+
+                    chunk_type: Literal["speech", "non_speech", "silent"]
+                    if not has_sound:
+                        chunk_type = "silent"
+                    elif speech_prob >= config.vad_threshold:
+                        chunk_type = "speech"
+                    else:
+                        chunk_type = "non_speech"
 
                     if has_sound:
                         # Always add to continuous buffer (audible speech or non_speech)
                         chunk_time = time.monotonic()
-                        audio_buffer.append((chunk_time, chunk, speech_prob, rms))
+                        audio_buffer.append((chunk_time, chunk, speech_prob, rms, chunk_type))
                         audio_total_samples += len(chunk) // 2   # int16
 
                     # Trim old data
                     while audio_total_samples / config.sample_rate > CONTINUOUS_AUDIO_MAX_SECONDS:
                         if audio_buffer:
-                            _, old_chunk, _, _ = audio_buffer.popleft()
+                            _, old_chunk, _, _, _ = audio_buffer.popleft()
                             audio_total_samples -= len(old_chunk) // 2
 
                     # Write file every ~60 chunks
@@ -222,7 +230,7 @@ async def stream_microphone(ws) -> None:
                         _append_to_global_all_probs(all_prob_history)
                         all_prob_history = all_prob_history[-20:]   # optional: keep small overlap
 
-                    if speech_prob >= config.vad_threshold:
+                    if chunk_type == "speech":
                         chunks_detected += 1
                         processed += 1
                         # Track best & latest VAD score for this segment
@@ -823,7 +831,7 @@ def _write_last_5min_wav():
    if not audio_buffer:
          return
    all_bytes = bytearray()
-   for _, chunk, _, _ in audio_buffer:
+   for _, chunk, _, _, _ in audio_buffer:
          all_bytes.extend(chunk)
    arr = np.frombuffer(all_bytes, dtype=np.int16)
    wavfile.write(LAST_5MIN_WAV, config.sample_rate, arr)
