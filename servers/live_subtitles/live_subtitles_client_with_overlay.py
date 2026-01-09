@@ -197,7 +197,7 @@ async def stream_microphone(ws) -> None:
                     # if not has_sound:
                     #     continue
 
-                    speech_prob: float = vad(chunk) if has_sound else 0.0
+                    speech_prob: float = vad(chunk)
 
                     all_prob_history.append(speech_prob)
 
