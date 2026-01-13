@@ -1,27 +1,25 @@
-from typing import Literal, Dict, Any, Union
+from typing import Dict, Any, Union, Iterator, List, Tuple
 import time
 import uuid
 from threading import Lock
 
 from rich.console import Console
-from rich.markdown import Markdown
+from rich.live import Live
+from rich.text import Text
+
 from llama_cpp import Llama
-from llama_cpp.llama_types import CreateCompletionResponse, CompletionChoice, CompletionUsage
-import numpy as np
+from llama_cpp.llama_types import (
+    ChatCompletionRequestMessage,
+    CreateChatCompletionResponse,
+    CreateChatCompletionStreamResponse,
+)
 
 console = Console()
 
 # ────────────────────────────────────────────────
-# Config – adjust paths & settings to match your setup
+# Configuration – easy to tweak
 # ────────────────────────────────────────────────
-
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\LFM2-350M-ENJP-MT.Q4_K_M.gguf"
-
-SYSTEM_MESSAGE = (
-    "You are a professional, natural-sounding Japanese-to-English translator. "
-    "Translate accurately while making the English sound fluent and idiomatic "
-    "as if written by a native English speaker."
-)
 
 MODEL_SETTINGS = {
     "n_ctx": 1024,
@@ -47,114 +45,164 @@ TRANSLATION_DEFAULTS = {
     "repeat_penalty": 1.05,
     "max_tokens": 512,
     # For confidence scores
-    "logprobs": 3,
+    "logprobs": True,
+    "top_logprobs": 3
 }
 
-def convert_numpy_to_python(obj: Any) -> Any:
-    """
-    Recursively convert numpy scalar types (float32, float64, int64, etc.) 
-    to native Python float/int.
-    Leaves other types unchanged.
-    """
-    if isinstance(obj, (np.floating, np.integer)):
-        return obj.item()           # converts to Python float or int
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()         # converts array → list (with recursion)
-    elif isinstance(obj, dict):
-        return {k: convert_numpy_to_python(v) for k, v in obj.items()}
-    elif isinstance(obj, (list, tuple)):
-        return type(obj)(convert_numpy_to_python(item) for item in obj)
-    else:
-        return obj
-
 # ────────────────────────────────────────────────
-# Lazy LLM initialization (thread-safe)
+# Lazy + thread-safe model loading
 # ────────────────────────────────────────────────
-
-_llm_instance: Llama | None = None
+_llm: Llama | None = None
 _llm_lock = Lock()
 
+
 def get_llm() -> Llama:
-    """
-    Lazily initialize and return the global Llama instance.
-    Thread-safe – safe to call concurrently from multiple threads.
-    """
-    global _llm_instance
-    if _llm_instance is None:
+    """Lazily initialize and return the Llama instance (thread-safe)"""
+    global _llm
+    if _llm is None:
         with _llm_lock:
-            if _llm_instance is None:  # double-checked locking
-                console.print("[bold yellow]Initializing Gemma translator model...[/bold yellow]")
-                _llm_instance = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
-                console.print("[bold green]Gemma model loaded and ready[/bold green]")
-    return _llm_instance
+            if _llm is None:
+                console.print("[bold yellow]Loading LFM2-350M translator...[/bold yellow]")
+                _llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
+                console.print("[bold green]Model ready ✓[/bold green]")
+    return _llm
+
 
 # ────────────────────────────────────────────────
-# No eager global initialization! Use get_llm().
-
-def translate_text(
+# Main translation interface
+# ────────────────────────────────────────────────
+def translate_japanese_to_english(
     text: str,
-    system_message: str = SYSTEM_MESSAGE,
+    stream: bool = False,
     **generation_params,
-) -> CreateCompletionResponse:
+) -> Union[CreateChatCompletionResponse, Iterator[CreateChatCompletionStreamResponse]]:
     """
-    Translate Japanese text to natural English.
+    High-level Japanese → natural English translation using chat format.
 
-    Returns a complete CreateCompletionResponse compatible with OpenAI-style output.
-    All numpy float types are converted to Python float recursively.
+    Uses llama_cpp's create_chat_completion under the hood.
+
+    Args:
+        text: Japanese text to translate
+        temperature: Controls randomness (0.0 = deterministic, ~0.6-0.8 natural)
+        top_p: Nucleus sampling
+        min_p: Minimum probability sampling (very helpful on smaller models)
+        repeat_penalty: Penalizes repetitions
+        max_tokens: Maximum output length
+        stream: Whether to return a streaming iterator
+        stop: Optional stop strings
+
+    Returns:
+        Full response object or stream iterator depending on `stream` flag
+
+    Recommended usage:
+        # Blocking
+        result = translate_japanese_to_english("こんにちは！", stream=False)
+        print(result["choices"][0]["message"]["content"])
+
+        # Streaming (beautiful console)
+        for chunk in translate_japanese_to_english("こんにちは！", stream=True):
+            delta = chunk["choices"][0]["delta"].get("content", "")
+            print(delta, end="", flush=True)
     """
-    prompt = f"""{system_message}
-Japanese: {text}
-English:""".strip()
+    messages: List[ChatCompletionRequestMessage] = [
+        {
+            "role": "system",
+            "content": (
+                "You are a professional, natural-sounding Japanese-to-English translator. "
+                "Translate accurately while making the English sound fluent and idiomatic "
+                "as if written by a native English speaker."
+            ),
+        },
+        {"role": "user", "content": text.strip()},
+    ]
 
-    generation_params: Dict[str, Any] = {
-        "prompt": prompt,
+    params: Dict[str, Any] = {
+        "messages": messages,
+        "stream": stream,
         **TRANSLATION_DEFAULTS,
         **generation_params
     }
 
-    raw_response = get_llm()(**generation_params)
+    llm = get_llm()
+    return llm.create_chat_completion(**params)
 
-    # ────────────────────────────────────────────────
-    # Final assembly + numpy cleanup
-    # ────────────────────────────────────────────────
-    response: CreateCompletionResponse = {
-        "id": f"cmpl-{uuid.uuid4().hex[:8]}",
-        "object": "text_completion",
-        "created": int(time.time()),
-        "model": get_llm().model_path.rsplit("/", 1)[-1] if get_llm().model_path else "gemma-2-2b-jpn-it",
-        "choices": raw_response["choices"],
-        "usage": raw_response.get("usage") or CompletionUsage(
-            prompt_tokens=0,
-            completion_tokens=0,
-            total_tokens=0
-        ),
+
+def translate_text(text: str) -> dict:
+    """Translate with beautiful real-time streaming display using rich"""
+    full_text = ""
+
+    stream = translate_japanese_to_english(
+        text=text,
+        stream=True,
+    )
+
+    llm = get_llm()
+    all_logprobs: List[Tuple[str, float, List[dict]]] = []
+    try:
+        role: str = None
+        finish_reason: str = None
+    
+        with Live(auto_refresh=False) as live:
+            for chunk in stream:
+                if "choices" not in chunk or not chunk["choices"]:
+                    continue
+
+                choice = chunk["choices"][0]
+                delta = choice.get("delta", {})
+                logprobs = choice["logprobs"] or {}
+                logprobs_content = logprobs.get("content", [])
+                logprobs_tokens = [(l["token"], l["logprob"], l["top_logprobs"]) for l in logprobs_content]
+
+                if "role" in delta:
+                    role = delta["role"]
+
+                content = delta.get("content", "")
+
+                if content:
+                    full_text += content
+                    live.update(Text(full_text))
+                    live.refresh()
+
+                    all_logprobs.extend(logprobs_tokens)
+
+                if choice["finish_reason"]:
+                    finish_reason = choice["finish_reason"]
+    finally:
+        # IMPORTANT:
+        # Clear KV cache + decoding state after a streaming completion.
+        # Without this, subsequent calls can hit llama_decode returned -1.
+        llm.reset()
+
+    return {
+        "role": role,
+        "text": full_text,
+        "finish_reason": finish_reason,
+        "logprobs": all_logprobs,
     }
 
-    # Convert all numpy scalars → Python float/int recursively
-    response = convert_numpy_to_python(response)
 
-    return response
-
-
+# ────────────────────────────────────────────────
+# Quick demo
+# ────────────────────────────────────────────────
 if __name__ == "__main__":
-    result = translate_text(
+    examples = [
         "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
-        logprobs=3,               # ← ask for top-3 logprobs per token
-    )
-    console.print(Markdown(result["choices"][0]["text"].strip()))
+    ]
 
-    from rich.pretty import pprint
+    for i, jp_text in enumerate(examples, 1):
+        console.rule(f"Example {i}")
+        console.print("[dim]Japanese:[/dim]")
+        console.print(jp_text, style="italic cyan")
+        console.print()
 
-    print("\n[bold cyan]Translation Result:[/bold cyan]")
-    pprint(result, expand_all=True)
+        console.print("[bold green]English (streaming):[/bold green]")
+        result = translate_text(jp_text)
+        all_logprobs = result.pop("logprobs")
 
-    if (logprobs := result["choices"][0].get("logprobs")):
-        print("\nFirst few tokens + top logprobs:")
-        for token, lp, top_lp in zip(
-            logprobs["tokens"][:8],
-            logprobs["token_logprobs"][:8],
-            logprobs["top_logprobs"][:8]
-        ):
-            print(f"{token:12} {lp:8.3f}   | top: {top_lp}")
-    else:
-        print("Still no logprobs → check logits_all=True in Llama()")
+        from rich.pretty import pprint
+
+        print(f"\n[bold cyan]Translation {i + 1}:[/bold cyan]")
+        pprint(result, expand_all=True)
+
+        print(f"\n[bold cyan]Logprobs {i + 1}:[/bold cyan]")
+        pprint(all_logprobs[:2])

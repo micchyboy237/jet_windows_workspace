@@ -127,7 +127,7 @@ def translate_japanese_to_english(
     return llm.create_chat_completion(**params)
 
 
-def translate_text(text: str) -> str:
+def translate_text(text: str) -> dict:
     """Translate with beautiful real-time streaming display using rich"""
     full_text = ""
 
@@ -187,8 +187,6 @@ def translate_text(text: str) -> str:
 if __name__ == "__main__":
     examples = [
         "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
-        "この度はご注文いただき誠にありがとうございます。明日発送予定でございます。",
-        "大変申し訳ございませんが、現在在庫切れとなっております。",
     ]
 
     for i, jp_text in enumerate(examples, 1):
