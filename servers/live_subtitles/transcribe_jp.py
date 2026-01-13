@@ -35,7 +35,7 @@ logger = logging.getLogger("JapaneseASR")
 QualityCategory = Literal["very_low", "low", "medium", "high", "very_high"]
 
 # Short audio example
-DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_5s_1word.wav"
+DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
 
 # Long audio example
 # DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
