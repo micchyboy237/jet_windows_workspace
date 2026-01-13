@@ -34,6 +34,7 @@ logger = logging.getLogger("JapaneseASR")
 
 QualityCategory = Literal["very_low", "low", "medium", "high", "very_high"]
 
+DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
 MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
 TARGET_SR = 16_000
@@ -344,17 +345,88 @@ class JapaneseASR:
 # Example usage
 # ────────────────────────────────────────
 if __name__ == "__main__":
-    asr = JapaneseASR()
+    import argparse
+    import torch 
 
-    # audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_5s_1word.wav"
+    parser = argparse.ArgumentParser(
+        description="Japanese speech-to-text using jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "audio",
+        type=str,
+        nargs="?",
+        default=DEFAULT_AUDIO_PATH,
+        help="Path to the audio file to transcribe "
+             "(default: recording_missav_5s_1word.wav from your Jet_Files folder)",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Device to run model on ('cpu', 'cuda', 'cuda:0', ...)",
+    )
+    parser.add_argument(
+        "--beams",
+        "--num-beams",
+        type=int,
+        default=1,
+        dest="num_beams",
+        help="Number of beams for beam search (1 = greedy)",
+    )
+    parser.add_argument(
+        "--max-chunk-sec",
+        type=float,
+        default=DEFAULT_MAX_CHUNK_SEC,
+        help="Maximum chunk length in seconds for long audio",
+    )
+    parser.add_argument(
+        "--chunk-overlap-sec",
+        type=float,
+        default=DEFAULT_CHUNK_OVERLAP_SEC,
+        help="Overlap between consecutive chunks (seconds)",
+    )
+    parser.add_argument(
+        "--no-confidence",
+        action="store_false",
+        dest="return_confidence",
+        help="Disable confidence / log-prob calculation",
+    )
+    parser.add_argument(
+        "--no-logprobs",
+        action="store_false",
+        dest="return_logprobs",
+        help="Disable detailed per-token log-probabilities",
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Show more detailed logging (DEBUG level)",
+    )
+
+    args = parser.parse_args()
+
+    # Adjust logging level if verbose
+    if args.verbose:
+        logging.getLogger("JapaneseASR").setLevel("DEBUG")
+        logger.debug("Verbose mode enabled")
+
+    asr = JapaneseASR(
+        device=args.device,
+        max_chunk_seconds=args.max_chunk_sec,
+        chunk_overlap_seconds=args.chunk_overlap_sec,
+    )
+
+    audio_path = args.audio
 
     try:
         result = asr.transcribe(
             audio_path,
-            return_confidence=True,
-            return_logprobs=True,
-            num_beams=1,
+            return_confidence=args.return_confidence,
+            return_logprobs=args.return_logprobs,
+            num_beams=args.num_beams,
+            max_chunk_seconds=args.max_chunk_sec,       # already set in init, but can override
+            chunk_overlap_seconds=args.chunk_overlap_sec,
         )
 
         asr.console.rule("Transcription Result")
