@@ -1,9 +1,8 @@
 # transcribe_jp.py
 
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List, Union, Optional, TypedDict, Literal
 import os
 import io
-from typing import List, Union, Optional, TypedDict, Literal
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -35,19 +34,18 @@ logger = logging.getLogger("JapaneseASR")
 
 QualityCategory = Literal["very_low", "low", "medium", "high", "very_high"]
 
-# Short audio
+# Short audio example
 DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_5s_1word.wav"
 
-# Long audio
+# Long audio example
 # DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
 MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
 TARGET_SR = 16_000
-DEFAULT_MAX_CHUNK_SEC = 30.0
-DEFAULT_CHUNK_OVERLAP_SEC = 2.0
+DEFAULT_MAX_CHUNK_SEC = 45.0       # Increased — better for Japanese sentence continuity
+DEFAULT_CHUNK_OVERLAP_SEC = 10.0   # Much better boundary context (≈22% overlap)
 
 # Quality categorization thresholds (empirical - Japanese wav2vec2 models)
-# avg_logprob: roughly per-token average log probability
 QUALITY_THRESHOLDS_AVG_LOGPROB = [
     (-0.50, "very_high"),
     (-0.95, "high"),
@@ -56,7 +54,6 @@ QUALITY_THRESHOLDS_AVG_LOGPROB = [
     (float("-inf"), "very_low"),
 ]
 
-# sequence_logprob: total sum - much more length dependent
 QUALITY_THRESHOLDS_SEQ_LOGPROB = [
     (-20.0, "very_high"),
     (-45.0, "high"),
@@ -89,7 +86,7 @@ class JapaneseASR:
 
     @staticmethod
     def _get_quality_label(
-        value: float, thresholds: List[tuple[float, QualityCategory]]
+        value: float, thresholds: List[Tuple[float, QualityCategory]]
     ) -> QualityCategory:
         for threshold, label in thresholds:
             if value >= threshold:
@@ -160,10 +157,38 @@ class JapaneseASR:
 
         return text, avg_logprob, seq_logprob, token_logprobs
 
+    def _stitch_texts_with_overlap(self, prev: str, curr: str) -> str:
+        """Naive but effective stitching for Japanese (no word boundaries).
+        Looks for longest matching suffix-prefix in a reasonable window.
+        """
+        if not prev:
+            return curr
+        if not curr:
+            return prev
+
+        # Limit search window to avoid bad matches and keep it fast
+        max_match_len = 40
+        prev_end = prev[-max_match_len:]
+        curr_start = curr[:max_match_len]
+
+        best_overlap = 0
+        for ol in range(min(len(prev_end), len(curr_start)), 3, -1):  # min overlap 4 chars
+            if prev_end[-ol:] == curr_start[:ol]:
+                best_overlap = ol
+                break
+
+        if best_overlap >= 4:
+            stitched = prev + curr[best_overlap:]
+            logger.debug(f"Stitched with overlap {best_overlap} chars: ...{prev[-15:]} + {curr[:15+best_overlap]}...")
+            return stitched
+        else:
+            logger.debug("No good overlap match → fallback concat with space")
+            return prev + " " + curr
+
     def transcribe(
         self,
         audio: AudioInput,
-        input_sample_rate: Optional[int] = None,   # only needed when passing raw array/tensor
+        input_sample_rate: Optional[int] = None,
         return_confidence: bool = False,
         return_logprobs: bool = False,
         num_beams: int = 1,
@@ -244,7 +269,7 @@ class JapaneseASR:
             "duration_sec": round(duration_sec, 1),
         }
 
-        # ── Resolve duration ──────────────────────────────────────────────
+        # ── Short audio: single pass ──────────────────────────────────────
         if duration_sec <= max_chunk_sec + 1.0:
             result["chunks_info"] = "single chunk"
 
@@ -257,16 +282,12 @@ class JapaneseASR:
             result["sequence_logprob"] = round(seq_logprob, 5) if seq_logprob is not None else None
 
             if return_confidence or return_logprobs:
-                # best_token_logprobs (used to compute confidence) are already found in _transcribe_segment
                 if avg_logprob is not None and seq_logprob is not None:
-                    # confidence: e^{avg_logprob}
-                    # For accurate confidence you might want to recompute as in the old code, but using avg_logprob as proxy
                     result["avg_confidence"] = round(np.exp(avg_logprob), 4)
 
                 if return_logprobs:
                     result["token_logprobs"] = token_logprobs
 
-                # ── Quality labels ──────────────────────────────────────
                 if "avg_logprob" in result and result["avg_logprob"] is not None:
                     result["quality_avg_logprob"] = self._get_quality_label(
                         result["avg_logprob"], QUALITY_THRESHOLDS_AVG_LOGPROB
@@ -277,7 +298,7 @@ class JapaneseASR:
                     )
 
             return result
-        
+
         # ── Long audio → chunked processing ───────────────────────────────
         else:
             chunk_size_samples = int(max_chunk_sec * TARGET_SR)
@@ -311,7 +332,7 @@ class JapaneseASR:
                     text, avg_lp, seq_lp, _ = self._transcribe_segment(
                         chunk, return_confidence, return_logprobs
                     )
-                    chunks.append(text)
+                    chunks.append(text.strip())  # ensure clean chunks
 
                     if avg_lp is not None:
                         total_avg_logprobs.append(avg_lp)
@@ -322,9 +343,19 @@ class JapaneseASR:
                     progress.advance(task)
                     start += step_samples
 
-            full_text = " ".join(chunks).strip()
+            # ── Stitch chunks using overlap-aware concatenation ───────────
+            if not chunks:
+                full_text = ""
+            elif len(chunks) == 1:
+                full_text = chunks[0]
+            else:
+                full_text = chunks[0]
+                for i in range(1, len(chunks)):
+                    full_text = self._stitch_texts_with_overlap(full_text, chunks[i])
+
+            full_text = full_text.strip()
             result["text"] = full_text
-            result["chunks_info"] = f"{len(chunks)} chunks (overlap {overlap_sec:.1f}s)"
+            result["chunks_info"] = f"{len(chunks)} chunks (overlap {overlap_sec:.1f}s, with text stitching)"
 
             if total_avg_logprobs:
                 avg_of_avgs = sum(total_avg_logprobs) / len(total_avg_logprobs)
@@ -378,7 +409,6 @@ class JapaneseASR:
 # ────────────────────────────────────────
 if __name__ == "__main__":
     import argparse
-    import torch 
 
     parser = argparse.ArgumentParser(
         description="Japanese speech-to-text using jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
@@ -389,8 +419,7 @@ if __name__ == "__main__":
         type=str,
         nargs="?",
         default=DEFAULT_AUDIO_PATH,
-        help="Path to the audio file to transcribe "
-             "(default: recording_missav_5s_1word.wav from your Jet_Files folder)",
+        help="Path to the audio file to transcribe"
     )
     parser.add_argument(
         "--device",
@@ -457,7 +486,7 @@ if __name__ == "__main__":
             return_confidence=args.return_confidence,
             return_logprobs=args.return_logprobs,
             num_beams=args.num_beams,
-            max_chunk_seconds=args.max_chunk_sec,       # already set in init, but can override
+            max_chunk_seconds=args.max_chunk_sec,
             chunk_overlap_seconds=args.chunk_overlap_sec,
         )
 
