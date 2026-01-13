@@ -4,7 +4,7 @@ Modern WebSocket live subtitles server (compatible with websockets ≥ 12.0 / 14
 Receives Japanese audio chunks, buffers until end-of-utterance, transcribes & translates.
 """
 
-from translate_jp_en_gemma import get_llm, translate_text
+from translate_jp_en_llm import get_llm, translate_text
 
 import asyncio
 import base64
@@ -31,9 +31,9 @@ import threading
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
 
-# Toggle between OPUS-MT (old) and Gemma (new)
-# USE_GEMMA_TRANSLATOR = os.getenv("USE_GEMMA_TRANSLATOR", "true").lower() in ("true", "1", "yes", "on")
-USE_GEMMA_TRANSLATOR = True
+# Toggle between OPUS-MT (old) and LLM (new)
+# USE_LLM_TRANSLATOR = os.getenv("USE_LLM_TRANSLATOR", "true").lower() in ("true", "1", "yes", "on")
+USE_LLM_TRANSLATOR = True
 
 # Logging setup
 logging.basicConfig(
@@ -119,7 +119,7 @@ whisper_model = WhisperModel(
     compute_type="float32",
 )
 
-if not USE_GEMMA_TRANSLATOR:
+if not USE_LLM_TRANSLATOR:
     logger.info("Loading OPUS-MT ja→en tokenizer & translator ...")
     tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER_NAME)
     translator = Translator(
@@ -177,12 +177,12 @@ executor = ThreadPoolExecutor(max_workers=3)  # conservative — GTX 1660
 DEFAULT_OUT_DIR: Optional[Path] = None  # ← change to Path("utterances") if you want default permanent storage
 
 # ───────────────────────────────────────────────
-# New: Gemma translation logic
+# New: LLM translation logic
 # ───────────────────────────────────────────────
 
-def translate_with_gemma(sentences_ja: List[str]) -> tuple[str, float | None]:
+def translate_ja_sentences(sentences_ja: List[str]) -> tuple[str, float | None]:
     """
-    Translate list of Japanese sentences using Gemma model.
+    Translate list of Japanese sentences using LLM.
     Returns combined English text and approximate average log-prob (or None).
     """
     if not sentences_ja:
@@ -196,25 +196,20 @@ def translate_with_gemma(sentences_ja: List[str]) -> tuple[str, float | None]:
         if not sent.strip():
             continue
         try:
-            response = translate_text(
+            result = translate_text(
                 text=sent.strip(),
-                max_tokens=256,
-                temperature=0.0,          # greedy
                 logprobs=1,               # request top-1 logprobs
             )
-            choice = response["choices"][0]
-            translated = choice["text"].strip()
+            translated = result["text"].strip()
+            all_logprobs = result["logprobs"]
             if translated:
                 en_sentences.append(translated)
 
-            # Extract logprobs if available
-            if (lp_data := choice.get("logprobs")):
-                lp_values = [v for v in lp_data.get("token_logprobs", []) if v is not None]
-                if lp_values:
-                    logprobs_sum += sum(lp_values)
-                    token_count += len(lp_values)
+            token_count = len(all_logprobs)
+            logprobs_sum = sum(l[1] for l in logprobs_sum)
+
         except Exception as e:
-            logger.error(f"Gemma translation error for '{sent[:50]}...': {e}")
+            logger.error(f"LLM translation error for '{sent[:50]}...': {e}")
             continue
 
     en_text = "\n".join(en_sentences).strip()
@@ -304,8 +299,8 @@ def transcribe_and_translate(
     translation_confidence: float | None = None
 
     if sentences_ja:
-        if USE_GEMMA_TRANSLATOR:
-            en_text, translation_logprob = translate_with_gemma(sentences_ja)
+        if USE_LLM_TRANSLATOR:
+            en_text, translation_logprob = translate_ja_sentences(sentences_ja)
         else:
             # Original OPUS-MT logic (kept as fallback)
             batch_src_tokens = [

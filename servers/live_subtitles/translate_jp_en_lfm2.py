@@ -1,4 +1,4 @@
-from typing import Dict, Any, Union, Iterator, List, Tuple
+from typing import Dict, Any, Union, Iterator, List, Tuple, Optional
 import time
 import uuid
 from threading import Lock
@@ -127,13 +127,23 @@ def translate_japanese_to_english(
     return llm.create_chat_completion(**params)
 
 
-def translate_text(text: str) -> dict:
+def translate_text(text: str, logprobs: Optional[int] = None, **generation_params) -> dict:
     """Translate with beautiful real-time streaming display using rich"""
     full_text = ""
+
+    _generation_params: Dict[str, Any] = {
+        **TRANSLATION_DEFAULTS,
+        **generation_params
+    }
+
+    if logprobs:
+        _generation_params["logprobs"] = True
+        _generation_params["top_logprobs"] = logprobs
 
     stream = translate_japanese_to_english(
         text=text,
         stream=True,
+        **_generation_params,
     )
 
     llm = get_llm()
@@ -196,7 +206,7 @@ if __name__ == "__main__":
         console.print()
 
         console.print("[bold green]English (streaming):[/bold green]")
-        result = translate_text(jp_text)
+        result = translate_text(jp_text, logprobs=1)
         all_logprobs = result.pop("logprobs")
 
         from rich.pretty import pprint
