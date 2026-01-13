@@ -22,10 +22,10 @@ console = Console()
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\LFM2-350M-ENJP-MT.Q4_K_M.gguf"
 
 MODEL_SETTINGS = {
-    "n_ctx": 4096,
-    "n_gpu_layers": 20,
-    "flash_attn": False,
-    "logits_all": False,
+    "n_ctx": 1024,
+    "n_gpu_layers": -1,
+    "flash_attn": True,
+    "logits_all": True,
     "cache_type_k": "q8_0",
     "cache_type_v": "q8_0",
     "tokenizer_kwargs": {"add_bos_token": False},
@@ -39,9 +39,9 @@ MODEL_SETTINGS = {
 
 # Recommended defaults for Japanese → English translation
 TRANSLATION_DEFAULTS = {
-    "temperature": 0.6,
-    "top_p": 0.95,
-    "min_p": 0.05,
+    "temperature": 0.5,
+    "top_p": 1.0,
+    "min_p": 0.5,
     "repeat_penalty": 1.05,
     "max_tokens": 512,
 }
