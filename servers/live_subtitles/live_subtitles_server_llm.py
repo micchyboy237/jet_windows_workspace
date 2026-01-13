@@ -1,14 +1,17 @@
-# live_subtitles_server_wav2vec2.py
+# live_subtitles_server.py
 """
 Modern WebSocket live subtitles server (compatible with websockets ≥ 12.0 / 14.0+)
 Receives Japanese audio chunks, buffers until end-of-utterance, transcribes & translates.
 """
+
+from translate_jp_en_gemma import get_llm, translate_text
 
 import asyncio
 import base64
 import json
 import logging
 import time
+import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, List
@@ -16,9 +19,10 @@ from datetime import datetime, timezone
 
 import numpy as np
 import scipy.io.wavfile as wavfile
-from asr_wav2vec2 import JapaneseASR
+from faster_whisper import WhisperModel
 from rich.logging import RichHandler
 from transformers import AutoTokenizer
+import os
 
 from translator_types import Translator  # adjust import if needed
 from utils import split_sentences_ja
@@ -26,6 +30,10 @@ import threading
 
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
+
+# Toggle between OPUS-MT (old) and Gemma (new)
+# USE_GEMMA_TRANSLATOR = os.getenv("USE_GEMMA_TRANSLATOR", "true").lower() in ("true", "1", "yes", "on")
+USE_GEMMA_TRANSLATOR = True
 
 # Logging setup
 logging.basicConfig(
@@ -104,17 +112,24 @@ def translation_confidence_score(
 # Load models once at startup
 # ───────────────────────────────────────────────
 
-logger.info("Loading Japanese wav2vec2-large-xlsr-53 ...")
-asr = JapaneseASR(device="cuda")   # or "cpu"
-
-logger.info("Loading OPUS-MT ja→en tokenizer & translator ...")
-tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER_NAME)
-translator = Translator(
-    TRANSLATOR_MODEL_PATH,
-    device="cpu",
-    compute_type="int8",
-    inter_threads=4,  # tune to your cores
+logger.info("Loading Whisper model kotoba-tech/kotoba-whisper-v2.0-faster ...")
+whisper_model = WhisperModel(
+    "kotoba-tech/kotoba-whisper-v2.0-faster",
+    device="cuda",
+    compute_type="float32",
 )
+
+if not USE_GEMMA_TRANSLATOR:
+    logger.info("Loading OPUS-MT ja→en tokenizer & translator ...")
+    tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER_NAME)
+    translator = Translator(
+        TRANSLATOR_MODEL_PATH,
+        device="cpu",
+        compute_type="int8",
+        inter_threads=4,  # tune to your cores
+    )
+else:
+    get_llm()
 
 logger.info("Models loaded.")
 
@@ -162,6 +177,51 @@ executor = ThreadPoolExecutor(max_workers=3)  # conservative — GTX 1660
 DEFAULT_OUT_DIR: Optional[Path] = None  # ← change to Path("utterances") if you want default permanent storage
 
 # ───────────────────────────────────────────────
+# New: Gemma translation logic
+# ───────────────────────────────────────────────
+
+def translate_with_gemma(sentences_ja: List[str]) -> tuple[str, float | None]:
+    """
+    Translate list of Japanese sentences using Gemma model.
+    Returns combined English text and approximate average log-prob (or None).
+    """
+    if not sentences_ja:
+        return "", None
+
+    en_sentences: List[str] = []
+    logprobs_sum = 0.0
+    token_count = 0
+
+    for sent in sentences_ja:
+        if not sent.strip():
+            continue
+        try:
+            response = translate_text(
+                text=sent.strip(),
+                max_tokens=256,
+                temperature=0.0,          # greedy
+                logprobs=1,               # request top-1 logprobs
+            )
+            choice = response["choices"][0]
+            translated = choice["text"].strip()
+            if translated:
+                en_sentences.append(translated)
+
+            # Extract logprobs if available
+            if (lp_data := choice.get("logprobs")):
+                lp_values = [v for v in lp_data.get("token_logprobs", []) if v is not None]
+                if lp_values:
+                    logprobs_sum += sum(lp_values)
+                    token_count += len(lp_values)
+        except Exception as e:
+            logger.error(f"Gemma translation error for '{sent[:50]}...': {e}")
+            continue
+
+    en_text = "\n".join(en_sentences).strip()
+    avg_logprob = logprobs_sum / token_count if token_count > 0 else None
+    return en_text, avg_logprob
+
+# ───────────────────────────────────────────────
 # Transcribe and translate with quality/confidence
 # ───────────────────────────────────────────────
 
@@ -176,113 +236,124 @@ def transcribe_and_translate(
 ) -> tuple[str, str, float, dict]:
     """Blocking function — run in executor."""
     processing_started_at = datetime.now(timezone.utc)
+
     timestamp = processing_started_at.strftime("%Y%m%d_%H%M%S")
     stem = f"utterance_{client_id}_{utterance_idx:04d}_{timestamp}"
-
-    audio_bytes = bytes(audio_bytes)  # ensure we have the real accumulated bytes
 
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
         audio_path = out_dir / f"{stem}.wav"
         meta_path = out_dir / f"{stem}.json"
-        # Save input audio for audit/debugging
-        arr = np.frombuffer(audio_bytes, dtype=np.int16)
-        wavfile.write(str(audio_path), sr, arr)
     else:
-        # ────────────────────────────── Add basic validation & logging ───────
-        if len(audio_bytes) < 960:   # < 30 ms @ 16kHz mono int16
-            logger.warning("[%s] Tiny audio buffer (%d bytes) → skipping transcription", client_id, len(audio_bytes))
-            return "", "", 0.0, {"error": "audio_too_short"}
-
-        arr = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        rms = np.sqrt(np.mean(arr**2))
-        if rms < 0.003:   # very quiet
-            logger.warning("[%s] Near-silent input (rms=%.4f) → returning empty", client_id, rms)
-            return "", "", 0.0, {"error": "near_silent"}
-        logger.info("[%s] Processing %d bytes ≈ %.1f s (rms=%.4f)", client_id, len(audio_bytes), len(audio_bytes)/2/sr, rms)
-        # ──────────────────────────────────────────────────────────────────────
         audio_path = Path(f"temp_{stem}.wav")
 
-    result = asr.transcribe(
-        audio_bytes,
-        input_sample_rate=sr,
-        return_confidence=True,
-        return_logprobs=False,
-        num_beams=1,
+    # Write audio
+    arr = np.frombuffer(audio_bytes, dtype=np.int16)
+    wavfile.write(str(audio_path), sr, arr)
+
+    # ─── Transcription ─────────────────────────────────────────────
+    segments, info = whisper_model.transcribe(
+        str(audio_path),
+        language="ja",
+        beam_size=5,
+        vad_filter=False,
+        condition_on_previous_text=False,
     )
-    ja_text = result["text"].strip()
-    duration_sec = result["duration_sec"]
 
-    # Extra safety: if model returned NaN logprob despite having audio
-    avg_logprob = result.get("avg_logprob")
-    if avg_logprob is not None and not math.isfinite(avg_logprob):
-        logger.warning("[%s] Model returned non-finite logprob (len=%d bytes) → forcing fallback", 
-                       client_id, len(audio_bytes))
-        avg_logprob = -12.0           # a bit worse than current -10
+    ja_text_parts = []
+    logprob_sum = 0.0
+    token_count_proxy = 0
+
+    segments_list = []
+    for segment in segments:
+        # Exclude tokens from metadata to keep JSON clean
+        segment_dict = {k: v for k, v in dataclasses.asdict(segment).items() if k != "tokens"}
+        segments_list.append(segment_dict)
+
+        text = segment.text.strip()
+        if text:
+            ja_text_parts.append(text)
+
+        if hasattr(segment, "avg_logprob") and segment.avg_logprob is not None:
+            # Prefer exact token count if available
+            if hasattr(segment, "tokens") and isinstance(segment.tokens, list):
+                segment_token_count = len(segment.tokens)
+            else:
+                # Fallback to original approximation for Japanese
+                segment_token_count = max(1, len(text) // 2)
+
+            logprob_sum += segment.avg_logprob * segment_token_count
+            token_count_proxy += segment_token_count
+
+    ja_text = " ".join(ja_text_parts).strip()
+
+    if token_count_proxy > 0:
+        avg_logprob = logprob_sum / token_count_proxy
+        transcription_confidence = float(np.exp(avg_logprob))
+    else:
+        avg_logprob = float('-inf')
         transcription_confidence = 0.0
-        transcription_quality = "very_low"
-    else:
-        avg_logprob_safe = avg_logprob if avg_logprob is not None else -10.0
 
-    if avg_logprob is None or not math.isfinite(avg_logprob):
-        avg_logprob_safe = -10.0
-        logger.warning(
-            "[%s] Transcription produced non-finite logprob → using fallback %s",
-            client_id, avg_logprob_safe
-        )
-    else:
-        avg_logprob_safe = avg_logprob
-    if avg_logprob_safe is not None:
-        transcription_confidence = float(np.exp(avg_logprob_safe))
-        transcription_quality = result.get("quality_avg_logprob", "Unknown")
-    else:
-        transcription_confidence = 0.0
-        transcription_quality = "N/A"
+    transcription_quality = transcription_quality_label(avg_logprob)
 
-    # --- Translation (unchanged) ---
+    # ─── Translation ───────────────────────────────────────────────
     sentences_ja: List[str] = split_sentences_ja(ja_text)
     en_sentences: List[str] = []
+    en_text: str = ""
     translation_logprob: float | None = None
     translation_confidence: float | None = None
 
     if sentences_ja:
-        batch_src_tokens = [
-            tokenizer.convert_ids_to_tokens(tokenizer.encode(sent.strip()))
-            for sent in sentences_ja if sent.strip()
-        ]
+        if USE_GEMMA_TRANSLATOR:
+            en_text, translation_logprob = translate_with_gemma(sentences_ja)
+        else:
+            # Original OPUS-MT logic (kept as fallback)
+            batch_src_tokens = [
+                tokenizer.convert_ids_to_tokens(tokenizer.encode(sent.strip()))
+                for sent in sentences_ja if sent.strip()
+            ]
 
-        if batch_src_tokens:
-            results = translator.translate_batch(
-                batch_src_tokens,
-                return_scores=True,          # Enable score extraction
-                beam_size=4,
-                max_decoding_length=512,
-            )
+            if batch_src_tokens:
+                results = translator.translate_batch(
+                    batch_src_tokens,
+                    return_scores=True,          # Enable score extraction
+                    beam_size=4,
+                    max_decoding_length=512,
+                )
 
-            for result_item in results:
-                hyp = result_item.hypotheses[0]
-                en_sent = tokenizer.decode(
-                    tokenizer.convert_tokens_to_ids(hyp),
-                    skip_special_tokens=True
-                ).strip()
-                if en_sent:
-                    en_sentences.append(en_sent)
+                for result in results:
+                    hyp = result.hypotheses[0]
+                    en_sent = tokenizer.decode(
+                        tokenizer.convert_tokens_to_ids(hyp),
+                        skip_special_tokens=True
+                    ).strip()
+                    if en_sent:
+                        en_sentences.append(en_sent)
 
-                # Take score from first/best hypothesis
-                if hasattr(result_item, "scores") and result_item.scores:
-                    translation_logprob = result_item.scores[0]
-                    num_output_tokens = len(hyp)
-                    translation_confidence = translation_confidence_score(
-                        translation_logprob, num_output_tokens, min_tokens=3
-                    )
+                    # Take score from first/best hypothesis
+                    if hasattr(result, "scores") and result.scores:
+                        translation_logprob = result.scores[0]
+                        num_output_tokens = len(hyp)
+                        translation_confidence = translation_confidence_score(
+                            translation_logprob, num_output_tokens, min_tokens=3
+                        )
+            en_text = "\n".join(en_sentences)
 
-    en_text = "\n".join(en_sentences)
+    # Common post-processing for confidence (works for both translators)
+    if translation_logprob is not None:
+        est_tokens = max(1, int(len(en_text.split()) * 1.3))
+        translation_confidence = translation_confidence_score(
+            translation_logprob, est_tokens, min_tokens=3
+        )
+    else:
+        translation_confidence = None
+
     translation_quality = translation_quality_label(translation_logprob)
 
-    # --- Logging ---
+    # ─── Logging ──────────────────────────────────────────────────
     logger.info(
-        "[transcription] avg_logprob=%s → conf=%.3f | quality=%s | ja=%s",
-        f"{avg_logprob:.4f}" if avg_logprob is not None else "N/A",
+        "[transcription] avg_logprob=%.4f → conf=%.3f | quality=%s | ja=%s",
+        avg_logprob,
         transcription_confidence,
         transcription_quality,
         ja_text[:70] + "..." if len(ja_text) > 70 else ja_text
@@ -290,7 +361,7 @@ def transcribe_and_translate(
     logger.info(
         "[translation]   log_prob=%s → quality=%s | en=%s",
         f"{translation_logprob:.4f}" if translation_logprob is not None else "N/A",
-        translation_quality,
+        translation_quality_label(translation_logprob),
         en_text[:70] + "..." if len(en_text) > 70 else en_text
     )
 
@@ -309,15 +380,13 @@ def transcribe_and_translate(
         "processing_finished_at": processing_finished_at.isoformat(),
         "queue_wait_seconds": round(queue_wait_duration, 3),
         "processing_duration_seconds": round(processing_duration, 3),
-        "audio_duration_seconds": round(duration_sec, 3),
+        "audio_duration_seconds": round(len(audio_bytes) / 2 / sr, 3),
         "sample_rate": sr,
         "transcription": {
             "text_ja": ja_text,
-            "avg_logprob": round(avg_logprob, 4) if avg_logprob is not None else None,
-            "raw_avg_logprob": avg_logprob,
+            "avg_logprob": round(avg_logprob, 4) if isfinite(avg_logprob) else None,
             "confidence": round(transcription_confidence, 4),
             "quality_label": transcription_quality,
-            "chunks_info": result.get("chunks_info"),
         },
         "translation": {
             "text_en": en_text,
@@ -325,10 +394,10 @@ def transcribe_and_translate(
             "confidence": round(translation_confidence, 4) if translation_confidence is not None else None,
             "quality_label": translation_quality,
         },
-        "segments": [],  # optionally [{"text": ja_text, "start":0, "end":duration_sec}]
+        "segments": segments_list,
     }
 
-    # Logging preview (still show names for legacy/debug, but temp.wav not saved)
+    # Logging preview
     preview_ja = ja_text[:60] + ("..." if len(ja_text) > 60 else "")
     preview_en = en_text[:60] + ("..." if len(en_text) > 60 else "")
     logger.info(
@@ -346,7 +415,7 @@ def transcribe_and_translate(
         logger.debug(f"Saved metadata → {meta_path}")
 
     # Clean up temp file if temporary
-    if not out_dir and audio_path.exists():
+    if not out_dir:
         audio_path.unlink(missing_ok=True)
 
     return ja_text, en_text, transcription_confidence, meta
@@ -390,25 +459,6 @@ async def handler(websocket):
 
                     # Capture the moment we received the end marker (UTC)
                     state.end_of_utterance_received_at = datetime.now(timezone.utc)
-
-                    # Early rejection for too-short utterances (prevents NaNs downstream)
-                    MIN_UTTERANCE_SEC = 0.45
-                    if duration < MIN_UTTERANCE_SEC:
-                        logger.info(
-                            "[%s] Utterance too short (%.2fs < %.2fs) — skipping ASR",
-                            client_id, duration, MIN_UTTERANCE_SEC
-                        )
-                        state.utterance_count += 1
-                        state.clear_buffer()
-                        await websocket.send(json.dumps({
-                            "type": "subtitle",
-                            "transcription_ja": "",
-                            "translation_en": "",
-                            "utterance_id": state.utterance_count - 1,
-                            "duration_sec": round(duration, 3),
-                            "transcription_quality": "too_short",
-                        }, ensure_ascii=False))
-                        continue
 
                     # Offload heavy work to thread, pass timestamps
                     loop = asyncio.get_running_loop()
@@ -472,7 +522,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    import os
     import shutil
     out_dir_str = os.getenv("UTTERANCE_OUT_DIR")
     if out_dir_str:

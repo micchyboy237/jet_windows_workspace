@@ -1,6 +1,8 @@
+# transcribe_jonatasgrosman_wav2vec2.py
+
 import os
 import io
-from typing import List, Union, Optional, Dict, TypedDict, Literal, Any
+from typing import List, Union, Optional, TypedDict, Literal
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -33,6 +35,31 @@ logger = logging.getLogger("JapaneseASR")
 QualityCategory = Literal["very_low", "low", "medium", "high", "very_high"]
 
 
+MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
+TARGET_SR = 16_000
+DEFAULT_MAX_CHUNK_SEC = 30.0
+DEFAULT_CHUNK_OVERLAP_SEC = 2.0
+
+# Quality categorization thresholds (empirical - Japanese wav2vec2 models)
+# avg_logprob: roughly per-token average log probability
+QUALITY_THRESHOLDS_AVG_LOGPROB = [
+    (-0.50, "very_high"),
+    (-0.95, "high"),
+    (-1.55, "medium"),
+    (-2.50, "low"),
+    (float("-inf"), "very_low"),
+]
+
+# sequence_logprob: total sum - much more length dependent
+QUALITY_THRESHOLDS_SEQ_LOGPROB = [
+    (-20.0, "very_high"),
+    (-45.0, "high"),
+    (-85.0, "medium"),
+    (-160.0, "low"),
+    (float("-inf"), "very_low"),
+]
+
+
 class TranscriptionResult(TypedDict, total=False):
     text: str
     file: str
@@ -53,30 +80,6 @@ class TranscriptionResult(TypedDict, total=False):
 
 class JapaneseASR:
     """Flexible Japanese speech-to-text using wav2vec2-large-xlsr-53-japanese"""
-
-    MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
-    TARGET_SR = 16_000
-    DEFAULT_MAX_CHUNK_SEC = 30.0
-    DEFAULT_CHUNK_OVERLAP_SEC = 2.0
-
-    # Quality categorization thresholds (empirical - Japanese wav2vec2 models)
-    # avg_logprob: roughly per-token average log probability
-    QUALITY_THRESHOLDS_AVG_LOGPROB = [
-        (-0.50, "very_high"),
-        (-0.95, "high"),
-        (-1.55, "medium"),
-        (-2.50, "low"),
-        (float("-inf"), "very_low"),
-    ]
-
-    # sequence_logprob: total sum - much more length dependent
-    QUALITY_THRESHOLDS_SEQ_LOGPROB = [
-        (-20.0, "very_high"),
-        (-45.0, "high"),
-        (-85.0, "medium"),
-        (-160.0, "low"),
-        (float("-inf"), "very_low"),
-    ]
 
     @staticmethod
     def _get_quality_label(
@@ -102,11 +105,11 @@ class JapaneseASR:
 
         with self.console.status("[bold green]Loading processor and model...", spinner="dots"):
             self.processor = Wav2Vec2Processor.from_pretrained(
-                self.MODEL_ID,
+                MODEL_ID,
                 local_files_only=True,
             )
             self.model = Wav2Vec2ForCTC.from_pretrained(
-                self.MODEL_ID,
+                MODEL_ID,
                 local_files_only=True,
             )
             self.model.to(self.device)
@@ -135,7 +138,7 @@ class JapaneseASR:
             source_name = str(audio)
             try:
                 with self.console.status(f"[cyan]Loading {source_name}...", spinner="arc"):
-                    array, orig_sr = librosa.load(audio, sr=self.TARGET_SR, mono=True)
+                    array, orig_sr = librosa.load(audio, sr=TARGET_SR, mono=True)
             except Exception as e:
                 raise ValueError(f"Failed to load audio file {source_name}") from e
 
@@ -143,7 +146,7 @@ class JapaneseASR:
             source_name = "<bytes>"
             try:
                 with self.console.status("[cyan]Loading audio from bytes...", spinner="arc"):
-                    array, orig_sr = librosa.load(io.BytesIO(audio), sr=self.TARGET_SR, mono=True)
+                    array, orig_sr = librosa.load(io.BytesIO(audio), sr=TARGET_SR, mono=True)
             except Exception as e:
                 raise ValueError("Failed to decode audio from bytes") from e
 
@@ -176,12 +179,20 @@ class JapaneseASR:
         if array.ndim > 1:
             array = np.mean(array, axis=1)  # very naive downmix
 
-        # Resample only if needed (librosa.load already did it for file/bytes)
-        if orig_sr != self.TARGET_SR:
-            logger.info(f"Resampling from {orig_sr}Hz → {self.TARGET_SR}Hz")
-            array = librosa.resample(array, orig_sr=orig_sr, target_sr=self.TARGET_SR)
+        if len(array) == 0:
+            return {
+                "text": "",
+                "file": source_name,
+                "duration_sec": 0.0,
+                "chunks_info": "empty input (0 samples)",
+            }
 
-        duration_sec = len(array) / self.TARGET_SR
+        # Resample only if needed (librosa.load already did it for file/bytes)
+        if orig_sr != TARGET_SR:
+            logger.info(f"Resampling from {orig_sr}Hz → {TARGET_SR}Hz")
+            array = librosa.resample(array, orig_sr=orig_sr, target_sr=TARGET_SR)
+
+        duration_sec = len(array) / TARGET_SR
         logger.info(f"Audio duration: [bold]{duration_sec:.1f} seconds[/bold]")
 
         result: TranscriptionResult = {
@@ -195,7 +206,7 @@ class JapaneseASR:
             result["chunks_info"] = "single chunk"
 
             inputs = self.processor(
-                array, sampling_rate=self.TARGET_SR, return_tensors="pt"
+                array, sampling_rate=TARGET_SR, return_tensors="pt"
             ).to(self.device)
 
             with torch.no_grad(), self.console.status("[magenta]Running inference...", spinner="bouncingBall"):
@@ -223,19 +234,19 @@ class JapaneseASR:
                 # ── Quality labels ──────────────────────────────────────
                 if "avg_logprob" in result:
                     result["quality_avg_logprob"] = self._get_quality_label(
-                        result["avg_logprob"], self.QUALITY_THRESHOLDS_AVG_LOGPROB
+                        result["avg_logprob"], QUALITY_THRESHOLDS_AVG_LOGPROB
                     )
                 if "sequence_logprob" in result:
                     result["quality_sequence_logprob"] = self._get_quality_label(
-                        result["sequence_logprob"], self.QUALITY_THRESHOLDS_SEQ_LOGPROB
+                        result["sequence_logprob"], QUALITY_THRESHOLDS_SEQ_LOGPROB
                     )
 
             return result
 
         # ── Long audio → chunked processing ───────────────────────────────
         else:
-            chunk_size_samples = int(max_chunk_sec * self.TARGET_SR)
-            overlap_samples = int(overlap_sec * self.TARGET_SR)
+            chunk_size_samples = int(max_chunk_sec * TARGET_SR)
+            overlap_samples = int(overlap_sec * TARGET_SR)
             step_samples = chunk_size_samples - overlap_samples
 
             chunks: List[str] = []
@@ -258,7 +269,7 @@ class JapaneseASR:
                     chunk_array = array[start:end]
 
                     inputs = self.processor(
-                        chunk_array, sampling_rate=self.TARGET_SR, return_tensors="pt", padding=True
+                        chunk_array, sampling_rate=TARGET_SR, return_tensors="pt", padding=True
                     ).to(self.device)
 
                     with torch.no_grad():
@@ -292,7 +303,7 @@ class JapaneseASR:
                 avg_of_avgs = sum(total_avg_logprobs) / len(total_avg_logprobs)
                 result["avg_logprob"] = round(avg_of_avgs, 5)
                 result["quality_avg_logprob"] = self._get_quality_label(
-                    avg_of_avgs, self.QUALITY_THRESHOLDS_AVG_LOGPROB
+                    avg_of_avgs, QUALITY_THRESHOLDS_AVG_LOGPROB
                 )
 
             return result
@@ -335,7 +346,8 @@ class JapaneseASR:
 if __name__ == "__main__":
     asr = JapaneseASR()
 
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+    # audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_5s_1word.wav"
 
     try:
         result = asr.transcribe(
@@ -374,5 +386,5 @@ if __name__ == "__main__":
         if result.get("token_logprobs"):
             asr.console.print(f"[dim]Token logprobs (first 15):[/dim] {result['token_logprobs'][:15]}")
 
-    except Exception as e:
+    except Exception:
         logger.exception("Transcription failed")

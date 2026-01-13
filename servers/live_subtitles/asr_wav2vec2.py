@@ -1,6 +1,5 @@
 import os
-import io
-from typing import List, Union, Optional, Dict, TypedDict, Literal, Any
+from typing import List, Union, Optional, TypedDict, Literal
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -192,6 +191,39 @@ class JapaneseASR:
         if orig_sr != self.TARGET_SR:
             logger.info(f"Resampling from {orig_sr}Hz → {self.TARGET_SR}Hz")
             array = librosa.resample(array, orig_sr=orig_sr, target_sr=self.TARGET_SR)
+
+        # ─── Safeguard very short / very quiet / degenerate inputs ───────────────
+        if len(array) < 160:  # < 10 ms @ 16kHz — almost certainly useless
+            logger.debug("Extremely short input — returning empty transcription")
+            return {
+                "text": "",
+                "file": source_name,
+                "duration_sec": round(len(array) / self.TARGET_SR, 1),
+                "chunks_info": "too_short",
+            }
+
+        # Prevent extreme values (mic clipping, bad capture)
+        array = np.clip(array, -1.0, 1.0)
+
+        var = np.var(array)
+        MIN_ENERGY_VAR = 1e-6
+        if var < MIN_ENERGY_VAR:
+            duration_sec = len(array) / self.TARGET_SR
+            logger.warning(
+                "Very low energy input (var=%.2e, %.2fs) → returning empty transcription",
+                var, duration_sec
+            )
+            return {
+                "text": "",
+                "file": source_name,
+                "duration_sec": round(duration_sec, 1),
+                "chunks_info": "silent_or_noise",
+                "quality_avg_logprob": "very_low",
+            }
+
+        if var < 1e-10:  # extremely flat signal
+            logger.debug(f"Very low variance ({var:.2e}) — adding tiny noise")
+            array += np.random.normal(0, 1e-5, size=array.shape)  # small dither
 
         duration_sec = len(array) / self.TARGET_SR
         logger.info(f"Audio duration: [bold]{duration_sec:.1f} seconds[/bold]")
@@ -386,5 +418,5 @@ if __name__ == "__main__":
         if result.get("token_logprobs"):
             asr.console.print(f"[dim]Token logprobs (first 15):[/dim] {result['token_logprobs'][:15]}")
 
-    except Exception as e:
+    except Exception:
         logger.exception("Transcription failed")
