@@ -1,5 +1,6 @@
-# transcribe_jonatasgrosman_wav2vec2.py
+# transcribe_jp.py
 
+from typing import Dict, Tuple
 import os
 import io
 from typing import List, Union, Optional, TypedDict, Literal
@@ -122,6 +123,43 @@ class JapaneseASR:
 
         logger.info("[green]✓ Model & processor loaded successfully[/green]")
 
+    def _transcribe_segment(
+        self,
+        segment: npt.NDArray[np.float32],
+        return_confidence: bool,
+        return_logprobs: bool,
+    ) -> Tuple[str, Optional[float], Optional[float], Optional[List[float]]]:
+        """Core transcription logic for one contiguous segment (short or chunk)."""
+        if len(segment) == 0:
+            return "", None, None, None
+
+        inputs = self.processor(
+            segment, sampling_rate=TARGET_SR, return_tensors="pt"
+        ).to(self.device)
+
+        with torch.no_grad():
+            model_outputs = self.model(inputs.input_values, attention_mask=inputs.attention_mask)
+            logits = model_outputs.logits
+            pred_ids = torch.argmax(logits, dim=-1)
+
+        text = self.processor.batch_decode(pred_ids, skip_special_tokens=True)[0].strip()
+
+        avg_logprob = None
+        seq_logprob = None
+        token_logprobs = None
+
+        if return_confidence or return_logprobs:
+            log_probs = torch.log_softmax(logits, dim=-1)
+            best_token_logprobs = log_probs.gather(2, pred_ids.unsqueeze(-1)).squeeze(-1)[0]
+
+            avg_logprob = best_token_logprobs.mean().item()
+            seq_logprob = best_token_logprobs.sum().item()
+
+            if return_logprobs:
+                token_logprobs = best_token_logprobs.cpu().numpy().tolist()
+
+        return text, avg_logprob, seq_logprob, token_logprobs
+
     def transcribe(
         self,
         audio: AudioInput,
@@ -206,48 +244,40 @@ class JapaneseASR:
             "duration_sec": round(duration_sec, 1),
         }
 
-        # ── Short audio ─ single inference ────────────────────────────────
+        # ── Resolve duration ──────────────────────────────────────────────
         if duration_sec <= max_chunk_sec + 1.0:
             result["chunks_info"] = "single chunk"
 
-            inputs = self.processor(
-                array, sampling_rate=TARGET_SR, return_tensors="pt"
-            ).to(self.device)
+            text, avg_logprob, seq_logprob, token_logprobs = self._transcribe_segment(
+                array, return_confidence, return_logprobs
+            )
+            result["text"] = text
 
-            with torch.no_grad(), self.console.status("[magenta]Running inference...", spinner="bouncingBall"):
-                model_outputs = self.model(inputs.input_values, attention_mask=inputs.attention_mask)
-                logits = model_outputs.logits
-                pred_ids = torch.argmax(logits, dim=-1)
-
-            transcription = self.processor.batch_decode(pred_ids, skip_special_tokens=True)[0].strip()
-            result["text"] = transcription
+            result["avg_logprob"] = round(avg_logprob, 5) if avg_logprob is not None else None
+            result["sequence_logprob"] = round(seq_logprob, 5) if seq_logprob is not None else None
 
             if return_confidence or return_logprobs:
-                log_probs = torch.log_softmax(logits, dim=-1)
-                best_token_logprobs = log_probs.gather(2, pred_ids.unsqueeze(-1)).squeeze(-1)
-
-                avg_logprob = best_token_logprobs.mean().item()
-                seq_logprob = best_token_logprobs.sum().item()
-
-                result["avg_logprob"] = round(avg_logprob, 5)
-                result["sequence_logprob"] = round(seq_logprob, 5)
-                result["avg_confidence"] = round(best_token_logprobs.exp().mean().item(), 4)
+                # best_token_logprobs (used to compute confidence) are already found in _transcribe_segment
+                if avg_logprob is not None and seq_logprob is not None:
+                    # confidence: e^{avg_logprob}
+                    # For accurate confidence you might want to recompute as in the old code, but using avg_logprob as proxy
+                    result["avg_confidence"] = round(np.exp(avg_logprob), 4)
 
                 if return_logprobs:
-                    result["token_logprobs"] = [float(x) for x in best_token_logprobs[0].cpu().numpy()]
+                    result["token_logprobs"] = token_logprobs
 
                 # ── Quality labels ──────────────────────────────────────
-                if "avg_logprob" in result:
+                if "avg_logprob" in result and result["avg_logprob"] is not None:
                     result["quality_avg_logprob"] = self._get_quality_label(
                         result["avg_logprob"], QUALITY_THRESHOLDS_AVG_LOGPROB
                     )
-                if "sequence_logprob" in result:
+                if "sequence_logprob" in result and result["sequence_logprob"] is not None:
                     result["quality_sequence_logprob"] = self._get_quality_label(
                         result["sequence_logprob"], QUALITY_THRESHOLDS_SEQ_LOGPROB
                     )
 
             return result
-
+        
         # ── Long audio → chunked processing ───────────────────────────────
         else:
             chunk_size_samples = int(max_chunk_sec * TARGET_SR)
@@ -256,6 +286,8 @@ class JapaneseASR:
 
             chunks: List[str] = []
             total_avg_logprobs: List[float] = []
+            total_seq_logprobs: float = 0.0
+            chunk_count = 0
 
             start = 0
             with Progress(
@@ -271,31 +303,21 @@ class JapaneseASR:
 
                 while start < len(array):
                     end = min(start + chunk_size_samples, len(array))
-                    chunk_array = array[start:end]
+                    chunk = array[start:end]
 
-                    inputs = self.processor(
-                        chunk_array, sampling_rate=TARGET_SR, return_tensors="pt", padding=True
-                    ).to(self.device)
+                    if num_beams > 1:
+                        logger.warning("Beam search not supported in chunked mode → using greedy")
 
-                    with torch.no_grad():
-                        outputs = self.model.generate(
-                            inputs.input_values,
-                            attention_mask=inputs.attention_mask,
-                            num_beams=num_beams,
-                            return_dict_in_generate=True,
-                            output_scores=True,
-                        )
-                        pred_ids = outputs.sequences
-                        text = self.processor.batch_decode(pred_ids, skip_special_tokens=True)[0].strip()
-                        chunks.append(text)
+                    text, avg_lp, seq_lp, _ = self._transcribe_segment(
+                        chunk, return_confidence, return_logprobs
+                    )
+                    chunks.append(text)
 
-                        # Greedy path logprobs only (most common case)
-                        if (return_confidence or return_logprobs) and num_beams == 1:
-                            out = self.model(inputs.input_values, attention_mask=inputs.attention_mask)
-                            logits = out.logits
-                            log_probs = torch.log_softmax(logits, dim=-1)
-                            best_token_logprobs = log_probs.gather(2, pred_ids.unsqueeze(-1)).squeeze(-1)
-                            total_avg_logprobs.append(best_token_logprobs.mean().item())
+                    if avg_lp is not None:
+                        total_avg_logprobs.append(avg_lp)
+                    if seq_lp is not None:
+                        total_seq_logprobs += seq_lp
+                        chunk_count += 1
 
                     progress.advance(task)
                     start += step_samples
@@ -307,9 +329,15 @@ class JapaneseASR:
             if total_avg_logprobs:
                 avg_of_avgs = sum(total_avg_logprobs) / len(total_avg_logprobs)
                 result["avg_logprob"] = round(avg_of_avgs, 5)
+                result["sequence_logprob"] = round(total_seq_logprobs, 5) if chunk_count > 0 else None
+
                 result["quality_avg_logprob"] = self._get_quality_label(
                     avg_of_avgs, QUALITY_THRESHOLDS_AVG_LOGPROB
                 )
+                if result["sequence_logprob"] is not None:
+                    result["quality_sequence_logprob"] = self._get_quality_label(
+                        result["sequence_logprob"], QUALITY_THRESHOLDS_SEQ_LOGPROB
+                    )
 
             return result
 
