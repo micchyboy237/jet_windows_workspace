@@ -487,6 +487,7 @@ def download_hf_model(
         ignore_patterns = [
             "*.bin",
             "*.h5",
+            "*.msgpack",
             "*.onnx",
             "onnx/*.onnx",
             "onnx/*/*.onnx",
@@ -574,7 +575,7 @@ def download_hf_space(
 
 
 if __name__ == "__main__":
-    repo_id = "litagin/Japanese-Ero-Voice-Classifier"
+    repo_id = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
     cache_dir = MODELS_CACHE_DIR
     clean_cache = False
 

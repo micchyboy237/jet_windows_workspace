@@ -13,7 +13,7 @@ import torch
 import torchaudio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from rich.console import Console
-from silero_vad.utils import VADIterator, init_jit_model
+from silero_vad import load_silero_vad, VADIterator
 
 console = Console()
 
@@ -46,7 +46,7 @@ spk_model = SpeakerRecognition.from_hparams(
 )
 
 # Silero VAD
-vad_model = init_jit_model("path/to/silero_vad.jit")   # download from snakers4/silero-vad
+vad_model = load_silero_vad()
 vad_iterator = VADIterator(vad_model, sampling_rate=16000, threshold=0.5)
 
 # ────────────────────────────────────────────────
