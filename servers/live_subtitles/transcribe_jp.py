@@ -34,7 +34,11 @@ logger = logging.getLogger("JapaneseASR")
 
 QualityCategory = Literal["very_low", "low", "medium", "high", "very_high"]
 
-DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
+# Short audio
+DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_5s_1word.wav"
+
+# Long audio
+# DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
 MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
 TARGET_SR = 16_000
