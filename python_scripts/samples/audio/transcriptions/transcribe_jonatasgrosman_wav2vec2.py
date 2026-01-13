@@ -1,13 +1,11 @@
 from pathlib import Path
-from typing import List, Union, Optional, Dict
-
+from typing import List, Union, Optional, Dict, TypedDict, Literal
 import torch
 import librosa
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 import logging
-
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
 
 # Setup rich-based logging
@@ -20,24 +18,62 @@ logging.basicConfig(
 logger = logging.getLogger("JapaneseASR")
 
 
+QualityCategory = Literal["very_low", "low", "medium", "high", "very_high"]
+
+
+class TranscriptionResult(TypedDict, total=False):
+    text: str
+    file: str
+    chunks_info: str
+    duration_sec: float
+
+    # Confidence & log-prob related
+    avg_confidence: Optional[float]
+    avg_logprob: Optional[float]
+    sequence_logprob: Optional[float]
+    token_logprobs: Optional[List[float]]
+    best_beam_score: Optional[float]
+
+    # Quality category labels
+    quality_avg_logprob: Optional[QualityCategory]
+    quality_sequence_logprob: Optional[QualityCategory]
+
+
 class JapaneseASR:
     """Flexible Japanese speech-to-text using wav2vec2-large-xlsr-53-japanese"""
 
     MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
     TARGET_SR = 16_000
-
     DEFAULT_MAX_CHUNK_SEC = 30.0
     DEFAULT_CHUNK_OVERLAP_SEC = 2.0
 
-    def _compute_avg_confidence(self, logits: torch.Tensor) -> float:
-        """
-        Very simple token-level confidence: average of max-probability per frame
-        Returns value roughly between 0.0 ~ 1.0
-        """
-        probs = torch.softmax(logits, dim=-1)
-        max_probs, _ = torch.max(probs, dim=-1)  # [batch, seq_len]
-        avg_conf = max_probs.mean().item()
-        return round(avg_conf, 4)
+    # Quality categorization thresholds (empirical - Japanese wav2vec2 models)
+    # avg_logprob: roughly per-token average log probability
+    QUALITY_THRESHOLDS_AVG_LOGPROB = [
+        (-0.50, "very_high"),
+        (-0.95, "high"),
+        (-1.55, "medium"),
+        (-2.50, "low"),
+        (float("-inf"), "very_low"),
+    ]
+
+    # sequence_logprob: total sum - much more length dependent
+    QUALITY_THRESHOLDS_SEQ_LOGPROB = [
+        (-20.0, "very_high"),
+        (-45.0, "high"),
+        (-85.0, "medium"),
+        (-160.0, "low"),
+        (float("-inf"), "very_low"),
+    ]
+
+    @staticmethod
+    def _get_quality_label(
+        value: float, thresholds: List[tuple[float, QualityCategory]]
+    ) -> QualityCategory:
+        for threshold, label in thresholds:
+            if value >= threshold:
+                return label
+        return "very_low"  # fallback
 
     def __init__(
         self,
@@ -70,9 +106,12 @@ class JapaneseASR:
         self,
         audio_path: Union[str, Path],
         return_confidence: bool = False,
+        return_logprobs: bool = False,
+        num_beams: int = 1,
         max_chunk_seconds: Optional[float] = None,
         chunk_overlap_seconds: Optional[float] = None,
-    ) -> Dict[str, any]:
+        **kwargs,
+    ) -> TranscriptionResult:
         """
         Transcribe a single Japanese audio file.
         Automatically uses chunking for long audio.
@@ -83,65 +122,74 @@ class JapaneseASR:
 
         logger.info(f"Processing: [blue]{path.name}[/blue]")
 
-        # Override defaults if provided
         max_chunk_sec = max_chunk_seconds if max_chunk_seconds is not None else self.max_chunk_seconds
         overlap_sec = chunk_overlap_seconds if chunk_overlap_seconds is not None else self.chunk_overlap_seconds
 
-        # ── Load full audio once ───────────────────────────────────────
+        # ── Load & resample audio ───────────────────────────────────────
         with self.console.status(f"[cyan]Loading & resampling {path.name}...", spinner="arc"):
             speech_array, orig_sr = librosa.load(path, sr=self.TARGET_SR, mono=True)
 
         duration_sec = len(speech_array) / self.TARGET_SR
         logger.info(f"Audio duration: [bold]{duration_sec:.1f} seconds[/bold]")
 
+        result: TranscriptionResult = {
+            "text": "",
+            "file": str(path),
+            "duration_sec": round(duration_sec, 1),
+        }
+
+        # ── Short audio ─ single inference ────────────────────────────────
         if duration_sec <= max_chunk_sec + 1.0:
-            # Short audio → single pass
+            result["chunks_info"] = "single chunk"
+
             inputs = self.processor(
-                speech_array,
-                sampling_rate=self.TARGET_SR,
-                return_tensors="pt",
-                padding=True
+                speech_array, sampling_rate=self.TARGET_SR, return_tensors="pt"
             ).to(self.device)
 
             with torch.no_grad(), self.console.status("[magenta]Running inference...", spinner="bouncingBall"):
-                outputs = self.model(
-                    inputs.input_values,
-                    attention_mask=inputs.attention_mask
-                )
-                logits = outputs.logits
+                model_outputs = self.model(inputs.input_values, attention_mask=inputs.attention_mask)
+                logits = model_outputs.logits
+                pred_ids = torch.argmax(logits, dim=-1)
 
-            predicted_ids = torch.argmax(logits, dim=-1)
-            transcription = self.processor.batch_decode(predicted_ids)[0].strip()
+            transcription = self.processor.batch_decode(pred_ids, skip_special_tokens=True)[0].strip()
+            result["text"] = transcription
 
-            confidence = None
-            if return_confidence:
-                confidence = self._compute_avg_confidence(logits)
+            if return_confidence or return_logprobs:
+                log_probs = torch.log_softmax(logits, dim=-1)
+                best_token_logprobs = log_probs.gather(2, pred_ids.unsqueeze(-1)).squeeze(-1)
 
-            full_text = transcription
-            chunks_info = "single chunk"
+                avg_logprob = best_token_logprobs.mean().item()
+                seq_logprob = best_token_logprobs.sum().item()
 
-            result: Dict[str, any] = {
-                "text": full_text,
-                "file": str(path),
-                "chunks_info": chunks_info,
-                "duration_sec": round(duration_sec, 1),
-            }
+                result["avg_logprob"] = round(avg_logprob, 5)
+                result["sequence_logprob"] = round(seq_logprob, 5)
+                result["avg_confidence"] = round(best_token_logprobs.exp().mean().item(), 4)
 
-            if return_confidence:
-                result["avg_confidence"] = confidence
+                if return_logprobs:
+                    result["token_logprobs"] = [float(x) for x in best_token_logprobs[0].cpu().numpy()]
+
+                # ── Quality labels ──────────────────────────────────────
+                if "avg_logprob" in result:
+                    result["quality_avg_logprob"] = self._get_quality_label(
+                        result["avg_logprob"], self.QUALITY_THRESHOLDS_AVG_LOGPROB
+                    )
+                if "sequence_logprob" in result:
+                    result["quality_sequence_logprob"] = self._get_quality_label(
+                        result["sequence_logprob"], self.QUALITY_THRESHOLDS_SEQ_LOGPROB
+                    )
 
             return result
 
+        # ── Long audio → chunked processing ───────────────────────────────
         else:
-            # Long audio → chunk with overlap
             chunk_size_samples = int(max_chunk_sec * self.TARGET_SR)
             overlap_samples = int(overlap_sec * self.TARGET_SR)
             step_samples = chunk_size_samples - overlap_samples
 
             chunks: List[str] = []
+            total_avg_logprobs: List[float] = []
 
             start = 0
-
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -158,62 +206,66 @@ class JapaneseASR:
                     chunk_array = speech_array[start:end]
 
                     inputs = self.processor(
-                        chunk_array,
-                        sampling_rate=self.TARGET_SR,
-                        return_tensors="pt",
-                        padding=True
+                        chunk_array, sampling_rate=self.TARGET_SR, return_tensors="pt", padding=True
                     ).to(self.device)
 
                     with torch.no_grad():
-                        logits = self.model(inputs.input_values, attention_mask=inputs.attention_mask).logits
+                        outputs = self.model.generate(
+                            inputs.input_values,
+                            attention_mask=inputs.attention_mask,
+                            num_beams=num_beams,
+                            return_dict_in_generate=True,
+                            output_scores=True,
+                        )
+                        pred_ids = outputs.sequences
+                        text = self.processor.batch_decode(pred_ids, skip_special_tokens=True)[0].strip()
+                        chunks.append(text)
 
-                    pred_ids = torch.argmax(logits, dim=-1)
-                    text = self.processor.batch_decode(pred_ids)[0].strip()
-
-                    chunks.append(text)
+                        # Greedy path logprobs only (most common case)
+                        if (return_confidence or return_logprobs) and num_beams == 1:
+                            out = self.model(inputs.input_values, attention_mask=inputs.attention_mask)
+                            logits = out.logits
+                            log_probs = torch.log_softmax(logits, dim=-1)
+                            best_token_logprobs = log_probs.gather(2, pred_ids.unsqueeze(-1)).squeeze(-1)
+                            total_avg_logprobs.append(best_token_logprobs.mean().item())
 
                     progress.advance(task)
                     start += step_samples
 
-            # Naive stitching: join with space (can be improved later)
             full_text = " ".join(chunks).strip()
-            chunks_info = f"{len(chunks)} chunks (overlap {overlap_sec:.1f}s)"
+            result["text"] = full_text
+            result["chunks_info"] = f"{len(chunks)} chunks (overlap {overlap_sec:.1f}s)"
 
-            result: Dict[str, any] = {
-                "text": full_text,
-                "file": str(path),
-                "chunks_info": chunks_info,
-                "duration_sec": round(duration_sec, 1),
-            }
-
-            if return_confidence:
-                result["avg_confidence"] = None
+            if total_avg_logprobs:
+                avg_of_avgs = sum(total_avg_logprobs) / len(total_avg_logprobs)
+                result["avg_logprob"] = round(avg_of_avgs, 5)
+                result["quality_avg_logprob"] = self._get_quality_label(
+                    avg_of_avgs, self.QUALITY_THRESHOLDS_AVG_LOGPROB
+                )
 
             return result
 
     def transcribe_files(
         self,
         audio_paths: List[Union[str, Path]],
-        show_progress: bool = True
-    ) -> List[Dict[str, any]]:
+        show_progress: bool = True,
+        **kwargs,
+    ) -> List[TranscriptionResult]:
         """Transcribe multiple audio files with progress bar"""
         results = []
-
         if show_progress:
-            progress = Progress(
+            with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 BarColumn(),
                 "[progress.percentage]{task.percentage:>3.0f}%",
                 TimeElapsedColumn(),
                 console=self.console
-            )
-            task = progress.add_task("[cyan]Transcribing files...", total=len(audio_paths))
-
-            with progress:
+            ) as progress:
+                task = progress.add_task("[cyan]Transcribing files...", total=len(audio_paths))
                 for path in audio_paths:
                     try:
-                        result = self.transcribe_file(path)
+                        result = self.transcribe_file(path, **kwargs)
                         results.append(result)
                     except Exception as e:
                         logger.error(f"Failed {path}: {e}")
@@ -221,27 +273,24 @@ class JapaneseASR:
                     progress.advance(task)
         else:
             for path in audio_paths:
-                results.append(self.transcribe_file(path))
-
+                results.append(self.transcribe_file(path, **kwargs))
         return results
 
 
 # ────────────────────────────────────────
-#          Example usage
+# Example usage
 # ────────────────────────────────────────
-
 if __name__ == "__main__":
     asr = JapaneseASR()
 
-    # Single file example
     audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+
     try:
         result = asr.transcribe_file(
             audio_path,
             return_confidence=True,
-            # You can override chunk size here if desired
-            # max_chunk_seconds=20.0,
-            # chunk_overlap_seconds=3.0,
+            return_logprobs=True,
+            num_beams=1,
         )
 
         asr.console.rule("Transcription Result")
@@ -250,11 +299,28 @@ if __name__ == "__main__":
         asr.console.print(f"[bold]Chunks:[/bold] {result['chunks_info']}")
         asr.console.print(f"[bold]Text:[/bold]\n{result['text']}")
 
-        # Show confidence when available (currently only single chunk mode)
-        if result.get("avg_confidence") is not None:
-            conf = result["avg_confidence"]
+        if (conf := result.get("avg_confidence")) is not None:
             color = "green" if conf >= 0.65 else "yellow" if conf >= 0.40 else "red"
             asr.console.print(f"\n[bold]Average confidence:[/bold] [{color}]{conf:.1%}[/{color}]")
+
+        if (alp := result.get("avg_logprob")) is not None:
+            cat = result.get("quality_avg_logprob", "—")
+            color = {"very_high": "bright_green", "high": "green", "medium": "yellow",
+                     "low": "orange1", "very_low": "red"}.get(cat, "white")
+            asr.console.print(
+                f"[bold]Avg token log-prob:[/bold] {alp:.4f} → [[{color}]{cat}[/{color}]]"
+            )
+
+        if (slp := result.get("sequence_logprob")) is not None:
+            cat = result.get("quality_sequence_logprob", "—")
+            color = {"very_high": "bright_green", "high": "green", "medium": "yellow",
+                     "low": "orange1", "very_low": "red"}.get(cat, "white")
+            asr.console.print(
+                f"[bold]Sequence log-prob:[/bold] {slp:.3f} → [[{color}]{cat}[/{color}]]"
+            )
+
+        if result.get("token_logprobs"):
+            asr.console.print(f"[dim]Token logprobs (first 15):[/dim] {result['token_logprobs'][:15]}")
 
     except Exception as e:
         logger.exception("Transcription failed")
