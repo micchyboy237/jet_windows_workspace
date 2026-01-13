@@ -19,11 +19,32 @@ MODEL_PATH = (
     r"C:\Users\druiv\.cache\llama.cpp\translators\gemma-2-2b-jpn-it-translate-Q4_K_M.gguf"
 )
 
-CTX_SIZE        = 1024
-GPU_LAYERS      = -1
-CACHE_TYPE_K    = "q8_0"
-CACHE_TYPE_V    = "q8_0"
-TOK_ADD_BOS     = False
+MODEL_SETTINGS = {
+    "n_ctx": 1024,
+    "n_gpu_layers": -1,
+    "flash_attn": True,
+    "logits_all": True,
+    "cache_type_k": "q8_0",
+    "cache_type_v": "q8_0",
+    "tokenizer_kwargs": {"add_bos_token": False},
+    "n_batch": 128,
+    "n_threads": 6,
+    "n_threads_batch": 6,
+    "use_mlock": True,
+    "use_mmap": True,
+    "verbose": False,
+}
+
+# Recommended defaults for Japanese → English translation
+TRANSLATION_DEFAULTS = {
+    "temperature": 0.5,
+    "top_p": 1.0,
+    "min_p": 0.5,
+    "repeat_penalty": 1.05,
+    "max_tokens": 512,
+    # For confidence scores
+    "logprobs": 3,
+}
 
 def convert_numpy_to_python(obj: Any) -> Any:
     """
@@ -59,23 +80,7 @@ def get_llm() -> Llama:
         with _llm_lock:
             if _llm_instance is None:  # double-checked locking
                 console.print("[bold yellow]Initializing Gemma translator model...[/bold yellow]")
-                _llm_instance = Llama(
-                    model_path=MODEL_PATH,
-                    n_ctx=CTX_SIZE,
-                    n_gpu_layers=GPU_LAYERS,
-                    flash_attn=True,
-                    logits_all=True,           # required for logprobs
-                    cache_type_k=CACHE_TYPE_K,
-                    cache_type_v=CACHE_TYPE_V,
-                    verbose=False,
-                    tokenizer_kwargs={"add_bos_token": TOK_ADD_BOS},
-                    # ─── New performance flags ───
-                    n_batch=512,                   # Higher = faster generation (512 is safe on 6GB VRAM)
-                    n_threads=6,                   # Match your Ryzen 5 3600 (6 cores / 12 threads)
-                    n_threads_batch=6,
-                    use_mlock=True,                # Prevents swapping (faster, more stable)
-                    use_mmap=True,                 # Default but explicit
-                )
+                _llm_instance = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
                 console.print("[bold green]Gemma model loaded and ready[/bold green]")
     return _llm_instance
 
@@ -147,11 +152,12 @@ English:""".strip()
 
 if __name__ == "__main__":
     result = translate_text(
-        "こんにちは、お元気ですか？今日はとても良い天気ですね。",
-        max_tokens=64,
+        "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
+        max_tokens=512,
         logprobs=3,               # ← ask for top-3 logprobs per token
         temperature=0.0,          # deterministic → easier to inspect
     )
+    all_logprobs = result["choices"][0].get("logprobs")
     console.print(Markdown(result["choices"][0]["text"].strip()))
 
     from rich.pretty import pprint
@@ -159,13 +165,5 @@ if __name__ == "__main__":
     print("\n[bold cyan]Translation Result:[/bold cyan]")
     pprint(result, expand_all=True)
 
-    if (logprobs := result["choices"][0].get("logprobs")):
-        print("\nFirst few tokens + top logprobs:")
-        for token, lp, top_lp in zip(
-            logprobs["tokens"][:8],
-            logprobs["token_logprobs"][:8],
-            logprobs["top_logprobs"][:8]
-        ):
-            print(f"{token:12} {lp:8.3f}   | top: {top_lp}")
-    else:
-        print("Still no logprobs → check logits_all=True in Llama()")
+    print(f"\n[bold cyan]All Logprobs:[/bold cyan]")
+    pprint(all_logprobs)
