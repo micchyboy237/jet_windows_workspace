@@ -64,7 +64,7 @@ def get_llm() -> Llama:
             if _llm is None:
                 console.print("[bold yellow]Loading LFM2-350M translator...[/bold yellow]")
                 _llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
-                console.print("[bold green]Model ready ✓[/bold green]")
+                console.print("[bold green]Translation LLM ready ✓[/bold green]")
     return _llm
 
 

@@ -188,9 +188,9 @@ def translate_ja_sentences(sentences_ja: List[str]) -> tuple[str, float | None]:
     if not sentences_ja:
         return "", None
 
-    en_sentences: List[str] = []
-    logprobs_sum = 0.0
-    token_count = 0
+    translated_parts: List[str] = []
+    total_logprob_sum = 0.0
+    total_token_count = 0
 
     for sent in sentences_ja:
         if not sent.strip():
@@ -198,23 +198,31 @@ def translate_ja_sentences(sentences_ja: List[str]) -> tuple[str, float | None]:
         try:
             result = translate_text(
                 text=sent.strip(),
-                logprobs=1,               # request top-1 logprobs
+                logprobs=1,
             )
-            translated = result["text"].strip()
-            all_logprobs = result["logprobs"]
-            if translated:
-                en_sentences.append(translated)
+            text_en = result.get("text", "").strip()
+            logprobs_list = result.get("logprobs", [])
 
-            token_count = len(all_logprobs)
-            logprobs_sum = sum(l[1] for l in logprobs_sum)
+            if text_en:
+                translated_parts.append(text_en)
+
+            if logprobs_list:
+                sentence_logprob_sum = sum(lp[1] for lp in logprobs_list)
+                total_logprob_sum += sentence_logprob_sum
+                total_token_count += len(logprobs_list)
 
         except Exception as e:
             logger.error(f"LLM translation error for '{sent[:50]}...': {e}")
             continue
 
-    en_text = "\n".join(en_sentences).strip()
-    avg_logprob = logprobs_sum / token_count if token_count > 0 else None
-    return en_text, avg_logprob
+    english_text = "\n".join(translated_parts).strip()
+    avg_logprob = (
+        total_logprob_sum / total_token_count
+        if total_token_count > 0
+        else None
+    )
+
+    return english_text, avg_logprob
 
 # ───────────────────────────────────────────────
 # Transcribe and translate with quality/confidence
