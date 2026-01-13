@@ -10,6 +10,7 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 import logging
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
+from audio_utils import load_audio_bytes
 
 # Audio input type: file-like, np/tensor, bytes, etc
 AudioInput = Union[
@@ -141,25 +142,36 @@ class JapaneseASR:
 
         elif isinstance(audio, bytes):
             source_name = "<bytes>"
+            # ── Most common live-streaming case: raw PCM ─────────────────────
+            if input_sample_rate is None:
+                raise ValueError(
+                    "When passing raw bytes from live capture, you MUST provide "
+                    "input_sample_rate= (usually 16000, 44100, 48000...)"
+                )
+
             try:
-                with self.console.status("[cyan]Loading audio from bytes...", spinner="arc"):
-                    array, orig_sr = librosa.load(io.BytesIO(audio), sr=self.TARGET_SR, mono=True)
-            except Exception as e:
-                raise ValueError("Failed to decode audio from bytes") from e
+                array, orig_sr = load_audio_bytes(
+                    audio,
+                    expected_sample_rate=input_sample_rate,
+                    channels=1,               # ← change if you capture stereo
+                    dtype=np.float32          # ← pyaudio usually float32 or int16
+                )
+            except ValueError as e:
+                raise ValueError("Failed to interpret bytes as raw PCM audio") from e
 
         elif isinstance(audio, np.ndarray):
             source_name = "<numpy array>"
             array = audio.astype(np.float32)
             orig_sr = input_sample_rate
             if orig_sr is None:
-                raise ValueError("When passing numpy array, you must provide input_sample_rate=...")
+                raise ValueError("input_sample_rate required for numpy array")
 
         elif isinstance(audio, torch.Tensor):
             source_name = "<torch.Tensor>"
             array = audio.cpu().numpy().astype(np.float32)
             orig_sr = input_sample_rate
             if orig_sr is None:
-                raise ValueError("When passing torch.Tensor, you must provide input_sample_rate=...")
+                raise ValueError("input_sample_rate required for torch.Tensor")
 
         else:
             raise TypeError(
