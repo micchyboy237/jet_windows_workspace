@@ -4,7 +4,7 @@ from rich.pretty import pprint
 
 # model_path = r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
 model_path = "shisa-ai/shisa-v2.1-llama3.2-3b"
-add_special_tokens = True
+add_special_tokens = False
 
 text = """\
 <|begin_of_text|><|start_header_id|>system<|end_header_id>
@@ -21,5 +21,7 @@ tokens = tokenizer.tokenize(
 )
 count = len(tokens)
 
+print(f"Detokenized tokens: {tokenizer.detokenize(tokens, special=add_special_tokens)}")
+print(f"Decoded text: {tokenizer.decode(tokens)}")
 print(f"Token ids:\n{tokens}")
 print(f"Count: {count}")

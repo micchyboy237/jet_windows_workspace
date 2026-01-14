@@ -4,7 +4,6 @@ from rich import print
 from rich.pretty import pprint
 
 model_path = r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
-# model_path = "shisa-ai/shisa-v2.1-llama3.2-3b"
 add_special_tokens = True
 
 text = """\
@@ -14,23 +13,9 @@ You are a helpful AI assistant.<|eot_id|><|start_header_id|>user<|end_header_id>
 
 Hello! Tell me a short joke about programming.<|eot_id|><|start_header_id|>assistant<|end_header_id>"""
 
-# tokenizer = LlamaHFTokenizer.from_pretrained(model_path)
-
-# llm = Llama(
-#     model_path=str(model_path),
-#     n_ctx=n_ctx,
-#     n_batch=512,
-#     verbose=verbose,
-#     # We don't really need these for counting
-#     embedding=False,
-#     logits_all=False,
-#     use_mlock=False
-# )
-# tokenizer = llm.tokenizer()
-
 MODEL_SETTINGS = {
-    "n_ctx": 1024,
-    "n_gpu_layers": -1,
+    "n_ctx": 128,
+    "n_gpu_layers": 0,
     "flash_attn": True,
     "logits_all": True,
     "type_k": 8,
@@ -52,6 +37,9 @@ tokens = tokenizer.tokenize(
     special=add_special_tokens  # llama.cpp special handling
 )
 count = len(tokens)
+small_tokens = tokenizer.tokenize("print('Hello world!')".encode("utf-8", "ignore"), special=True)
 
+print(f"Detokenized tokens: {tokenizer.detokenize(tokens, special=add_special_tokens)}")
+print(f"Decoded text: {tokenizer.decode(tokens)}")
 print(f"Token ids:\n{tokens}")
 print(f"Count: {count}")
