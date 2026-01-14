@@ -1,4 +1,4 @@
-from typing import Literal, Any, Dict, Union, List, Optional, Iterator, Tuple
+from typing import Literal, Any, Dict, Union, List, Iterator, Tuple
 from pathlib import Path
 import time
 from contextlib import contextmanager
@@ -7,7 +7,6 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import librosa
-import soundfile as sf
 from transformers import pipeline
 from rich.live import Live               # ← new
 from rich.text import Text               # ← new
@@ -396,40 +395,107 @@ def _progress_context(show: bool, total: int, duration: float):
             yield update
 
 
-# ─── Demo ───────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────
+# Example usage
+# ────────────────────────────────────────
+
+def example(
+    audio_path: Union[str, Path],
+    task: TaskMode = "transcribe",
+    output_mode: OutputMode = "basic",
+    tgt_lang: str = "eng_Latn",
+    compute_type: ComputeType = "float32",
+    max_chunk_seconds: float = 45.0,
+    chunk_overlap_seconds: float = 10.0,
+    **kwargs,
+) -> None:
+    """
+    Convenience function: run full (blocking) transcription and display nicely with rich.
+    """
+    from rich.panel import Panel
+
+    _console.rule(f"[bold cyan]Full Transcription – {Path(audio_path).name}[/bold cyan]")
+
+    result = japanese_speech_to_text(
+        audio_path=audio_path,
+        task=task,
+        output_mode=output_mode,
+        tgt_lang=tgt_lang,
+        compute_type=compute_type,
+        max_chunk_seconds=max_chunk_seconds,
+        chunk_overlap_seconds=chunk_overlap_seconds,
+        show_progress=True,
+        **kwargs,
+    )
+
+    if output_mode == "basic":
+        if isinstance(result, str):
+            _console.print(Panel(result, title="Transcription", border_style="green"))
+    elif output_mode == "with_timestamps":
+        if isinstance(result, list):
+            table = Table(title="Segments with Timestamps")
+            table.add_column("Start–End (s)", style="blue")
+            table.add_column("Text", style="white")
+            for item in result:
+                ts = item.get("timestamp")
+                ts_str = f"{ts[0]:.1f}–{ts[1]:.1f}" if ts and ts[0] is not None else "n/a"
+                table.add_row(ts_str, item.get("text", "").strip())
+            _console.print(table)
+    else:  # verbose
+        if isinstance(result, dict):
+            table = Table(title="Verbose Info")
+            table.add_column("Key", style="cyan")
+            table.add_column("Value", style="green")
+            for k, v in result.items():
+                table.add_row(k, str(v))
+            _console.print(table)
+
+
+def live_stream_example(
+    audio_path: Union[str, Path],
+    task: TaskMode = "transcribe",
+    tgt_lang: str = "eng_Latn",
+    compute_type: ComputeType = "float32",
+    max_chunk_seconds: float = 45.0,
+    chunk_overlap_seconds: float = 10.0,
+    **kwargs,
+) -> None:
+    """Run streaming transcription and show live updating text with progress."""
+    _console.rule(f"[bold magenta]Live Streaming – {Path(audio_path).name}[/bold magenta]")
+
+    with Live(refresh_per_second=4, console=_console) as live:
+        last_text = None
+        for text, progress in japanese_speech_to_text_stream(
+            audio_path=audio_path,
+            task=task,
+            tgt_lang=tgt_lang,
+            compute_type=compute_type,
+            max_chunk_seconds=max_chunk_seconds,
+            chunk_overlap_seconds=chunk_overlap_seconds,
+            **kwargs,
+        ):
+            if text != last_text or progress >= 1.0:
+                display = text if text else "[dim](waiting for first chunk...)[/dim]"
+                live.update(Text.from_markup(f"[cyan]{progress:>6.1%}[/cyan]  {display}"))
+                last_text = text
+
+    _console.print("[green bold]✓ Streaming complete[/green bold]\n")
 
 if __name__ == "__main__":
     AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
     AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
-    rprint("[bold cyan]Demo: Long audio — streaming version[/bold cyan]")
-    
-    # ── Option A: simple print (overwrites line) ───────────────────────────
-    # for text, prog in japanese_speech_to_text_stream(AUDIO_LONG):
-    #     print(f"\r[{prog:5.1%}] {text}", end="", flush=True)
-    # print()
+    _console.print("[bold cyan]Demo: Short audio – full mode[/bold cyan]")
+    example(AUDIO_SHORT, task="transcribe", output_mode="basic")
 
-    # ── Option B: nice updating UI with rich ───────────────────────────────
-    with Live(refresh_per_second=4, console=_console) as live:
-        last_text = ""
-        for text, progress in japanese_speech_to_text_stream(
-            AUDIO_LONG,
-            task="transcribe",
-            # compute_type="bfloat16",  # if your GPU likes it
-        ):
-            if text != last_text or progress >= 1.0:
-                live.update(
-                    Text.from_markup(f"[cyan]{progress:>6.1%}[/cyan]  {text}")
-                )
-                last_text = text
+    _console.print("[bold cyan]Demo: Long audio – full mode[/bold cyan]")
+    example(AUDIO_LONG, task="transcribe", output_mode="basic")
 
-    rprint("[green]Streaming transcription complete.[/green]")
-
-    # ── Original non-streaming call still works ────────────────────────────
-    # rprint("\n[bold]Original non-streaming version:[/bold]")
-    # japanese_speech_to_text(
-    #     AUDIO_LONG,
-    #     task="transcribe",
-    #     output_mode="basic",
-    #     # compute_type="bfloat16",
-    # )
+    _console.print("\n[bold magenta]Demo: Long audio – live streaming mode[/bold magenta]")
+    live_stream_example(
+        AUDIO_LONG,
+        task="transcribe",
+        # compute_type="bfloat16",          # uncomment on supported hardware
+        # max_chunk_seconds=30.0,           # smaller → earlier first result
+        # chunk_overlap_seconds=8.0,
+    )
