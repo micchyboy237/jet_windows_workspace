@@ -252,6 +252,7 @@ def transcribe_and_translate(
         audio_path = out_dir / f"{stem}.wav"
         meta_path = out_dir / f"{stem}.json"
     else:
+        DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         audio_path = DEFAULT_OUTPUT_DIR / f"temp_{stem}.wav"
 
     # Write audio
