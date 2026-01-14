@@ -61,9 +61,9 @@ def sliding_window_emotion_analysis(
     data: np.ndarray,
     sr: int,
     pipe,
-    window_sec: float,
-    step_sec: float,
-    top_k: int = 3
+    window_sec: float = CONFIG["window_sec"],
+    step_sec: float = CONFIG["step_sec"],
+    top_k: int = CONFIG["top_k"]
 ) -> List[Dict[str, any]]:
     """Process audio in overlapping windows without temporary files"""
     duration = len(data) / sr
@@ -93,29 +93,37 @@ def sliding_window_emotion_analysis(
 
 
 def print_results(results: List[Dict]):
+    """Print results in a nice dynamic table"""
     table = Table(title="Anime Speech Emotion - Sliding Window Analysis")
     table.add_column("Time window", justify="right")
-    table.add_column("Top Emotion")
-    table.add_column("Confidence", justify="right")
-    table.add_column("2nd", justify="left")
-    table.add_column("3rd", justify="left")
+
+    # Dynamic rank columns
+    for rank in range(1, CONFIG["top_k"] + 1):
+        if rank == 1:
+            col_name = "1st"
+        elif rank == 2:
+            col_name = "2nd"
+        elif rank == 3:
+            col_name = "3rd"
+        else:
+            col_name = f"{rank}th"
+        table.add_column(col_name, justify="left")
 
     for i, item in enumerate(results):
-        # Calculate actual window range
         start_time = i * CONFIG["step_sec"]
         end_time = start_time + CONFIG["window_sec"]
 
-        top = item["top_k"][0]
-        second = item["top_k"][1] if len(item["top_k"]) >= 2 else {"label":"-", "score":0.0}
-        third  = item["top_k"][2] if len(item["top_k"]) >= 3 else {"label":"-", "score":0.0}
+        preds = item["top_k"]
+        row = [f"{start_time:.1f}–{end_time:.1f}s"]
 
-        table.add_row(
-            f"{start_time:.1f}–{end_time:.1f}s",
-            top["label"],
-            f"{top['score']:.1%}",
-            f"{second['label']} ({second['score']:.0%})",
-            f"{third['label']}  ({third['score']:.0%})"
-        )
+        for rank in range(CONFIG["top_k"]):
+            if rank < len(preds):
+                p = preds[rank]
+                row.append(f"{p['label']} ({p['score']:.0%})")
+            else:
+                row.append("-")
+
+        table.add_row(*row)
 
     console.print(table)
 
