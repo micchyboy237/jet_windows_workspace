@@ -12,7 +12,7 @@ from rich import print as rprint
 
 TaskMode = Literal["transcribe", "translate"]
 OutputMode = Literal["basic", "with_timestamps", "verbose"]
-ComputeType = Literal["float32", "float16", "bfloat16"]
+ComputeType = Literal["float32", "bfloat16"]
 
 # Global cache + console
 _PIPELINE_CACHE: Dict[str, Any] = {}
@@ -39,7 +39,7 @@ def japanese_speech_to_text(
 
     New parameters:
         device:        "cuda", "cuda:0", "mps", "cpu", 0, -1, None (auto)
-        compute_type:  "float32" (default), "float16", "bfloat16"
+        compute_type:  "float32" (default), "bfloat16"
                        → sets torch_dtype for faster / lower-memory inference
         show_progress: bool = True   → toggle rich progress UI (useful for notebooks/scripts)
     """
@@ -67,7 +67,6 @@ def japanese_speech_to_text(
     # ─── Map compute_type string → torch.dtype ──────────────────────────────
     dtype_map = {
         "float32": torch.float32,
-        "float16": torch.float16,
         "bfloat16": torch.bfloat16,
     }
     torch_dtype = dtype_map.get(compute_type)
@@ -234,9 +233,12 @@ if __name__ == "__main__":
     AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
     # Most common cases
+
     rprint("[bold cyan]Demo: auto device + float32[/bold cyan]")
-    japanese_speech_to_text(AUDIO_LONG)                                 # auto device + float32
-    # rprint("[bold cyan]Demo: try half precision[/bold cyan]")
-    # japanese_speech_to_text(AUDIO_SHORT, compute_type="float16")         # try half precision
-    # rprint("[bold cyan]Demo: long audio with half precision[/bold cyan]")
-    # japanese_speech_to_text(AUDIO_LONG, compute_type="float16")
+    japanese_speech_to_text(AUDIO_LONG)
+
+    # rprint("[bold cyan]Demo: try bfloat16 precision[/bold cyan]")
+    # japanese_speech_to_text(AUDIO_SHORT, compute_type="bfloat16")
+
+    # rprint("[bold cyan]Demo: long audio with bfloat16 precision[/bold cyan]")
+    # japanese_speech_to_text(AUDIO_LONG, compute_type="bfloat16")
