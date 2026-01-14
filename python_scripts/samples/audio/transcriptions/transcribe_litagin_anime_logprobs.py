@@ -16,7 +16,11 @@ MODEL_ID = "litagin/anime-whisper"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float32
 
+# Short audio
 AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+
+# Long audio
+# AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
 GENERATE_KWARGS = {
     "language": "ja",

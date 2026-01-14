@@ -5,7 +5,12 @@ from funasr import AutoModel
 BASE_DIR = Path(__file__).resolve().parent
 REMOTE_CODE_PATH = BASE_DIR / "custom_model_fun_asr_nano.py"
 
-def main():
+# Single audio file to test all examples
+SHORT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+LONG_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
+
+
+def main(audio_path):
     model_dir = "FunAudioLLM/Fun-ASR-Nano-2512"
     model = AutoModel(
         model=model_dir,
@@ -14,18 +19,13 @@ def main():
         device="cuda:0",
     )
 
-    wav_path = f"{model.model_path}/example/zh.mp3"
     res = model.generate(
-        input=[wav_path],
+        input=[audio_path],
         cache={},
         batch_size=1,
-        hotwords=["开放时间"],
-        # 中文、英文、日文 for Fun-ASR-Nano-2512
-        # 中文、英文、粤语、日文、韩文、越南语、印尼语、泰语、马来语、菲律宾语、阿拉伯语、
-        # 印地语、保加利亚语、克罗地亚语、捷克语、丹麦语、荷兰语、爱沙尼亚语、芬兰语、希腊语、
-        # 匈牙利语、爱尔兰语、拉脱维亚语、立陶宛语、马耳他语、波兰语、葡萄牙语、罗马尼亚语、
-        # 斯洛伐克语、斯洛文尼亚语、瑞典语 for Fun-ASR-MLT-Nano-2512
-        language="中文",
+        # hotwords=["开放时间"],
+        # language="中文",
+        language="ja",
         itn=True, # or False
     )
     text = res[0]["text"]
@@ -39,10 +39,13 @@ def main():
         remote_code=str(REMOTE_CODE_PATH),
         device="cuda:0",
     )
-    res = model.generate(input=[wav_path], cache={}, batch_size=1)
+    res = model.generate(input=[audio_path], cache={}, batch_size=1)
     text = res[0]["text"]
     print(text)
 
 
 if __name__ == "__main__":
-    main()
+    audio_path = SHORT_AUDIO
+    # audio_path = LONG_AUDIO
+
+    main(audio_path)
