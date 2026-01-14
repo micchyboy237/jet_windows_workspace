@@ -1,12 +1,14 @@
-# transcribe_jonatasgrosman_wav2vec2.py
+# transcribe_jp.py
 
-from typing import Dict, Tuple, List, Union, Optional, TypedDict, Literal
 import os
 import io
 import numpy as np
 import numpy.typing as npt
 import torch
 import librosa
+import threading
+from dataclasses import asdict, dataclass
+from typing import Iterator, Tuple, List, Union, Optional, TypedDict, Literal, Any
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.live import Live                    # new
@@ -14,6 +16,55 @@ from rich.text import Text                    # new
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 import logging
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
+from utils import split_sentences_ja
+from warnings import warn
+
+
+@dataclass
+class Word:
+    start: float
+    end: float
+    word: str
+    probability: float
+
+    def _asdict(self):
+        warn(
+            "Word._asdict() method is deprecated, use dataclasses.asdict(Word) instead",
+            DeprecationWarning,
+            2,
+        )
+        return asdict(self)
+
+
+@dataclass
+class Segment:
+    id: int
+    seek: int
+    start: float
+    end: float
+    text: str
+    tokens: List[int]               # or List[dict] if you keep fake dict tokens
+    avg_logprob: Optional[float] = None
+    temperature: Optional[float] = None
+    # compression_ratio: Optional[float] = None
+    # no_speech_prob: Optional[float] = None
+    # words: Optional[List[Word]] = None
+
+    def _asdict(self):
+        warn(
+            "Segment._asdict() method is deprecated, use dataclasses.asdict(Segment) instead",
+            DeprecationWarning,
+            2,
+        )
+        return asdict(self)
+
+
+class TokenDetail(TypedDict, total=False):
+    token: str
+    logprob: float
+    token_id: int
+    # future: start_frame: int, duration_frames: int, start_time_s: float, end_time_s: float
+
 
 # Audio input type: file-like, np/tensor, bytes, etc
 AudioInput = Union[
@@ -23,8 +74,6 @@ AudioInput = Union[
     npt.NDArray[np.floating | np.integer],
     torch.Tensor,
 ]
-
-from typing import Iterator, Tuple
 
 # Setup rich-based logging
 logging.basicConfig(
@@ -79,6 +128,7 @@ class TranscriptionResult(TypedDict, total=False):
     sequence_logprob: Optional[float]
     token_logprobs: Optional[List[float]]
     best_beam_score: Optional[float]
+    token_details: Optional[List[TokenDetail]]
 
     # Quality category labels
     quality_avg_logprob: Optional[QualityCategory]
@@ -165,12 +215,13 @@ class JapaneseASR:
     def _transcribe_segment(
         self,
         segment: npt.NDArray[np.float32],
-        return_confidence: bool,
-        return_logprobs: bool,
-    ) -> Tuple[str, Optional[float], Optional[float], Optional[List[float]]]:
+        return_confidence: bool = False,
+        return_logprobs: bool = False,
+        return_token_details: bool = False,
+    ) -> Tuple[str, Optional[float], Optional[float], Optional[List[float]], Optional[List[TokenDetail]]]:
         """Core transcription logic for one contiguous segment (short or chunk)."""
         if len(segment) == 0:
-            return "", None, None, None
+            return "", None, None, None, None
 
         inputs = self.processor(
             segment, sampling_rate=TARGET_SR, return_tensors="pt"
@@ -186,6 +237,7 @@ class JapaneseASR:
         avg_logprob = None
         seq_logprob = None
         token_logprobs = None
+        token_details: Optional[List[TokenDetail]] = None
 
         if return_confidence or return_logprobs:
             log_probs = torch.log_softmax(logits, dim=-1)
@@ -197,7 +249,26 @@ class JapaneseASR:
             if return_logprobs:
                 token_logprobs = best_token_logprobs.cpu().numpy().tolist()
 
-        return text, avg_logprob, seq_logprob, token_logprobs
+                if return_token_details:
+                    token_ids = pred_ids[0].cpu().tolist()
+                    tokens = self.processor.tokenizer.convert_ids_to_tokens(token_ids)
+
+                    blank_token = self.processor.tokenizer.word_delimiter_token or "|"
+                    pad_token   = self.processor.tokenizer.pad_token or "<pad>"
+                    unk_token   = self.processor.tokenizer.unk_token or "<unk>"
+
+                    token_details = []
+                    for tok_str, lp, tok_id in zip(tokens, best_token_logprobs, token_ids):
+                        if tok_str in {blank_token, pad_token, unk_token, ""}:
+                            continue
+                        token_details.append({
+                            "token": tok_str,
+                            "logprob": round(lp.item(), 5),
+                            "token_id": int(tok_id),
+                        })
+
+        return text, avg_logprob, seq_logprob, token_logprobs, token_details
+        # Note: we return 5 values now (added token_details as fifth)
 
     def _stitch_texts_with_overlap(self, prev: str, curr: str) -> str:
         """Naive but effective stitching for Japanese (no word boundaries)."""
@@ -232,13 +303,13 @@ class JapaneseASR:
         return_confidence: bool = False,
         return_logprobs: bool = False,
         num_beams: int = 1,
+        return_token_details: bool = False,
         max_chunk_seconds: Optional[float] = None,
         chunk_overlap_seconds: Optional[float] = None,
         **kwargs,
     ) -> TranscriptionResult:
         """
         Flexible Japanese speech-to-text.
-
         Accepts: path (str/Path), bytes, numpy array, torch.Tensor
         """
         # ── Resolve audio array & sample rate ─────────────────────────────
@@ -253,10 +324,25 @@ class JapaneseASR:
         elif isinstance(audio, bytes):
             source_name = "<bytes>"
             try:
-                with self.console.status("[cyan]Loading audio from bytes...", spinner="arc"):
-                    array, orig_sr = librosa.load(io.BytesIO(audio), sr=TARGET_SR, mono=True)
+                with self.console.status("[cyan]Loading raw PCM bytes...", spinner="arc"):
+                    # ─── Quick & reliable way ───
+                    array = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
+
+                    # Optional: very basic silence trimming (helps a bit)
+                    energy = np.abs(array)
+                    mask = energy > 0.015   # ~500 / 32768
+                    if np.any(mask):
+                        first = np.where(mask)[0][0]
+                        last = np.where(mask)[0][-1] + 1
+                        array = array[first:last]
+                    else:
+                        array = np.array([], dtype=np.float32)
+
+                orig_sr = input_sample_rate
+                if orig_sr is None:
+                    raise ValueError("For raw PCM bytes you must provide input_sample_rate!")
             except Exception as e:
-                raise ValueError("Failed to decode audio from bytes") from e
+                raise ValueError("Failed to interpret bytes as raw 16-bit PCM") from e
 
         elif isinstance(audio, np.ndarray):
             source_name = "<numpy array>"
@@ -313,9 +399,13 @@ class JapaneseASR:
         if duration_sec <= max_chunk_sec + 1.0:
             result["chunks_info"] = "single chunk"
 
-            text, avg_logprob, seq_logprob, token_logprobs = self._transcribe_segment(
-                array, return_confidence, return_logprobs
+            text, avg_logprob, seq_logprob, token_logprobs, token_details = self._transcribe_segment(
+                array,
+                return_confidence=return_confidence,
+                return_logprobs=return_logprobs,
+                return_token_details=return_token_details
             )
+
             result["text"] = text
 
             result["avg_logprob"] = round(avg_logprob, 5) if avg_logprob is not None else None
@@ -327,6 +417,8 @@ class JapaneseASR:
 
                 if return_logprobs:
                     result["token_logprobs"] = token_logprobs
+                    if return_token_details:
+                        result["token_details"] = token_details
 
                 if "avg_logprob" in result and result["avg_logprob"] is not None:
                     result["quality_avg_logprob"] = self._get_quality_label(
@@ -367,8 +459,11 @@ class JapaneseASR:
                     if num_beams > 1:
                         logger.warning("Beam search not supported in chunked mode → using greedy")
 
-                    text, avg_lp, seq_lp, _ = self._transcribe_segment(
-                        chunk, return_confidence, return_logprobs
+                    text, avg_lp, seq_lp, _, _ = self._transcribe_segment(
+                        chunk,
+                        return_confidence=return_confidence,
+                        return_logprobs=return_logprobs,
+                        return_token_details=False   # ← not collecting per-chunk details yet
                     )
                     chunks_texts.append(text.strip())
 
@@ -459,7 +554,7 @@ class JapaneseASR:
             return
 
         if duration_sec <= max_chunk_sec + 1.0:
-            text, _, _, _ = self._transcribe_segment(array, False, False)
+            text, _, _, _, _ = self._transcribe_segment(array, False, False, False)
             yield text.strip(), 1.0
             return
 
@@ -470,7 +565,7 @@ class JapaneseASR:
         processed_sec = 0.0
 
         for chunk in chunks:
-            text, _, _, _ = self._transcribe_segment(chunk, False, False)
+            text, _, _, _, _ = self._transcribe_segment(chunk, False, False, False)
             text = text.strip()
 
             if not current_text:
@@ -518,6 +613,91 @@ class JapaneseASR:
         return results
 
 
+_default_asr_instance: JapaneseASR | None = None
+_asr_lock = threading.Lock()
+
+def get_japanese_asr() -> JapaneseASR:
+    global _default_asr_instance
+
+    if _default_asr_instance is not None:
+        return _default_asr_instance
+
+    with _asr_lock:
+        # double check
+        if _default_asr_instance is not None:
+            return _default_asr_instance
+
+        logger.info("Initializing Japanese ASR (once only)...")
+        instance = JapaneseASR(
+            device="cuda" if torch.cuda.is_available() else "cpu",
+            max_chunk_seconds=45.0,
+            chunk_overlap_seconds=10.0,
+        )
+        logger.info("ASR model ready ✓")
+        _default_asr_instance = instance
+        return instance
+
+
+def transcribe_with_japanese_asr(
+    audio_bytes: bytes,
+    sample_rate: int,
+    language: str = "ja",               # currently ignored – model is ja only
+    beam_size: int = 1,                 # currently not supported
+    vad_filter: bool = False,           # ignored
+    condition_on_previous_text: bool = False,  # ignored
+    **kwargs
+) -> tuple[Segment, dict, Optional[List[TokenDetail]]]:
+    """
+    Adapter to make JapaneseASR behave similarly to faster-whisper .transcribe()
+    Returns dict that tries to be compatible with existing server code
+    """
+    asr = get_japanese_asr()
+
+    # JapaneseASR already handles bytes very well
+    result: TranscriptionResult = asr.transcribe(
+        audio=audio_bytes,
+        input_sample_rate=sample_rate,
+        return_confidence=True,
+        return_logprobs=True,           # we don't use per-token yet
+        return_token_details=True,
+        num_beams=beam_size,             # currently ignored
+    )
+
+    # ── Convert to fake "segments" format expected by server ─────────────
+    full_text = result["text"]
+    sentences = split_sentences_ja(full_text)  # assuming you import this
+    token_ids = [td["token_id"] for td in result.get("token_details") or []]
+    # logprobs = [td["logprob"] for td in result.get("token_details") or []]
+    # tokens = [td["token"] for td in result.get("token_details") or []]
+
+    segments = []
+    current_time = 0.0
+    duration = result["duration_sec"]
+
+    if sentences:
+        time_per_sentence = duration / len(sentences)
+        for sent in sentences:
+            segment_obj = Segment(
+                id=len(segments),              # just incremental
+                seek=0,                        # almost always 0 for live/short segments
+                start=current_time,
+                end=current_time + time_per_sentence,
+                text=sent,
+                tokens=token_ids,  # ← note: this is List[dict], not List[int]
+                avg_logprob=result.get("avg_logprob"),
+                temperature=0.0,               # fake value - most servers ignore it anyway
+            )
+            segments.append(segment_obj)
+            current_time += time_per_sentence
+
+    info = {
+            "language": "ja",
+            "language_probability": 0.99,  # dummy
+            "duration": duration,
+        }
+    return segments, info, result.get("token_details")
+
+
 # ────────────────────────────────────────
 # Example usage
 # ────────────────────────────────────────
@@ -529,6 +709,7 @@ def example(audio_path):
             audio_path,
             return_confidence=True,
             return_logprobs=True,
+            return_token_details=True,          # ← added to show token + logprob table
             num_beams=1,
         )
 
@@ -544,22 +725,49 @@ def example(audio_path):
 
         if (alp := result.get("avg_logprob")) is not None:
             cat = result.get("quality_avg_logprob", "—")
-            color = {"very_high": "bright_green", "high": "green", "medium": "yellow",
-                     "low": "orange1", "very_low": "red"}.get(cat, "white")
+            color = {
+                "very_high": "bright_green",
+                "high": "green",
+                "medium": "yellow",
+                "low": "orange1",
+                "very_low": "red"
+            }.get(cat, "white")
             asr.console.print(
                 f"[bold]Avg token log-prob:[/bold] {alp:.4f} → [[{color}]{cat}[/{color}]]"
             )
 
         if (slp := result.get("sequence_logprob")) is not None:
             cat = result.get("quality_sequence_logprob", "—")
-            color = {"very_high": "bright_green", "high": "green", "medium": "yellow",
-                     "low": "orange1", "very_low": "red"}.get(cat, "white")
+            color = {
+                "very_high": "bright_green",
+                "high": "green",
+                "medium": "yellow",
+                "low": "orange1",
+                "very_low": "red"
+            }.get(cat, "white")
             asr.console.print(
                 f"[bold]Sequence log-prob:[/bold] {slp:.3f} → [[{color}]{cat}[/{color}]]"
             )
 
         if result.get("token_logprobs"):
             asr.console.print(f"[dim]Token logprobs (first 15):[/dim] {result['token_logprobs'][:15]}")
+
+        asr.console.print("")  # small spacing
+
+        if result.get("token_details"):
+            asr.console.rule("Token-Level Details (first 20 non-blank)", style="dim")
+            from rich.table import Table
+            table = Table(title="First 20 Predicted Tokens", show_header=True, expand=False)
+            table.add_column("Token", style="cyan", no_wrap=True)
+            table.add_column("Log-prob", style="magenta", justify="right")
+            table.add_column("Token ID", style="dim blue", justify="right")
+            for item in (result["token_details"] or [])[:20]:
+                table.add_row(
+                    item.get("token", "—"),
+                    f"{item.get('logprob', 0.0):.5f}",
+                    str(item.get("token_id", "—"))
+                )
+            asr.console.print(table)
 
     except Exception:
         logger.exception("Transcription failed")

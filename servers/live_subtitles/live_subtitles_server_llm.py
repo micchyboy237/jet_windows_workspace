@@ -4,8 +4,6 @@ Modern WebSocket live subtitles server (compatible with websockets ≥ 12.0 / 14
 Receives Japanese audio chunks, buffers until end-of-utterance, transcribes & translates.
 """
 
-from translate_jp_en_llm import get_llm, translate_text
-
 import asyncio
 import base64
 import json
@@ -19,7 +17,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 import scipy.io.wavfile as wavfile
-from faster_whisper import WhisperModel
+# from faster_whisper import WhisperModel
 from rich.logging import RichHandler
 from transformers import AutoTokenizer
 import os
@@ -27,6 +25,9 @@ import os
 from translator_types import Translator  # adjust import if needed
 from utils import split_sentences_ja
 import threading
+
+from transcribe_jp import get_japanese_asr, transcribe_with_japanese_asr
+from translate_jp_en_llm import get_llm, translate_text
 
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
@@ -112,12 +113,12 @@ def translation_confidence_score(
 # Load models once at startup
 # ───────────────────────────────────────────────
 
-logger.info("Loading Whisper model kotoba-tech/kotoba-whisper-v2.0-faster ...")
-whisper_model = WhisperModel(
-    "kotoba-tech/kotoba-whisper-v2.0-faster",
-    device="cuda",
-    compute_type="float32",
-)
+# logger.info("Loading Whisper model kotoba-tech/kotoba-whisper-v2.0-faster ...")
+# whisper_model = WhisperModel(
+#     "kotoba-tech/kotoba-whisper-v2.0-faster",
+#     device="cuda",
+#     compute_type="float32",
+# )
 
 if not USE_LLM_TRANSLATOR:
     logger.info("Loading OPUS-MT ja→en tokenizer & translator ...")
@@ -129,6 +130,7 @@ if not USE_LLM_TRANSLATOR:
         inter_threads=4,  # tune to your cores
     )
 else:
+    get_japanese_asr()
     get_llm()
 
 logger.info("Models loaded.")
@@ -255,12 +257,19 @@ def transcribe_and_translate(
     wavfile.write(str(audio_path), sr, arr)
 
     # ─── Transcription ─────────────────────────────────────────────
-    segments, info = whisper_model.transcribe(
-        str(audio_path),
-        language="ja",
-        beam_size=5,
-        vad_filter=False,
-        condition_on_previous_text=False,
+
+    # segments, info = whisper_model.transcribe(
+    #     str(audio_path),
+    #     language="ja",
+    #     beam_size=5,
+    #     vad_filter=False,
+    #     condition_on_previous_text=False,
+    # )
+
+    segments, info, token_details = transcribe_with_japanese_asr(
+        audio_bytes=audio_bytes,
+        sample_rate=sr,
+        beam_size=5,                      # will be ignored for now
     )
 
     ja_text_parts = []
