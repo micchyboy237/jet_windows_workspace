@@ -235,8 +235,8 @@ if __name__ == "__main__":
 
     # Most common cases
     rprint("[bold cyan]Demo: auto device + float32[/bold cyan]")
-    japanese_speech_to_text(AUDIO_SHORT)                                 # auto device + float32
-    rprint("[bold cyan]Demo: try bfloat16 precision[/bold cyan]")
-    japanese_speech_to_text(AUDIO_SHORT, compute_type="bfloat16")         # try bfloat16 precision
-    rprint("[bold cyan]Demo: long audio with bfloat16 precision[/bold cyan]")
-    japanese_speech_to_text(AUDIO_LONG, compute_type="bfloat16")
+    japanese_speech_to_text(AUDIO_LONG)                                 # auto device + float32
+    # rprint("[bold cyan]Demo: try half precision[/bold cyan]")
+    # japanese_speech_to_text(AUDIO_SHORT, compute_type="float16")         # try half precision
+    # rprint("[bold cyan]Demo: long audio with half precision[/bold cyan]")
+    # japanese_speech_to_text(AUDIO_LONG, compute_type="float16")
