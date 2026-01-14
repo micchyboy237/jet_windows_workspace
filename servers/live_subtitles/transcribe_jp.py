@@ -1,4 +1,4 @@
-# transcribe_jp.py
+# transcribe_jonatasgrosman_wav2vec2.py
 
 from typing import Dict, Tuple, List, Union, Optional, TypedDict, Literal
 import os
@@ -9,6 +9,8 @@ import torch
 import librosa
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.live import Live                    # new
+from rich.text import Text                    # new
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 import logging
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
@@ -21,6 +23,8 @@ AudioInput = Union[
     npt.NDArray[np.floating | np.integer],
     torch.Tensor,
 ]
+
+from typing import Iterator, Tuple
 
 # Setup rich-based logging
 logging.basicConfig(
@@ -40,7 +44,7 @@ DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_m
 # Long audio example
 # DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
-MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
+MODEL_ID = "reazon-research/japanese-wav2vec2-large-rs35kh"
 TARGET_SR = 16_000
 DEFAULT_MAX_CHUNK_SEC = 45.0       # Increased — better for Japanese sentence continuity
 DEFAULT_CHUNK_OVERLAP_SEC = 10.0   # Much better boundary context (≈22% overlap)
@@ -79,6 +83,44 @@ class TranscriptionResult(TypedDict, total=False):
     # Quality category labels
     quality_avg_logprob: Optional[QualityCategory]
     quality_sequence_logprob: Optional[QualityCategory]
+
+
+def chunk_audio(
+    audio: npt.NDArray[np.float32],
+    sample_rate: int,
+    max_chunk_seconds: float,
+    overlap_seconds: float,
+) -> List[npt.NDArray[np.float32]]:
+    """
+    Split a 1D float32 audio array into overlapping chunks suitable for ASR.
+
+    Returns slices/views of the original array (zero-copy where possible).
+    """
+    if len(audio) == 0:
+        return []
+
+    if max_chunk_seconds <= 0 or overlap_seconds < 0:
+        raise ValueError("max_chunk_seconds must be > 0 and overlap_seconds >= 0")
+
+    chunk_size = int(max_chunk_seconds * sample_rate)
+    overlap = int(overlap_seconds * sample_rate)
+    step = chunk_size - overlap
+
+    if step <= 0:
+        raise ValueError(
+            f"overlap ({overlap_seconds}s) must be strictly less than "
+            f"max_chunk_seconds ({max_chunk_seconds}s) at sample rate {sample_rate}"
+        )
+
+    chunks: List[npt.NDArray[np.float32]] = []
+    start = 0
+
+    while start < len(audio):
+        end = min(start + chunk_size, len(audio))
+        chunks.append(audio[start:end])
+        start += step
+
+    return chunks
 
 
 class JapaneseASR:
@@ -158,9 +200,7 @@ class JapaneseASR:
         return text, avg_logprob, seq_logprob, token_logprobs
 
     def _stitch_texts_with_overlap(self, prev: str, curr: str) -> str:
-        """Naive but effective stitching for Japanese (no word boundaries).
-        Looks for longest matching suffix-prefix in a reasonable window.
-        """
+        """Naive but effective stitching for Japanese (no word boundaries)."""
         if not prev:
             return curr
         if not curr:
@@ -301,16 +341,18 @@ class JapaneseASR:
 
         # ── Long audio → chunked processing ───────────────────────────────
         else:
-            chunk_size_samples = int(max_chunk_sec * TARGET_SR)
-            overlap_samples = int(overlap_sec * TARGET_SR)
-            step_samples = chunk_size_samples - overlap_samples
+            audio_chunks = chunk_audio(
+                array,
+                TARGET_SR,
+                max_chunk_sec,
+                overlap_sec,
+            )
 
-            chunks: List[str] = []
+            chunks_texts: List[str] = []
             total_avg_logprobs: List[float] = []
             total_seq_logprobs: float = 0.0
             chunk_count = 0
 
-            start = 0
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -319,20 +361,16 @@ class JapaneseASR:
                 TimeElapsedColumn(),
                 console=self.console
             ) as progress:
-                total_steps = (len(array) + step_samples - 1) // step_samples
-                task = progress.add_task("[magenta]Chunked transcription...", total=total_steps)
+                task = progress.add_task("[magenta]Chunked transcription...", total=len(audio_chunks))
 
-                while start < len(array):
-                    end = min(start + chunk_size_samples, len(array))
-                    chunk = array[start:end]
-
+                for chunk in audio_chunks:
                     if num_beams > 1:
                         logger.warning("Beam search not supported in chunked mode → using greedy")
 
                     text, avg_lp, seq_lp, _ = self._transcribe_segment(
                         chunk, return_confidence, return_logprobs
                     )
-                    chunks.append(text.strip())  # ensure clean chunks
+                    chunks_texts.append(text.strip())
 
                     if avg_lp is not None:
                         total_avg_logprobs.append(avg_lp)
@@ -341,21 +379,20 @@ class JapaneseASR:
                         chunk_count += 1
 
                     progress.advance(task)
-                    start += step_samples
 
             # ── Stitch chunks using overlap-aware concatenation ───────────
-            if not chunks:
+            if not chunks_texts:
                 full_text = ""
-            elif len(chunks) == 1:
-                full_text = chunks[0]
+            elif len(chunks_texts) == 1:
+                full_text = chunks_texts[0]
             else:
-                full_text = chunks[0]
-                for i in range(1, len(chunks)):
-                    full_text = self._stitch_texts_with_overlap(full_text, chunks[i])
+                full_text = chunks_texts[0]
+                for i in range(1, len(chunks_texts)):
+                    full_text = self._stitch_texts_with_overlap(full_text, chunks_texts[i])
 
             full_text = full_text.strip()
             result["text"] = full_text
-            result["chunks_info"] = f"{len(chunks)} chunks (overlap {overlap_sec:.1f}s, with text stitching)"
+            result["chunks_info"] = f"{len(audio_chunks)} chunks (overlap {overlap_sec:.1f}s, with text stitching)"
 
             if total_avg_logprobs:
                 avg_of_avgs = sum(total_avg_logprobs) / len(total_avg_logprobs)
@@ -371,6 +408,83 @@ class JapaneseASR:
                     )
 
             return result
+
+    def transcribe_stream(
+        self,
+        audio: AudioInput,
+        input_sample_rate: Optional[int] = None,
+        max_chunk_seconds: Optional[float] = None,
+        chunk_overlap_seconds: Optional[float] = None,
+    ) -> Iterator[Tuple[str, float]]:
+        """
+        Generator version: yields (current_stitched_text_so_far, progress_0_to_1)
+        after each chunk is processed.
+
+        Last yield has progress == 1.0
+        """
+        max_chunk_sec = max_chunk_seconds if max_chunk_seconds is not None else self.max_chunk_seconds
+        overlap_sec   = chunk_overlap_seconds if chunk_overlap_seconds is not None else self.chunk_overlap_seconds
+
+        # ── Same audio loading logic as transcribe() ───────────────────────
+        if isinstance(audio, (str, os.PathLike)):
+            source_name = str(audio)
+            array, orig_sr = librosa.load(audio, sr=TARGET_SR, mono=True)
+        elif isinstance(audio, bytes):
+            source_name = "<bytes>"
+            array, orig_sr = librosa.load(io.BytesIO(audio), sr=TARGET_SR, mono=True)
+        elif isinstance(audio, np.ndarray):
+            source_name = "<numpy array>"
+            array = audio.astype(np.float32)
+            orig_sr = input_sample_rate
+            if orig_sr is None:
+                raise ValueError("input_sample_rate required for numpy array")
+        elif isinstance(audio, torch.Tensor):
+            source_name = "<torch.Tensor>"
+            array = audio.cpu().numpy().astype(np.float32)
+            orig_sr = input_sample_rate
+            if orig_sr is None:
+                raise ValueError("input_sample_rate required for torch.Tensor")
+        else:
+            raise TypeError(f"Unsupported audio type: {type(audio)}")
+
+        if orig_sr != TARGET_SR:
+            array = librosa.resample(array, orig_sr=orig_sr, target_sr=TARGET_SR)
+
+        if array.ndim > 1:
+            array = np.mean(array, axis=1)
+
+        duration_sec = len(array) / TARGET_SR
+        if duration_sec == 0:
+            yield "", 1.0
+            return
+
+        if duration_sec <= max_chunk_sec + 1.0:
+            text, _, _, _ = self._transcribe_segment(array, False, False)
+            yield text.strip(), 1.0
+            return
+
+        # Long audio
+        chunks = chunk_audio(array, TARGET_SR, max_chunk_sec, overlap_sec)
+
+        current_text = ""
+        processed_sec = 0.0
+
+        for chunk in chunks:
+            text, _, _, _ = self._transcribe_segment(chunk, False, False)
+            text = text.strip()
+
+            if not current_text:
+                current_text = text
+            else:
+                current_text = self._stitch_texts_with_overlap(current_text, text)
+
+            processed_sec += max_chunk_sec - overlap_sec
+            progress = min(1.0, processed_sec / duration_sec)
+
+            yield current_text, progress
+
+        # Final clean yield
+        yield current_text, 1.0
 
     def batch_transcribe(
         self,
@@ -407,87 +521,15 @@ class JapaneseASR:
 # ────────────────────────────────────────
 # Example usage
 # ────────────────────────────────────────
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Japanese speech-to-text using jonatasgrosman/wav2vec2-large-xlsr-53-japanese",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "audio",
-        type=str,
-        nargs="?",
-        default=DEFAULT_AUDIO_PATH,
-        help="Path to the audio file to transcribe"
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default=None,
-        help="Device to run model on ('cpu', 'cuda', 'cuda:0', ...)",
-    )
-    parser.add_argument(
-        "--beams",
-        "--num-beams",
-        type=int,
-        default=1,
-        dest="num_beams",
-        help="Number of beams for beam search (1 = greedy)",
-    )
-    parser.add_argument(
-        "--max-chunk-sec",
-        type=float,
-        default=DEFAULT_MAX_CHUNK_SEC,
-        help="Maximum chunk length in seconds for long audio",
-    )
-    parser.add_argument(
-        "--chunk-overlap-sec",
-        type=float,
-        default=DEFAULT_CHUNK_OVERLAP_SEC,
-        help="Overlap between consecutive chunks (seconds)",
-    )
-    parser.add_argument(
-        "--no-confidence",
-        action="store_false",
-        dest="return_confidence",
-        help="Disable confidence / log-prob calculation",
-    )
-    parser.add_argument(
-        "--no-logprobs",
-        action="store_false",
-        dest="return_logprobs",
-        help="Disable detailed per-token log-probabilities",
-    )
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Show more detailed logging (DEBUG level)",
-    )
-
-    args = parser.parse_args()
-
-    # Adjust logging level if verbose
-    if args.verbose:
-        logging.getLogger("JapaneseASR").setLevel("DEBUG")
-        logger.debug("Verbose mode enabled")
-
-    asr = JapaneseASR(
-        device=args.device,
-        max_chunk_seconds=args.max_chunk_sec,
-        chunk_overlap_seconds=args.chunk_overlap_sec,
-    )
-
-    audio_path = args.audio
+def example(audio_path):
+    asr = JapaneseASR()
 
     try:
         result = asr.transcribe(
             audio_path,
-            return_confidence=args.return_confidence,
-            return_logprobs=args.return_logprobs,
-            num_beams=args.num_beams,
-            max_chunk_seconds=args.max_chunk_sec,
-            chunk_overlap_seconds=args.chunk_overlap_sec,
+            return_confidence=True,
+            return_logprobs=True,
+            num_beams=1,
         )
 
         asr.console.rule("Transcription Result")
@@ -521,3 +563,39 @@ if __name__ == "__main__":
 
     except Exception:
         logger.exception("Transcription failed")
+
+
+def live_stream_example(audio_path: str):
+    asr = JapaneseASR()
+
+    console = Console()
+    from pathlib import Path
+    console.rule(f"[bold cyan]Live Streaming Transcription – {Path(audio_path).name}[/bold cyan]")
+
+    with Live(refresh_per_second=3, console=console) as live:
+        last_text = None
+        for partial_text, progress in asr.transcribe_stream(audio_path):
+            if partial_text != last_text or progress >= 1.0:
+                display_text = partial_text if partial_text else "[dim](processing first chunk...)[/dim]"
+                live.update(
+                    Text.from_markup(f"[cyan]{progress:>6.1%}[/cyan]  {display_text}")
+                )
+                last_text = partial_text
+
+    console.print("\n[green bold]Streaming complete.[/green bold]")
+
+
+if __name__ == "__main__":
+    from rich import print as rprint
+
+    AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+    AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
+
+    rprint("\n[bold magenta]Demo: Long Audio – Streaming / Live mode[/bold magenta]")
+    live_stream_example(AUDIO_LONG)
+
+    rprint("[bold cyan]Demo: Short Audio (normal mode)[/bold cyan]")
+    example(AUDIO_SHORT)
+
+    rprint("\n[bold cyan]Demo: Long Audio (normal mode)[/bold cyan]")
+    example(AUDIO_LONG)
