@@ -7,7 +7,7 @@
 # pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir \
 #     -C cmake.args="-DLLAMA_CUBLAS=ON"
 
-from typing import Optional
+from typing import Optional, Dict, Any
 from llama_cpp import Llama
 from rich.console import Console
 
@@ -16,24 +16,46 @@ console = Console()
 # ── Model configuration ──────────────────────────────────────────────
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
 
+MODEL_SETTINGS = {
+    "n_ctx": 1024,
+    "n_gpu_layers": -1,
+    "flash_attn": True,
+    "logits_all": True,
+    "type_k": 8,
+    "type_v": 8,
+    "tokenizer_kwargs": {"add_bos_token": False},
+    "n_batch": 128,
+    "n_threads": 6,
+    "n_threads_batch": 6,
+    "use_mlock": True,
+    "use_mmap": True,
+    "verbose": False,
+}
+
+# Recommended defaults for Japanese → English translation
+TRANSLATION_DEFAULTS = {
+    "temperature": 0.65,
+    "top_p": 0.92,
+    "min_p": 0.05,
+    "repeat_penalty": 1.05,
+    "max_tokens": 512,
+    "stop": ["<|im_end|>", "<|im_start|>"],
+    "echo": False
+}
+
 # You can also try Q5_K_M / Q6_K if you have enough VRAM/RAM (~4–5GB needed)
 # Q4_K_M → good speed/quality balance on your GTX 1660 / M1
 
-llm = Llama(
-    model_path=MODEL_PATH,
-    n_gpu_layers=-1,           # Full GPU offload (Metal on M1, cuBLAS on NVIDIA)
-    n_ctx=8192,                # Good for medium-long Japanese texts
-    n_batch=1024,
-    verbose=False,
-)
+llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
 
 
 def translate_ja_to_en(
     text: str,
-    temperature: float = 0.65,
-    max_tokens: int = 1024,
-    top_p: float = 0.92,
-    repeat_penalty: float = 1.05,
+    # temperature: float = 0.65,
+    # max_tokens: int = 1024,
+    # top_p: float = 0.92,
+    # repeat_penalty: float = 1.05,
+    **generation_params,
 ) -> str:
     """
     Translate Japanese text to natural, high-quality English using Shisa v2.1 3B
@@ -56,15 +78,22 @@ Do not add explanations or notes unless explicitly requested.<|im_end|>
 <|im_start|>assistant
 """
 
+    params: Dict[str, Any] = {
+        "prompt": prompt,
+        **TRANSLATION_DEFAULTS,
+        **generation_params
+    }
+
     response = llm(
-        prompt,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        top_p=top_p,
-        min_p=0.05,
-        repeat_penalty=repeat_penalty,
-        stop=["<|im_end|>", "<|im_start|>"],
-        echo=False,
+        # prompt,
+        # max_tokens=max_tokens,
+        # temperature=temperature,
+        # top_p=top_p,
+        # min_p=0.05,
+        # repeat_penalty=repeat_penalty,
+        # stop=["<|im_end|>", "<|im_start|>"],
+        # echo=False,
+        **params
     )
 
     translated = response["choices"][0]["text"].strip()
@@ -87,7 +116,7 @@ if __name__ == "__main__":
         console.print(f"[dim]{ja_text}[/dim]\n")
 
         with console.status("[bold green]Translating...[/bold green]"):
-            english = translate_ja_to_en(ja_text, temperature=0.65)
+            english = translate_ja_to_en(ja_text)
 
         console.print("[bold cyan]→ English:[/bold cyan]")
         console.print(f"{english}\n")
