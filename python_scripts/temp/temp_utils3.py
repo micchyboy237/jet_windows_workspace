@@ -51,7 +51,7 @@ TRANSLATION_DEFAULTS = {
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
 
 
-def translate_text(
+def translate_ja_to_en(
     text: str,
     # temperature: float = 0.65,
     # max_tokens: int = 1024,
@@ -118,7 +118,7 @@ if __name__ == "__main__":
         console.print(f"[dim]{ja_text}[/dim]\n")
 
         with console.status("[bold green]Translating...[/bold green]"):
-            english = translate_text(ja_text)
+            english = translate_ja_to_en(ja_text)
 
         console.print("[bold cyan]→ English:[/bold cyan]")
         console.print(f"{english}\n")

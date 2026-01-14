@@ -575,7 +575,7 @@ def download_hf_space(
 
 
 if __name__ == "__main__":
-    repo_id = "Mitsua/elan-mt-bt-ja-en"
+    repo_id = "tohoku-nlp/bert-base-japanese-v3"
     cache_dir = MODELS_CACHE_DIR
     clean_cache = False
 
