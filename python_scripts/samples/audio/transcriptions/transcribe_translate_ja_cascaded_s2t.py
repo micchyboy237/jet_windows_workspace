@@ -1,4 +1,4 @@
-from typing import Literal, Any, Dict, Union, List, Optional
+from typing import Literal, Any, Dict, Union, List, Optional, Iterator, Tuple
 from pathlib import Path
 import time
 from contextlib import contextmanager
@@ -9,6 +9,8 @@ import torch
 import librosa
 import soundfile as sf
 from transformers import pipeline
+from rich.live import Live               # ← new
+from rich.text import Text               # ← new
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
@@ -89,10 +91,9 @@ def japanese_speech_to_text(
     compute_type: ComputeType = "float32",
     show_progress: bool = True,
 ) -> Union[str, Dict[str, Any], List[Dict[str, Any]]]:
-    """
-    Japanese speech → text / translation with manual overlapping chunking for long audio.
-    Uses same defaults & stitching logic as the wav2vec2-based implementation.
-    """
+
+    # ─── (existing body unchanged until after pipeline loading) ───
+
     global _PIPELINE_CACHE
 
     if task not in ("transcribe", "translate"):
@@ -257,6 +258,89 @@ def japanese_speech_to_text(
             rprint(table)
         return info
 
+def japanese_speech_to_text_stream(
+    audio_path: Union[str, Path],
+    task: TaskMode = "transcribe",
+    tgt_lang: str = "eng_Latn",
+    max_chunk_seconds: float = 45.0,
+    chunk_overlap_seconds: float = 10.0,
+    device: Union[int, str, None] = None,
+    compute_type: ComputeType = "float32",
+) -> Iterator[Tuple[str, float]]:
+    """
+    Streaming version: yields (current_best_text_so_far, progress_fraction) repeatedly.
+
+    Progress ∈ [0.0 .. 1.0]. Last yield has exactly 1.0.
+    Use with rich.live.Live for nice updating console UI.
+    """
+    global _PIPELINE_CACHE
+
+    audio_path = Path(audio_path)
+    if not audio_path.is_file():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    # ─── Device & dtype logic (same as original) ───────────────────────────
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else \
+                 "mps"  if torch.backends.mps.is_available() else "cpu"
+
+    device_str = str(device)
+    if isinstance(device, int):
+        device_str = f"cuda:{device}" if device >= 0 else "cpu"
+
+    dtype_map = {"float32": torch.float32, "bfloat16": torch.bfloat16}
+    torch_dtype = dtype_map.get(compute_type, torch.float32)
+
+    if "mps" in device_str and compute_type != "float32":
+        _console.print("[yellow]MPS: falling back to float32[/yellow]")
+        torch_dtype = torch.float32
+
+    # ─── Load audio ────────────────────────────────────────────────────────
+    with _console.status("[cyan]Loading audio…[/cyan]"):
+        array, orig_sr = librosa.load(audio_path, sr=16000, mono=True)
+    duration_s = len(array) / 16000.0
+
+    # ─── Load pipeline (reuse cache logic) ─────────────────────────────────
+    cache_key = f"{task}_{device_str}_{max_chunk_seconds:.1f}_{compute_type}"
+    if cache_key not in _PIPELINE_CACHE:
+        _load_pipeline(cache_key, task, tgt_lang, device_str, torch_dtype)
+    pipe = _PIPELINE_CACHE[cache_key]
+
+    if duration_s <= max_chunk_seconds + 1.0:
+        # Short audio: single inference
+        result = pipe(str(audio_path), return_timestamps=True, chunk_length_s=None)
+        text = (result.get("text") or "").strip()
+        yield text, 1.0
+        return
+
+    # Long audio: overlapping chunks
+    chunks = chunk_audio(array, 16000, max_chunk_seconds, chunk_overlap_seconds)
+
+    current_text = ""
+    processed_up_to_s = 0.0
+
+    for i, chunk_array in enumerate(chunks, 1):
+        result = pipe(
+            chunk_array,
+            return_timestamps=True,
+            chunk_length_s=None,
+        )
+        chunk_text = (result.get("text") or "").strip()
+
+        if i == 1:
+            current_text = chunk_text
+        else:
+            current_text = _stitch_texts_with_overlap(current_text, chunk_text)
+
+        processed_up_to_s += max_chunk_seconds - chunk_overlap_seconds
+        progress = min(1.0, processed_up_to_s / duration_s)
+
+        yield current_text.strip(), progress
+
+    # Final yield with clean 1.0
+    yield current_text.strip(), 1.0
+
+
 
 def _load_pipeline(
     cache_key: str,
@@ -318,10 +402,34 @@ if __name__ == "__main__":
     AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
     AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
-    rprint("[bold cyan]Demo: Long audio — manual 45s chunks + 10s overlap[/bold cyan]")
-    japanese_speech_to_text(
-        AUDIO_LONG,
-        task="transcribe",           # or "translate"
-        output_mode="basic",
-        # compute_type="bfloat16",   # uncomment if GPU supports it well
-    )
+    rprint("[bold cyan]Demo: Long audio — streaming version[/bold cyan]")
+    
+    # ── Option A: simple print (overwrites line) ───────────────────────────
+    # for text, prog in japanese_speech_to_text_stream(AUDIO_LONG):
+    #     print(f"\r[{prog:5.1%}] {text}", end="", flush=True)
+    # print()
+
+    # ── Option B: nice updating UI with rich ───────────────────────────────
+    with Live(refresh_per_second=4, console=_console) as live:
+        last_text = ""
+        for text, progress in japanese_speech_to_text_stream(
+            AUDIO_LONG,
+            task="transcribe",
+            # compute_type="bfloat16",  # if your GPU likes it
+        ):
+            if text != last_text or progress >= 1.0:
+                live.update(
+                    Text.from_markup(f"[cyan]{progress:>6.1%}[/cyan]  {text}")
+                )
+                last_text = text
+
+    rprint("[green]Streaming transcription complete.[/green]")
+
+    # ── Original non-streaming call still works ────────────────────────────
+    # rprint("\n[bold]Original non-streaming version:[/bold]")
+    # japanese_speech_to_text(
+    #     AUDIO_LONG,
+    #     task="transcribe",
+    #     output_mode="basic",
+    #     # compute_type="bfloat16",
+    # )

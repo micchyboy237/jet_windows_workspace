@@ -9,6 +9,8 @@ import torch
 import librosa
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.live import Live                    # new
+from rich.text import Text                    # new
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 import logging
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
@@ -21,6 +23,8 @@ AudioInput = Union[
     npt.NDArray[np.floating | np.integer],
     torch.Tensor,
 ]
+
+from typing import Iterator, Tuple
 
 # Setup rich-based logging
 logging.basicConfig(
@@ -405,6 +409,83 @@ class JapaneseASR:
 
             return result
 
+    def transcribe_stream(
+        self,
+        audio: AudioInput,
+        input_sample_rate: Optional[int] = None,
+        max_chunk_seconds: Optional[float] = None,
+        chunk_overlap_seconds: Optional[float] = None,
+    ) -> Iterator[Tuple[str, float]]:
+        """
+        Generator version: yields (current_stitched_text_so_far, progress_0_to_1)
+        after each chunk is processed.
+
+        Last yield has progress == 1.0
+        """
+        max_chunk_sec = max_chunk_seconds if max_chunk_seconds is not None else self.max_chunk_seconds
+        overlap_sec   = chunk_overlap_seconds if chunk_overlap_seconds is not None else self.chunk_overlap_seconds
+
+        # ── Same audio loading logic as transcribe() ───────────────────────
+        if isinstance(audio, (str, os.PathLike)):
+            source_name = str(audio)
+            array, orig_sr = librosa.load(audio, sr=TARGET_SR, mono=True)
+        elif isinstance(audio, bytes):
+            source_name = "<bytes>"
+            array, orig_sr = librosa.load(io.BytesIO(audio), sr=TARGET_SR, mono=True)
+        elif isinstance(audio, np.ndarray):
+            source_name = "<numpy array>"
+            array = audio.astype(np.float32)
+            orig_sr = input_sample_rate
+            if orig_sr is None:
+                raise ValueError("input_sample_rate required for numpy array")
+        elif isinstance(audio, torch.Tensor):
+            source_name = "<torch.Tensor>"
+            array = audio.cpu().numpy().astype(np.float32)
+            orig_sr = input_sample_rate
+            if orig_sr is None:
+                raise ValueError("input_sample_rate required for torch.Tensor")
+        else:
+            raise TypeError(f"Unsupported audio type: {type(audio)}")
+
+        if orig_sr != TARGET_SR:
+            array = librosa.resample(array, orig_sr=orig_sr, target_sr=TARGET_SR)
+
+        if array.ndim > 1:
+            array = np.mean(array, axis=1)
+
+        duration_sec = len(array) / TARGET_SR
+        if duration_sec == 0:
+            yield "", 1.0
+            return
+
+        if duration_sec <= max_chunk_sec + 1.0:
+            text, _, _, _ = self._transcribe_segment(array, False, False)
+            yield text.strip(), 1.0
+            return
+
+        # Long audio
+        chunks = chunk_audio(array, TARGET_SR, max_chunk_sec, overlap_sec)
+
+        current_text = ""
+        processed_sec = 0.0
+
+        for chunk in chunks:
+            text, _, _, _ = self._transcribe_segment(chunk, False, False)
+            text = text.strip()
+
+            if not current_text:
+                current_text = text
+            else:
+                current_text = self._stitch_texts_with_overlap(current_text, text)
+
+            processed_sec += max_chunk_sec - overlap_sec
+            progress = min(1.0, processed_sec / duration_sec)
+
+            yield current_text, progress
+
+        # Final clean yield
+        yield current_text, 1.0
+
     def batch_transcribe(
         self,
         audio_paths: List[Union[str, os.PathLike]],
@@ -484,14 +565,37 @@ def example(audio_path):
         logger.exception("Transcription failed")
 
 
+def live_stream_example(audio_path: str):
+    asr = JapaneseASR()
+
+    console = Console()
+    from pathlib import Path
+    console.rule(f"[bold cyan]Live Streaming Transcription – {Path(audio_path).name}[/bold cyan]")
+
+    with Live(refresh_per_second=3, console=console) as live:
+        last_text = None
+        for partial_text, progress in asr.transcribe_stream(audio_path):
+            if partial_text != last_text or progress >= 1.0:
+                display_text = partial_text if partial_text else "[dim](processing first chunk...)[/dim]"
+                live.update(
+                    Text.from_markup(f"[cyan]{progress:>6.1%}[/cyan]  {display_text}")
+                )
+                last_text = partial_text
+
+    console.print("\n[green bold]Streaming complete.[/green bold]")
+
+
 if __name__ == "__main__":
     from rich import print as rprint
-    
+
     AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
     AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
-    rprint("[bold cyan]Demo: Short Audio[/bold cyan]")
-    example(AUDIO_SHORT)
+    # rprint("[bold cyan]Demo: Short Audio (normal mode)[/bold cyan]")
+    # example(AUDIO_SHORT)
 
-    rprint("[bold cyan]Demo: Long Audio[/bold cyan]")
-    example(AUDIO_LONG)
+    # rprint("\n[bold cyan]Demo: Long Audio (normal mode)[/bold cyan]")
+    # example(AUDIO_LONG)
+
+    rprint("\n[bold magenta]Demo: Long Audio – Streaming / Live mode[/bold magenta]")
+    live_stream_example(AUDIO_LONG)
