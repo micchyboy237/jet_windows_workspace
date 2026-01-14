@@ -216,7 +216,7 @@ if __name__ == "__main__":
         print(f"\n[bold cyan]Logprobs {i}:[/bold cyan]")
         pprint(all_logprobs)
 
-        print(f"\n[bold cyan]Meta: {i}:[/bold cyan]")
+        print(f"\n[bold cyan]Meta {i}:[/bold cyan]")
         pprint(result, expand_all=True)
 
         print(f"\n[bold cyan]Translation {i}:[/bold cyan]")

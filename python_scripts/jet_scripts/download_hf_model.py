@@ -575,7 +575,7 @@ def download_hf_space(
 
 
 if __name__ == "__main__":
-    repo_id = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
+    repo_id = "Mitsua/elan-mt-bt-ja-en"
     cache_dir = MODELS_CACHE_DIR
     clean_cache = False
 

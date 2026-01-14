@@ -6,6 +6,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from llama_cpp import Llama
 from llama_cpp.llama_types import CreateCompletionResponse, CompletionChoice, CompletionUsage
+from split_sentences_ja import split_sentences_ja
 
 console = Console()
 
@@ -97,26 +98,41 @@ English:""".strip()
 
 
 if __name__ == "__main__":
+    # ja_text = "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。"
+
+    ja_text = """
+世界各国が水面下で熾烈な情報戦を繰り広げる時代にらみ合う2つの国東のオスタニア西の西のウェスタリス戦争を企てるオスタニア
+政の動向を探るべくウェスタリスはオペレーションを担うディエンとたそがれ100の顔を使い分正体ロイドフォージャー
+コードネームたそがれ母ヨルフォージャー市役所職員正体殺し屋コードネーム茨原姫 母ヨルフォージャー正体
+仕事職員正体、コロシアコードネームイバラヒメ娘。妻に正体、正体、心を読むことができるエスパー犬、女ボンドフォージャー、正
+体、未来を予知できる超能力家族を作り物狩りのため疑似家族を作り互いに正体を隠した彼らのミッションは続く
+"""
+    ja_sentences = split_sentences_ja(ja_text)
+    # Temporary limit for faster testing
+    ja_sentences = ja_sentences[:2]
+    ja_text = "\n".join(ja_sentences)
+
+    max_tokens = 512
+    temperature = 0.0
+    logprobs = 1
+
     result = translate_text(
-        "こんにちは、お元気ですか？今日はとても良い天気ですね。",
-        max_tokens=64,
-        logprobs=3,               # ← ask for top-3 logprobs per token
-        temperature=0.0,          # deterministic → easier to inspect
+        ja_text,
+        max_tokens=max_tokens,
+        temperature=temperature,          # deterministic → easier to inspect
+        logprobs=logprobs,               # ← ask for top-3 logprobs per token
     )
-    console.print(Markdown(result["choices"][0]["text"].strip()))
+    choice = result["choices"][0].copy()
+    full_text = choice.pop("text")
+    all_logprobs = choice.pop("logprobs", [])
 
     from rich.pretty import pprint
 
-    print("\n[bold cyan]Translation Result:[/bold cyan]")
-    pprint(result, expand_all=True)
+    print(f"\n[bold cyan]Logprobs:[/bold cyan]")
+    pprint(all_logprobs)
 
-    if (logprobs := result["choices"][0].get("logprobs")):
-        print("\nFirst few tokens + top logprobs:")
-        for token, lp, top_lp in zip(
-            logprobs["tokens"][:8],
-            logprobs["token_logprobs"][:8],
-            logprobs["top_logprobs"][:8]
-        ):
-            print(f"{token:12} {lp:8.3f}   | top: {top_lp}")
-    else:
-        print("Still no logprobs → check logits_all=True in Llama()")
+    print(f"\n[bold cyan]Meta:[/bold cyan]")
+    pprint(choice, expand_all=True)
+
+    print(f"\n[bold cyan]Translation:[/bold cyan]")
+    pprint(full_text, expand_all=True)
