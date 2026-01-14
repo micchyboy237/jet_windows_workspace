@@ -40,7 +40,9 @@ TRANSLATION_DEFAULTS = {
     "repeat_penalty": 1.05,
     "max_tokens": 512,
     "stop": ["<|im_end|>", "<|im_start|>"],
-    "echo": False
+    "echo": False,
+    # For confidence scores
+    # "logprobs": 3,
 }
 
 # You can also try Q5_K_M / Q6_K if you have enough VRAM/RAM (~4–5GB needed)
