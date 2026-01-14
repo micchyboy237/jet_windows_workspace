@@ -485,12 +485,6 @@ if __name__ == "__main__":
     AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
     AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
-    _console.print("[bold cyan]Demo: Short audio – full mode[/bold cyan]")
-    example(AUDIO_SHORT, task="transcribe", output_mode="basic")
-
-    _console.print("[bold cyan]Demo: Long audio – full mode[/bold cyan]")
-    example(AUDIO_LONG, task="transcribe", output_mode="basic")
-
     _console.print("\n[bold magenta]Demo: Long audio – live streaming mode[/bold magenta]")
     live_stream_example(
         AUDIO_LONG,
@@ -499,3 +493,9 @@ if __name__ == "__main__":
         # max_chunk_seconds=30.0,           # smaller → earlier first result
         # chunk_overlap_seconds=8.0,
     )
+
+    _console.print("[bold cyan]Demo: Short audio – full mode[/bold cyan]")
+    example(AUDIO_SHORT, task="transcribe", output_mode="basic")
+
+    _console.print("[bold cyan]Demo: Long audio – full mode[/bold cyan]")
+    example(AUDIO_LONG, task="transcribe", output_mode="basic")

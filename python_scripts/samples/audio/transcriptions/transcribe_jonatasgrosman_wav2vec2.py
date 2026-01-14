@@ -591,11 +591,11 @@ if __name__ == "__main__":
     AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
     AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
-    # rprint("[bold cyan]Demo: Short Audio (normal mode)[/bold cyan]")
-    # example(AUDIO_SHORT)
-
-    # rprint("\n[bold cyan]Demo: Long Audio (normal mode)[/bold cyan]")
-    # example(AUDIO_LONG)
-
     rprint("\n[bold magenta]Demo: Long Audio – Streaming / Live mode[/bold magenta]")
     live_stream_example(AUDIO_LONG)
+
+    rprint("[bold cyan]Demo: Short Audio (normal mode)[/bold cyan]")
+    example(AUDIO_SHORT)
+
+    rprint("\n[bold cyan]Demo: Long Audio (normal mode)[/bold cyan]")
+    example(AUDIO_LONG)
