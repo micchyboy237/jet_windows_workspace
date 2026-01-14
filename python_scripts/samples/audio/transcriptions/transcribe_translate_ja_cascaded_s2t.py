@@ -15,7 +15,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeEl
 from rich.table import Table
 from rich import print as rprint
 
-TaskMode = Literal["transcribe", "translate"]
 OutputMode = Literal["basic", "with_timestamps", "verbose"]
 ComputeType = Literal["float32", "bfloat16"]
 
@@ -81,11 +80,10 @@ def _stitch_texts_with_overlap(prev: str, curr: str) -> str:
 
 def japanese_speech_to_text(
     audio_path: Union[str, Path],
-    task: TaskMode = "transcribe",
     output_mode: OutputMode = "basic",
     tgt_lang: str = "eng_Latn",
-    max_chunk_seconds: float = 45.0,           # ← new default (was 15 → now matches previous impl)
-    chunk_overlap_seconds: float = 10.0,       # ← new: overlap for stitching quality
+    max_chunk_seconds: float = 45.0,
+    chunk_overlap_seconds: float = 10.0,
     device: Union[int, str, None] = None,
     compute_type: ComputeType = "float32",
     show_progress: bool = True,
@@ -95,8 +93,6 @@ def japanese_speech_to_text(
 
     global _PIPELINE_CACHE
 
-    if task not in ("transcribe", "translate"):
-        raise ValueError(f"Invalid task: {task!r}")
     if output_mode not in ("basic", "with_timestamps", "verbose"):
         raise ValueError(f"Invalid output_mode: {output_mode!r}")
 
@@ -137,17 +133,17 @@ def japanese_speech_to_text(
     approx_chunks = max(1, int(duration_s / max_chunk_seconds) + 2)  # conservative estimate
 
     # ─── Cache key (ignores new chunk params — safe for now) ───────────────
-    cache_key = f"{task}_{device_str}_{max_chunk_seconds:.1f}_{compute_type}"
+    cache_key = f"asr_{device_str}_{max_chunk_seconds:.1f}_{compute_type}"
 
     if cache_key not in _PIPELINE_CACHE:
         if show_progress:
             with Progress(SpinnerColumn(), TextColumn("{task.description}"), transient=True) as p:
                 tid = p.add_task("[cyan]Loading model…", total=None)
-                _load_pipeline(cache_key, task, tgt_lang, device_str, torch_dtype)
+                _load_pipeline(cache_key, tgt_lang, device_str, torch_dtype)
                 p.update(tid, completed=True)
         else:
             _console.print("[cyan]Loading model…[/cyan]", end=" ")
-            _load_pipeline(cache_key, task, tgt_lang, device_str, torch_dtype)
+            _load_pipeline(cache_key, tgt_lang, device_str, torch_dtype)
             _console.print("[green]done[/green]")
 
     pipe = _PIPELINE_CACHE[cache_key]
@@ -225,7 +221,7 @@ def japanese_speech_to_text(
     # ─── Format output ──────────────────────────────────────────────────────
     if output_mode == "basic":
         if show_progress:
-            _console.rule("Transcription / Translation")
+            _console.rule("Transcription")
             rprint(full_text)
             _console.rule()
             _console.print(f"[italic]Done in {elapsed:.2f}s — {chunks_info}[/italic]")
@@ -259,7 +255,6 @@ def japanese_speech_to_text(
 
 def japanese_speech_to_text_stream(
     audio_path: Union[str, Path],
-    task: TaskMode = "transcribe",
     tgt_lang: str = "eng_Latn",
     max_chunk_seconds: float = 45.0,
     chunk_overlap_seconds: float = 10.0,
@@ -300,9 +295,9 @@ def japanese_speech_to_text_stream(
     duration_s = len(array) / 16000.0
 
     # ─── Load pipeline (reuse cache logic) ─────────────────────────────────
-    cache_key = f"{task}_{device_str}_{max_chunk_seconds:.1f}_{compute_type}"
+    cache_key = f"asr_{device_str}_{max_chunk_seconds:.1f}_{compute_type}"
     if cache_key not in _PIPELINE_CACHE:
-        _load_pipeline(cache_key, task, tgt_lang, device_str, torch_dtype)
+        _load_pipeline(cache_key, tgt_lang, device_str, torch_dtype)
     pipe = _PIPELINE_CACHE[cache_key]
 
     if duration_s <= max_chunk_seconds + 1.0:
@@ -343,7 +338,6 @@ def japanese_speech_to_text_stream(
 
 def _load_pipeline(
     cache_key: str,
-    task: str,
     tgt_lang: str,
     device: str,
     torch_dtype: torch.dtype,
@@ -355,19 +349,11 @@ def _load_pipeline(
         "model_kwargs": {"attn_implementation": "sdpa"},
     }
 
-    if task == "transcribe":
-        _PIPELINE_CACHE[cache_key] = pipeline(
-            "automatic-speech-recognition",
-            model="japanese-asr/ja-cascaded-s2t-translation",
-            **common,
-        )
-    else:
-        _PIPELINE_CACHE[cache_key] = pipeline(
-            model="japanese-asr/ja-cascaded-s2t-translation",
-            model_translation="facebook/nllb-200-distilled-600M",
-            tgt_lang=tgt_lang,
-            **common,
-        )
+    _PIPELINE_CACHE[cache_key] = pipeline(
+        "automatic-speech-recognition",
+        model="japanese-asr/ja-cascaded-s2t-translation",
+        **common,
+    )
 
 
 @contextmanager
@@ -401,7 +387,6 @@ def _progress_context(show: bool, total: int, duration: float):
 
 def example(
     audio_path: Union[str, Path],
-    task: TaskMode = "transcribe",
     output_mode: OutputMode = "basic",
     tgt_lang: str = "eng_Latn",
     compute_type: ComputeType = "float32",
@@ -418,7 +403,6 @@ def example(
 
     result = japanese_speech_to_text(
         audio_path=audio_path,
-        task=task,
         output_mode=output_mode,
         tgt_lang=tgt_lang,
         compute_type=compute_type,
@@ -453,7 +437,6 @@ def example(
 
 def live_stream_example(
     audio_path: Union[str, Path],
-    task: TaskMode = "transcribe",
     tgt_lang: str = "eng_Latn",
     compute_type: ComputeType = "float32",
     max_chunk_seconds: float = 45.0,
@@ -467,7 +450,6 @@ def live_stream_example(
         last_text = None
         for text, progress in japanese_speech_to_text_stream(
             audio_path=audio_path,
-            task=task,
             tgt_lang=tgt_lang,
             compute_type=compute_type,
             max_chunk_seconds=max_chunk_seconds,
@@ -481,6 +463,7 @@ def live_stream_example(
 
     _console.print("[green bold]✓ Streaming complete[/green bold]\n")
 
+
 if __name__ == "__main__":
     AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
     AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
@@ -488,14 +471,13 @@ if __name__ == "__main__":
     _console.print("\n[bold magenta]Demo: Long audio – live streaming mode[/bold magenta]")
     live_stream_example(
         AUDIO_LONG,
-        task="transcribe",
         # compute_type="bfloat16",          # uncomment on supported hardware
         # max_chunk_seconds=30.0,           # smaller → earlier first result
         # chunk_overlap_seconds=8.0,
     )
 
     _console.print("[bold cyan]Demo: Short audio – full mode[/bold cyan]")
-    example(AUDIO_SHORT, task="transcribe", output_mode="basic")
+    example(AUDIO_SHORT, output_mode="basic")
 
     _console.print("[bold cyan]Demo: Long audio – full mode[/bold cyan]")
-    example(AUDIO_LONG, task="transcribe", output_mode="basic")
+    example(AUDIO_LONG, output_mode="basic")
