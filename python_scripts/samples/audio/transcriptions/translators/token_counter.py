@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal, overload, Union, Optional
+from typing import Literal, overload, Union
 import re
 from pathlib import Path
 
@@ -119,13 +119,23 @@ class TokenCounter:
         
         # Fallback - very rough estimation (used when tokenizer not available)
         if ignore_special_patterns:
-            # Very naive fallback
-            count = len(text) // 4 + text.count(" ") + 2
+            # More realistic rough estimation for modern LLMs (esp. Llama-3 family)
+            # ~3.8–4.2 chars/token in English
+            count = max(1, len(text) // 4 + (text.count(" ") // 3) + 1)
         else:
-            # Try to detect common special tokens
-            special_count = sum(len(re.findall(pat, text)) for pat in COMMON_SPECIAL_PATTERNS)
+            # Improved, more conservative English-text oriented estimation (2024-2025 average)
+            special_count = sum(len(re.findall(pat, text, re.IGNORECASE)) for pat in COMMON_SPECIAL_PATTERNS)
             clean_text = re.sub("|".join(COMMON_SPECIAL_PATTERNS), " ", text)
-            count = (len(clean_text) // 4) + clean_text.count(" ") + special_count + 4
+            
+            char_count = len(clean_text)
+            word_count = len(clean_text.split())
+            
+            # ~3.9–4.4 chars per token is more common in recent models for natural text
+            base = max(1, char_count // 4 + (char_count // 20))   # ≈ 4.2 chars/token
+            word_bonus = word_count // 4                           # words are slightly cheaper than uniform chars
+            space_bonus = clean_text.count(" ") // 3
+            
+            count = base + word_bonus + space_bonus + special_count * 2 + 3  # small safety buffer
         
         if return_tokens:
             # We can't return real tokens in fallback mode
