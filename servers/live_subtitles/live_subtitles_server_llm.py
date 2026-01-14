@@ -29,6 +29,8 @@ import threading
 from transcribe_jp import get_japanese_asr, transcribe_with_japanese_asr
 from translate_jp_en_llm import get_llm, translate_text
 
+DEFAULT_OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
 
@@ -250,7 +252,7 @@ def transcribe_and_translate(
         audio_path = out_dir / f"{stem}.wav"
         meta_path = out_dir / f"{stem}.json"
     else:
-        audio_path = Path(f"temp_{stem}.wav")
+        audio_path = DEFAULT_OUTPUT_DIR / f"temp_{stem}.wav"
 
     # Write audio
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
