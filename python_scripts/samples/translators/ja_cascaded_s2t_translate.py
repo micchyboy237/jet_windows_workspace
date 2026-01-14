@@ -1,5 +1,11 @@
 from transformers import pipeline
 
+# Short audio
+AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+
+# Long audio
+# AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
+
 # load model
 pipe = pipeline(
     model="japanese-asr/ja-cascaded-s2t-translation",
@@ -10,7 +16,6 @@ pipe = pipeline(
     trust_remote_code=True,
 )
 
-# translate
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
-output = pipe(audio_path)
+# Transcribe and translate
+output = pipe(AUDIO_PATH)
 print(f"Results: {output}")

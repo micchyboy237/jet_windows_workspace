@@ -1,8 +1,8 @@
 # transcribe_jonatasgrosman_wav2vec2.py
 
+from typing import Dict, Tuple, List, Union, Optional, TypedDict, Literal
 import os
 import io
-from typing import List, Union, Optional, TypedDict, Literal
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -34,14 +34,18 @@ logger = logging.getLogger("JapaneseASR")
 
 QualityCategory = Literal["very_low", "low", "medium", "high", "very_high"]
 
+# Short audio example
+DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+
+# Long audio example
+# DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
 MODEL_ID = "jonatasgrosman/wav2vec2-large-xlsr-53-japanese"
 TARGET_SR = 16_000
-DEFAULT_MAX_CHUNK_SEC = 30.0
-DEFAULT_CHUNK_OVERLAP_SEC = 2.0
+DEFAULT_MAX_CHUNK_SEC = 45.0       # Increased — better for Japanese sentence continuity
+DEFAULT_CHUNK_OVERLAP_SEC = 10.0   # Much better boundary context (≈22% overlap)
 
 # Quality categorization thresholds (empirical - Japanese wav2vec2 models)
-# avg_logprob: roughly per-token average log probability
 QUALITY_THRESHOLDS_AVG_LOGPROB = [
     (-0.50, "very_high"),
     (-0.95, "high"),
@@ -50,7 +54,6 @@ QUALITY_THRESHOLDS_AVG_LOGPROB = [
     (float("-inf"), "very_low"),
 ]
 
-# sequence_logprob: total sum - much more length dependent
 QUALITY_THRESHOLDS_SEQ_LOGPROB = [
     (-20.0, "very_high"),
     (-45.0, "high"),
@@ -83,7 +86,7 @@ class JapaneseASR:
 
     @staticmethod
     def _get_quality_label(
-        value: float, thresholds: List[tuple[float, QualityCategory]]
+        value: float, thresholds: List[Tuple[float, QualityCategory]]
     ) -> QualityCategory:
         for threshold, label in thresholds:
             if value >= threshold:
@@ -117,10 +120,75 @@ class JapaneseASR:
 
         logger.info("[green]✓ Model & processor loaded successfully[/green]")
 
+    def _transcribe_segment(
+        self,
+        segment: npt.NDArray[np.float32],
+        return_confidence: bool,
+        return_logprobs: bool,
+    ) -> Tuple[str, Optional[float], Optional[float], Optional[List[float]]]:
+        """Core transcription logic for one contiguous segment (short or chunk)."""
+        if len(segment) == 0:
+            return "", None, None, None
+
+        inputs = self.processor(
+            segment, sampling_rate=TARGET_SR, return_tensors="pt"
+        ).to(self.device)
+
+        with torch.no_grad():
+            model_outputs = self.model(inputs.input_values, attention_mask=inputs.attention_mask)
+            logits = model_outputs.logits
+            pred_ids = torch.argmax(logits, dim=-1)
+
+        text = self.processor.batch_decode(pred_ids, skip_special_tokens=True)[0].strip()
+
+        avg_logprob = None
+        seq_logprob = None
+        token_logprobs = None
+
+        if return_confidence or return_logprobs:
+            log_probs = torch.log_softmax(logits, dim=-1)
+            best_token_logprobs = log_probs.gather(2, pred_ids.unsqueeze(-1)).squeeze(-1)[0]
+
+            avg_logprob = best_token_logprobs.mean().item()
+            seq_logprob = best_token_logprobs.sum().item()
+
+            if return_logprobs:
+                token_logprobs = best_token_logprobs.cpu().numpy().tolist()
+
+        return text, avg_logprob, seq_logprob, token_logprobs
+
+    def _stitch_texts_with_overlap(self, prev: str, curr: str) -> str:
+        """Naive but effective stitching for Japanese (no word boundaries).
+        Looks for longest matching suffix-prefix in a reasonable window.
+        """
+        if not prev:
+            return curr
+        if not curr:
+            return prev
+
+        # Limit search window to avoid bad matches and keep it fast
+        max_match_len = 40
+        prev_end = prev[-max_match_len:]
+        curr_start = curr[:max_match_len]
+
+        best_overlap = 0
+        for ol in range(min(len(prev_end), len(curr_start)), 3, -1):  # min overlap 4 chars
+            if prev_end[-ol:] == curr_start[:ol]:
+                best_overlap = ol
+                break
+
+        if best_overlap >= 4:
+            stitched = prev + curr[best_overlap:]
+            logger.debug(f"Stitched with overlap {best_overlap} chars: ...{prev[-15:]} + {curr[:15+best_overlap]}...")
+            return stitched
+        else:
+            logger.debug("No good overlap match → fallback concat with space")
+            return prev + " " + curr
+
     def transcribe(
         self,
         audio: AudioInput,
-        input_sample_rate: Optional[int] = None,   # only needed when passing raw array/tensor
+        input_sample_rate: Optional[int] = None,
         return_confidence: bool = False,
         return_logprobs: bool = False,
         num_beams: int = 1,
@@ -201,42 +269,30 @@ class JapaneseASR:
             "duration_sec": round(duration_sec, 1),
         }
 
-        # ── Short audio ─ single inference ────────────────────────────────
+        # ── Short audio: single pass ──────────────────────────────────────
         if duration_sec <= max_chunk_sec + 1.0:
             result["chunks_info"] = "single chunk"
 
-            inputs = self.processor(
-                array, sampling_rate=TARGET_SR, return_tensors="pt"
-            ).to(self.device)
+            text, avg_logprob, seq_logprob, token_logprobs = self._transcribe_segment(
+                array, return_confidence, return_logprobs
+            )
+            result["text"] = text
 
-            with torch.no_grad(), self.console.status("[magenta]Running inference...", spinner="bouncingBall"):
-                model_outputs = self.model(inputs.input_values, attention_mask=inputs.attention_mask)
-                logits = model_outputs.logits
-                pred_ids = torch.argmax(logits, dim=-1)
-
-            transcription = self.processor.batch_decode(pred_ids, skip_special_tokens=True)[0].strip()
-            result["text"] = transcription
+            result["avg_logprob"] = round(avg_logprob, 5) if avg_logprob is not None else None
+            result["sequence_logprob"] = round(seq_logprob, 5) if seq_logprob is not None else None
 
             if return_confidence or return_logprobs:
-                log_probs = torch.log_softmax(logits, dim=-1)
-                best_token_logprobs = log_probs.gather(2, pred_ids.unsqueeze(-1)).squeeze(-1)
-
-                avg_logprob = best_token_logprobs.mean().item()
-                seq_logprob = best_token_logprobs.sum().item()
-
-                result["avg_logprob"] = round(avg_logprob, 5)
-                result["sequence_logprob"] = round(seq_logprob, 5)
-                result["avg_confidence"] = round(best_token_logprobs.exp().mean().item(), 4)
+                if avg_logprob is not None and seq_logprob is not None:
+                    result["avg_confidence"] = round(np.exp(avg_logprob), 4)
 
                 if return_logprobs:
-                    result["token_logprobs"] = [float(x) for x in best_token_logprobs[0].cpu().numpy()]
+                    result["token_logprobs"] = token_logprobs
 
-                # ── Quality labels ──────────────────────────────────────
-                if "avg_logprob" in result:
+                if "avg_logprob" in result and result["avg_logprob"] is not None:
                     result["quality_avg_logprob"] = self._get_quality_label(
                         result["avg_logprob"], QUALITY_THRESHOLDS_AVG_LOGPROB
                     )
-                if "sequence_logprob" in result:
+                if "sequence_logprob" in result and result["sequence_logprob"] is not None:
                     result["quality_sequence_logprob"] = self._get_quality_label(
                         result["sequence_logprob"], QUALITY_THRESHOLDS_SEQ_LOGPROB
                     )
@@ -251,6 +307,8 @@ class JapaneseASR:
 
             chunks: List[str] = []
             total_avg_logprobs: List[float] = []
+            total_seq_logprobs: float = 0.0
+            chunk_count = 0
 
             start = 0
             with Progress(
@@ -266,45 +324,51 @@ class JapaneseASR:
 
                 while start < len(array):
                     end = min(start + chunk_size_samples, len(array))
-                    chunk_array = array[start:end]
+                    chunk = array[start:end]
 
-                    inputs = self.processor(
-                        chunk_array, sampling_rate=TARGET_SR, return_tensors="pt", padding=True
-                    ).to(self.device)
+                    if num_beams > 1:
+                        logger.warning("Beam search not supported in chunked mode → using greedy")
 
-                    with torch.no_grad():
-                        outputs = self.model.generate(
-                            inputs.input_values,
-                            attention_mask=inputs.attention_mask,
-                            num_beams=num_beams,
-                            return_dict_in_generate=True,
-                            output_scores=True,
-                        )
-                        pred_ids = outputs.sequences
-                        text = self.processor.batch_decode(pred_ids, skip_special_tokens=True)[0].strip()
-                        chunks.append(text)
+                    text, avg_lp, seq_lp, _ = self._transcribe_segment(
+                        chunk, return_confidence, return_logprobs
+                    )
+                    chunks.append(text.strip())  # ensure clean chunks
 
-                        # Greedy path logprobs only (most common case)
-                        if (return_confidence or return_logprobs) and num_beams == 1:
-                            out = self.model(inputs.input_values, attention_mask=inputs.attention_mask)
-                            logits = out.logits
-                            log_probs = torch.log_softmax(logits, dim=-1)
-                            best_token_logprobs = log_probs.gather(2, pred_ids.unsqueeze(-1)).squeeze(-1)
-                            total_avg_logprobs.append(best_token_logprobs.mean().item())
+                    if avg_lp is not None:
+                        total_avg_logprobs.append(avg_lp)
+                    if seq_lp is not None:
+                        total_seq_logprobs += seq_lp
+                        chunk_count += 1
 
                     progress.advance(task)
                     start += step_samples
 
-            full_text = " ".join(chunks).strip()
+            # ── Stitch chunks using overlap-aware concatenation ───────────
+            if not chunks:
+                full_text = ""
+            elif len(chunks) == 1:
+                full_text = chunks[0]
+            else:
+                full_text = chunks[0]
+                for i in range(1, len(chunks)):
+                    full_text = self._stitch_texts_with_overlap(full_text, chunks[i])
+
+            full_text = full_text.strip()
             result["text"] = full_text
-            result["chunks_info"] = f"{len(chunks)} chunks (overlap {overlap_sec:.1f}s)"
+            result["chunks_info"] = f"{len(chunks)} chunks (overlap {overlap_sec:.1f}s, with text stitching)"
 
             if total_avg_logprobs:
                 avg_of_avgs = sum(total_avg_logprobs) / len(total_avg_logprobs)
                 result["avg_logprob"] = round(avg_of_avgs, 5)
+                result["sequence_logprob"] = round(total_seq_logprobs, 5) if chunk_count > 0 else None
+
                 result["quality_avg_logprob"] = self._get_quality_label(
                     avg_of_avgs, QUALITY_THRESHOLDS_AVG_LOGPROB
                 )
+                if result["sequence_logprob"] is not None:
+                    result["quality_sequence_logprob"] = self._get_quality_label(
+                        result["sequence_logprob"], QUALITY_THRESHOLDS_SEQ_LOGPROB
+                    )
 
             return result
 
@@ -343,11 +407,8 @@ class JapaneseASR:
 # ────────────────────────────────────────
 # Example usage
 # ────────────────────────────────────────
-if __name__ == "__main__":
+def example(audio_path):
     asr = JapaneseASR()
-
-    # audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_5s_1word.wav"
 
     try:
         result = asr.transcribe(
@@ -388,3 +449,16 @@ if __name__ == "__main__":
 
     except Exception:
         logger.exception("Transcription failed")
+
+
+if __name__ == "__main__":
+    from rich import print as rprint
+    
+    AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+    AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
+
+    rprint("[bold cyan]Demo: Short Audio[/bold cyan]")
+    example(AUDIO_SHORT)
+
+    rprint("[bold cyan]Demo: Long Audio[/bold cyan]")
+    example(AUDIO_LONG)
