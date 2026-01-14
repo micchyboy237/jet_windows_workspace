@@ -1,8 +1,12 @@
 from typing import Literal, Any, Dict, Union, List, Optional
 from pathlib import Path
 import time
+from contextlib import contextmanager
 
+import numpy as np
+import numpy.typing as npt
 import torch
+import librosa
 import soundfile as sf
 from transformers import pipeline
 from rich.console import Console
@@ -19,29 +23,75 @@ _PIPELINE_CACHE: Dict[str, Any] = {}
 _console = Console()
 
 
+def chunk_audio(
+    audio: npt.NDArray[np.float32],
+    sample_rate: int,
+    max_chunk_seconds: float,
+    overlap_seconds: float,
+) -> List[npt.NDArray[np.float32]]:
+    """
+    Split 1D float32 audio into overlapping chunks (zero-copy slices).
+    Same logic as used in JapaneseASR class.
+    """
+    if len(audio) == 0:
+        return []
+
+    chunk_size = int(max_chunk_seconds * sample_rate)
+    overlap = int(overlap_seconds * sample_rate)
+    step = chunk_size - overlap
+
+    if step <= 0:
+        raise ValueError(
+            f"overlap ({overlap_seconds}s) >= max_chunk_seconds ({max_chunk_seconds}s)"
+        )
+
+    chunks = []
+    start = 0
+    while start < len(audio):
+        end = min(start + chunk_size, len(audio))
+        chunks.append(audio[start:end])
+        start += step
+
+    return chunks
+
+
+def _stitch_texts_with_overlap(prev: str, curr: str) -> str:
+    """Naive but effective stitching for Japanese — looks for longest matching suffix-prefix."""
+    if not prev:
+        return curr
+    if not curr:
+        return prev
+
+    max_match_len = 40
+    prev_end = prev[-max_match_len:]
+    curr_start = curr[:max_match_len]
+
+    best_overlap = 0
+    for ol in range(min(len(prev_end), len(curr_start)), 3, -1):
+        if prev_end[-ol:] == curr_start[:ol]:
+            best_overlap = ol
+            break
+
+    if best_overlap >= 4:
+        return prev + curr[best_overlap:]
+    else:
+        return prev + " " + curr
+
+
 def japanese_speech_to_text(
     audio_path: Union[str, Path],
     task: TaskMode = "transcribe",
     output_mode: OutputMode = "basic",
     tgt_lang: str = "eng_Latn",
-    chunk_length_s: float = 15.0,
-    device: Union[int, str, None] = None,   # None → auto-detect
+    max_chunk_seconds: float = 45.0,           # ← new default (was 15 → now matches previous impl)
+    chunk_overlap_seconds: float = 10.0,       # ← new: overlap for stitching quality
+    device: Union[int, str, None] = None,
     compute_type: ComputeType = "float32",
     show_progress: bool = True,
 ) -> Union[str, Dict[str, Any], List[Dict[str, Any]]]:
     """
-    Reusable Japanese speech → text / translation function with rich progress & logging.
-
-    Progress estimation:
-    - Uses real audio duration + chunk_length_s to show approximate chunk progress
-    - Rich spinner + bar during inference
-    - Clean logging sections (loading, audio info, result summary)
-
-    New parameters:
-        device:        "cuda", "cuda:0", "mps", "cpu", 0, -1, None (auto)
-        compute_type:  "float32" (default), "bfloat16"
-                       → sets torch_dtype for faster / lower-memory inference
-        show_progress: bool = True   → toggle rich progress UI (useful for notebooks/scripts)
+    Japanese speech → text / translation with manual overlapping chunking for long audio.
+    Uses same defaults & stitching logic as the wav2vec2-based implementation.
     """
     global _PIPELINE_CACHE
 
@@ -50,7 +100,7 @@ def japanese_speech_to_text(
     if output_mode not in ("basic", "with_timestamps", "verbose"):
         raise ValueError(f"Invalid output_mode: {output_mode!r}")
 
-    # ─── Auto-detect device if None ────────────────────────────────────────
+    # ─── Device auto-detection ─────────────────────────────────────────────
     if device is None:
         if torch.cuda.is_available():
             device = "cuda"
@@ -59,186 +109,219 @@ def japanese_speech_to_text(
         else:
             device = "cpu"
 
-    # Normalize device string
     if isinstance(device, int):
         device = f"cuda:{device}" if device >= 0 else "cpu"
     device_str = str(device)
 
-    # ─── Map compute_type string → torch.dtype ──────────────────────────────
-    dtype_map = {
-        "float32": torch.float32,
-        "bfloat16": torch.bfloat16,
-    }
+    # ─── dtype mapping & safety fallbacks ──────────────────────────────────
+    dtype_map = {"float32": torch.float32, "bfloat16": torch.bfloat16}
     torch_dtype = dtype_map.get(compute_type)
     if torch_dtype is None:
         raise ValueError(f"Unsupported compute_type: {compute_type}")
 
-    # Safety fallback / warning for problematic combinations
     if device_str.startswith("mps") and compute_type != "float32":
-        _console.print(
-            "[yellow]Warning: MPS has limited / unstable support for "
-            f"{compute_type}. Falling back to float32.[/yellow]"
-        )
+        _console.print("[yellow]MPS: falling back to float32 (limited bfloat16 support)[/yellow]")
         torch_dtype = torch.float32
     elif device_str == "cpu" and compute_type != "float32":
-        _console.print(
-            f"[yellow]Note: Using {compute_type} on CPU — may be slower than float32.[/yellow]"
-        )
+        _console.print(f"[yellow]CPU note: {compute_type} may be slower than float32[/yellow]")
 
     audio_path = Path(audio_path)
     if not audio_path.is_file():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-    cache_key = f"{task}_{device_str}_{chunk_length_s:.1f}_{compute_type}"
+    # ─── Load audio once (mono, 16kHz) ─────────────────────────────────────
+    with _console.status("[cyan]Loading audio…[/cyan]"):
+        array, orig_sr = librosa.load(audio_path, sr=16000, mono=True)
+        duration_s = len(array) / 16000
 
-    # ─── Model loading with progress ────────────────────────────────────────
+    approx_chunks = max(1, int(duration_s / max_chunk_seconds) + 2)  # conservative estimate
+
+    # ─── Cache key (ignores new chunk params — safe for now) ───────────────
+    cache_key = f"{task}_{device_str}_{max_chunk_seconds:.1f}_{compute_type}"
+
     if cache_key not in _PIPELINE_CACHE:
         if show_progress:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                transient=True,
-            ) as progress:
-                task_id = progress.add_task("[cyan]Loading model…", total=None)
-                _load_pipeline(
-                    cache_key,
-                    task,
-                    tgt_lang,
-                    chunk_length_s,
-                    device_str,
-                    torch_dtype,
-                )
-                progress.update(task_id, completed=True)
+            with Progress(SpinnerColumn(), TextColumn("{task.description}"), transient=True) as p:
+                tid = p.add_task("[cyan]Loading model…", total=None)
+                _load_pipeline(cache_key, task, tgt_lang, device_str, torch_dtype)
+                p.update(tid, completed=True)
         else:
             _console.print("[cyan]Loading model…[/cyan]", end=" ")
-            _load_pipeline(cache_key, task, tgt_lang, chunk_length_s, device_str, torch_dtype)
+            _load_pipeline(cache_key, task, tgt_lang, device_str, torch_dtype)
             _console.print("[green]done[/green]")
 
     pipe = _PIPELINE_CACHE[cache_key]
 
-    # ─── Get real audio duration for better progress estimation ─────────────
-    with sf.SoundFile(str(audio_path)) as f:
-        if f.samplerate <= 0:
-            raise ValueError("Invalid sample rate detected")
-        duration_s = f.frames / f.samplerate
-        approx_chunks = max(1, int(duration_s / chunk_length_s) + 1)
-
-    # ─── Inference with rich progress ───────────────────────────────────────
     start_time = time.time()
+    full_text = ""
+    chunk_results = []  # for verbose / timestamps mode
 
-    if show_progress:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            "[progress.percentage]{task.percentage:>3.0f}%",
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
-            transient=False,
-        ) as progress:
-            task_id = progress.add_task(
-                f"[cyan]Processing audio (~{approx_chunks} chunks)" + (f" | {duration_s:.1f}s" if duration_s else ""),
-                total=approx_chunks,
-            )
+    is_long = duration_s > max_chunk_seconds + 1.0
 
-            # We can't get real per-chunk callbacks → simulate progress
-            # Advance ~evenly over estimated chunks
+    if not is_long:
+        # ── Short audio: single pipeline call ──────────────────────────────
+        chunks_info = "single pass"
+        with _progress_context(show_progress, approx_chunks, duration_s) as update_fn:
             result = pipe(
                 str(audio_path),
-                return_timestamps=(output_mode == "with_timestamps"),
+                return_timestamps=True,
+                chunk_length_s=None,  # disable internal chunking
             )
-            # Fake progress completion (since no real callback)
-            progress.update(task_id, completed=approx_chunks)
+            update_fn(1)
+
+        if output_mode == "basic":
+            full_text = result["text"].strip()
+        else:
+            chunk_results = result.get("chunks", [])
+            if not chunk_results:
+                chunk_results = [{"text": result["text"], "timestamp": None}]
+            full_text = " ".join(c["text"] for c in chunk_results).strip()
+
     else:
-        result = pipe(
-            str(audio_path),
-            return_timestamps=(output_mode == "with_timestamps"),
+        # ── Long audio: manual overlapping chunks + stitching ──────────────
+        chunks_info = f"{approx_chunks} overlapping chunks + stitching"
+
+        audio_chunks = chunk_audio(
+            array,
+            sample_rate=16000,
+            max_chunk_seconds=max_chunk_seconds,
+            overlap_seconds=chunk_overlap_seconds,
         )
+
+        texts: List[str] = []
+
+        with _progress_context(show_progress, len(audio_chunks), duration_s) as update_fn:
+            for i, chunk in enumerate(audio_chunks, 1):
+                result = pipe(
+                    chunk,                               # np.float32 at 16 kHz — do NOT pass sampling_rate=
+                    return_timestamps=True,
+                    chunk_length_s=None,                 # disable any internal auto-chunking
+                )
+                text = result["text"].strip()
+                texts.append(text)
+
+                if output_mode != "basic" and "chunks" in result:
+                    # Offset timestamps roughly — not perfect but better than nothing
+                    offset = (i - 1) * (max_chunk_seconds - chunk_overlap_seconds)
+                    for c in result["chunks"]:
+                        if c.get("timestamp") and isinstance(c["timestamp"], (tuple, list)):
+                            ts = c["timestamp"]
+                            start = ts[0] + offset if ts[0] is not None else None
+                            end   = ts[1] + offset if ts[1] is not None else None
+                            c["timestamp"] = (start, end)
+                        chunk_results.append(c)
+
+                update_fn(1)
+
+        # Stitch texts
+        if texts:
+            full_text = texts[0]
+            for next_text in texts[1:]:
+                full_text = _stitch_texts_with_overlap(full_text, next_text)
+            full_text = full_text.strip()
 
     elapsed = time.time() - start_time
 
     # ─── Format output ──────────────────────────────────────────────────────
     if output_mode == "basic":
-        text = result["text"]
         if show_progress:
-            _console.rule("Result")
-            rprint(text)
+            _console.rule("Transcription / Translation")
+            rprint(full_text)
             _console.rule()
-        return text
+            _console.print(f"[italic]Done in {elapsed:.2f}s — {chunks_info}[/italic]")
+        return full_text
 
     elif output_mode == "with_timestamps":
-        chunks = result.get("chunks", [])
-        if not chunks:
-            chunks = [{"text": result["text"], "timestamp": None}]
         if show_progress:
             _console.rule("Chunked Result")
-            for i, chunk in enumerate(chunks, 1):
+            for i, chunk in enumerate(chunk_results or [{"text": full_text, "timestamp": None}], 1):
                 ts = chunk.get("timestamp")
-                ts_str = f"{ts[0]:.1f}–{ts[1]:.1f}s" if isinstance(ts, (tuple, list)) and ts[0] is not None else "n/a"
+                ts_str = f"{ts[0]:.1f}–{ts[1]:.1f}s" if ts and ts[0] is not None else "n/a"
                 rprint(f"[dim]{i:2d}[/dim]  [blue]{ts_str}[/blue]  {chunk['text']}")
             _console.rule()
-        return chunks
+        return chunk_results or [{"text": full_text, "timestamp": None}]
 
     else:  # verbose
+        info = {
+            "text": full_text,
+            "chunks_info": chunks_info,
+            "duration_s": round(duration_s, 1),
+            "elapsed_s": round(elapsed, 2),
+        }
         if show_progress:
-            table = Table(title="Verbose Result", show_header=True, header_style="bold magenta")
+            table = Table(title="Verbose Result")
             table.add_column("Key", style="cyan")
             table.add_column("Value", style="green")
-            for k, v in result.items():
-                if k == "chunks" and isinstance(v, list):
-                    table.add_row(k, f"{len(v)} chunks")
-                else:
-                    table.add_row(k, str(v)[:120] + "..." if len(str(v)) > 120 else str(v))
+            for k, v in info.items():
+                table.add_row(k, str(v))
             rprint(table)
-            _console.print(f"[italic]Processed in {elapsed:.2f} seconds[/italic]")
-        return result
+        return info
 
 
 def _load_pipeline(
     cache_key: str,
     task: str,
     tgt_lang: str,
-    chunk_length_s: float,
     device: str,
     torch_dtype: torch.dtype,
 ):
-    common_kwargs = {
-        "chunk_length_s": chunk_length_s,
+    common = {
         "device": device,
         "torch_dtype": torch_dtype,
         "trust_remote_code": True,
+        "model_kwargs": {"attn_implementation": "sdpa"},
     }
 
     if task == "transcribe":
         _PIPELINE_CACHE[cache_key] = pipeline(
             "automatic-speech-recognition",
             model="japanese-asr/ja-cascaded-s2t-translation",
-            model_kwargs={"attn_implementation": "sdpa"},
-            **common_kwargs,
+            **common,
         )
     else:
         _PIPELINE_CACHE[cache_key] = pipeline(
             model="japanese-asr/ja-cascaded-s2t-translation",
-            model_kwargs={"attn_implementation": "sdpa"},
             model_translation="facebook/nllb-200-distilled-600M",
             tgt_lang=tgt_lang,
-            **common_kwargs,
+            **common,
         )
 
 
-# ─── Updated usage examples ─────────────────────────────────────────────────
+@contextmanager
+def _progress_context(show: bool, total: int, duration: float):
+    """Helper to yield update function — simulates or uses real progress."""
+    if not show:
+        yield lambda _: None
+    else:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}"),
+            BarColumn(),
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+        ) as progress:
+            task_id = progress.add_task(
+                f"[cyan]Processing (~{total} chunks | {duration:.1f}s)",
+                total=total,
+            )
+
+            def update(adv: int = 1):
+                progress.advance(task_id, advance=adv)
+
+            yield update
+
+
+# ─── Demo ───────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
     AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
-    # Most common cases
-
-    rprint("[bold cyan]Demo: auto device + float32[/bold cyan]")
-    japanese_speech_to_text(AUDIO_LONG)
-
-    # rprint("[bold cyan]Demo: try bfloat16 precision[/bold cyan]")
-    # japanese_speech_to_text(AUDIO_SHORT, compute_type="bfloat16")
-
-    # rprint("[bold cyan]Demo: long audio with bfloat16 precision[/bold cyan]")
-    # japanese_speech_to_text(AUDIO_LONG, compute_type="bfloat16")
+    rprint("[bold cyan]Demo: Long audio — manual 45s chunks + 10s overlap[/bold cyan]")
+    japanese_speech_to_text(
+        AUDIO_LONG,
+        task="transcribe",           # or "translate"
+        output_mode="basic",
+        # compute_type="bfloat16",   # uncomment if GPU supports it well
+    )

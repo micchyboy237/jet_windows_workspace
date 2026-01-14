@@ -81,6 +81,44 @@ class TranscriptionResult(TypedDict, total=False):
     quality_sequence_logprob: Optional[QualityCategory]
 
 
+def chunk_audio(
+    audio: npt.NDArray[np.float32],
+    sample_rate: int,
+    max_chunk_seconds: float,
+    overlap_seconds: float,
+) -> List[npt.NDArray[np.float32]]:
+    """
+    Split a 1D float32 audio array into overlapping chunks suitable for ASR.
+
+    Returns slices/views of the original array (zero-copy where possible).
+    """
+    if len(audio) == 0:
+        return []
+
+    if max_chunk_seconds <= 0 or overlap_seconds < 0:
+        raise ValueError("max_chunk_seconds must be > 0 and overlap_seconds >= 0")
+
+    chunk_size = int(max_chunk_seconds * sample_rate)
+    overlap = int(overlap_seconds * sample_rate)
+    step = chunk_size - overlap
+
+    if step <= 0:
+        raise ValueError(
+            f"overlap ({overlap_seconds}s) must be strictly less than "
+            f"max_chunk_seconds ({max_chunk_seconds}s) at sample rate {sample_rate}"
+        )
+
+    chunks: List[npt.NDArray[np.float32]] = []
+    start = 0
+
+    while start < len(audio):
+        end = min(start + chunk_size, len(audio))
+        chunks.append(audio[start:end])
+        start += step
+
+    return chunks
+
+
 class JapaneseASR:
     """Flexible Japanese speech-to-text using wav2vec2-large-xlsr-53-japanese"""
 
@@ -158,9 +196,7 @@ class JapaneseASR:
         return text, avg_logprob, seq_logprob, token_logprobs
 
     def _stitch_texts_with_overlap(self, prev: str, curr: str) -> str:
-        """Naive but effective stitching for Japanese (no word boundaries).
-        Looks for longest matching suffix-prefix in a reasonable window.
-        """
+        """Naive but effective stitching for Japanese (no word boundaries)."""
         if not prev:
             return curr
         if not curr:
@@ -301,16 +337,18 @@ class JapaneseASR:
 
         # ── Long audio → chunked processing ───────────────────────────────
         else:
-            chunk_size_samples = int(max_chunk_sec * TARGET_SR)
-            overlap_samples = int(overlap_sec * TARGET_SR)
-            step_samples = chunk_size_samples - overlap_samples
+            audio_chunks = chunk_audio(
+                array,
+                TARGET_SR,
+                max_chunk_sec,
+                overlap_sec,
+            )
 
-            chunks: List[str] = []
+            chunks_texts: List[str] = []
             total_avg_logprobs: List[float] = []
             total_seq_logprobs: float = 0.0
             chunk_count = 0
 
-            start = 0
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -319,20 +357,16 @@ class JapaneseASR:
                 TimeElapsedColumn(),
                 console=self.console
             ) as progress:
-                total_steps = (len(array) + step_samples - 1) // step_samples
-                task = progress.add_task("[magenta]Chunked transcription...", total=total_steps)
+                task = progress.add_task("[magenta]Chunked transcription...", total=len(audio_chunks))
 
-                while start < len(array):
-                    end = min(start + chunk_size_samples, len(array))
-                    chunk = array[start:end]
-
+                for chunk in audio_chunks:
                     if num_beams > 1:
                         logger.warning("Beam search not supported in chunked mode → using greedy")
 
                     text, avg_lp, seq_lp, _ = self._transcribe_segment(
                         chunk, return_confidence, return_logprobs
                     )
-                    chunks.append(text.strip())  # ensure clean chunks
+                    chunks_texts.append(text.strip())
 
                     if avg_lp is not None:
                         total_avg_logprobs.append(avg_lp)
@@ -341,21 +375,20 @@ class JapaneseASR:
                         chunk_count += 1
 
                     progress.advance(task)
-                    start += step_samples
 
             # ── Stitch chunks using overlap-aware concatenation ───────────
-            if not chunks:
+            if not chunks_texts:
                 full_text = ""
-            elif len(chunks) == 1:
-                full_text = chunks[0]
+            elif len(chunks_texts) == 1:
+                full_text = chunks_texts[0]
             else:
-                full_text = chunks[0]
-                for i in range(1, len(chunks)):
-                    full_text = self._stitch_texts_with_overlap(full_text, chunks[i])
+                full_text = chunks_texts[0]
+                for i in range(1, len(chunks_texts)):
+                    full_text = self._stitch_texts_with_overlap(full_text, chunks_texts[i])
 
             full_text = full_text.strip()
             result["text"] = full_text
-            result["chunks_info"] = f"{len(chunks)} chunks (overlap {overlap_sec:.1f}s, with text stitching)"
+            result["chunks_info"] = f"{len(audio_chunks)} chunks (overlap {overlap_sec:.1f}s, with text stitching)"
 
             if total_avg_logprobs:
                 avg_of_avgs = sum(total_avg_logprobs) / len(total_avg_logprobs)
