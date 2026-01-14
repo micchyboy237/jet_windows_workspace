@@ -1,8 +1,10 @@
-from typing import Dict, Any, Union, Iterator, List, Tuple, Optional
 import time
 import uuid
+import json
+from typing import Dict, Any, Union, Iterator, List, Tuple, Optional
 from threading import Lock
 
+from rich import print
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
@@ -44,9 +46,6 @@ TRANSLATION_DEFAULTS = {
     "min_p": 0.5,
     "repeat_penalty": 1.05,
     "max_tokens": 512,
-    # For confidence scores
-    "logprobs": True,
-    "top_logprobs": 3
 }
 
 # ────────────────────────────────────────────────
@@ -195,6 +194,8 @@ def translate_text(text: str, logprobs: Optional[int] = None, **generation_param
 # Quick demo
 # ────────────────────────────────────────────────
 if __name__ == "__main__":
+    # logprobs = None
+    logprobs = 5
     examples = [
         "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
     ]
@@ -206,13 +207,19 @@ if __name__ == "__main__":
         console.print()
 
         console.print("[bold green]English (streaming):[/bold green]")
-        result = translate_text(jp_text, logprobs=1)
+        result = translate_text(jp_text, logprobs=logprobs)
+        full_text = result.pop("text")
         all_logprobs = result.pop("logprobs")
 
         from rich.pretty import pprint
 
-        print(f"\n[bold cyan]Translation {i + 1}:[/bold cyan]")
+        print(f"\n[bold cyan]Logprobs {i}:[/bold cyan]")
+        pprint(all_logprobs)
+
+        print(f"\n[bold cyan]Meta: {i}:[/bold cyan]")
         pprint(result, expand_all=True)
 
-        print(f"\n[bold cyan]Logprobs {i + 1}:[/bold cyan]")
-        pprint(all_logprobs)
+        print(f"\n[bold cyan]Translation {i}:[/bold cyan]")
+        pprint(full_text, expand_all=True)
+
+    print()
