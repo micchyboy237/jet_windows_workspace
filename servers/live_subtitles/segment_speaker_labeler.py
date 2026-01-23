@@ -15,7 +15,7 @@ from pyannote.audio.pipelines.clustering import AgglomerativeClustering as Pyann
 from pyannote.audio.pipelines.clustering import KMeansClustering as PyannoteKMeansClustering
 from tqdm import tqdm
 
-AudioInput = Union[np.ndarray, bytes, io.BytesIO, str, Path]
+AudioInput = Union[np.ndarray, bytes, bytearray, io.BytesIO, str, Path]
 
 
 class SegmentResult(TypedDict):
@@ -49,6 +49,8 @@ class SegmentSpeakerLabeler:
         distance_threshold: float = 0.7,
         clustering_strategy: Literal["agglomerative", "kmeans"] = "agglomerative",
         n_clusters: int | None = None,
+        clustering_method: Literal["average", "complete", "single"] = "average",
+        min_cluster_size: int = 1,
         # ── New parameters for reference-based assignment ─────────────────────
         reference_embeddings_by_speaker: dict[int | str, np.ndarray] | None = None,
         reference_paths_by_speaker: dict[int | str, list[str | Path]] | None = None,
@@ -75,6 +77,10 @@ class SegmentSpeakerLabeler:
             Clustering algorithm to use. Defaults to "agglomerative".
         n_clusters : int | None, optional
             Required when using "kmeans". Ignored for "agglomerative".
+        clustering_method : Literal["average", "complete", "single"], optional
+            Linkage method for agglomerative clustering. Defaults to "average".
+        min_cluster_size : int, optional
+            Minimum number of segments in a cluster (agglomerative only).
         use_accelerator : bool, optional
             Use MPS (Apple), CUDA or CPU as available.
         device : str | torch.device | None, optional
@@ -140,9 +146,40 @@ class SegmentSpeakerLabeler:
         if reference_paths_by_speaker:
             self._load_references_from_paths(reference_paths_by_speaker)
 
+        # ────────────── Clustering config: store and validate, instantiate clusterer ──────────────
         self.distance_threshold = distance_threshold
         self.clustering_strategy = clustering_strategy
         self.n_clusters = n_clusters
+        self.clustering_method = clustering_method
+        self.min_cluster_size = min_cluster_size
+
+        # Validate early (raise if config invalid)
+        if self.clustering_strategy == "kmeans" and self.n_clusters is None:
+            raise ValueError("n_clusters must be provided for kmeans strategy.")
+
+        if self.clustering_strategy == "agglomerative" and self.n_clusters is not None:
+            raise ValueError("n_clusters cannot be used with agglomerative strategy.")
+
+        # Instantiate the clusterer once per instance, based on config
+        self._clusterer = None
+
+        if self.clustering_strategy == "agglomerative":
+            self._clusterer = (
+                PyannoteAgglomerativeClustering(metric="cosine")
+                .instantiate(
+                    {
+                        "threshold": self.distance_threshold,
+                        "method": self.clustering_method,
+                        "min_cluster_size": self.min_cluster_size,
+                    }
+                )
+            )
+
+        elif self.clustering_strategy == "kmeans":
+            self._clusterer = (
+                PyannoteKMeansClustering(metric="cosine")
+                .instantiate({})
+            )
 
     def _load_references_from_paths(
         self,
@@ -234,28 +271,36 @@ class SegmentSpeakerLabeler:
 
         return np.stack(embeddings)
 
-    def _normalize_audio_input(self, item: AudioInput) -> np.ndarray | io.BytesIO | str:
+    def _normalize_audio_input(self, item: AudioInput):
         """Convert any AudioInput to format accepted by pyannote.audio.Inference"""
+
         if isinstance(item, (str, Path)):
-            return str(Path(item))           # ensure string path
+            return str(Path(item))
 
         if isinstance(item, io.BytesIO):
-            item.seek(0)                     # be polite
+            item.seek(0)
             return item
 
-        if isinstance(item, bytes):
-            return io.BytesIO(item)
+        if isinstance(item, (bytes, bytearray)):
+            return io.BytesIO(bytes(item))
 
         if isinstance(item, np.ndarray):
             if item.ndim not in (1, 2):
                 raise ValueError(f"Expected 1D or 2D waveform, got shape {item.shape}")
-            if item.ndim == 2:
-                if item.shape[1] not in (1, 2):
-                    raise ValueError("Waveform must be mono or stereo (channels last)")
-                item = item.mean(axis=1)     # quick downmix to mono
-            if item.dtype != np.float32:
-                item = item.astype(np.float32)
-            return item
+
+            # channels-first expected by pyannote: (channels, time)
+            if item.ndim == 1:
+                waveform = torch.from_numpy(item).unsqueeze(0)
+            else:
+                waveform = torch.from_numpy(item.T)
+
+            if waveform.dtype != torch.float32:
+                waveform = waveform.float()
+
+            return {
+                "waveform": waveform,
+                "sample_rate": 16000,  # ⚠️ MUST be correct
+            }
 
         raise TypeError(f"Unsupported audio input type: {type(item).__name__}")
 
@@ -372,40 +417,26 @@ class SegmentSpeakerLabeler:
             if self.verbose:
                 print(f"Found {len(segment_list)} segment(s). Clustering embeddings...")
 
-            # ── existing unsupervised clustering code ──
+            # Reuse per-instance clusterer to avoid repeated object construction
             if self.clustering_strategy == "agglomerative":
-                if self.n_clusters is not None:
-                    raise ValueError("n_clusters cannot be used with agglomerative strategy.")
-                clusterer = PyannoteAgglomerativeClustering(
-                    metric="cosine",
-                ).instantiate({
-                    "threshold": self.distance_threshold,
-                    "method": "average",
-                    "min_cluster_size": 1,
-                })
-                labels = clusterer.cluster(
+                labels = self._clusterer.cluster(
                     embeddings,
                     min_clusters=1,
                     max_clusters=9999,
                 )
-
             elif self.clustering_strategy == "kmeans":
-                if self.n_clusters is None:
-                    raise ValueError("n_clusters must be provided for kmeans strategy.")
-                clusterer = PyannoteKMeansClustering(metric="cosine").instantiate({})
-                labels = clusterer.cluster(
+                labels = self._clusterer.cluster(
                     embeddings,
                     num_clusters=self.n_clusters,
                 )
-
             else:
                 raise ValueError(f"Unsupported clustering_strategy: {self.clustering_strategy}")
 
             # majority-size remapping (only in unsupervised mode)
             unique_labels = np.unique(labels)
-            cluster_sizes = [(l, np.sum(labels == l)) for l in unique_labels]
-            cluster_sizes.sort(key=lambda x: -x[1])
-            old_label_to_priority = {old: idx for idx, (old, _) in enumerate(cluster_sizes)}
+            cluster_sizes_list = [(l, np.sum(labels == l)) for l in unique_labels]
+            cluster_sizes_list.sort(key=lambda x: -x[1])
+            old_label_to_priority = {old: idx for idx, (old, _) in enumerate(cluster_sizes_list)}
             labels = np.array([old_label_to_priority[l] for l in labels])
             unique_labels = np.unique(labels)
 
@@ -470,6 +501,7 @@ class SegmentSpeakerLabeler:
         if self.verbose:
             print(f"Processing complete → {len(np.unique(labels))} speakers detected.")
         return results
+
 
 
 if __name__ == "__main__":

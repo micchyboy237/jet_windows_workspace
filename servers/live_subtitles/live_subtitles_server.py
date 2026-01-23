@@ -121,6 +121,11 @@ translator = Translator(
     inter_threads=4,  # tune to your cores
 )
 
+from segment_speaker_labeler import SegmentSpeakerLabeler, AudioInput as SpeakerAudioInput, SegmentResult as SpeakerSegmentResult
+
+logger.info("Loading speaker labeler pyannote model & clustering strategy...")
+labeler = SegmentSpeakerLabeler()
+
 logger.info("Models loaded.")
 
 # ───────────────────────────────────────────────
@@ -131,6 +136,7 @@ class ConnectionState:
     def __init__(self, client_id: str):
         self.client_id = client_id
         self.buffer = bytearray()
+        self.prev_buffer: Optional[bytearray] = None
         self.sample_rate: Optional[int] = None
         self.utterance_count = 0
         self.last_chunk_time = time.monotonic()
@@ -407,6 +413,28 @@ async def handler(websocket):
                         DEFAULT_OUT_DIR,
                     )
 
+                    audio_curr = pcm_bytes_to_waveform(state.buffer)
+                    audio_prev = (
+                        pcm_bytes_to_waveform(state.prev_buffer)
+                        if state.prev_buffer else None
+                    )
+
+                    cluster_speakers = (
+                        labeler.cluster_segments([audio_prev, audio_curr])
+                        if audio_prev is not None and audio_prev.size > 0
+                        else None
+                    )
+                    similarity_prev = (
+                        labeler.similarity(audio_curr, audio_prev)
+                        if audio_prev is not None and audio_prev.size > 0
+                        else None
+                    )
+                    is_same_speaker_as_prev = (
+                        labeler.is_same_speaker(audio_curr, audio_prev)
+                        if audio_prev is not None and audio_prev.size > 0
+                        else False
+                    )
+
                     # Payload follows updated context (includes quality/conf/logprob)
                     payload = {
                         "type": "subtitle",
@@ -419,9 +447,14 @@ async def handler(websocket):
                         "translation_logprob": meta["translation"]["log_prob"],
                         "translation_confidence": meta["translation"].get("confidence"),
                         "translation_quality": meta["translation"]["quality_label"],
+                        "is_same_speaker_as_prev": is_same_speaker_as_prev,
+                        "similarity_prev": similarity_prev,
+                        "cluster_speakers": cluster_speakers,
                         "meta": meta,
                     }
                     await websocket.send(json.dumps(payload, ensure_ascii=False))
+
+                    state.prev_buffer = state.buffer
 
                     state.utterance_count += 1
                     state.clear_buffer()
@@ -439,6 +472,21 @@ async def handler(websocket):
     finally:
         connected_states.pop(websocket, None)
         logger.info(f"[{client_id}] Disconnected")
+
+
+def pcm_bytes_to_waveform(
+    pcm: bytes | bytearray,
+    *,
+    dtype=np.int16,
+) -> np.ndarray:
+    """
+    Convert raw PCM bytes to mono float32 waveform in [-1, 1].
+    """
+    waveform = np.frombuffer(pcm, dtype=dtype)
+    if waveform.size == 0:
+        raise ValueError("Empty PCM buffer")
+    waveform = waveform.astype(np.float32) / 32768.0
+    return waveform  # (samples,)
 
 
 async def main():
