@@ -457,9 +457,17 @@ async def stream_microphone(ws) -> None:
                                 _append_to_global_speech_probs_index(
                                     current_segment_num, duration, segment_start_wallclock, base_time, probs_path, speech_prob_history)
 
+                            # ── Compute average VAD confidence right here ────────────────────────────────
+                            avg_vad = round(
+                                vad_confidence_sum / speech_chunk_count, 4
+                            ) if speech_chunk_count > 0 else 0.0
+
                             # Signal end of utterance to server
                             try:
-                                await ws.send(json.dumps({"type": "end_of_utterance"}))
+                                await ws.send(json.dumps({
+                                    "type": "end_of_utterance",
+                                    "avg_vad_confidence": avg_vad,
+                                }))
                                 log.success("[speech → server] Sent end_of_utterance marker", bright=True)
                             except websockets.ConnectionClosed:
                                 log.warning("WebSocket closed while sending end marker")
@@ -668,6 +676,7 @@ async def handle_final_subtitle(data: dict) -> None:
         return
 
     duration_sec = data.get("duration_sec", 0.0)
+    avg_vad_conf = data.get("avg_vad_confidence")
     trans_conf = data.get("transcription_confidence")
     trans_quality = data.get("transcription_quality")
     transl_conf = data.get("translation_confidence")
@@ -705,6 +714,7 @@ async def handle_final_subtitle(data: dict) -> None:
         "relative_start": relative_start,
         "relative_end": relative_end,
         "segment_num": segment_num,
+        "avg_vad_conf": avg_vad_conf,
         "trans_conf": trans_conf,
         "trans_quality": trans_quality,
         "transl_conf": transl_conf,
@@ -775,20 +785,16 @@ async def _update_display_and_files(utt_id: int) -> None:
     segment_num    = entry["segment_num"]
     start_time     = entry["start_wallclock"]
 
+    avg_vad_conf   = entry["avg_vad_conf"]
+
     trans_conf     = entry.get("trans_conf")
     trans_quality  = entry.get("trans_quality")
     transl_conf    = entry.get("transl_conf")
     transl_quality = entry.get("transl_quality")
 
-    sp = entry.get("speaker_info", {})
-    speaker_is_same        = sp.get("is_same_speaker_as_prev")
-    speaker_similarity     = sp.get("similarity_prev")
-    speaker_clusters       = sp.get("cluster_speakers")
-
     segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
     os.makedirs(segment_dir, exist_ok=True)
 
-    avg_vad_conf = 0.0
 
     # ── Overlay ────────────────────────────────────────────────────────────────
     overlay.add_message(
@@ -808,16 +814,6 @@ async def _update_display_and_files(utt_id: int) -> None:
         # speaker_similarity=round(similarity, 3) if similarity is not None else None,
         # speaker_clusters=clusters,
     )
-
-    # Write per-segment speech info
-    speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
-    if os.path.exists(speech_meta_path):
-        try:
-            with open(speech_meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-            avg_vad_conf = meta.get("vad_confidence", {}).get("ave", 0.0)
-        except Exception:
-            pass
 
     # ── SRT (write only once) ─────────────────────────────────────────────────
     per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
