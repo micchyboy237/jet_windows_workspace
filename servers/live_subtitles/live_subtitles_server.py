@@ -397,6 +397,8 @@ async def handler(websocket):
                         logger.debug(f"[{client_id}] end-of-utterance but empty buffer")
                         continue
 
+                    avg_vad_confidence = data["avg_vad_confidence"]
+
                     duration = state.get_duration_sec()
                     logger.info(f"[{client_id}] End of utterance — {duration:.2f}s")
 
@@ -431,6 +433,7 @@ async def handler(websocket):
                     text_payload = {
                         "type": "final_subtitle",
                         "utterance_id": current_utterance_idx,
+                        "avg_vad_confidence": avg_vad_confidence,
                         "transcription_ja": meta["transcription"]["text_ja"],
                         "translation_en": meta["translation"]["text_en"],
                         "duration_sec": round(duration, 3),
