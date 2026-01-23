@@ -5,7 +5,6 @@ import shutil
 import asyncio
 import base64
 import json
-import logging
 import time
 import queue
 from collections import deque
@@ -15,7 +14,8 @@ from typing import Deque, Literal
 import sounddevice as sd
 import websockets
 from pysilero_vad import SileroVoiceActivityDetector
-from rich.logging import RichHandler
+# from rich.logging import RichHandler
+from jet.logger import logger as log
 import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
 import numpy as np  # needed for saving wav with frombuffer
 
@@ -24,6 +24,7 @@ import datetime
 import sys
 from threading import Thread
 from PyQt6.QtWidgets import QApplication
+from jet.audio.helpers.energy import compute_rms, rms_to_loudness_label
 from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
 
 OUTPUT_DIR = os.path.join(
@@ -40,17 +41,8 @@ audio_buffer: deque[tuple[float, bytes]] = deque()   # (monotonic_time, chunk)
 audio_total_samples: int = 0
 LAST_5MIN_WAV = os.path.join(OUTPUT_DIR, "last_5_mins.wav")
 
-# =============================
-# Logging setup
-# =============================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True, markup=True)]
-)
-log = logging.getLogger("mic-streamer")
+_last_written_total_bytes: int = 0
+_audio_buffer_is_dirty: bool = False
 
 # =============================
 # Configuration (now flexible)
@@ -150,6 +142,7 @@ async def stream_microphone(ws) -> None:
     chunks_sent = 0
     chunks_detected = 0
     total_chunks_processed = 0
+    speech_start_time = None
 
     def audio_callback(indata, frames: int, time_, status) -> None:
         if status:
@@ -159,7 +152,7 @@ async def stream_microphone(ws) -> None:
             audio_queue.put_nowait(bytes(indata))
         except queue.Full:
             # Rare: consumer too slow → drop frame to avoid blocking callback
-            log.warning("[audio] Queue full – dropping audio frame to prevent callback blockage")
+            log.error("[audio] Queue full – dropping audio frame to prevent callback blockage")
 
     with sd.RawInputStream(
         samplerate=config.sample_rate,
@@ -187,11 +180,19 @@ async def stream_microphone(ws) -> None:
                         log.warning("[audio] Unexpected chunk size: %d (expected %d)", len(chunk), VAD_CHUNK_BYTES)
                         continue
 
+                    is_speech_ongoing = speech_start_time is not None
+
                     # ← NEW: compute RMS energy for this chunk
                     chunk_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
                     rms = np.sqrt(np.mean(chunk_np ** 2))
 
                     has_sound = rms > 50.0
+
+                    # Start temp code
+                    normalized_chunk_np = np.frombuffer(chunk_np, dtype=np.int16).astype(np.float32) / 32767.0
+                    temp_rms = compute_rms(normalized_chunk_np)
+                    energy_label = rms_to_loudness_label(temp_rms)
+                    # End temp code
 
                     # Skip processing if there is no sufficiently loud sound in the audio chunk
                     # if not has_sound:
@@ -211,8 +212,10 @@ async def stream_microphone(ws) -> None:
                     if has_sound:
                         # Always add to continuous buffer (audible speech or non_speech)
                         chunk_time = time.monotonic()
+                        global _audio_buffer_is_dirty
                         audio_buffer.append((chunk_time, chunk, speech_prob, rms, chunk_type))
                         audio_total_samples += len(chunk) // 2   # int16
+                        _audio_buffer_is_dirty = True
 
                     # Trim old data
                     while audio_total_samples / config.sample_rate > CONTINUOUS_AUDIO_MAX_SECONDS:
@@ -241,7 +244,7 @@ async def stream_microphone(ws) -> None:
                             min_vad_confidence = speech_prob
                         # Reset silence timer
                         silence_start_time = None
-                        if speech_start_time is None:
+                        if not is_speech_ongoing:
                             speech_start_time = time.monotonic()
                             # Start new segment
                             current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
@@ -260,7 +263,7 @@ async def stream_microphone(ws) -> None:
                             speech_energy_sum_squares = 0.0
                             max_energy = 0.0
                             min_energy = float("inf")
-                            log.info("[speech] Speech started | segment_%04d", current_segment_num)
+                            log.success("[speech] Speech started | segment_%04d", current_segment_num)
                             speech_duration_sec = 0.0
                         # Append chunk to current segment buffer
                         if current_segment_buffer is not None:
@@ -283,6 +286,8 @@ async def stream_microphone(ws) -> None:
                         speech_duration_sec += VAD_CHUNK_SAMPLES / config.sample_rate
                         payload = {
                             "type": "audio",
+                            "ongoing_speech": is_speech_ongoing,
+                            "chunk_type": chunk_type,
                             "sample_rate": config.sample_rate,
                             "pcm": base64.b64encode(chunk).decode("ascii"),
                         }
@@ -292,12 +297,35 @@ async def stream_microphone(ws) -> None:
                         except websockets.ConnectionClosed:
                             log.warning("WebSocket closed during send")
                             return
+
+
                     else:
+                        if is_speech_ongoing and has_sound:
+                            # We are inside an utterance → send non-speech too
+                            payload = {
+                                "type": "audio",
+                                "ongoing_speech": is_speech_ongoing,
+                                "chunk_type": chunk_type,
+                                "sample_rate": config.sample_rate,
+                                "pcm": base64.b64encode(chunk).decode("ascii"),
+                            }
+                            await ws.send(json.dumps(payload))
+                            log.pink(
+                                "[non-speech → server] Sent chunk %d | rms=%.4f | speech_prob=%.3f | dur=%.2fs | label=%s",
+                                chunks_sent,
+                                temp_rms,
+                                speech_prob,
+                                time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
+                                # f" | RTT={avg_rtt:.3f}s" if avg_rtt is not None else "",
+                                # energy_info,
+                                energy_label
+                            )
+
                         # Silence chunk
-                        if speech_start_time is not None and silence_start_time is None:
+                        if is_speech_ongoing and silence_start_time is None:
                             silence_start_time = time.monotonic()
                         # Check if silence too long → end segment
-                        if (speech_start_time is not None and silence_start_time is not None
+                        if (is_speech_ongoing and silence_start_time is not None
                             and time.monotonic() - silence_start_time > config.max_silence_seconds):
                             # Compute precise duration using number of samples in the segment buffer
                             if current_segment_buffer is not None:
@@ -320,7 +348,7 @@ async def stream_microphone(ws) -> None:
                                 speech_chunks_in_segment = 0
                                 continue
 
-                            log.info(
+                            log.success(
                                 "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
                                 duration, speech_chunks_in_segment
                             )
@@ -427,7 +455,7 @@ async def stream_microphone(ws) -> None:
                             # Signal end of utterance to server
                             try:
                                 await ws.send(json.dumps({"type": "end_of_utterance"}))
-                                log.info("[speech → server] Sent end_of_utterance marker")
+                                log.success("[speech → server] Sent end_of_utterance marker", bright=True)
                             except websockets.ConnectionClosed:
                                 log.warning("WebSocket closed while sending end marker")
                                 return
@@ -454,21 +482,21 @@ async def stream_microphone(ws) -> None:
                                 f"[min={min_energy:.4f} max={max_energy:.4f}]"
                             )
 
-                        log.info(
-                            "[speech → server] Sent chunk %d | rms=%.4f | speech_prob=%.3f | dur=%.2fs%s%s",
+                        log.orange(
+                            "[speech → server] Sent chunk %d | rms=%.4f | speech_prob=%.3f | dur=%.2fs%s%s | label=%s",
                             chunks_sent,
-                            rms,
+                            temp_rms,
                             speech_prob,
                             time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
                             f" | RTT={avg_rtt:.3f}s" if avg_rtt is not None else "",
-                            energy_info
+                            energy_info,
+                            energy_label
                         )
                     else:
                         # Silence chunk – compute energy and always log speech_prob for VAD debugging
                         if has_sound:  # audible low-level sound (breath, noise, etc.)
-                            log.debug(
-                                "[no speech] Chunk has audible energy | rms=%.4f | speech_prob=%.3f | samples=%d",
-                                rms, speech_prob, len(chunk_np)
+                            log.white(
+                                "[no speech] Chunk has audible energy | sent=%d | rms=%.4f | speech_prob=%.3f | samples=%d | label=%s", chunks_sent, temp_rms, speech_prob, len(chunk_np), energy_label
                             )
                         else:
                             # log.debug(
@@ -477,7 +505,7 @@ async def stream_microphone(ws) -> None:
                             # )
                             pass
                 if processed > 0:
-                    log.debug("Processed %d speech chunk(s) this cycle", processed)
+                    log.debug("\nProcessed %d speech chunk(s) this cycle\n", processed)
                 # Periodic status update
                 if total_chunks_processed % 100 == 0:
                     status = "SPEAKING" if speech_start_time else "SILENCE"
@@ -508,7 +536,7 @@ async def stream_microphone(ws) -> None:
                 _write_last_5min_wav()
 
             # Optional: also flush speech_prob_history if segment is active
-            if speech_start_time is not None and speech_prob_history:
+            if is_speech_ongoing and speech_prob_history:
                 log.warning("Active speech segment was interrupted — saving partial prob history")
                 # You could save it to a special "interrupted_segment_XXX" folder
                 # or just append to a global interrupted_probs.json
@@ -828,15 +856,49 @@ def _append_to_global_all_probs(
 
 
 def _write_last_5min_wav():
-   if not audio_buffer:
-         return
-   all_bytes = bytearray()
-   for _, chunk, _, _, _ in audio_buffer:
-         all_bytes.extend(chunk)
-   arr = np.frombuffer(all_bytes, dtype=np.int16)
-   wavfile.write(LAST_5MIN_WAV, config.sample_rate, arr)
-   log.debug("[continuous] Updated last_5_mins.wav — %.1f seconds", 
-               len(arr) / config.sample_rate)
+    global _last_written_total_bytes, _audio_buffer_is_dirty
+
+    if not audio_buffer:
+        return
+
+    current_total_bytes = sum(len(chunk) for _, chunk, _, _, _ in audio_buffer)
+
+    if not _audio_buffer_is_dirty and current_total_bytes == _last_written_total_bytes:
+        # log.debug("[continuous] Buffer unchanged — skipping wav write")
+        return
+
+    all_bytes = bytearray()
+    for _, chunk, _, _, _ in audio_buffer:
+        all_bytes.extend(chunk)
+
+    arr = np.frombuffer(all_bytes, dtype=np.int16)
+    wavfile.write(LAST_5MIN_WAV, config.sample_rate, arr)
+    log.debug(
+        "[continuous] Updated last_5_mins.wav — %.1f seconds (%s)",
+        len(arr) / config.sample_rate,
+        format_bytes(len(all_bytes))
+    )
+
+    _last_written_total_bytes = len(all_bytes)
+    _audio_buffer_is_dirty = False
+
+
+def format_bytes(size: int) -> str:
+    """
+    Convert a byte count to a human-readable string (e.g., '5.2 MB', '1.3 GB').
+    
+    Args:
+        size: Number of bytes (integer)
+    
+    Returns:
+        Formatted string with 1 decimal place
+    """
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024:
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    # Extremely large files (shouldn't happen here)
+    return f"{size:.1f} PB"
 
 
 if __name__ == "__main__":
