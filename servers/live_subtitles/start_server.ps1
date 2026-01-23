@@ -1,0 +1,1 @@
+& { $env:UTTERANCE_OUT_DIR = "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server"; python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server.py }; $env:UTTERANCE_OUT_DIR = $null
