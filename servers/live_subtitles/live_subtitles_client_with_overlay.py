@@ -29,6 +29,11 @@ from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
+pending_subtitles: dict[int, dict] = {}  # utterance_id → partial/complete data
+
+# For safety — clean up entries older than ~30 utterances
+MAX_PENDING = 50
+
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 ALL_SPEECH_META_PATH = os.path.join(OUTPUT_DIR, "all_speech_meta.json")
@@ -575,205 +580,34 @@ def write_srt_block(
     # log.info("[SRT] Appended block #%d to %s", sequence, os.path.basename(file_path))
 
 # =============================
-# Subtitles/RTT receiver with SRT writing
+# Thin message receiver — receives WebSocket messages and dispatches to handler
 # =============================
 
-async def receive_subtitles(ws) -> None:
-    global srt_sequence
-    global stream_start_time
-
-    all_srt_path = os.path.join(OUTPUT_DIR, "all_subtitles.srt")
-
+async def receive_messages(ws) -> None:
+    """Thin receiver: recv → parse → dispatch by type"""
     async for msg in ws:
         try:
             data = json.loads(msg)
-            if data.get("type") != "subtitle":
-                continue
+            msg_type = data.get("type")
 
-            ja = data.get("transcription_ja", "").strip()
-            en = data.get("translation_en", "").strip()
-            utterance_id = data.get("utterance_id")
-            duration_sec = data.get("duration_sec", 0.0)
+            if msg_type == "final_subtitle":
+                await handle_final_subtitle(data)
 
-            # Speaker info
-            speaker_clusters = data.get("cluster_speakers")
-            speaker_meta = {
-                "is_same_speaker_as_prev": data.get("is_same_speaker_as_prev"),
-                "similarity_prev": data.get("similarity_prev"),
-            }
+            elif msg_type == "speaker_update":
+                await handle_speaker_update(data)
 
-
-            # New fields from server
-            trans_conf = data.get("transcription_confidence")
-            trans_quality = data.get("transcription_quality")
-            transl_conf = data.get("translation_confidence")    # normalized 0.0–1.0
-            transl_quality = data.get("translation_quality")
-
-            server_meta = data.get("meta", {})
-
-            if pending_sends:
-                rtt = time.monotonic() - pending_sends.popleft()
-                recent_rtts.append(rtt)
-
-            if not (ja or en):
-                log.debug("[subtitle] Empty result received")
-                continue
-
-            log.info("[subtitle] JA: %s", ja)
-            if en:
-                log.info("[subtitle] EN: %s", en)
-
-            # Log quality & confidence info
-            log.info(
-                "[quality] Transc: conf=%.3f | %s | Transl: conf=%.3f | %s",
-                trans_conf if trans_conf is not None else 0.0,
-                trans_quality or "N/A",
-                transl_conf if transl_conf is not None else 0.0,
-                transl_quality or "N/A"
-            )
-
-            if trans_conf is not None and trans_conf < 0.50:
-                log.warning("[low-transc-conf] utt %d | conf=%.3f | %s", utterance_id, trans_conf, ja[:60])
-
-            if transl_conf is not None and transl_conf < 0.70:
-                log.warning("[low-transl-conf] utt %d | conf=%.3f | %s", utterance_id, transl_conf, en[:60])
-
-            # Find segment
-            segment_num = utterance_id + 1
-            segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
-            start_time = segment_start_wallclock.get(segment_num)
-            if start_time is None:
-                log.warning("[SRT] No start time for segment_%04d", segment_num)
-                start_time = time.time() - duration_sec
-
-            # Relative timing
-            if stream_start_time is None:
-                stream_start_time = start_time
-                relative_start = 0.0
             else:
-                relative_start = start_time - stream_start_time
-            relative_end = relative_start + duration_sec
+                log.warning("[ws] Ignoring unknown message type: %s", msg_type)
 
-            # Prepare per-segment paths
-            per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
-            speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
-            speaker_clusters_path = os.path.join(segment_dir, "speaker_cluster.json")
-            speaker_meta_path = os.path.join(segment_dir, "speaker_meta.json")
-            translation_meta_path = os.path.join(segment_dir, "translation_meta.json")
-
-            # ── Build translation metadata ──────────────────────────────────────
-            translation_meta = {
-                "segment_id": segment_num,
-                "utterance_id": utterance_id,
-                "start_sec": round(relative_start, 3),
-                "end_sec": round(relative_end, 3),
-                "duration_sec": round(duration_sec, 3),
-                "transcription": {
-                    "text_ja": ja,
-                    "confidence": round(trans_conf, 4) if trans_conf is not None else None,
-                    "quality_label": trans_quality,
-                },
-                "translation": {
-                    "text_en": en,
-                    "confidence": round(transl_conf, 4) if transl_conf is not None else None,
-                    "quality_label": transl_quality,
-                },
-                "server_meta": server_meta,
-            }
-
-            # Merge with existing file if present
-            if os.path.exists(translation_meta_path):
-                try:
-                    with open(translation_meta_path, "r", encoding="utf-8") as f:
-                        existing = json.load(f)
-                    def merge_dicts(target, source):
-                        for k, v in source.items():
-                            if isinstance(v, dict) and k in target and isinstance(target[k], dict):
-                                merge_dicts(target[k], v)
-                            else:
-                                target[k] = v
-                    merge_dicts(existing, translation_meta)
-                    translation_meta = existing
-                except Exception as e:
-                    log.warning("Failed to load existing translation_meta: %s", e)
-
-            # Write per-segment translation meta
-            with open(translation_meta_path, "w", encoding="utf-8") as f:
-                json.dump(translation_meta, f, indent=2, ensure_ascii=False)
-
-            # Write per-segment speakers info
-            with open(speaker_clusters_path, "w", encoding="utf-8") as f:
-                json.dump(speaker_clusters, f, indent=2, ensure_ascii=False)
-            with open(speaker_meta_path, "w", encoding="utf-8") as f:
-                json.dump(speaker_meta, f, indent=2, ensure_ascii=False)
-
-            # Append to global all_translation_meta.json
-            all_translation = []
-            if os.path.exists(ALL_TRANSLATION_META_PATH):
-                try:
-                    with open(ALL_TRANSLATION_META_PATH, "r", encoding="utf-8") as f:
-                        all_translation = json.load(f)
-                except Exception:
-                    pass
-            all_translation.append({
-                **translation_meta,
-                "segment_dir": f"segment_{segment_num:04d}",
-                "translation_meta_path": str(translation_meta_path),
-            })
-            with open(ALL_TRANSLATION_META_PATH, "w", encoding="utf-8") as f:
-                json.dump(all_translation, f, indent=2, ensure_ascii=False)
-
-            # ── SRT output ──────────────────────────────────────────────────────
-            write_srt_block(
-                sequence=srt_sequence,
-                start_sec=start_time,
-                duration_sec=duration_sec,
-                ja=ja,
-                en=en,
-                file_path=per_seg_srt
-            )
-            write_srt_block(
-                sequence=srt_sequence,
-                start_sec=start_time,
-                duration_sec=duration_sec,
-                ja=ja,
-                en=en,
-                file_path=all_srt_path
-            )
-            srt_sequence += 1
-
-            # ── Overlay ─────────────────────────────────────────────────────────
-            avg_vad_conf = 0.0
-            if os.path.exists(speech_meta_path):
-                try:
-                    with open(speech_meta_path, "r", encoding="utf-8") as f:
-                        meta = json.load(f)
-                    avg_vad_conf = meta.get("vad_confidence", {}).get("ave", 0.0)
-                except Exception:
-                    pass
-
-            display_start = round(relative_start, 2)
-            display_end = round(relative_end, 2)
-            display_duration = round(duration_sec, 2)
-
-            overlay.add_message(
-                source_text=ja,
-                translated_text=en,
-                start_sec=display_start,
-                end_sec=display_end,
-                duration_sec=display_duration,
-                segment_number=segment_num,
-                avg_vad_confidence=round(avg_vad_conf, 3),
-                transcription_confidence=round(trans_conf, 3) if trans_conf is not None else None,
-                transcription_quality=trans_quality,
-                translation_confidence=round(transl_conf, 3) if transl_conf is not None else None,
-                translation_quality=transl_quality,
-            )
-
+        except websockets.ConnectionClosed:
+            log.info("[receive] WebSocket connection closed cleanly")
+            break
         except json.JSONDecodeError:
-            log.warning("[receive] Invalid JSON received")
+            log.error("[receive] Invalid JSON received")
         except Exception as e:
-            log.exception("[receive] Error processing subtitle message: %s", e)
+            log.error("[receive] Error in receive loop: %s", e)
+            await asyncio.sleep(0.3)  # prevent tight loop on repeated errors
+
 
 # =============================
 # Main with reconnection logic
@@ -795,7 +629,8 @@ async def main() -> None:
                 log.info("Connected to %s", config.ws_url)
                 await asyncio.gather(
                     stream_microphone(ws),
-                    receive_subtitles(ws),
+                    receive_messages(ws),
+                    # handle_final_subtitle & handle_speaker_update are called from receive_messages
                 )
                 break  # normal exit
 
@@ -804,7 +639,7 @@ async def main() -> None:
         except OSError as e:
             log.error("Network error: %s", e)
         except Exception as e:
-            log.exception("Unexpected error: %s", e)
+            log.error("Unexpected error: %s", e)
 
         attempt += 1
         if attempt >= config.reconnect_attempts:
@@ -816,6 +651,185 @@ async def main() -> None:
         await asyncio.sleep(delay)
 
     log.info("Client shutdown complete")
+
+
+async def handle_final_subtitle(data: dict) -> None:
+    global srt_sequence, stream_start_time
+
+    utterance_id = data.get("utterance_id")
+    if utterance_id is None:
+        log.warning("[final_subtitle] Missing utterance_id")
+        return
+
+    ja = data.get("transcription_ja", "").strip()
+    en = data.get("translation_en", "").strip()
+    if not (ja or en):
+        log.debug("[final_subtitle] Empty text received for utt %d", utterance_id)
+        return
+
+    duration_sec = data.get("duration_sec", 0.0)
+    trans_conf = data.get("transcription_confidence")
+    trans_quality = data.get("transcription_quality")
+    transl_conf = data.get("translation_confidence")
+    transl_quality = data.get("translation_quality")
+    server_meta = data.get("meta", {})
+
+    log.info("[final_subtitle] utt %d | JA: %s", utterance_id, ja[:80])
+    if en:
+        log.info("[final_subtitle] EN: %s", en[:80])
+    log.info(
+        "[quality] Transc: %.3f %s | Transl: %.3f %s",
+        trans_conf or 0.0, trans_quality or "N/A",
+        transl_conf or 0.0, transl_quality or "N/A"
+    )
+
+    segment_num = utterance_id + 1
+    start_time = segment_start_wallclock.get(segment_num)
+    if start_time is None:
+        log.warning("[timing] No start time found for segment_%04d", segment_num)
+        start_time = time.time() - duration_sec
+
+    if stream_start_time is None:
+        stream_start_time = start_time
+        relative_start = 0.0
+    else:
+        relative_start = start_time - stream_start_time
+    relative_end = relative_start + duration_sec
+
+    # Store partial data
+    pending_subtitles[utterance_id] = {
+        "ja": ja,
+        "en": en,
+        "duration_sec": duration_sec,
+        "start_wallclock": start_time,
+        "relative_start": relative_start,
+        "relative_end": relative_end,
+        "segment_num": segment_num,
+        "trans_conf": trans_conf,
+        "trans_quality": trans_quality,
+        "transl_conf": transl_conf,
+        "transl_quality": transl_quality,
+        "server_meta": server_meta,
+        "srt_written": False,
+    }
+
+    # Show text immediately (no speaker info yet)
+    await _update_display_and_files(utterance_id)
+
+    # Optional cleanup
+    if len(pending_subtitles) > MAX_PENDING:
+        oldest = min(pending_subtitles.keys())
+        del pending_subtitles[oldest]
+
+
+async def handle_speaker_update(data: dict) -> None:
+    utterance_id = data.get("utterance_id")
+    if utterance_id is None:
+        log.warning("[speaker_update] Missing utterance_id")
+        return
+
+    segment_num = utterance_id + 1
+    segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
+
+    speaker_clusters = data.get("cluster_speakers")
+    speaker_is_same = data.get("is_same_speaker_as_prev")
+    speaker_similarity = data.get("similarity_prev")
+    speaker_meta = {
+        "is_same_speaker_as_prev": speaker_is_same,
+        "similarity_prev": speaker_similarity,
+    }
+
+    # if utterance_id in pending_subtitles:
+    #     pending_subtitles[utterance_id]["speaker_meta"] = speaker_meta
+    #     log.info("[speaker_update] Enriched utt %d", utterance_id)
+    #     await _update_display_and_files(utterance_id)
+    # else:
+    #     # Rare: speaker info arrived before text
+    #     pending_subtitles[utterance_id] = {"speaker_meta": speaker_meta}
+    #     log.debug("[speaker_update] Stored early speaker info for utt %d", utterance_id)
+
+    # Write per-segment speakers info
+    speaker_clusters_path = os.path.join(segment_dir, "speaker_cluster.json")
+    speaker_meta_path = os.path.join(segment_dir, "speaker_meta.json")
+    with open(speaker_clusters_path, "w", encoding="utf-8") as f:
+        json.dump(speaker_clusters, f, indent=2, ensure_ascii=False)
+    with open(speaker_meta_path, "w", encoding="utf-8") as f:
+        json.dump(speaker_meta, f, indent=2, ensure_ascii=False)
+
+
+async def _update_display_and_files(utt_id: int) -> None:
+    if utt_id not in pending_subtitles:
+        return
+
+    entry = pending_subtitles[utt_id]
+
+    # Require text to proceed with display & SRT
+    if "ja" not in entry:
+        return
+
+    ja             = entry["ja"]
+    en             = entry["en"]
+    duration_sec   = entry["duration_sec"]
+    relative_start = entry["relative_start"]
+    relative_end   = entry["relative_end"]
+    segment_num    = entry["segment_num"]
+    start_time     = entry["start_wallclock"]
+
+    trans_conf     = entry.get("trans_conf")
+    trans_quality  = entry.get("trans_quality")
+    transl_conf    = entry.get("transl_conf")
+    transl_quality = entry.get("transl_quality")
+
+    sp = entry.get("speaker_info", {})
+    speaker_is_same        = sp.get("is_same_speaker_as_prev")
+    speaker_similarity     = sp.get("similarity_prev")
+    speaker_clusters       = sp.get("cluster_speakers")
+
+    segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
+    os.makedirs(segment_dir, exist_ok=True)
+
+    avg_vad_conf = 0.0
+
+    # ── Overlay ────────────────────────────────────────────────────────────────
+    overlay.add_message(
+        source_text=ja,
+        translated_text=en,
+        start_sec=round(relative_start, 2),
+        end_sec=round(relative_end, 2),
+        duration_sec=round(duration_sec, 2),
+        segment_number=segment_num,
+        avg_vad_confidence=round(avg_vad_conf, 3),
+        transcription_confidence=round(trans_conf, 3) if trans_conf is not None else None,
+        transcription_quality=trans_quality,
+        translation_confidence=round(transl_conf, 3) if transl_conf is not None else None,
+        translation_quality=transl_quality,
+        # New speaker fields (overlay can ignore them if not ready)
+        # is_same_speaker_as_prev=is_same,
+        # speaker_similarity=round(similarity, 3) if similarity is not None else None,
+        # speaker_clusters=clusters,
+    )
+
+    # Write per-segment speech info
+    speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
+    if os.path.exists(speech_meta_path):
+        try:
+            with open(speech_meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            avg_vad_conf = meta.get("vad_confidence", {}).get("ave", 0.0)
+        except Exception:
+            pass
+
+    # ── SRT (write only once) ─────────────────────────────────────────────────
+    per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
+    all_srt_path = os.path.join(OUTPUT_DIR, "all_subtitles.srt")
+
+    if not entry.get("srt_written", False):
+        global srt_sequence
+        write_srt_block(srt_sequence, start_time, duration_sec, ja, en, per_seg_srt)
+        write_srt_block(srt_sequence, start_time, duration_sec, ja, en, all_srt_path)
+        srt_sequence += 1
+        entry["srt_written"] = True
+
 
 
 def _append_to_global_speech_probs_index(
