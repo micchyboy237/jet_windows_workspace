@@ -121,7 +121,7 @@ translator = Translator(
     inter_threads=4,  # tune to your cores
 )
 
-from segment_speaker_labeler import SegmentSpeakerLabeler, AudioInput as SpeakerAudioInput, SegmentResult as SpeakerSegmentResult
+from segment_speaker_labeler import SegmentSpeakerLabeler
 
 logger.info("Loading speaker labeler pyannote model & clustering strategy...")
 labeler = SegmentSpeakerLabeler()
@@ -330,7 +330,11 @@ def transcribe_and_translate(
         "translation": {
             "text_en": en_text,
             "log_prob": round(translation_logprob, 4) if translation_logprob is not None else None,
-            "confidence": round(translation_confidence, 4) if 'translation_confidence' in locals() else None,
+            "confidence": (
+                round(translation_confidence, 4)
+                if translation_confidence is not None
+                else None
+            ),
             "quality_label": translation_quality,
         },
         "segments": segments_list,
@@ -396,68 +400,84 @@ async def handler(websocket):
                     duration = state.get_duration_sec()
                     logger.info(f"[{client_id}] End of utterance — {duration:.2f}s")
 
-                    # Capture the moment we received the end marker (UTC)
-                    state.end_of_utterance_received_at = datetime.now(timezone.utc)
+                    # 1. Capture the moment we received the end marker
+                    end_of_utterance_received_at = datetime.now(timezone.utc)
 
-                    # Offload heavy work to thread, pass timestamps
+                    # 2. Copy buffers before clearing to avoid mutating shared bytearray
+                    curr_buffer = bytes(state.buffer)
+                    prev_buffer = bytes(state.prev_buffer) if state.prev_buffer else None
+                    current_utterance_idx = state.utterance_count
+
+                    # 3. Immediately prepare state for NEXT utterance
+                    state.prev_buffer = curr_buffer
+                    state.utterance_count += 1
+                    state.clear_buffer()
+
+                    # 4. Run transcription & translation (using captured values)
                     loop = asyncio.get_running_loop()
                     ja, en, transcription_confidence, meta = await loop.run_in_executor(
                         executor,
                         transcribe_and_translate,
-                        bytes(state.buffer),
+                        bytes(curr_buffer),
                         state.sample_rate,
                         state.client_id,
-                        state.utterance_count,
-                        state.end_of_utterance_received_at,
-                        state.first_chunk_received_at,   # received_at
+                        current_utterance_idx,
+                        end_of_utterance_received_at,               # ← Use captured value (NEVER state.xxx)
+                        state.first_chunk_received_at,
                         DEFAULT_OUT_DIR,
                     )
 
-                    audio_curr = pcm_bytes_to_waveform(state.buffer)
-                    audio_prev = (
-                        pcm_bytes_to_waveform(state.prev_buffer)
-                        if state.prev_buffer else None
-                    )
-
-                    cluster_speakers = (
-                        labeler.cluster_segments([audio_prev, audio_curr])
-                        if audio_prev is not None and audio_prev.size > 0
-                        else None
-                    )
-                    similarity_prev = (
-                        labeler.similarity(audio_curr, audio_prev)
-                        if audio_prev is not None and audio_prev.size > 0
-                        else None
-                    )
-                    is_same_speaker_as_prev = (
-                        labeler.is_same_speaker(audio_curr, audio_prev)
-                        if audio_prev is not None and audio_prev.size > 0
-                        else False
-                    )
-
-                    # Payload follows updated context (includes quality/conf/logprob)
-                    payload = {
-                        "type": "subtitle",
+                    # 5. Send final subtitle
+                    text_payload = {
+                        "type": "final_subtitle",
+                        "utterance_id": current_utterance_idx,
                         "transcription_ja": meta["transcription"]["text_ja"],
                         "translation_en": meta["translation"]["text_en"],
-                        "utterance_id": state.utterance_count,
                         "duration_sec": round(duration, 3),
                         "transcription_confidence": meta["transcription"]["confidence"],
                         "transcription_quality": meta["transcription"]["quality_label"],
-                        "translation_logprob": meta["translation"]["log_prob"],
                         "translation_confidence": meta["translation"].get("confidence"),
                         "translation_quality": meta["translation"]["quality_label"],
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    await websocket.send(json.dumps(text_payload, ensure_ascii=False))
+                    logger.info(f"[{client_id}] sent final_subtitle #{current_utterance_idx}")
+
+                    # 6. Speaker analysis
+                    audio_curr = None
+                    audio_prev = None
+                    cluster_speakers = None
+                    similarity_prev = None
+                    is_same_speaker_as_prev = False
+
+                    if len(curr_buffer) > 0:
+                        try:
+                            audio_curr = pcm_bytes_to_waveform(curr_buffer)
+
+                            if prev_buffer is not None and len(prev_buffer) > 0:
+                                audio_prev = pcm_bytes_to_waveform(prev_buffer)
+
+                                cluster_results = labeler.cluster_segments([audio_prev, audio_curr])
+                                if len(cluster_results) == 2:
+                                    cluster_speakers = cluster_results
+                                    similarity_prev = labeler.similarity(audio_curr, audio_prev)
+                                    is_same_speaker_as_prev = labeler.is_same_speaker(audio_curr, audio_prev)
+
+                        except Exception as e:
+                            logger.exception(f"Speaker clustering failed for utterance #{current_utterance_idx}: {e}")
+                    else:
+                        logger.warning(f"[{client_id}] Skipping speaker analysis — empty current buffer (utterance #{current_utterance_idx})")
+
+                    # Always send speaker payload
+                    speaker_payload = {
+                        "type": "speaker_update",
+                        "utterance_id": current_utterance_idx,
                         "is_same_speaker_as_prev": is_same_speaker_as_prev,
                         "similarity_prev": similarity_prev,
                         "cluster_speakers": cluster_speakers,
-                        "meta": meta,
                     }
-                    await websocket.send(json.dumps(payload, ensure_ascii=False))
-
-                    state.prev_buffer = state.buffer
-
-                    state.utterance_count += 1
-                    state.clear_buffer()
+                    await websocket.send(json.dumps(speaker_payload, ensure_ascii=False))
+                    logger.info(f"[{client_id}] sent speaker_update #{current_utterance_idx}")
 
                 else:
                     logger.warning(f"[{client_id}] Unknown message type: {msg_type}")
@@ -474,19 +494,14 @@ async def handler(websocket):
         logger.info(f"[{client_id}] Disconnected")
 
 
-def pcm_bytes_to_waveform(
-    pcm: bytes | bytearray,
-    *,
-    dtype=np.int16,
-) -> np.ndarray:
-    """
-    Convert raw PCM bytes to mono float32 waveform in [-1, 1].
-    """
+def pcm_bytes_to_waveform(pcm: bytes | bytearray, *, dtype=np.int16) -> np.ndarray:
+    if len(pcm) == 0:
+        raise ValueError("Empty PCM buffer")
     waveform = np.frombuffer(pcm, dtype=dtype)
     if waveform.size == 0:
-        raise ValueError("Empty PCM buffer")
+        raise ValueError("Empty PCM buffer after conversion")
     waveform = waveform.astype(np.float32) / 32768.0
-    return waveform  # (samples,)
+    return waveform
 
 
 async def main():
