@@ -595,6 +595,14 @@ async def receive_subtitles(ws) -> None:
             utterance_id = data.get("utterance_id")
             duration_sec = data.get("duration_sec", 0.0)
 
+            # Speaker info
+            speaker_clusters = data.get("cluster_speakers")
+            speaker_meta = {
+                "is_same_speaker_as_prev": data.get("is_same_speaker_as_prev"),
+                "similarity_prev": data.get("similarity_prev"),
+            }
+
+
             # New fields from server
             trans_conf = data.get("transcription_confidence")
             trans_quality = data.get("transcription_quality")
@@ -649,6 +657,8 @@ async def receive_subtitles(ws) -> None:
             # Prepare per-segment paths
             per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
             speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
+            speaker_clusters_path = os.path.join(segment_dir, "speaker_cluster.json")
+            speaker_meta_path = os.path.join(segment_dir, "speaker_meta.json")
             translation_meta_path = os.path.join(segment_dir, "translation_meta.json")
 
             # ── Build translation metadata ──────────────────────────────────────
@@ -690,6 +700,12 @@ async def receive_subtitles(ws) -> None:
             # Write per-segment translation meta
             with open(translation_meta_path, "w", encoding="utf-8") as f:
                 json.dump(translation_meta, f, indent=2, ensure_ascii=False)
+
+            # Write per-segment speakers info
+            with open(speaker_clusters_path, "w", encoding="utf-8") as f:
+                json.dump(speaker_clusters, f, indent=2, ensure_ascii=False)
+            with open(speaker_meta_path, "w", encoding="utf-8") as f:
+                json.dump(speaker_meta, f, indent=2, ensure_ascii=False)
 
             # Append to global all_translation_meta.json
             all_translation = []
