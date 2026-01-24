@@ -45,9 +45,7 @@ ALL_SPEECH_PROBS_INDEX_PATH = os.path.join(OUTPUT_DIR, "all_speech_probs.json")
 ALL_PROBS_PATH = os.path.join(OUTPUT_DIR, "all_probs.json")
 
 CONTINUOUS_AUDIO_MAX_SECONDS = 320.0  # a bit more than 5 min
-audio_buffer: deque[
-    tuple[float, bytes, float, float, Literal["speech", "non_speech", "silent"]]
-] = deque()   # (time, pcm, vad_prob, rms, chunk_type)
+
 audio_total_samples: int = 0
 LAST_5MIN_WAV = os.path.join(OUTPUT_DIR, "last_5_mins.wav")
 
@@ -61,12 +59,15 @@ _audio_buffer_is_dirty: bool = False
 @dataclass(frozen=True)
 class Config:
     ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
-    min_speech_duration: float = 0.5          # seconds; ignore shorter speech bursts
+    min_speech_duration: float = 0.25         # JP backchannels: 「はい」「え？」
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
-    vad_threshold: float = 0.3
-    max_silence_seconds: float = 0.5   # seconds of silence before ending segment
+    vad_threshold: float = 0.3                 # kept for logging / legacy
+    vad_start_threshold: float = 0.45          # NEW: hysteresis start
+    vad_end_threshold: float = 0.20            # NEW: hysteresis end
+    pre_roll_seconds: float = 0.30             # NEW: capture mora onsets
+    max_silence_seconds: float = 0.9           # JP clause pauses
     vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
@@ -95,6 +96,15 @@ segment_start_wallclock: dict[int, float] = {}  # segment_num → time.time()
 VAD_CHUNK_SAMPLES = SileroVoiceActivityDetector.chunk_samples()
 VAD_CHUNK_BYTES = SileroVoiceActivityDetector.chunk_bytes()
 log.info("[VAD] chunk_samples=%s, chunk_bytes=%s", VAD_CHUNK_SAMPLES, VAD_CHUNK_BYTES)
+
+audio_buffer: deque[
+    tuple[float, bytes, float, float, Literal["speech", "non_speech", "silent"]]
+] = deque()   # (time, pcm, vad_prob, rms, chunk_type)
+
+# NEW: pre-roll buffer for safe speech onset
+pre_roll_buffer: deque[bytes] = deque(
+    maxlen=int(config.pre_roll_seconds * config.sample_rate / VAD_CHUNK_SAMPLES)
+)
 
 # =============================
 # RTT tracking – fixed & improved
@@ -213,13 +223,16 @@ async def stream_microphone(ws) -> None:
                         log.warning("[audio] Unexpected chunk size: %d (expected %d)", len(chunk), VAD_CHUNK_BYTES)
                         continue
 
+                    # NEW: always keep pre-roll audio
+                    pre_roll_buffer.append(chunk)
+
                     is_speech_ongoing = speech_start_time is not None
 
                     # ← NEW: compute RMS energy for this chunk
                     chunk_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
                     rms = np.sqrt(np.mean(chunk_np ** 2))
 
-                    has_sound = rms > 50.0
+                    has_sound = rms > 20.0  # diagnostic only (do NOT gate speech)
 
                     # Start temp code
                     normalized_chunk_np = chunk_np / 32767.0
@@ -244,10 +257,13 @@ async def stream_microphone(ws) -> None:
 
                         chunk_type = "silent"
 
-                    elif speech_prob >= config.vad_threshold:
-                        chunk_type = "speech"
+                    # NEW: hysteresis-based speech decision
+                    if not is_speech_ongoing:
+                        is_speech_chunk = speech_prob >= config.vad_start_threshold
                     else:
-                        chunk_type = "non_speech"
+                        is_speech_chunk = speech_prob >= config.vad_end_threshold
+
+                    chunk_type = "speech" if is_speech_chunk else "non_speech"
 
                     if has_sound:
                         # Always add to continuous buffer (audible speech or non_speech)
@@ -291,6 +307,11 @@ async def stream_microphone(ws) -> None:
                             current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
                             segment_start_wallclock[current_segment_num] = time.time()
                             current_segment_buffer = bytearray()
+
+                            # NEW: prepend pre-roll audio (safe onset capture)
+                            for pre_chunk in pre_roll_buffer:
+                                current_segment_buffer.extend(pre_chunk)
+
                             speech_chunks_in_segment = 0  # reset for new segment
                             max_vad_confidence = 0.0                # ← reset
                             last_vad_confidence = 0.0               # ← reset
