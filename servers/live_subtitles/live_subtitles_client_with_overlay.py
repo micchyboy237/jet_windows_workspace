@@ -324,6 +324,7 @@ async def stream_microphone(ws) -> None:
 
 
                     else:
+                        # if is_speech_ongoing and chunk_type == "non_speech":
                         if has_sound and chunk_type == "non_speech":
                             # We are inside an utterance → send non-speech too
                             payload = {
@@ -360,7 +361,7 @@ async def stream_microphone(ws) -> None:
                                 duration = 0.0
 
                             if speech_duration_sec < config.min_speech_duration:
-                                log.info(
+                                log.warning(
                                     "[speech] Segment too short (%.3fs < %.3fs) — discarded",
                                     speech_duration_sec, config.min_speech_duration
                                 )
