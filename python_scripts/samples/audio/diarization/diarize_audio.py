@@ -550,14 +550,44 @@ def diarize(
             temp_path.unlink()
 
 if __name__ == "__main__":
+    import argparse
+    from pathlib import Path
     import shutil
-    AUDIO_FILE = Path(
+
+    # Default values
+    DEFAULT_AUDIO = Path(
         r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
     )
-    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    DEFAULT_OUTPUT = Path(__file__).parent / "generated" / Path(__file__).stem
+
+    parser = argparse.ArgumentParser(
+        description="Diarize audio file and save results",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    # Positional (required) argument for audio file
+    parser.add_argument(
+        "audio",
+        type=Path,
+        nargs="?",                    # makes it optional → uses default if not provided
+        default=DEFAULT_AUDIO,
+        help="Path to the input audio file (.wav)"
+    )
+
+    parser.add_argument(
+        "-o", "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+        help="Directory where results will be saved"
+    )
+
+    args = parser.parse_args()
+
+    # Clean previous results
+    shutil.rmtree(args.output, ignore_errors=True)
+
     diarize_file(
-        AUDIO_FILE,
-        output_dir=OUTPUT_DIR,
+        args.audio,
+        output_dir=args.output,
         return_scores=True,
     )
