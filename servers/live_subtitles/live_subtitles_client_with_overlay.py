@@ -1,6 +1,7 @@
 # live_subtitles_client_with_overlay.py
 
 import os
+from pathlib import Path
 import shutil
 import asyncio
 import base64
@@ -209,7 +210,13 @@ async def stream_microphone(ws) -> None:
                     all_prob_history.append(speech_prob)
 
                     if not has_sound:
+                        if chunk_type != "silent":
+                            await ws.send(json.dumps({
+                                "type": "silent",
+                            }))
+
                         chunk_type = "silent"
+
                     elif speech_prob >= config.vad_threshold:
                         chunk_type = "speech"
                     else:
@@ -364,6 +371,7 @@ async def stream_microphone(ws) -> None:
                                 current_segment_num = None
                                 current_segment_buffer = None
                                 speech_chunks_in_segment = 0
+
                                 continue
 
                             log.success(
@@ -519,18 +527,18 @@ async def stream_microphone(ws) -> None:
                             energy_info,
                             energy_label
                         )
-                    else:
-                        # Non-speech chunk – compute energy and always log speech_prob for VAD debugging
-                        if has_sound:  # audible low-level sound (breath, noise, etc.)
-                            log.white(
-                                "[no speech] Chunk has audible energy | sent=%d | rms=%.4f | speech_prob=%.3f | samples=%d | label=%s", chunks_sent, temp_rms, speech_prob, len(chunk_np), energy_label
-                            )
-                        else:
-                            # log.debug(
-                            #     "[silence] True silence chunk | speech_prob=%.3f | rms=%.4f",
-                            #     speech_prob, rms
-                            # )
-                            pass
+                    # else:
+                    #     # Non-speech chunk – compute energy and always log speech_prob for VAD debugging
+                    #     if has_sound:  # audible low-level sound (breath, noise, etc.)
+                    #         log.white(
+                    #             "[no speech] Chunk has audible energy | sent=%d | rms=%.4f | speech_prob=%.3f | samples=%d | label=%s", chunks_sent, temp_rms, speech_prob, len(chunk_np), energy_label
+                    #         )
+                    #     else:
+                    #         # log.debug(
+                    #         #     "[silence] True silence chunk | speech_prob=%.3f | rms=%.4f",
+                    #         #     speech_prob, rms
+                    #         # )
+                    #         pass
                 if processed > 0:
                     log.debug("\nProcessed %d speech chunk(s) this cycle\n", processed)
                 # Periodic status update
@@ -679,6 +687,7 @@ async def main() -> None:
 
 
 async def handle_final_subtitle(data: dict) -> None:
+    log.info("[final_subtitle] Handling new final subtitle update...")
     global srt_sequence, stream_start_time
 
     utterance_id = data.get("utterance_id")
@@ -691,6 +700,11 @@ async def handle_final_subtitle(data: dict) -> None:
     if not (ja or en):
         log.debug("[final_subtitle] Empty text received for utt %d", utterance_id)
         return
+
+    # segment_num = utterance_id + 1
+    segment_idx = data["segment_idx"]
+    segment_num = data["segment_num"]
+    segment_type = data["segment_type"]
 
     duration_sec = data.get("duration_sec", 0.0)
     avg_vad_conf = data.get("avg_vad_confidence")
@@ -709,7 +723,7 @@ async def handle_final_subtitle(data: dict) -> None:
         transl_conf or 0.0, transl_quality or "N/A"
     )
 
-    segment_num = utterance_id + 1
+    
     start_time = segment_start_wallclock.get(segment_num)
     if start_time is None:
         log.warning("[timing] No start time found for segment_%04d", segment_num)
@@ -730,7 +744,9 @@ async def handle_final_subtitle(data: dict) -> None:
         "start_wallclock": start_time,
         "relative_start": relative_start,
         "relative_end": relative_end,
+        "segment_idx": segment_idx,
         "segment_num": segment_num,
+        "segment_type": segment_type,
         "avg_vad_conf": avg_vad_conf,
         "trans_conf": trans_conf,
         "trans_quality": trans_quality,
@@ -750,18 +766,25 @@ async def handle_final_subtitle(data: dict) -> None:
 
 
 async def handle_speaker_update(data: dict) -> None:
+    log.info("[speaker_update] Handling new speaker update...")
     utterance_id = data.get("utterance_id")
     if utterance_id is None:
         log.warning("[speaker_update] Missing utterance_id")
         return
 
-    segment_num = utterance_id + 1
+    # segment_num = utterance_id + 1
+    segment_idx = data["segment_idx"]
+    segment_num = data["segment_num"]
+    segment_type = data["segment_type"]
     segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
 
     speaker_clusters = data.get("cluster_speakers")
     speaker_is_same = data.get("is_same_speaker_as_prev")
     speaker_similarity = data.get("similarity_prev")
     speaker_meta = {
+        "segment_idx": segment_idx,
+        "segment_num": segment_num,
+        "segment_type": segment_type,
         "is_same_speaker_as_prev": speaker_is_same,
         "similarity_prev": speaker_similarity,
     }
@@ -785,14 +808,19 @@ async def handle_speaker_update(data: dict) -> None:
 
 
 async def handle_emotion_classification_update(data: dict) -> None:
+    log.info("[emotion_classification_update] Handling new emotion classification update...")
     utterance_id = data.get("utterance_id")
     if utterance_id is None:
         log.warning("[emotion_classification_update] Missing utterance_id")
         return
 
 
-    segment_num = utterance_id + 1
-    segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
+    segment_idx = data["segment_idx"]
+    segment_num = data["segment_num"]
+    segment_type = data["segment_type"]
+    subdir = "segments" if segment_type == "speech" else "segments_non_speech"
+    segment_dir = os.path.join(OUTPUT_DIR, subdir, f"segment_{segment_num:04d}")
+    Path(segment_dir).mkdir(parents=True, exist_ok=True)
 
     segment_type: Literal["speech", "non_speech"] = data["segment_type"]
     emotion_classification_all = data.get("emotion_all")
@@ -800,6 +828,8 @@ async def handle_emotion_classification_update(data: dict) -> None:
     emotion_top_score = data.get("emotion_top_score")
     emotion_top_label = data.get("emotion_top_label")
     emotion_classification_meta = {
+        "segment_idx": segment_idx,
+        "segment_num": segment_num,
         "segment_type": segment_type,
         "emotion_top_label": emotion_top_label,
         "emotion_top_score": emotion_top_score,
@@ -829,7 +859,9 @@ async def _update_display_and_files(utt_id: int) -> None:
     duration_sec   = entry["duration_sec"]
     relative_start = entry["relative_start"]
     relative_end   = entry["relative_end"]
+    segment_idx    = entry["segment_idx"]
     segment_num    = entry["segment_num"]
+    segment_type    = entry["segment_type"]
     start_time     = entry["start_wallclock"]
 
     avg_vad_conf   = entry["avg_vad_conf"]
@@ -839,8 +871,9 @@ async def _update_display_and_files(utt_id: int) -> None:
     transl_conf    = entry.get("transl_conf")
     transl_quality = entry.get("transl_quality")
 
-    segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
-    os.makedirs(segment_dir, exist_ok=True)
+    subdir = "segments" if segment_type == "speech" else "segments_non_speech"
+    segment_dir = os.path.join(OUTPUT_DIR, subdir, f"segment_{segment_num:04d}")
+    Path(segment_dir).mkdir(parents=True, exist_ok=True)
 
 
     # ── Overlay ────────────────────────────────────────────────────────────────
