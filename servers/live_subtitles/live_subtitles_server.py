@@ -141,11 +141,17 @@ class ConnectionState:
         self.buffer = bytearray()
         self.prev_buffer: Optional[bytearray] = None
         self.sample_rate: Optional[int] = None
+        self.speech_segment_count = 0
+        self.non_speech_segment_count = 0
+        self.speech_chunk_count = 0
+        self.non_speech_chunk_count = 0
         self.utterance_count = 0
         self.last_chunk_time = time.monotonic()
         self.first_chunk_received_at: Optional[datetime] = None
         self.end_of_utterance_received_at: Optional[datetime] = None
         self.segment_type: Optional[Literal["speech", "non_speech"]] = None
+        self.segment_chunk_count = 0
+        self.ongoing_speech: bool = False
 
     def append_chunk(self, pcm_bytes: bytes, sample_rate: int):
         if self.sample_rate is None:
@@ -389,23 +395,117 @@ async def handler(websocket):
                 data = json.loads(message)
                 msg_type = data.get("type")
 
-                if msg_type == "start_of_utterance":
+                if msg_type == "silent" and state.segment_type != "speech":
+                    logger.info(f"Received msg_type: {msg_type}")
+                    if len(state.segment_chunk_count) > 1:
+                        state.segment_chunk_count = 0
+                        state.non_speech_segment_count += 1
+                        logger.info(f"[{client_id}] non_speech_segment_count={state.non_speech_segment_count}")
+
+                        segment_idx = state.speech_segment_count + state.non_speech_segment_count - 1
+                        segment_num = state.non_speech_segment_count
+
+
+                        # classify current non speech buffer
+                        emo_results = emotion_classifier.classify(state.buffer, state.sample_rate)
+                        # get top prediction
+                        if emo_results:
+                            top = emo_results[0]
+                            top_label = top.get("label")
+                            top_score = top.get("score")
+                        else:
+                            top_label = None
+                        top_score = None
+                        emotion_classification_payload = {
+                            "type": "emotion_classification_update",
+                            "utterance_id": state.utterance_count,
+                            "segment_idx": segment_idx,
+                            "segment_num": segment_num,
+                            "segment_type": "non_speech",
+                            "emotion_top_label": top_label,
+                            "emotion_top_score": top_score,
+                            "emotion_all": emo_results,
+                            # "emotion_prev_all": prev_results,
+                        }
+                        await websocket.send(json.dumps(emotion_classification_payload, ensure_ascii=False))
+                        logger.info(f"[{client_id}] sent non-speech emotion_classification_update #{segment_num} | msg_type: {msg_type}")
+
+                    state.ongoing_speech = False
+                    state.segment_type = None
+                    state.prev_buffer = None
+                    state.segment_chunk_count = 0
+                    state.clear_buffer()
+                elif msg_type == "start_of_utterance":
+                    logger.info(f"Received msg_type: {msg_type}")
+                    state.ongoing_speech = True
+
+                    if state.segment_chunk_count:
+                        state.segment_chunk_count = 0
+                        state.non_speech_segment_count += 1
+                        logger.info(f"[{client_id}] non_speech_segment_count={state.non_speech_segment_count}")
+
+                        segment_idx = state.speech_segment_count + state.non_speech_segment_count - 1
+                        segment_num = state.non_speech_segment_count
+
+
+                        # classify current non speech buffer
+                        emo_results = emotion_classifier.classify(state.buffer, state.sample_rate)
+                        # get top prediction
+                        if emo_results:
+                            top = emo_results[0]
+                            top_label = top.get("label")
+                            top_score = top.get("score")
+                        else:
+                            top_label = None
+                        top_score = None
+                        emotion_classification_payload = {
+                            "type": "emotion_classification_update",
+                            "utterance_id": state.utterance_count,
+                            "segment_idx": segment_idx,
+                            "segment_num": segment_num,
+                            "segment_type": "non_speech",
+                            "emotion_top_label": top_label,
+                            "emotion_top_score": top_score,
+                            "emotion_all": emo_results,
+                            # "emotion_prev_all": prev_results,
+                        }
+                        await websocket.send(json.dumps(emotion_classification_payload, ensure_ascii=False))
+                        logger.info(f"[{client_id}] sent non-speech emotion_classification_update #{segment_num} | msg_type: {msg_type}")
+
                     state.segment_type = "speech"
 
                 elif msg_type == "audio":
                     pcm_b64 = data["pcm"]
                     chunk_type = data["chunk_type"]
-                    chunk_ongoing_speech = data["ongoing_speech"]
+                    ongoing_speech = data["ongoing_speech"]
                     sr = data.get("sample_rate", 16000)
 
                     pcm_bytes = base64.b64decode(pcm_b64)
                     state.append_chunk(pcm_bytes, sr)
                     logger.debug(f"[{client_id}] added {len(pcm_bytes)} bytes")
 
-                    if state.segment_type is None:
-                        state.segment_type = "speech" if chunk_ongoing_speech else "non_speech"
+                    if ongoing_speech:
+                        state.speech_chunk_count += 1
+                    else:
+                        state.non_speech_chunk_count += 1
+
+                    state.segment_chunk_count += 1
+
+
+                    state.segment_type = "speech" if ongoing_speech else "non_speech"
+                    
+                    if state.segment_chunk_count % 20 == 0:
+                        logger.info(
+                            f"[{client_id}] segment_chunk_count={state.segment_chunk_count} | "
+                            f"speech={state.speech_chunk_count} | non_speech={state.non_speech_chunk_count} | "
+                            f"segment_type={state.segment_type}"
+                        )
+
+                    logger.info(f"Received msg_type: {msg_type} | seg_type: {state.segment_type}")
 
                 elif msg_type == "end_of_utterance":
+                    logger.info(f"Received msg_type: {msg_type}")
+
                     if not state.buffer:
                         logger.debug(f"[{client_id}] end-of-utterance but empty buffer")
                         continue
@@ -425,83 +525,96 @@ async def handler(websocket):
                     current_utterance_idx = state.utterance_count
 
                     # 3. Immediately prepare state for NEXT utterance
-                    state.segment_type = "non_speech"
+                    state.ongoing_speech = False
+                    state.segment_chunk_count = 0
+                    state.segment_type = None
                     state.prev_buffer = curr_buffer
                     state.utterance_count += 1
+                    state.speech_segment_count += 1
+                    logger.info(f"[{client_id}] speech_segment_count={state.speech_segment_count}")
+
+                    curr_segment_idx = state.speech_segment_count + state.non_speech_segment_count - 1
+                    curr_segment_num = state.speech_segment_count
+
                     state.clear_buffer()
 
-                    if curr_segment_type == "speech":
-                        # 4. Run transcription & translation (using captured values)
-                        loop = asyncio.get_running_loop()
-                        ja, en, transcription_confidence, meta = await loop.run_in_executor(
-                            executor,
-                            transcribe_and_translate,
-                            bytes(curr_buffer),
-                            state.sample_rate,
-                            state.client_id,
-                            current_utterance_idx,
-                            end_of_utterance_received_at,               # ← Use captured value (NEVER state.xxx)
-                            state.first_chunk_received_at,
-                            DEFAULT_OUT_DIR,
-                        )
-                            
-                        # 5. Send final subtitle
-                        text_payload = {
-                            "type": "final_subtitle",
-                            "utterance_id": current_utterance_idx,
-                            "avg_vad_confidence": avg_vad_confidence,
-                            "transcription_ja": meta["transcription"]["text_ja"],
-                            "translation_en": meta["translation"]["text_en"],
-                            "duration_sec": round(duration, 3),
-                            "transcription_confidence": meta["transcription"]["confidence"],
-                            "transcription_quality": meta["transcription"]["quality_label"],
-                            "translation_confidence": meta["translation"].get("confidence"),
-                            "translation_quality": meta["translation"]["quality_label"],
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        }
-                        await websocket.send(json.dumps(text_payload, ensure_ascii=False))
-                        logger.info(f"[{client_id}] sent final_subtitle #{current_utterance_idx}")
+                    # 4. Run transcription & translation (using captured values)
+                    loop = asyncio.get_running_loop()
+                    ja, en, transcription_confidence, meta = await loop.run_in_executor(
+                        executor,
+                        transcribe_and_translate,
+                        bytes(curr_buffer),
+                        state.sample_rate,
+                        state.client_id,
+                        current_utterance_idx,
+                        end_of_utterance_received_at,               # ← Use captured value (NEVER state.xxx)
+                        state.first_chunk_received_at,
+                        DEFAULT_OUT_DIR,
+                    )
+                        
+                    # 5. Send final subtitle
+                    text_payload = {
+                        "type": "final_subtitle",
+                        "utterance_id": current_utterance_idx,
+                        "segment_idx": curr_segment_idx,
+                        "segment_num": curr_segment_num,
+                        "segment_type": "speech",
+                        "avg_vad_confidence": avg_vad_confidence,
+                        "transcription_ja": meta["transcription"]["text_ja"],
+                        "translation_en": meta["translation"]["text_en"],
+                        "duration_sec": round(duration, 3),
+                        "transcription_confidence": meta["transcription"]["confidence"],
+                        "transcription_quality": meta["transcription"]["quality_label"],
+                        "translation_confidence": meta["translation"].get("confidence"),
+                        "translation_quality": meta["translation"]["quality_label"],
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    await websocket.send(json.dumps(text_payload, ensure_ascii=False))
+                    logger.info(f"[{client_id}] sent final_subtitle #{current_utterance_idx}")
 
-                        # 6. Speaker analysis
-                        audio_curr = None
-                        audio_prev = None
-                        cluster_speakers = None
-                        similarity_prev = None
-                        is_same_speaker_as_prev = False
+                    # 6. Speaker analysis
+                    audio_curr = None
+                    audio_prev = None
+                    cluster_speakers = None
+                    similarity_prev = None
+                    is_same_speaker_as_prev = False
 
-                        if len(curr_buffer) > 0:
-                            try:
-                                audio_curr = pcm_bytes_to_waveform(curr_buffer)
+                    if len(curr_buffer) > 0:
+                        try:
+                            audio_curr = pcm_bytes_to_waveform(curr_buffer)
 
-                                if prev_buffer is not None and len(prev_buffer) > 0:
-                                    audio_prev = pcm_bytes_to_waveform(prev_buffer)
+                            if prev_buffer is not None and len(prev_buffer) > 0:
+                                audio_prev = pcm_bytes_to_waveform(prev_buffer)
 
-                                    cluster_results = labeler.cluster_segments([audio_prev, audio_curr])
-                                    if len(cluster_results) == 2:
-                                        cluster_speakers = cluster_results
-                                        similarity_prev = labeler.similarity(audio_curr, audio_prev)
-                                        is_same_speaker_as_prev = labeler.is_same_speaker(audio_curr, audio_prev)
+                                cluster_results = labeler.cluster_segments([audio_prev, audio_curr])
+                                if len(cluster_results) == 2:
+                                    cluster_speakers = cluster_results
+                                    similarity_prev = labeler.similarity(audio_curr, audio_prev)
+                                    is_same_speaker_as_prev = labeler.is_same_speaker(audio_curr, audio_prev)
 
-                            except Exception as e:
-                                logger.exception(f"Speaker clustering failed for utterance #{current_utterance_idx}: {e}")
-                        else:
-                            logger.warning(f"[{client_id}] Skipping speaker analysis — empty current buffer (utterance #{current_utterance_idx})")
+                        except Exception as e:
+                            logger.exception(f"Speaker clustering failed for utterance #{current_utterance_idx}: {e}")
+                    else:
+                        logger.warning(f"[{client_id}] Skipping speaker analysis — empty current buffer (utterance #{current_utterance_idx})")
 
-                        # Send speaker payload
-                        speaker_payload = {
-                            "type": "speaker_update",
-                            "utterance_id": current_utterance_idx,
-                            "is_same_speaker_as_prev": is_same_speaker_as_prev,
-                            "similarity_prev": similarity_prev,
-                            "cluster_speakers": cluster_speakers,
-                        }
-                        await websocket.send(json.dumps(speaker_payload, ensure_ascii=False))
-                        logger.info(f"[{client_id}] sent speaker_update #{current_utterance_idx}")
+                    # Send speaker payload
+                    speaker_payload = {
+                        "type": "speaker_update",
+                        "utterance_id": current_utterance_idx,
+                        "segment_idx": curr_segment_idx,
+                        "segment_num": curr_segment_num,
+                        "segment_type": "speech",
+                        "is_same_speaker_as_prev": is_same_speaker_as_prev,
+                        "similarity_prev": similarity_prev,
+                        "cluster_speakers": cluster_speakers,
+                    }
+                    await websocket.send(json.dumps(speaker_payload, ensure_ascii=False))
+                    logger.info(f"[{client_id}] sent speaker_update #{current_utterance_idx}")
 
                     # Handle both "speech" and "non_speech"
 
                     # --- Emotion classification for this utterance ---
-                    # classify current buffer
+                    # classify current speech buffer
                     emo_results = emotion_classifier.classify(curr_buffer, state.sample_rate)
                     # get top prediction
                     if emo_results:
@@ -516,17 +629,20 @@ async def handler(websocket):
                     # prev_results = None
                     # if prev_buffer is not None:
                         # prev_results = emotion_classifier.classify(prev_buffer, state.sample_rate)
+                    
                     emotion_classification_payload = {
                         "type": "emotion_classification_update",
                         "utterance_id": current_utterance_idx,
-                        "segment_type": curr_segment_type,
+                        "segment_idx": curr_segment_idx,
+                        "segment_num": curr_segment_num,
+                        "segment_type": "speech",
                         "emotion_top_label": top_label,
                         "emotion_top_score": top_score,
                         "emotion_all": emo_results,
                         # "emotion_prev_all": prev_results,
                     }
                     await websocket.send(json.dumps(emotion_classification_payload, ensure_ascii=False))
-                    logger.info(f"[{client_id}] sent emotion_classification_update #{current_utterance_idx}")
+                    logger.info(f"[{client_id}] sent speech emotion_classification_update #{curr_segment_num} | msg_type: {msg_type}")
 
                 else:
                     logger.warning(f"[{client_id}] Unknown message type: {msg_type}")
