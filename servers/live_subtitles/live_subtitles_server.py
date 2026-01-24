@@ -397,7 +397,7 @@ async def handler(websocket):
 
                 if msg_type == "silent" and state.segment_type != "speech":
                     logger.info(f"Received msg_type: {msg_type}")
-                    if len(state.segment_chunk_count) > 1:
+                    if state.segment_chunk_count > 1:
                         state.segment_chunk_count = 0
                         state.non_speech_segment_count += 1
                         logger.info(f"[{client_id}] non_speech_segment_count={state.non_speech_segment_count}")
