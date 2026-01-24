@@ -368,8 +368,8 @@ async def stream_microphone(ws) -> None:
                             except asyncio.QueueFull:
                                 log.error("[ws] send queue full – dropping audio frame")
 
-                            log.pink(
-                                "[non-speech → server] Sent chunk %d | rms=%.4f | speech_prob=%.3f | dur=%.2fs | label=%s",
+                            log.debug(
+                                "[non-speech → server] Sent chunk %d | rms=%.4f | speech=%.3f | dur=%.2fs | label=%s",
                                 chunks_sent,
                                 temp_rms,
                                 speech_prob,
@@ -549,7 +549,7 @@ async def stream_microphone(ws) -> None:
                         # Throttle hot-path logging for speech chunks
                         if chunks_sent % 20 == 0:
                             log.orange(
-                                "[speech] Sent %d chunks | rms=%.4f | vad=%.3f | dur=%.2fs%s",
+                                "[speech] Sent %d chunks | rms=%.4f | speech=%.3f | dur=%.2fs%s",
                                 chunks_sent,
                                 temp_rms,
                                 speech_prob,
@@ -1002,11 +1002,11 @@ def _write_last_5min_wav():
 
     arr = np.frombuffer(all_bytes, dtype=np.int16)
     wavfile.write(LAST_5MIN_WAV, config.sample_rate, arr)
-    log.debug(
-        "[continuous] Updated last_5_mins.wav — %.1f seconds (%s)",
-        len(arr) / config.sample_rate,
-        format_bytes(len(all_bytes))
-    )
+    # log.debug(
+    #     "[continuous] Updated last_5_mins.wav — %.1f seconds (%s)",
+    #     len(arr) / config.sample_rate,
+    #     format_bytes(len(all_bytes))
+    # )
 
     _last_written_total_bytes = len(all_bytes)
     _audio_buffer_is_dirty = False
