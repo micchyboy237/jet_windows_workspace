@@ -148,6 +148,7 @@ async def stream_microphone(ws) -> None:
     chunks_detected = 0
     total_chunks_processed = 0
     speech_start_time = None
+    segment_type: Literal["speech", "non_speech"] = "non_speech"
 
     def audio_callback(indata, frames: int, time_, status) -> None:
         if status:
@@ -250,6 +251,7 @@ async def stream_microphone(ws) -> None:
                         # Reset silence timer
                         silence_start_time = None
                         if not is_speech_ongoing:
+                            segment_type = "speech"
                             speech_start_time = time.monotonic()
                             # Start new segment
                             current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
@@ -356,6 +358,7 @@ async def stream_microphone(ws) -> None:
                                     speech_duration_sec, config.min_speech_duration
                                 )
                                 # Reset without sending or saving
+                                segment_type = "non_speech"
                                 speech_start_time = None
                                 silence_start_time = None
                                 current_segment_num = None
@@ -483,6 +486,7 @@ async def stream_microphone(ws) -> None:
                                 log.warning("WebSocket closed while sending end marker")
                                 return
 
+                            segment_type = "non_speech"
                             speech_start_time = None
                             silence_start_time = None
                             current_segment_num = None
@@ -490,7 +494,7 @@ async def stream_microphone(ws) -> None:
                             speech_chunks_in_segment = 0  # reset counter
                             speech_prob_history = [] # clear after save
 
-                    if speech_prob >= config.vad_threshold:
+                    if chunk_type == "speech":
                         avg_rtt = sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
                         
                         energy_info = ""
@@ -516,7 +520,7 @@ async def stream_microphone(ws) -> None:
                             energy_label
                         )
                     else:
-                        # Silence chunk – compute energy and always log speech_prob for VAD debugging
+                        # Non-speech chunk – compute energy and always log speech_prob for VAD debugging
                         if has_sound:  # audible low-level sound (breath, noise, etc.)
                             log.white(
                                 "[no speech] Chunk has audible energy | sent=%d | rms=%.4f | speech_prob=%.3f | samples=%d | label=%s", chunks_sent, temp_rms, speech_prob, len(chunk_np), energy_label
