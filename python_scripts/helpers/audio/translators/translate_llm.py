@@ -1,20 +1,27 @@
-# Recommended installation (run once)
-# For Mac M1/Metal:
-# pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir \
-#     -C cmake.args="-DLLAMA_METAL=ON"
+import time
+import uuid
+import json
+from typing import Dict, Any, Union, Iterator, List, Tuple, Optional
+from threading import Lock
 
-# For Windows NVIDIA GTX 1660:
-# pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir \
-#     -C cmake.args="-DLLAMA_CUBLAS=ON"
-
-from typing import Optional, Dict, Any
-from llama_cpp import Llama
+from rich import print
 from rich.console import Console
+from rich.live import Live
+from rich.text import Text
+
+from llama_cpp import Llama
+from llama_cpp.llama_types import (
+    ChatCompletionRequestMessage,
+    CreateChatCompletionResponse,
+    CreateChatCompletionStreamResponse,
+)
 
 console = Console()
 
-# ── Model configuration ──────────────────────────────────────────────
-MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
+# ────────────────────────────────────────────────
+# Configuration – easy to tweak
+# ────────────────────────────────────────────────
+MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\LFM2-350M-ENJP-MT.Q4_K_M.gguf"
 
 MODEL_SETTINGS = {
     "n_ctx": 1024,
@@ -34,94 +41,187 @@ MODEL_SETTINGS = {
 
 # Recommended defaults for Japanese → English translation
 TRANSLATION_DEFAULTS = {
-    "temperature": 0.65,
-    "top_p": 0.92,
-    "min_p": 0.05,
+    "temperature": 0.5,
+    "top_p": 1.0,
+    "min_p": 0.5,
     "repeat_penalty": 1.05,
     "max_tokens": 512,
-    "stop": ["<|im_end|>", "<|im_start|>"],
-    "echo": False,
-    # For confidence scores
-    # "logprobs": 3,
 }
 
-# You can also try Q5_K_M / Q6_K if you have enough VRAM/RAM (~4–5GB needed)
-# Q4_K_M → good speed/quality balance on your GTX 1660 / M1
+# ────────────────────────────────────────────────
+# Lazy + thread-safe model loading
+# ────────────────────────────────────────────────
+_llm: Llama | None = None
+_llm_lock = Lock()
 
-llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
+
+def get_llm() -> Llama:
+    """Lazily initialize and return the Llama instance (thread-safe)"""
+    global _llm
+    if _llm is None:
+        with _llm_lock:
+            if _llm is None:
+                console.print("[bold yellow]Loading LFM2-350M translator...[/bold yellow]")
+                _llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
+                console.print("[bold green]Translation LLM ready ✓[/bold green]")
+    else:
+        console.print("[bold green]Cache hit for translation LLM ✓[/bold green]")
+    return _llm
 
 
-def translate_text(
+# ────────────────────────────────────────────────
+# Main translation interface
+# ────────────────────────────────────────────────
+def translate_japanese_to_english(
     text: str,
-    # temperature: float = 0.65,
-    # max_tokens: int = 1024,
-    # top_p: float = 0.92,
-    # repeat_penalty: float = 1.05,
+    stream: bool = False,
     **generation_params,
-) -> str:
+) -> Union[CreateChatCompletionResponse, Iterator[CreateChatCompletionStreamResponse]]:
     """
-    Translate Japanese text to natural, high-quality English using Shisa v2.1 3B
-    
+    High-level Japanese → natural English translation using chat format.
+
+    Uses llama_cpp's create_chat_completion under the hood.
+
     Args:
-        text: Japanese input text (can be paragraph, dialogue, novel snippet, etc.)
-        temperature: Lower = more literal/accurate, Higher = more creative
-        max_tokens: Safety limit for very long outputs
-    
+        text: Japanese text to translate
+        temperature: Controls randomness (0.0 = deterministic, ~0.6-0.8 natural)
+        top_p: Nucleus sampling
+        min_p: Minimum probability sampling (very helpful on smaller models)
+        repeat_penalty: Penalizes repetitions
+        max_tokens: Maximum output length
+        stream: Whether to return a streaming iterator
+        stop: Optional stop strings
+
     Returns:
-        Clean English translation
+        Full response object or stream iterator depending on `stream` flag
+
+    Recommended usage:
+        # Blocking
+        result = translate_japanese_to_english("こんにちは！", stream=False)
+        print(result["choices"][0]["message"]["content"])
+
+        # Streaming (beautiful console)
+        for chunk in translate_japanese_to_english("こんにちは！", stream=True):
+            delta = chunk["choices"][0]["delta"].get("content", "")
+            print(delta, end="", flush=True)
     """
-    prompt = f"""<|im_start|>system
-You are an excellent, professional Japanese-to-English translator.
-Translate the following Japanese text into natural, idiomatic English.
-Preserve nuance, tone, politeness level, and intent as accurately as possible.
-Do not add explanations or notes unless explicitly requested.<|im_end|>
-<|im_start|>user
-{text}<|im_end|>
-<|im_start|>assistant
-"""
+    messages: List[ChatCompletionRequestMessage] = [
+        {
+            "role": "system",
+            "content": (
+                "You are a professional, natural-sounding Japanese-to-English translator. "
+                "Translate accurately while making the English sound fluent and idiomatic "
+                "as if written by a native English speaker."
+            ),
+        },
+        {"role": "user", "content": text.strip()},
+    ]
 
     params: Dict[str, Any] = {
-        "prompt": prompt,
+        "messages": messages,
+        "stream": stream,
         **TRANSLATION_DEFAULTS,
         **generation_params
     }
 
-    response = llm(
-        # prompt,
-        # max_tokens=max_tokens,
-        # temperature=temperature,
-        # top_p=top_p,
-        # min_p=0.05,
-        # repeat_penalty=repeat_penalty,
-        # stop=["<|im_end|>", "<|im_start|>"],
-        # echo=False,
-        **params
+    llm = get_llm()
+    return llm.create_chat_completion(**params)
+
+
+def translate_text(text: str, logprobs: Optional[int] = None, **generation_params) -> dict:
+    """Translate with beautiful real-time streaming display using rich"""
+    full_text = ""
+
+    _generation_params: Dict[str, Any] = {
+        **TRANSLATION_DEFAULTS,
+        **generation_params
+    }
+
+    if logprobs:
+        _generation_params["logprobs"] = True
+        _generation_params["top_logprobs"] = logprobs
+
+    stream = translate_japanese_to_english(
+        text=text,
+        stream=True,
+        **_generation_params,
     )
 
-    translated = response["choices"][0]["text"].strip()
-    return translated
+    llm = get_llm()
+    all_logprobs: List[Tuple[str, float, List[dict]]] = []
+    try:
+        role: str = None
+        finish_reason: str = None
+    
+        with Live(auto_refresh=False) as live:
+            for chunk in stream:
+                if "choices" not in chunk or not chunk["choices"]:
+                    continue
+
+                choice = chunk["choices"][0]
+                delta = choice.get("delta", {})
+                logprobs = choice["logprobs"] or {}
+                logprobs_content = logprobs.get("content", [])
+                logprobs_tokens = [(l["token"], l["logprob"], l["top_logprobs"]) for l in logprobs_content]
+
+                if "role" in delta:
+                    role = delta["role"]
+
+                content = delta.get("content", "")
+
+                if content:
+                    full_text += content
+                    live.update(Text(full_text))
+                    live.refresh()
+
+                    all_logprobs.extend(logprobs_tokens)
+
+                if choice["finish_reason"]:
+                    finish_reason = choice["finish_reason"]
+    finally:
+        # IMPORTANT:
+        # Clear KV cache + decoding state after a streaming completion.
+        # Without this, subsequent calls can hit llama_decode returned -1.
+        llm.reset()
+
+    return {
+        "role": role,
+        "text": full_text,
+        "finish_reason": finish_reason,
+        "logprobs": all_logprobs,
+    }
 
 
-# ── Example usage ────────────────────────────────────────────────────
+# ────────────────────────────────────────────────
+# Quick demo
+# ────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Test sentences (feel free to replace with your real text)
-    japanese_samples = [
-        "雨のマニラの夜に、ネオンの光が濡れたアスファルトに映り込んでいた。",
-        "お疲れ様です。明日の会議資料はもうご確認いただけましたでしょうか？",
-        "彼女は静かに目を閉じ、遠い夏の記憶に身を委ねた。蝉の声が、どこか懐かしく響く。",
-        "世界各国が水面下で熾烈な情報戦を繰り広げる時代 にらみ合う2つの国 東のオスタニア西の西のウェスタリス",
-        "戦争を企てるオスタニア政の動向を探るべく ウェスタリスはオペレーションを発動 作業を使い分ける彼の任務は"
+    # logprobs = None
+    logprobs = 5
+    examples = [
+        "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
     ]
 
-    console.print("[bold magenta]Japanese → English Translation Demo[/bold magenta]\n")
+    for i, jp_text in enumerate(examples, 1):
+        console.rule(f"Example {i}")
+        console.print("[dim]Japanese:[/dim]")
+        console.print(jp_text, style="italic cyan")
+        console.print()
 
-    for i, ja_text in enumerate(japanese_samples, 1):
-        console.print(f"[bold white]Example {i}:[/bold white]")
-        console.print(f"[dim]{ja_text}[/dim]\n")
+        console.print("[bold green]English (streaming):[/bold green]")
+        result = translate_text(jp_text, logprobs=logprobs)
+        full_text = result.pop("text")
+        all_logprobs = result.pop("logprobs")
 
-        with console.status("[bold green]Translating...[/bold green]"):
-            english = translate_text(ja_text)
+        from rich.pretty import pprint
 
-        console.print("[bold cyan]→ English:[/bold cyan]")
-        console.print(f"{english}\n")
-        console.rule(style="dim")
+        print(f"\n[bold cyan]Logprobs {i}:[/bold cyan]")
+        pprint(all_logprobs)
+
+        print(f"\n[bold cyan]Meta {i}:[/bold cyan]")
+        pprint(result, expand_all=True)
+
+        print(f"\n[bold cyan]Translation {i}:[/bold cyan]")
+        pprint(full_text, expand_all=True)
+
+    print()

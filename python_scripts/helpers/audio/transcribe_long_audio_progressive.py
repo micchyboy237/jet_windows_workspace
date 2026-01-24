@@ -8,6 +8,10 @@ from tqdm import tqdm
 from faster_whisper import WhisperModel
 from faster_whisper.transcribe import Segment
 
+# from translators.translate_llm import translate_text
+from translators.utils import split_sentences_ja
+from utils.audio_utils import split_audio
+
 console = Console()
 
 
@@ -22,57 +26,74 @@ def transcribe_progressive(
     beam_size: int = 5,
     word_timestamps: bool = False,
     show_progress: bool = False,
+    chunk_duration_s: float = 15.0,
+    overlap_s: float = 3.0,
     **transcribe_kwargs,
 ) -> Generator[Tuple[Segment, str], None, None]:
     """
-    Transcribes audio and yields each new/changed segment immediately for UI updates.
-    Uses rich Live display as example — replace with your own UI (Streamlit, gradio, console, websocket...).
+    Progressive transcription using overlapping audio chunks.
 
-    Yields: (latest_segment, current_full_transcript_text)
+    Yields:
+        (latest_segment, current_full_transcript_text)
     """
-    full_text_parts = []
+    full_text_parts: list[str] = []
     last_printed_length = 0
 
-    # Optional: show simple progress bar while waiting for first segments
-    with tqdm(desc="Transcribing...", unit="seg", disable=not show_progress) as pbar:
-
-        segments, info = model.transcribe(
-            audio,
-            language=language,
-            task=task,
-            vad_filter=vad_filter,
-            condition_on_previous_text=condition_on_previous_text,
-            beam_size=beam_size,
-            word_timestamps=word_timestamps,
-            **transcribe_kwargs,
+    audio_chunks = list(
+        split_audio(
+            audio=audio,
+            sr=sr,
+            chunk_duration_s=chunk_duration_s,
+            overlap_s=overlap_s,
         )
+    )
 
-        for segment in segments:
-            pbar.update(1)
+    with tqdm(
+        total=len(audio_chunks),
+        desc="Transcribing chunks...",
+        unit="chunk",
+        disable=not show_progress,
+    ) as pbar:
 
-            # Build running text (you can also use segment.text directly)
-            full_text_parts.append(segment.text.strip())
-            current_text = " ".join(full_text_parts).strip()
+        for chunk_audio, chunk_start_time in audio_chunks:
+            segments, _ = model.transcribe(
+                chunk_audio,
+                language=language,
+                task=task,
+                vad_filter=vad_filter,
+                condition_on_previous_text=condition_on_previous_text,
+                beam_size=beam_size,
+                word_timestamps=word_timestamps,
+                **transcribe_kwargs,
+            )
 
-            # Yield the new segment + full current transcription
-            yield segment, current_text
+            for segment in segments:
+                # Offset timestamps
+                segment.start += chunk_start_time
+                segment.end += chunk_start_time
 
-            # Live console preview example
-            if len(current_text) > last_printed_length:
-                console.print(
-                    Text.from_markup(
-                        f"[dim]{segment.start:5.1f}s → {segment.end:5.1f}s[/dim]  "
-                        f"[bold]{segment.text.strip()}[/bold]"
+                full_text_parts.append(segment.text.strip())
+                current_text = " ".join(full_text_parts).strip()
+
+                yield segment, current_text
+
+                if len(current_text) > last_printed_length:
+                    console.print(
+                        Text.from_markup(
+                            f"[dim]{segment.start:5.1f}s → {segment.end:5.1f}s[/dim]  "
+                            f"[bold]{segment.text.strip()}[/bold]"
+                        )
                     )
-                )
-                last_printed_length = len(current_text)
+                    last_printed_length = len(current_text)
+
+            pbar.update(1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 #   Usage example
 # ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server_spyxfamily_intro\utterance_1d825427_0001_20260104_061420.wav"
+    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
     # Load model once (reuse for multiple calls)
     model = WhisperModel(
@@ -80,6 +101,8 @@ if __name__ == "__main__":
         device="cuda",
         compute_type="float32",
     )
+    chunk_duration_s: float = 15.0
+    overlap_s: float = 3.0
 
     # Example: load your 20-second (or longer) audio
     from scipy.io import wavfile
@@ -100,12 +123,31 @@ if __name__ == "__main__":
             beam_size=5,
             show_progress=True,
         ):
-            full_transcript = current_text
-            # Update live display (replace with your frontend)
-            live.update(
-                f"[bold green]Live transcript:[/bold green]\n{full_transcript}\n\n"
-                f"[dim]Latest segment: {segment.start:.1f}–{segment.end:.1f}s[/dim]"
-            )
+            ja_text = current_text.strip()
+            ja_sents = split_sentences_ja(ja_text)
 
-    console.rule("Final result")
-    console.print(full_transcript)
+            # Build nicely formatted sentence display
+            if ja_sents:
+                sent_count = len(ja_sents)
+                # Show numbered sentences (last few for readability)
+                display_sents = []
+                if sent_count <= 3:
+                    display_sents = ja_sents
+                else:
+                    # Show last 3 sentences + "..." if there are more
+                    display_sents = ["…"] + ja_sents[-3:] if sent_count > 3 else ja_sents
+
+                sentences_display = "\n".join(
+                    f"  {i+1}. {sent}" for i, sent in enumerate(display_sents)
+                )
+            else:
+                sent_count = 0
+                sentences_display = "[dim](no complete sentences yet)[/dim]"
+
+            live.update(
+                f"[bold green]Live Japanese Transcript[/bold green]  "
+                f"[cyan]({sent_count} sentence{'s' if sent_count != 1 else ''})[/cyan]\n\n"
+                f"{sentences_display}\n\n"
+                f"[dim]Latest segment: {segment.start:.1f}–{segment.end:.1f}s[/dim]\n"
+                f"[dim]Raw accumulating text:[/dim] {ja_text}"
+            )

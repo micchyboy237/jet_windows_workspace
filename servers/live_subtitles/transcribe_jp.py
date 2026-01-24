@@ -98,8 +98,8 @@ DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_m
 
 MODEL_ID = "reazon-research/japanese-wav2vec2-large-rs35kh"
 TARGET_SR = 16_000
-DEFAULT_MAX_CHUNK_SEC = 45.0       # Increased — better for Japanese sentence continuity
-DEFAULT_CHUNK_OVERLAP_SEC = 10.0   # Much better boundary context (≈22% overlap)
+DEFAULT_MAX_CHUNK_SEC = 15.0       # Increased — better for Japanese sentence continuity
+DEFAULT_CHUNK_OVERLAP_SEC = 3.0   # Much better boundary context (≈22% overlap)
 
 # Quality categorization thresholds (empirical - Japanese wav2vec2 models)
 QUALITY_THRESHOLDS_AVG_LOGPROB = [

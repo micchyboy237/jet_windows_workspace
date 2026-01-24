@@ -1,4 +1,13 @@
 # Jet_Windows_Workspace/python_scripts/powershell/Start-LlamaServer-Llm.ps1
+
+[CmdletBinding()]
+param(
+    [Alias("p")]
+    [Parameter(HelpMessage = "Port for llama-server to listen on (default: 8080)")]
+    [ValidateRange(1, 65535)]
+    [int]$Port = 8080
+)
+
 Write-Host "`n  Llama.cpp Server Launcher  " -BackgroundColor DarkCyan -ForegroundColor Black
 Write-Host "  Ryzen 5 3600 • GTX 1660 • 16 GB`n" -ForegroundColor DarkGray
 
@@ -118,7 +127,7 @@ while ($true) {
 
     $cmd = "llama-server.exe " +
            "-m `"$modelPath`" " +
-           "--host 0.0.0.0 --port 8080 " +
+           "--host 0.0.0.0 --port $Port " +
            "--ctx-size $($model.Ctx) " +
            "--flash-attn on " +
            "--cache-type-k q8_0 --cache-type-v q8_0 "
@@ -140,6 +149,8 @@ while ($true) {
     Write-Host "$($model.Ctx) tokens" -ForegroundColor Yellow
     Write-Host "  GPU      : " -NoNewline -ForegroundColor DarkGray
     Write-Host "$gpuLayers layers" -ForegroundColor Magenta
+    Write-Host "  Port     : " -NoNewline -ForegroundColor DarkGray
+    Write-Host $Port -ForegroundColor Cyan
 
     if ($model.Extra) {
         Write-Host "  Extra    : " -NoNewline -ForegroundColor DarkGray

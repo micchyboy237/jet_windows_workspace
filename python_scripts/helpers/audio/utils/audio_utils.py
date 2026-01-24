@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Union, Sequence
+from typing import Union, Sequence, Generator, Tuple
 from pathlib import Path
 
 import os
@@ -172,3 +172,47 @@ def resample_audio(
         resampled = np.stack(resampled_channels)
 
     return resampled.astype(np.float32)
+
+
+def split_audio(
+    audio: np.ndarray,
+    sr: int = 16000,
+    chunk_duration_s: float = 15.0,
+    overlap_s: float = 3.0,
+) -> Generator[Tuple[np.ndarray, float], None, None]:
+    """
+    Splits audio into overlapping chunks.
+
+    Defaults are optimized for Whisper / faster-whisper:
+    - sr=16000 (Whisper native sample rate)
+    - chunk_duration_s=15.0 (balanced latency vs context)
+    - overlap_s=3.0 (prevents word truncation at boundaries)
+
+    Yields:
+        (audio_chunk, chunk_start_time_seconds)
+    """
+    if chunk_duration_s <= 0:
+        raise ValueError("chunk_duration_s must be > 0")
+    if overlap_s < 0:
+        raise ValueError("overlap_s must be >= 0")
+    if overlap_s >= chunk_duration_s:
+        raise ValueError("overlap_s must be < chunk_duration_s")
+
+    chunk_size = int(chunk_duration_s * sr)
+    overlap_size = int(overlap_s * sr)
+    step_size = chunk_size - overlap_size
+
+    total_samples = len(audio)
+
+    start = 0
+    while start < total_samples:
+        end = min(start + chunk_size, total_samples)
+        chunk = audio[start:end]
+
+        chunk_start_time = start / sr
+        yield chunk, chunk_start_time
+
+        if end == total_samples:
+            break
+
+        start += step_size
