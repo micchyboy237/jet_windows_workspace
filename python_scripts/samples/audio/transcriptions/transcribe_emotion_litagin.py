@@ -1,3 +1,4 @@
+import json
 from transformers import pipeline
 
 REPO_ID = "litagin/anime_speech_emotion_classification"
@@ -10,5 +11,7 @@ pipe = pipeline(
 )
 
 audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
-result = pipe(audio_path)
-print(result)
+top_k = 5
+results = pipe(audio_path, top_k=top_k)
+print(f"Results ({len(results)})")
+print(json.dumps(results, indent=2))

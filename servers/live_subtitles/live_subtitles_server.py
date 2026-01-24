@@ -10,9 +10,11 @@ import json
 import logging
 import time
 import dataclasses
+import math
+from math import isfinite  # for safe float rounding
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime, timezone
 
 import numpy as np
@@ -24,6 +26,9 @@ from transformers import AutoTokenizer
 from translator_types import Translator  # adjust import if needed
 from utils import split_sentences_ja
 import threading
+
+from segment_speaker_labeler import SegmentSpeakerLabeler
+from segment_emotion_classifier import SegmentEmotionClassifier
 
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
@@ -40,9 +45,6 @@ logger = logging.getLogger("live-sub-server")
 # ───────────────────────────────────────────────
 # Quality/certainty labelers (see context section)
 # ───────────────────────────────────────────────
-
-import math
-from math import isfinite  # for safe float rounding
 
 def transcription_quality_label(avg_logprob: float) -> str:
     """
@@ -121,10 +123,11 @@ translator = Translator(
     inter_threads=4,  # tune to your cores
 )
 
-from segment_speaker_labeler import SegmentSpeakerLabeler
-
 logger.info("Loading speaker labeler pyannote model & clustering strategy...")
 labeler = SegmentSpeakerLabeler()
+
+logger.info("Loading emotion classifier model...")
+emotion_classifier = SegmentEmotionClassifier()
 
 logger.info("Models loaded.")
 
@@ -142,6 +145,7 @@ class ConnectionState:
         self.last_chunk_time = time.monotonic()
         self.first_chunk_received_at: Optional[datetime] = None
         self.end_of_utterance_received_at: Optional[datetime] = None
+        self.segment_type: Optional[Literal["speech", "non_speech"]] = None
 
     def append_chunk(self, pcm_bytes: bytes, sample_rate: int):
         if self.sample_rate is None:
@@ -385,12 +389,21 @@ async def handler(websocket):
                 data = json.loads(message)
                 msg_type = data.get("type")
 
-                if msg_type == "audio":
+                if msg_type == "start_of_utterance":
+                    state.segment_type = "speech"
+
+                elif msg_type == "audio":
                     pcm_b64 = data["pcm"]
+                    chunk_type = data["chunk_type"]
+                    chunk_ongoing_speech = data["ongoing_speech"]
                     sr = data.get("sample_rate", 16000)
+
                     pcm_bytes = base64.b64decode(pcm_b64)
                     state.append_chunk(pcm_bytes, sr)
                     logger.debug(f"[{client_id}] added {len(pcm_bytes)} bytes")
+
+                    if state.segment_type is None:
+                        state.segment_type = "speech" if chunk_ongoing_speech else "non_speech"
 
                 elif msg_type == "end_of_utterance":
                     if not state.buffer:
@@ -404,6 +417,7 @@ async def handler(websocket):
 
                     # 1. Capture the moment we received the end marker
                     end_of_utterance_received_at = datetime.now(timezone.utc)
+                    curr_segment_type = state.segment_type
 
                     # 2. Copy buffers before clearing to avoid mutating shared bytearray
                     curr_buffer = bytes(state.buffer)
@@ -411,76 +425,108 @@ async def handler(websocket):
                     current_utterance_idx = state.utterance_count
 
                     # 3. Immediately prepare state for NEXT utterance
+                    state.segment_type = "non_speech"
                     state.prev_buffer = curr_buffer
                     state.utterance_count += 1
                     state.clear_buffer()
 
-                    # 4. Run transcription & translation (using captured values)
-                    loop = asyncio.get_running_loop()
-                    ja, en, transcription_confidence, meta = await loop.run_in_executor(
-                        executor,
-                        transcribe_and_translate,
-                        bytes(curr_buffer),
-                        state.sample_rate,
-                        state.client_id,
-                        current_utterance_idx,
-                        end_of_utterance_received_at,               # ← Use captured value (NEVER state.xxx)
-                        state.first_chunk_received_at,
-                        DEFAULT_OUT_DIR,
-                    )
+                    if curr_segment_type == "speech":
+                        # 4. Run transcription & translation (using captured values)
+                        loop = asyncio.get_running_loop()
+                        ja, en, transcription_confidence, meta = await loop.run_in_executor(
+                            executor,
+                            transcribe_and_translate,
+                            bytes(curr_buffer),
+                            state.sample_rate,
+                            state.client_id,
+                            current_utterance_idx,
+                            end_of_utterance_received_at,               # ← Use captured value (NEVER state.xxx)
+                            state.first_chunk_received_at,
+                            DEFAULT_OUT_DIR,
+                        )
+                            
+                        # 5. Send final subtitle
+                        text_payload = {
+                            "type": "final_subtitle",
+                            "utterance_id": current_utterance_idx,
+                            "segment_type": state.segment_type,
+                            "avg_vad_confidence": avg_vad_confidence,
+                            "transcription_ja": meta["transcription"]["text_ja"],
+                            "translation_en": meta["translation"]["text_en"],
+                            "duration_sec": round(duration, 3),
+                            "transcription_confidence": meta["transcription"]["confidence"],
+                            "transcription_quality": meta["transcription"]["quality_label"],
+                            "translation_confidence": meta["translation"].get("confidence"),
+                            "translation_quality": meta["translation"]["quality_label"],
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                        await websocket.send(json.dumps(text_payload, ensure_ascii=False))
+                        logger.info(f"[{client_id}] sent final_subtitle #{current_utterance_idx}")
 
-                    # 5. Send final subtitle
-                    text_payload = {
-                        "type": "final_subtitle",
-                        "utterance_id": current_utterance_idx,
-                        "avg_vad_confidence": avg_vad_confidence,
-                        "transcription_ja": meta["transcription"]["text_ja"],
-                        "translation_en": meta["translation"]["text_en"],
-                        "duration_sec": round(duration, 3),
-                        "transcription_confidence": meta["transcription"]["confidence"],
-                        "transcription_quality": meta["transcription"]["quality_label"],
-                        "translation_confidence": meta["translation"].get("confidence"),
-                        "translation_quality": meta["translation"]["quality_label"],
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }
-                    await websocket.send(json.dumps(text_payload, ensure_ascii=False))
-                    logger.info(f"[{client_id}] sent final_subtitle #{current_utterance_idx}")
+                        # 6. Speaker analysis
+                        audio_curr = None
+                        audio_prev = None
+                        cluster_speakers = None
+                        similarity_prev = None
+                        is_same_speaker_as_prev = False
 
-                    # 6. Speaker analysis
-                    audio_curr = None
-                    audio_prev = None
-                    cluster_speakers = None
-                    similarity_prev = None
-                    is_same_speaker_as_prev = False
+                        if len(curr_buffer) > 0:
+                            try:
+                                audio_curr = pcm_bytes_to_waveform(curr_buffer)
 
-                    if len(curr_buffer) > 0:
-                        try:
-                            audio_curr = pcm_bytes_to_waveform(curr_buffer)
+                                if prev_buffer is not None and len(prev_buffer) > 0:
+                                    audio_prev = pcm_bytes_to_waveform(prev_buffer)
 
-                            if prev_buffer is not None and len(prev_buffer) > 0:
-                                audio_prev = pcm_bytes_to_waveform(prev_buffer)
+                                    cluster_results = labeler.cluster_segments([audio_prev, audio_curr])
+                                    if len(cluster_results) == 2:
+                                        cluster_speakers = cluster_results
+                                        similarity_prev = labeler.similarity(audio_curr, audio_prev)
+                                        is_same_speaker_as_prev = labeler.is_same_speaker(audio_curr, audio_prev)
 
-                                cluster_results = labeler.cluster_segments([audio_prev, audio_curr])
-                                if len(cluster_results) == 2:
-                                    cluster_speakers = cluster_results
-                                    similarity_prev = labeler.similarity(audio_curr, audio_prev)
-                                    is_same_speaker_as_prev = labeler.is_same_speaker(audio_curr, audio_prev)
+                            except Exception as e:
+                                logger.exception(f"Speaker clustering failed for utterance #{current_utterance_idx}: {e}")
+                        else:
+                            logger.warning(f"[{client_id}] Skipping speaker analysis — empty current buffer (utterance #{current_utterance_idx})")
 
-                        except Exception as e:
-                            logger.exception(f"Speaker clustering failed for utterance #{current_utterance_idx}: {e}")
+                        # Send speaker payload
+                        speaker_payload = {
+                            "type": "speaker_update",
+                            "utterance_id": current_utterance_idx,
+                            "is_same_speaker_as_prev": is_same_speaker_as_prev,
+                            "similarity_prev": similarity_prev,
+                            "cluster_speakers": cluster_speakers,
+                        }
+                        await websocket.send(json.dumps(speaker_payload, ensure_ascii=False))
+                        logger.info(f"[{client_id}] sent speaker_update #{current_utterance_idx}")
+
+                    # Handle both "speech" and "non_speech"
+
+                    # --- Emotion classification for this utterance ---
+                    # classify current buffer
+                    emo_results = emotion_classifier.classify(curr_buffer, state.sample_rate)
+                    # get top prediction
+                    if emo_results:
+                        top = emo_results[0]
+                        top_label = top.get("label")
+                        top_score = top.get("score")
                     else:
-                        logger.warning(f"[{client_id}] Skipping speaker analysis — empty current buffer (utterance #{current_utterance_idx})")
+                        top_label = None
+                        top_score = None
 
-                    # Always send speaker payload
-                    speaker_payload = {
-                        "type": "speaker_update",
+                    # optional: classify previous buffer if present
+                    # prev_results = None
+                    # if prev_buffer is not None:
+                        # prev_results = emotion_classifier.classify(prev_buffer, state.sample_rate)
+                    emotion_classification_payload = {
+                        "type": "emotion_classification_update",
                         "utterance_id": current_utterance_idx,
-                        "is_same_speaker_as_prev": is_same_speaker_as_prev,
-                        "similarity_prev": similarity_prev,
-                        "cluster_speakers": cluster_speakers,
+                        "emotion_top_label": top_label,
+                        "emotion_top_score": top_score,
+                        "emotion_all": emo_results,
+                        # "emotion_prev_all": prev_results,
                     }
-                    await websocket.send(json.dumps(speaker_payload, ensure_ascii=False))
-                    logger.info(f"[{client_id}] sent speaker_update #{current_utterance_idx}")
+                    await websocket.send(json.dumps(emotion_classification_payload, ensure_ascii=False))
+                    logger.info(f"[{client_id}] sent emotion_classification_update #{current_utterance_idx}")
 
                 else:
                     logger.warning(f"[{client_id}] Unknown message type: {msg_type}")
