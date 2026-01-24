@@ -270,6 +270,16 @@ async def stream_microphone(ws) -> None:
                             min_energy = float("inf")
                             log.success("[speech] Speech started | segment_%04d", current_segment_num)
                             speech_duration_sec = 0.0
+
+                            # Signal start of utterance to server
+                            try:
+                                await ws.send(json.dumps({
+                                    "type": "start_of_utterance",
+                                }))
+                                log.success("[speech → server] Sent start_of_utterance marker", bright=True)
+                            except websockets.ConnectionClosed:
+                                log.warning("WebSocket closed while sending end marker")
+                                return
                         # Append chunk to current segment buffer
                         if current_segment_buffer is not None:
                             current_segment_buffer.extend(chunk)
@@ -305,7 +315,7 @@ async def stream_microphone(ws) -> None:
 
 
                     else:
-                        if is_speech_ongoing and has_sound:
+                        if has_sound and chunk_type == "non_speech":
                             # We are inside an utterance → send non-speech too
                             payload = {
                                 "type": "audio",
@@ -604,6 +614,9 @@ async def receive_messages(ws) -> None:
             elif msg_type == "speaker_update":
                 await handle_speaker_update(data)
 
+            elif msg_type == "emotion_classification_update":
+                await handle_emotion_classification_update(data)
+
             else:
                 log.warning("[ws] Ignoring unknown message type: %s", msg_type)
 
@@ -668,6 +681,8 @@ async def handle_final_subtitle(data: dict) -> None:
     if utterance_id is None:
         log.warning("[final_subtitle] Missing utterance_id")
         return
+    
+    segment_type: Literal["speech", "non_speech"] = data["segment_type"]
 
     ja = data.get("transcription_ja", "").strip()
     en = data.get("translation_en", "").strip()
@@ -765,6 +780,33 @@ async def handle_speaker_update(data: dict) -> None:
         json.dump(speaker_clusters, f, indent=2, ensure_ascii=False)
     with open(speaker_meta_path, "w", encoding="utf-8") as f:
         json.dump(speaker_meta, f, indent=2, ensure_ascii=False)
+
+
+async def handle_emotion_classification_update(data: dict) -> None:
+    utterance_id = data.get("utterance_id")
+    if utterance_id is None:
+        log.warning("[emotion_classification_update] Missing utterance_id")
+        return
+
+    segment_num = utterance_id + 1
+    segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
+
+    emotion_classification_all = data.get("emotion_all")
+    emotion_top_label = data.get("emotion_top_label")
+    emotion_top_score = data.get("emotion_top_score")
+    emotion_top_label = data.get("emotion_top_label")
+    emotion_classification_meta = {
+        "emotion_top_label": emotion_top_label,
+        "emotion_top_score": emotion_top_score,
+    }
+
+    # Write per-segment emotion classification info
+    emotion_classification_all_path = os.path.join(segment_dir, "emotion_classification_all.json")
+    emotion_classification_meta_path = os.path.join(segment_dir, "emotion_classification_meta.json")
+    with open(emotion_classification_all_path, "w", encoding="utf-8") as f:
+        json.dump(emotion_classification_all, f, indent=2, ensure_ascii=False)
+    with open(emotion_classification_meta_path, "w", encoding="utf-8") as f:
+        json.dump(emotion_classification_meta, f, indent=2, ensure_ascii=False)
 
 
 async def _update_display_and_files(utt_id: int) -> None:
