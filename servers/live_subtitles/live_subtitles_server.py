@@ -21,14 +21,13 @@ import numpy as np
 import scipy.io.wavfile as wavfile
 from faster_whisper import WhisperModel
 from rich.logging import RichHandler
-from transformers import AutoTokenizer
 
-from translator_types import Translator  # adjust import if needed
 from utils import split_sentences_ja
 import threading
 
 from segment_speaker_labeler import SegmentSpeakerLabeler
 from segment_emotion_classifier import SegmentEmotionClassifier
+
 
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
@@ -115,19 +114,17 @@ whisper_model = WhisperModel(
 )
 
 logger.info("Loading OPUS-MT ja→en tokenizer & translator ...")
-tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER_NAME)
-translator = Translator(
-    TRANSLATOR_MODEL_PATH,
-    device="cpu",
-    compute_type="int8",
-    inter_threads=4,  # tune to your cores
+from translate_jp_en import (
+    translate_japanese_to_english,
+    translation_quality_label,
+    translation_confidence_score,
 )
 
 logger.info("Loading speaker labeler pyannote model & clustering strategy...")
 labeler = SegmentSpeakerLabeler()
 
 logger.info("Loading emotion classifier model...")
-emotion_classifier = SegmentEmotionClassifier()
+emotion_classifier = SegmentEmotionClassifier(device=-1)
 
 logger.info("Models loaded.")
 
@@ -178,7 +175,7 @@ class ConnectionState:
 # Global state and output directory
 # ───────────────────────────────────────────────
 connected_states: dict[asyncio.StreamWriter, ConnectionState] = {}
-executor = ThreadPoolExecutor(max_workers=3)  # conservative — GTX 1660
+executor = ThreadPoolExecutor(max_workers=1)  # conservative — GTX 1660
 
 DEFAULT_OUT_DIR: Optional[Path] = None  # ← change to Path("utterances") if you want default permanent storage
 
@@ -257,47 +254,16 @@ def transcribe_and_translate(
 
     transcription_quality = transcription_quality_label(avg_logprob)
 
-    # ─── Translation ───────────────────────────────────────────────
-    sentences_ja: List[str] = split_sentences_ja(ja_text)
-    en_sentences: List[str] = []
-    translation_logprob: float | None = None
-    translation_confidence: float | None = None
-
-    if sentences_ja:
-        batch_src_tokens = [
-            tokenizer.convert_ids_to_tokens(tokenizer.encode(sent.strip()))
-            for sent in sentences_ja if sent.strip()
-        ]
-
-        if batch_src_tokens:
-            results = translator.translate_batch(
-                batch_src_tokens,
-                return_scores=True,          # Enable score extraction
-                beam_size=4,
-                max_decoding_length=512,
-            )
-
-            for result in results:
-                hyp = result.hypotheses[0]
-                en_sent = tokenizer.decode(
-                    tokenizer.convert_tokens_to_ids(hyp),
-                    skip_special_tokens=True
-                ).strip()
-                if en_sent:
-                    en_sentences.append(en_sent)
-
-                # Take score from first/best hypothesis
-                if hasattr(result, "scores") and result.scores:
-                    # For multi-sentence → take the first one (or average/min later if needed)
-                    translation_logprob = result.scores[0]
-                    num_output_tokens = len(hyp)  # exact number of output tokens
-                    translation_confidence = translation_confidence_score(
-                        translation_logprob, num_output_tokens, min_tokens=3
-                    )
-
-    en_text = "\n".join(en_sentences)
-
-    translation_quality = translation_quality_label(translation_logprob)
+    # ─── Translation (updated: use standalone translation util) ─────
+    # Replaces old batch translation logic — see @Untitled-7 (16-43)
+    en_text, translation_logprob, translation_confidence, translation_quality = (
+        translate_japanese_to_english(
+            ja_text,
+            beam_size=4,
+            max_decoding_length=512,
+            min_tokens_for_confidence=3
+        )
+    )
 
     # ─── Logging ──────────────────────────────────────────────────
     logger.info(
@@ -395,82 +361,9 @@ async def handler(websocket):
                 data = json.loads(message)
                 msg_type = data.get("type")
 
-                if msg_type == "silent" and state.segment_type != "speech":
-                    logger.info(f"Received msg_type: {msg_type}")
-                    if state.segment_chunk_count > 1:
-                        state.segment_chunk_count = 0
-                        state.non_speech_segment_count += 1
-                        logger.info(f"[{client_id}] non_speech_segment_count={state.non_speech_segment_count}")
-
-                        segment_idx = state.speech_segment_count + state.non_speech_segment_count - 1
-                        segment_num = state.non_speech_segment_count
-
-
-                        # classify current non speech buffer
-                        emo_results = emotion_classifier.classify(state.buffer, state.sample_rate)
-                        # get top prediction
-                        if emo_results:
-                            top = emo_results[0]
-                            top_label = top.get("label")
-                            top_score = top.get("score")
-                        else:
-                            top_label = None
-                        top_score = None
-                        emotion_classification_payload = {
-                            "type": "emotion_classification_update",
-                            "utterance_id": state.utterance_count,
-                            "segment_idx": segment_idx,
-                            "segment_num": segment_num,
-                            "segment_type": "non_speech",
-                            "emotion_top_label": top_label,
-                            "emotion_top_score": top_score,
-                            "emotion_all": emo_results,
-                            # "emotion_prev_all": prev_results,
-                        }
-                        await websocket.send(json.dumps(emotion_classification_payload, ensure_ascii=False))
-                        logger.info(f"[{client_id}] sent non-speech emotion_classification_update #{segment_num} | msg_type: {msg_type}")
-
-                    state.ongoing_speech = False
-                    state.segment_type = None
-                    state.prev_buffer = None
-                    state.segment_chunk_count = 0
-                    state.clear_buffer()
-                elif msg_type == "start_of_utterance":
+                if msg_type == "start_of_utterance":
                     logger.info(f"Received msg_type: {msg_type}")
                     state.ongoing_speech = True
-
-                    if state.segment_chunk_count:
-                        state.segment_chunk_count = 0
-                        state.non_speech_segment_count += 1
-                        logger.info(f"[{client_id}] non_speech_segment_count={state.non_speech_segment_count}")
-
-                        segment_idx = state.speech_segment_count + state.non_speech_segment_count - 1
-                        segment_num = state.non_speech_segment_count
-
-
-                        # classify current non speech buffer
-                        emo_results = emotion_classifier.classify(state.buffer, state.sample_rate)
-                        # get top prediction
-                        if emo_results:
-                            top = emo_results[0]
-                            top_label = top.get("label")
-                            top_score = top.get("score")
-                        else:
-                            top_label = None
-                        top_score = None
-                        emotion_classification_payload = {
-                            "type": "emotion_classification_update",
-                            "utterance_id": state.utterance_count,
-                            "segment_idx": segment_idx,
-                            "segment_num": segment_num,
-                            "segment_type": "non_speech",
-                            "emotion_top_label": top_label,
-                            "emotion_top_score": top_score,
-                            "emotion_all": emo_results,
-                            # "emotion_prev_all": prev_results,
-                        }
-                        await websocket.send(json.dumps(emotion_classification_payload, ensure_ascii=False))
-                        logger.info(f"[{client_id}] sent non-speech emotion_classification_update #{segment_num} | msg_type: {msg_type}")
 
                     state.segment_type = "speech"
 
