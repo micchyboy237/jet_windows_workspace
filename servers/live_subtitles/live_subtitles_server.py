@@ -449,7 +449,6 @@ async def handler(websocket):
                         text_payload = {
                             "type": "final_subtitle",
                             "utterance_id": current_utterance_idx,
-                            "segment_type": state.segment_type,
                             "avg_vad_confidence": avg_vad_confidence,
                             "transcription_ja": meta["transcription"]["text_ja"],
                             "translation_en": meta["translation"]["text_en"],
@@ -520,6 +519,7 @@ async def handler(websocket):
                     emotion_classification_payload = {
                         "type": "emotion_classification_update",
                         "utterance_id": current_utterance_idx,
+                        "segment_type": curr_segment_type,
                         "emotion_top_label": top_label,
                         "emotion_top_score": top_score,
                         "emotion_all": emo_results,
