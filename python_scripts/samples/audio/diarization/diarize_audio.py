@@ -561,33 +561,110 @@ if __name__ == "__main__":
     DEFAULT_OUTPUT = Path(__file__).parent / "generated" / Path(__file__).stem
 
     parser = argparse.ArgumentParser(
-        description="Diarize audio file and save results",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Perform speaker diarization using pyannote-audio and save detailed results",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        epilog="Examples:\n"
+               "  python %(prog)s recording.wav\n"
+               "  python %(prog)s audio.wav -o results --num-speakers 2 --device cuda\n"
+               "  python %(prog)s file.wav --pipeline pyannote/speaker-diarization@2.1",
     )
 
-    # Positional (required) argument for audio file
+    # ─── Positional: audio input (file path) ─────────────────────────────
     parser.add_argument(
         "audio",
         type=Path,
-        nargs="?",                    # makes it optional → uses default if not provided
+        nargs="?",
         default=DEFAULT_AUDIO,
-        help="Path to the input audio file (.wav)"
+        help="Path to the input audio file (supports .wav, .mp3, .m4a, ...)"
     )
 
+    # ─── Output directory ────────────────────────────────────────────────
     parser.add_argument(
         "-o", "--output",
         type=Path,
         default=DEFAULT_OUTPUT,
-        help="Directory where results will be saved"
+        help="Directory where results (segments, json, rttm, scores) will be saved"
+    )
+
+    # ─── Pipeline selection ──────────────────────────────────────────────
+    parser.add_argument(
+        "-p", "--pipeline",
+        type=str,
+        default="pyannote/speaker-diarization-3.1",
+        help="Hugging Face pipeline identifier (e.g. pyannote/speaker-diarization-3.1, "
+             "pyannote/speaker-diarization@2.1, ...)"
+    )
+
+    # ─── Number of speakers ──────────────────────────────────────────────
+    parser.add_argument(
+        "-n", "--num-speakers",
+        type=int,
+        default=None,
+        help="Force fixed number of speakers (if known). Leave empty to auto-detect."
+    )
+
+    # ─── Device selection ────────────────────────────────────────────────
+    parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Device to run on: 'cpu', 'cuda', 'mps', 'cuda:1', ... (auto-detected if None)"
+    )
+
+    # ─── Return raw scores ───────────────────────────────────────────────
+    scores_group = parser.add_mutually_exclusive_group()
+    scores_group.add_argument(
+        "--return-scores",
+        action="store_true",
+        default=True,
+        help="Extract and save raw segmentation scores (probabilities) [default]"
+    )
+    scores_group.add_argument(
+        "--no-return-scores",
+        dest="return_scores",
+        action="store_false",
+        help="Skip extraction of raw segmentation scores"
+    )
+
+    # ─── Clean output directory ──────────────────────────────────────────
+    clean_group = parser.add_mutually_exclusive_group()
+    clean_group.add_argument(
+        "--clean",
+        action="store_true",
+        default=True,
+        help="Delete output directory before running (default)"
+    )
+    clean_group.add_argument(
+        "--no-clean",
+        dest="clean",
+        action="store_false",
+        help="Do NOT delete existing output directory"
     )
 
     args = parser.parse_args()
 
-    # Clean previous results
-    shutil.rmtree(args.output, ignore_errors=True)
+    # ─── Validation ──────────────────────────────────────────────────────
+    if not args.audio.exists():
+        parser.error(f"Audio file not found: {args.audio}")
 
+    if not args.audio.is_file():
+        parser.error(f"Audio path is not a file: {args.audio}")
+
+    # ─── Clean output dir if requested ───────────────────────────────────
+    if args.clean:
+        console.log(f"[yellow]Cleaning output directory:[/] {args.output}")
+        shutil.rmtree(args.output, ignore_errors=True)
+
+    args.output.mkdir(parents=True, exist_ok=True)
+
+    # ─── Run diarization ─────────────────────────────────────────────────
+    console.rule("Starting Diarization")
     diarize_file(
-        args.audio,
+        audio_path=args.audio,
         output_dir=args.output,
-        return_scores=True,
+        pipeline_id=args.pipeline,
+        device=args.device,
+        num_speakers=args.num_speakers,
+        return_scores=args.return_scores,
     )
+    console.rule("Finished")
