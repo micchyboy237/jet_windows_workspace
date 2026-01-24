@@ -56,7 +56,7 @@ _audio_buffer_is_dirty: bool = False
 @dataclass(frozen=True)
 class Config:
     ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
-    min_speech_duration: float = 0.25          # seconds; ignore shorter speech bursts
+    min_speech_duration: float = 0.5          # seconds; ignore shorter speech bursts
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
@@ -682,8 +682,6 @@ async def handle_final_subtitle(data: dict) -> None:
         log.warning("[final_subtitle] Missing utterance_id")
         return
     
-    segment_type: Literal["speech", "non_speech"] = data["segment_type"]
-
     ja = data.get("transcription_ja", "").strip()
     en = data.get("translation_en", "").strip()
     if not (ja or en):
@@ -788,14 +786,17 @@ async def handle_emotion_classification_update(data: dict) -> None:
         log.warning("[emotion_classification_update] Missing utterance_id")
         return
 
+
     segment_num = utterance_id + 1
     segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
 
+    segment_type: Literal["speech", "non_speech"] = data["segment_type"]
     emotion_classification_all = data.get("emotion_all")
     emotion_top_label = data.get("emotion_top_label")
     emotion_top_score = data.get("emotion_top_score")
     emotion_top_label = data.get("emotion_top_label")
     emotion_classification_meta = {
+        "segment_type": segment_type,
         "emotion_top_label": emotion_top_label,
         "emotion_top_score": emotion_top_score,
     }
