@@ -194,8 +194,8 @@ def translate_text(text: str, logprobs: Optional[int] = None, **generation_param
 # Quick demo
 # ────────────────────────────────────────────────
 if __name__ == "__main__":
-    # logprobs = None
-    logprobs = 5
+    logprobs = None
+    # logprobs = 5
     examples = [
         "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
     ]

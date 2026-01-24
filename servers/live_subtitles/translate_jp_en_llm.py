@@ -44,9 +44,9 @@ TRANSLATION_DEFAULTS = {
     "min_p": 0.5,
     "repeat_penalty": 1.05,
     "max_tokens": 512,
-    # For confidence scores
-    "logprobs": True,
-    "top_logprobs": 3
+    # # For confidence scores
+    # "logprobs": True,
+    # "top_logprobs": 3
 }
 
 # ────────────────────────────────────────────────
@@ -195,6 +195,9 @@ def translate_text(text: str, logprobs: Optional[int] = None, **generation_param
 # Quick demo
 # ────────────────────────────────────────────────
 if __name__ == "__main__":
+    logprobs = None
+    # logprobs = 1
+
     examples = [
         "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
     ]
@@ -206,7 +209,7 @@ if __name__ == "__main__":
         console.print()
 
         console.print("[bold green]English (streaming):[/bold green]")
-        result = translate_text(jp_text, logprobs=1)
+        result = translate_text(jp_text, logprobs=logprobs)
         all_logprobs = result.pop("logprobs")
 
         from rich.pretty import pprint

@@ -19,6 +19,9 @@ from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
 from utils import split_sentences_ja
 from warnings import warn
 
+console = Console()
+from pathlib import Path
+
 
 @dataclass
 class Word:
@@ -776,19 +779,18 @@ def example(audio_path):
 def live_stream_example(audio_path: str):
     asr = JapaneseASR()
 
-    console = Console()
-    from pathlib import Path
     console.rule(f"[bold cyan]Live Streaming Transcription – {Path(audio_path).name}[/bold cyan]")
 
-    with Live(refresh_per_second=3, console=console) as live:
-        last_text = None
-        for partial_text, progress in asr.transcribe_stream(audio_path):
-            if partial_text != last_text or progress >= 1.0:
-                display_text = partial_text if partial_text else "[dim](processing first chunk...)[/dim]"
-                live.update(
-                    Text.from_markup(f"[cyan]{progress:>6.1%}[/cyan]  {display_text}")
-                )
-                last_text = partial_text
+
+    last_text = None
+    for partial_text, progress in asr.transcribe_stream(audio_path):
+        if partial_text != last_text or progress >= 1.0:
+            ja_text = partial_text if partial_text else "[dim](processing first chunk...)[/dim]"
+            ja_sents = split_sentences_ja(ja_text)
+            # en_text = translate_text(ja_text)
+            last_text = partial_text
+
+            yield ja_sents, progress
 
     console.print("\n[green bold]Streaming complete.[/green bold]")
 
@@ -796,14 +798,29 @@ def live_stream_example(audio_path: str):
 if __name__ == "__main__":
     from rich import print as rprint
 
+    from translate_jp_en_llm import translate_text
+
     AUDIO_SHORT = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
     AUDIO_LONG  = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
     rprint("\n[bold magenta]Demo: Long Audio – Streaming / Live mode[/bold magenta]")
-    live_stream_example(AUDIO_LONG)
+    results_stream = live_stream_example(AUDIO_LONG)
 
-    rprint("[bold cyan]Demo: Short Audio (normal mode)[/bold cyan]")
-    example(AUDIO_SHORT)
+    with Live(refresh_per_second=3, console=console) as live:
+        for ja_sents, progress in results_stream:
+            ja_sents_text = "\n".join(f"# {num}: {sent}" for num, sent in enumerate(ja_sents, start=1))
+            en_sents = []
+            for ja_sent in ja_sents:
+                en_sent = translate_text(ja_sent)
+                en_sents.append(ja_sent)
+                
+                live.update(
+                    Text.from_markup(f"[cyan]{progress:>6.1%}[/cyan]\nJA: {ja_sents_text}\nEN: {en_sent}")
+                )
 
-    rprint("\n[bold cyan]Demo: Long Audio (normal mode)[/bold cyan]")
-    example(AUDIO_LONG)
+
+    # rprint("[bold cyan]Demo: Short Audio (normal mode)[/bold cyan]")
+    # example(AUDIO_SHORT)
+
+    # rprint("\n[bold cyan]Demo: Long Audio (normal mode)[/bold cyan]")
+    # example(AUDIO_LONG)
