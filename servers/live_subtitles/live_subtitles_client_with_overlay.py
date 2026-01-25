@@ -414,15 +414,29 @@ async def stream_microphone(ws) -> None:
                                     "[speech] Segment too short (%.3fs < %.3fs) — discarded",
                                     speech_duration_sec, config.min_speech_duration
                                 )
-                                # Reset without sending or saving
+
+                                try:
+                                    await send_queue.put({
+                                        "type": "end_of_utterance",
+                                        "discarded": True,
+                                        "reason": "too_short",
+                                        "duration_sec": round(speech_duration_sec, 3),
+                                    })
+                                    log.info("[speech → server] Sent end_of_utterance (discarded)")
+                                except websockets.ConnectionClosed:
+                                    log.warning("WebSocket closed while sending discarded end marker")
+                                    return
+
+                                # Now reset local state
                                 segment_type = "non_speech"
                                 speech_start_time = None
                                 silence_start_time = None
                                 current_segment_num = None
                                 current_segment_buffer = None
                                 speech_chunks_in_segment = 0
-
+                                speech_prob_history = []
                                 continue
+
 
                             log.success(
                                 "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
