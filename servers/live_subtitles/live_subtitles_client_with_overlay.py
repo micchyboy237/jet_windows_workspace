@@ -64,8 +64,8 @@ class Config:
     channels: int = 1
     dtype: str = "int16"
     vad_threshold: float = 0.3                 # kept for logging / legacy
-    vad_start_threshold: float = 0.45          # NEW: hysteresis start
-    vad_end_threshold: float = 0.20            # NEW: hysteresis end
+    vad_start_threshold: float = 0.3          # NEW: hysteresis start
+    vad_end_threshold: float = 0.1            # NEW: hysteresis end
     pre_roll_seconds: float = 0.30             # NEW: capture mora onsets
     max_silence_seconds: float = 0.9           # JP clause pauses
     vad_model_path: str | None = None  # allow custom model if needed
@@ -232,7 +232,7 @@ async def stream_microphone(ws) -> None:
                     chunk_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
                     rms = np.sqrt(np.mean(chunk_np ** 2))
 
-                    has_sound = rms > 20.0  # diagnostic only (do NOT gate speech)
+                    has_sound = rms > 0.0  # diagnostic only (do NOT gate speech)
 
                     # Start temp code
                     normalized_chunk_np = chunk_np / 32767.0
@@ -247,15 +247,6 @@ async def stream_microphone(ws) -> None:
                     speech_prob: float = vad(chunk)
 
                     all_prob_history.append(speech_prob)
-
-                    if not has_sound:
-                        # if chunk_type != "silent":
-                        #     try:
-                        #         send_queue.put_nowait({"type": "silent"})
-                        #     except asyncio.QueueFull:
-                        #         pass
-
-                        chunk_type = "silent"
 
                     # NEW: hysteresis-based speech decision
                     if not is_speech_ongoing:
