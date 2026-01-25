@@ -581,16 +581,14 @@ async def stream_microphone(ws) -> None:
                                 f"[min={min_energy:.4f} max={max_energy:.4f}]"
                             )
 
-                        # Throttle hot-path logging for speech chunks
-                        if chunks_sent % 20 == 0:
-                            log.orange(
-                                "[speech] Sent %d chunks | rms=%.4f | speech=%.3f | dur=%.2fs%s",
-                                chunks_sent,
-                                temp_rms,
-                                speech_prob,
-                                time.monotonic() - speech_start_time if speech_start_time else 0.0,
-                                f" | RTT={avg_rtt:.3f}s" if avg_rtt is not None else "",
-                            )
+                        log.orange(
+                            "[speech] Sent %d chunks | rms=%.4f | speech=%.3f | dur=%.2fs%s",
+                            chunks_sent,
+                            temp_rms,
+                            speech_prob,
+                            time.monotonic() - speech_start_time if speech_start_time else 0.0,
+                            f" | RTT={avg_rtt:.3f}s" if avg_rtt is not None else "",
+                        )
 
                 # if processed > 0:
                 #     log.debug("\nProcessed %d speech chunk(s) this cycle\n", processed)
