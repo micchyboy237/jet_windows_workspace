@@ -1,4 +1,4 @@
-# servers/live_subtitles/translate_jp_en.py
+# /translate_jp_en_opus.py
 """
 Standalone Japanese → English translation module using CTranslate2 + Helsinki-NLP/opus-mt-ja-en
 """

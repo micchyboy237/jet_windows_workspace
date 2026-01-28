@@ -50,9 +50,18 @@ $categories = @(
     @{
         Name = "Vision / Multimodal"
         Items = @(
-            @{ Num=1; Size="Medium"; Name="Qwen2.5-VL-7B-Instruct";              File="ggml-org_Qwen2.5-VL-7B-Instruct-GGUF_Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf";                  Ctx=8192; Gpu=28; Jinja=$true; 
-               Desc="Solid vision-language model"; 
-               Extra="--mmproj `"ggml-org_Qwen2.5-VL-7B-Instruct-GGUF_mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf`"" }
+            @{ Num=1; Size="Medium"; Name="Qwen2.5-VL-7B-Instruct";              
+               File="ggml-org_Qwen2.5-VL-7B-Instruct-GGUF_Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf";                  
+               Ctx=8192; Gpu=28; Jinja=$true; 
+               Desc="Strong vision + text (OCR, charts, objects)"; 
+               MmprojFile="ggml-org_Qwen2.5-VL-7B-Instruct-GGUF_mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf" 
+            },
+            @{ Num=2; Size="Small"; Name="Gemma-3-4B-it (Vision)";
+               File="ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf";
+               Ctx=8192; Gpu=30; Jinja=$true;
+               Desc="Lightweight & efficient 2025 vision model";
+               MmprojFile="ggml-org_gemma-3-4b-it-GGUF_mmproj-model-f16.gguf"
+            }
         )
     },
     @{
@@ -135,8 +144,21 @@ while ($true) {
     $gpuLayers = if ($model.Gpu -lt 999) { $model.Gpu } else { 999 }
     $cmd += "--n-gpu-layers $gpuLayers "
 
-    if ($model.Jinja)         { $cmd += "--jinja " }
-    if ($model.Extra)         { $cmd += "$($model.Extra) " }
+    if ($model.Jinja) { $cmd += "--jinja " }
+
+    # ── Improved Multimodal (vision) support ──
+    if ($model.MmprojFile) {
+        $mmprojFullPath = Join-Path "C:\Users\druiv\.cache\llama.cpp" $model.MmprojFile
+        if (Test-Path $mmprojFullPath) {
+            $cmd += "--mmproj `"$mmprojFullPath`" "
+        } else {
+            Write-Host "  Warning: mmproj file not found: $mmprojFullPath" -ForegroundColor Yellow
+            Write-Host "  Vision features will be disabled" -ForegroundColor Yellow
+        }
+    }
+
+    # Keep legacy Extra field for special overrides (if still needed)
+    if ($model.Extra) { $cmd += "$($model.Extra) " }
 
     Write-Host "`nLaunching:" -ForegroundColor Green
     Write-Host "  Size     : " -NoNewline -ForegroundColor DarkGray
