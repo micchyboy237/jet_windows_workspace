@@ -575,7 +575,7 @@ def download_hf_space(
 
 
 if __name__ == "__main__":
-    repo_id = "tohoku-nlp/bert-base-japanese-v3"
+    repo_id = "knowledgator/modern-gliner-bi-large-v1.0"
     cache_dir = MODELS_CACHE_DIR
     clean_cache = False
 
