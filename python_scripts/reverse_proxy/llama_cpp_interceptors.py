@@ -122,18 +122,32 @@ def create_app(
             bytes_received = 0
             last_preview_time = datetime.now(timezone.utc)
             preview_throttle_sec = 1.5
-            full_content_pieces: list[str] = []
+
+            full_content_pieces = []
 
             try:
                 async for chunk in stream:
-                    # chunk: openai.types.chat.ChatCompletionChunk (model specific)
-                    if hasattr(chunk, "choices"):
-                        # Track full content (OpenAI style chunking)
-                        delta = chunk.choices[0].delta
-                        if hasattr(delta, "content") and delta.content is not None:
-                            full_content_pieces.append(delta.content)
+                    # chunk is ChatCompletionChunk object
 
-                    # Reconstruct SSE line
+                    # Guard: skip if no choices (common in final usage chunk or server quirks)
+                    if not getattr(chunk, "choices", None):
+                        # Still forward the chunk as SSE
+                        chunk_data = chunk.model_dump_json(exclude_none=True)
+                        sse_line = f"data: {chunk_data}\n\n"
+                        sse_bytes = sse_line.encode("utf-8")
+                        bytes_received += len(sse_bytes)
+                        chunks.append(sse_bytes)
+                        yield sse_bytes
+                        logger.debug("[empty choices chunk forwarded] id=%s", request_id)
+                        continue
+
+                    delta = chunk.choices[0].delta
+
+                    # Collect content for reconstruction / final logging
+                    if getattr(delta, "content", None) is not None:
+                        full_content_pieces.append(delta.content)
+
+                    # Reconstruct SSE (same as before)
                     chunk_data = chunk.model_dump_json(exclude_none=True)
                     sse_line = f"data: {chunk_data}\n\n"
                     sse_bytes = sse_line.encode("utf-8")
@@ -141,25 +155,25 @@ def create_app(
                     bytes_received += len(sse_bytes)
                     chunks.append(sse_bytes)
 
-                    # Debug log size
                     logger.debug("[chunk] %d bytes • id=%s", len(sse_bytes), request_id)
 
-                    # Throttled preview
+                    # Throttled preview — only if there's content
                     now = datetime.now(timezone.utc)
                     if (now - last_preview_time).total_seconds() >= preview_throttle_sec:
-                        if chunk.choices and chunk.choices[0].delta.content:
-                            preview = chunk.choices[0].delta.content[:120]
+                        if getattr(delta, "content", None):
+                            preview = delta.content.strip()[:120]
                             if len(preview) == 120:
                                 preview += "…"
-                            logger.info(
-                                f"[dim]chunk preview[/] {preview} "
-                                f"[dim]({bytes_received:,} bytes so far)[/]"
-                            )
+                            if preview.strip():
+                                logger.info(
+                                    f"[dim]chunk preview[/] {preview} "
+                                    f"[dim]({bytes_received:,} bytes so far)[/]"
+                                )
                         last_preview_time = now
 
                     yield sse_bytes
 
-                # Final [DONE] message (OpenAI style)
+                # After stream ends, send final [DONE]
                 done = b"data: [DONE]\n\n"
                 yield done
                 chunks.append(done)
