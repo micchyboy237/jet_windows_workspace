@@ -4,6 +4,7 @@ import argparse
 import subprocess
 import json
 from rich.console import Console
+from tqdm import tqdm
 from _utils_copy_for_prompt import (
     find_files,
     format_file_structure,
@@ -49,20 +50,15 @@ include_files = [
 
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
 
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\preprocessors.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\tests\test_normalize_loudness.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\jet_scripts\inputs.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\jet_scripts\modules\scene_detection.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\jet_scripts\HOW_TO_RUN.md",
 
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\jet_scripts\inputs.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\jet_scripts\modules\scene_detection.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\jet_scripts\HOW_TO_RUN.md",
-
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\translate\core.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\translate\providers.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\translate\service.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\translate\settings.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\translate\local_opus.py",
-    
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\jet_scripts\translate\opus_ct2_translation.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_emotion_classifier.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
+    r"",
 
     r"",
 ]
@@ -81,20 +77,10 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Complete jet_scripts usage examples for opus_ct2_translation with complete parse args. Use these default values:
-provider="opus-ct2"
-tone="pornify"
-source_lang=japanese
-target_lang="english"
-
-Reuse from inputs.py if applicable.
-Copy other default values.
-See jet_scripts\modules\scene_detection.py for inspiration.
+Evaluate server code. How do I reduce too much VRAM usage?
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
-- Write step by step analysis
-- Provide a single diff for each updated file
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """
@@ -187,7 +173,9 @@ def main():
     else:
 
         # Append relative filenames to the clipboard content
-        for file in context_files:
+        for file in tqdm(
+            context_files, desc=f"Processing {len(context_files)} files..."
+        ):
             rel_path = os.path.relpath(path=file, start=file_dir)
             cleaned_rel_path = remove_parent_paths(rel_path)
 

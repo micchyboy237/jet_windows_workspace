@@ -410,15 +410,50 @@ def clean_comments(content):
     return re.sub(r'#.*', '', content)
 
 
-def clean_logging(content):
-    """Removes logging statements from the given content, including multi-line ones."""
-    logging_pattern = re.compile(
-        r'logging\.(?:info|debug|error|warning|critical|exception|log|basicConfig|getLogger|disable|shutdown)\s*\((?:[^)(]+|\((?:[^)(]+|\([^)(]*\))*\))*\)',
-        re.DOTALL
-    )
-    content = re.sub(logging_pattern, '', content)
-    content = re.sub(r'\n\s*\n', '\n', content)
-    return content
+# Much safer version — avoids nested quantifier explosion
+_LOGGING_CALL_RE = re.compile(
+    r"logging\.(?:info|debug|error|warning|critical|exception|log|basicConfig|getLogger|disable|shutdown)\s*\("
+)
+
+
+def clean_logging(content: str) -> str:
+    """
+    Removes logging statements from the given content, including multi-line ones,
+    without catastrophic regex backtracking.
+    """
+    result = []
+    i = 0
+    n = len(content)
+
+    while i < n:
+        match = _LOGGING_CALL_RE.search(content, i)
+        if not match:
+            result.append(content[i:])
+            break
+
+        # Keep text before logging call
+        result.append(content[i : match.start()])
+
+        # Scan forward to find the matching closing parenthesis
+        depth = 1
+        j = match.end()
+
+        while j < n and depth > 0:
+            if content[j] == "(":
+                depth += 1
+            elif content[j] == ")":
+                depth -= 1
+            j += 1
+
+        # Skip the logging call entirely
+        i = j
+
+    cleaned = "".join(result)
+
+    # Normalize excessive blank lines
+    cleaned = re.sub(r"\n\s*\n", "\n", cleaned)
+
+    return cleaned
 
 
 def clean_content(content: str, file_path: str, shorten_funcs: bool = True, remove_triple_quoted_definitions: bool = False):
