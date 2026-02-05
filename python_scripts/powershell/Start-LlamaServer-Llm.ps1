@@ -3,9 +3,9 @@
 [CmdletBinding()]
 param(
     [Alias("p")]
-    [Parameter(HelpMessage = "Port for llama-server to listen on (default: 8080)")]
+    [Parameter(HelpMessage = "Port for llama-server to listen on (default: 8000)")]
     [ValidateRange(1, 65535)]
-    [int]$Port = 8080
+    [int]$Port = 8000
 )
 
 Write-Host "`n  Llama.cpp Server Launcher  " -BackgroundColor DarkCyan -ForegroundColor Black
@@ -118,19 +118,24 @@ while ($true) {
         continue
     }
 
-    # ── Build command ──
-    $cmd = "llama-server.exe " +
-           "-m `"$modelPath`" " +
-           "--host 0.0.0.0 --port $Port " +
-           "--ctx-size $($model.Ctx) " +
-           "--n-gpu-layers $($model.Gpu) " +
-           "--flash-attn on " +
-           "--cache-type-k q8_0 --cache-type-v q8_0 " +
-           "--threads 8 --threads-batch 8 " +
-           "--mlock --no-mmap " +
-           "--cont-batching "
+       # ── Build command ──
+       $cmd = "llama-server.exe " +
+              "-m `"$modelPath`" " +
+              "--host 0.0.0.0 --port $Port " +
+              "--ctx-size $($model.Ctx) " +
+              "--n-gpu-layers $($model.Gpu) " +
+              "--flash-attn on " +
+              "--cache-type-k q8_0 --cache-type-v q8_0 " +
+              "--threads 8 --threads-batch 8 " +
+              "--mlock --no-mmap " +
+              "--cont-batching " +
+              "--log-file `"C:\Users\druiv\.cache\logs\llama.cpp\llm_logs`" " +
+              "--log-colors on " +
+              "--log-timestamps " +
+              "--log-prefix " +
+              "--verbose "
 
-    if ($model.Jinja) { $cmd += "--jinja " }
+       if ($model.Jinja) { $cmd += "--jinja " }
 
     # Reasonable sampling defaults (most people prefer this style)
     $cmd += "--temp 0.75 --min-p 0.05 --top-k 40 --top-p 0.92 "

@@ -83,14 +83,19 @@ Write-Host "---------------------------------------------`n"
 $cmd = "llama-server.exe " +
        "-m `"$modelPath`" " +
        "--embedding " +
-       "--host 0.0.0.0 --port 8081 " +
+       "--host 0.0.0.0 --port 8001 " +
        "-c $b -ub $ub -b $b " +
        "--n-gpu-layers $gpu " +
        "--threads 6 --threads-batch 6 " +
        "--mlock --no-mmap " +
        "--flash-attn $flash " +
        "--cache-type-k q8_0 --cache-type-v q8_0 " +
-       "--cont-batching"
+       "--cont-batching " +
+       "--log-file `"C:\Users\druiv\.cache\logs\llama.cpp\embedding_logs`" " +
+       "--log-colors on " +
+       "--log-timestamps " +
+       "--log-prefix " +
+       "--verbose "
 
 # Optional: quieter logs (uncomment if desired)
 # $cmd += " --log-disable"
