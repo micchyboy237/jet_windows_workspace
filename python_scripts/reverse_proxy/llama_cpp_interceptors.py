@@ -29,6 +29,28 @@ logger = logging.getLogger("llama_proxy")
 console = Console()
 
 
+def safe_extract_response_data(response: Any) -> Dict[str, Any]:
+    """Extract data safely from OpenAI response (handles LegacyAPIResponse)."""
+    data: Dict[str, Any] = {}
+
+    if hasattr(response, "model_dump"):
+        try:
+            data = response.model_dump(exclude_none=True)
+            return data
+        except Exception:
+            pass
+
+    if hasattr(response, "_response") and hasattr(response._response, "json"):
+        try:
+            data = response._response.json()
+            return data
+        except Exception:
+            pass
+
+    logger.warning("Failed to extract response data", extra={"type": str(type(response))})
+    return data
+
+
 def create_app(
     upstream_url: str,
     log_dir: Path | str,
@@ -60,7 +82,7 @@ def create_app(
         payload: dict,
         duration_ms: float,
         usage_info: Optional[Dict[str, Any]],
-        content: str,
+        assistant_message: Optional[Dict[str, Any]],
         bytes_transferred: int,
         was_streaming: bool,
         log_file: Path,
@@ -78,7 +100,7 @@ def create_app(
             "status_code": 200,
             "response_headers": {},
             "response_body": {
-                "content": content,
+                "message": assistant_message or {},
                 "usage": usage_info,
             },
             "duration_ms": round(duration_ms, 1),
@@ -118,10 +140,19 @@ def create_app(
             console.print(Syntax(json.dumps(payload, indent=2), "json", word_wrap=True))
 
         console.print("[bold blue]← Response content[/]")
-        preview_text = content[:800]
-        if len(content) > 800:
-            preview_text += " … [truncated in console – full in log file]"
-        console.print(preview_text)
+        if assistant_message:
+            if assistant_message.get("content"):
+                preview = assistant_message["content"][:800]
+                if len(assistant_message["content"]) > 800:
+                    preview += " … [truncated]"
+                console.print(preview)
+            elif assistant_message.get("tool_calls"):
+                tc_summary = ", ".join(tc.get("function", {}).get("name", "?") for tc in assistant_message["tool_calls"])
+                console.print(f"[yellow]Tool calls:[/] {tc_summary}")
+            else:
+                console.print("[dim]Empty assistant message[/]")
+        else:
+            console.print("[dim]No assistant message captured[/]")
 
     async def log_error(
         request_id: str,
@@ -195,7 +226,6 @@ def create_app(
             forwarded_for += ", "
         forwarded_for += request.client.host or "unknown"
 
-        # Remove duplicate forwarded_for logic
         extra_headers = {
             "X-Forwarded-For": forwarded_for,
             "X-Forwarded-Proto": request.headers.get("x-forwarded-proto", "http"),
@@ -220,11 +250,9 @@ def create_app(
 
         if is_embeddings:
             # ── Embeddings path ─────────────────────────────────────────────
-            # (embeddings block unchanged except log file & error logging)
             try:
                 response = await client.embeddings.create(
                     **payload,
-                    # embeddings do not support stream=True in OpenAI spec
                 )
 
                 duration_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
@@ -232,7 +260,6 @@ def create_app(
                     f"[bold cyan]←[/] embeddings completed in {duration_ms:.0f} ms   id={request_id}"
                 )  
 
-                # For logging: take first embedding or summary
                 content_summary = ""
                 if response.data and response.data[0].embedding:
                     emb = response.data[0].embedding
@@ -264,29 +291,28 @@ def create_app(
                     request_id, timestamp, request, path_with_query, payload, exc, daily_dir
                 )
                 raise
-                # Alternative: return Response(f"Upstream error: {exc}", 502)
 
         try:
             if stream_requested:
-                # ── Streaming chat path ── (existing)
+                # ── Streaming chat path ──
                 stream = await client.chat.completions.create(
                     **payload,
                     stream=True,
                     extra_headers=extra_headers,
                 )
 
-                # duration measured later for streaming
                 logger.info(
                     f"[bold cyan]←[/] streaming started   id={request_id}"
                 )
 
                 full_content_pieces: list[str] = []
+                last_delta: Optional[Dict[str, Any]] = None
                 usage_info: Optional[Dict[str, Any]] = None
                 chunks: list[bytes] = []
                 bytes_received = 0
 
                 async def stream_and_log() -> AsyncGenerator[bytes, None]:
-                    nonlocal bytes_received, usage_info
+                    nonlocal bytes_received, usage_info, last_delta
                     last_preview_time = datetime.now(timezone.utc)
                     preview_throttle_sec = 1.5
 
@@ -309,6 +335,9 @@ def create_app(
                                 continue
 
                             delta = chunk.choices[0].delta
+                            # Keep the latest delta (useful for tool_calls / refusal / structured fields)
+                            last_delta = delta.model_dump(exclude_none=True)
+
                             if delta.content is not None:
                                 fixed = ftfy.fix_text(delta.content)
                                 full_content_pieces.append(fixed)
@@ -346,11 +375,20 @@ def create_app(
                         )
                         raise
 
-                    # finally block already logs success
                     finally:
-                        full_content = "".join(full_content_pieces)
                         end = datetime.now(timezone.utc)
                         duration_ms = (end - start).total_seconds() * 1000
+
+                        # Build final assistant message for logging
+                        final_message: Dict[str, Any] = {"role": "assistant"}
+                        full_content = "".join(full_content_pieces).strip()
+                        if full_content:
+                            final_message["content"] = full_content
+
+                        # If we have tool_calls in the last delta, include them
+                        if last_delta and "tool_calls" in last_delta:
+                            final_message["tool_calls"] = last_delta["tool_calls"]
+
                         await log_success(
                             request_id=request_id,
                             timestamp=timestamp,
@@ -359,7 +397,7 @@ def create_app(
                             payload=payload,
                             duration_ms=duration_ms,
                             usage_info=usage_info,
-                            content=full_content,
+                            assistant_message=final_message,
                             bytes_transferred=bytes_received, 
                             was_streaming=True,
                             log_file=success_log_file,
@@ -389,13 +427,20 @@ def create_app(
                     f"[bold cyan]←[/] completed in {duration_ms:.0f} ms   id={request_id}"
                 )
 
-                usage_info = response.usage.model_dump() if response.usage else None
-                content = ""
-                if response.choices and response.choices[0].message.content is not None:
-                    content = ftfy.fix_text(response.choices[0].message.content)
+                raw_data = safe_extract_response_data(response)
+                usage_info = raw_data.get("usage")
 
-                # Approximate bytes for logging
-                bytes_transferred = len(json.dumps(response.model_dump()).encode("utf-8"))
+                if usage_info is None:
+                    logger.warning(f"No usage stats available from upstream id={request_id}")
+
+                choices = raw_data.get("choices", [])
+                assistant_message: Dict[str, Any] = {}
+                if choices and len(choices) > 0:
+                    msg = choices[0].get("message")
+                    if isinstance(msg, dict):
+                        assistant_message = msg
+
+                bytes_transferred = len(json.dumps(raw_data).encode("utf-8"))
 
                 await log_success(
                     request_id=request_id,
@@ -405,14 +450,14 @@ def create_app(
                     payload=payload,
                     duration_ms=duration_ms,
                     usage_info=usage_info,
-                    content=content,
+                    assistant_message=assistant_message,
                     bytes_transferred=bytes_transferred,
                     was_streaming=False,
                     log_file=success_log_file,
                 )
 
                 return JSONResponse(
-                    content=response.model_dump(exclude_none=True),
+                    content=raw_data,
                     status_code=200,
                 )
 
@@ -421,7 +466,6 @@ def create_app(
                 request_id, timestamp, request, path_with_query, payload, exc, daily_dir
             )
             raise
-            # or: return Response(f"Upstream error: {exc}", 502)
 
     return app
 
