@@ -49,6 +49,7 @@ def create_app(
         base_url=f"{upstream_base}/v1",
         api_key="sk-no-key-required",
         timeout=None,
+        max_retries=0,
     )
 
     async def log_success(
