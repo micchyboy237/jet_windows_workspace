@@ -2,6 +2,7 @@ import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import traceback
 from typing import Optional, Dict, Any, AsyncGenerator, Union
 
 from openai import AsyncOpenAI
@@ -40,6 +41,7 @@ def create_app(
 
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = log_dir.resolve()  # make sure we have absolute path
     upstream_base = upstream_url.rstrip("/")
 
     # Shared async client pointing to llama.cpp server
@@ -49,7 +51,7 @@ def create_app(
         timeout=None,
     )
 
-    async def log_request_and_response(
+    async def log_success(
         request_id: str,
         timestamp: str,
         request: Request,
@@ -62,7 +64,7 @@ def create_app(
         was_streaming: bool,
         log_file: Path,
     ) -> None:
-        """Shared logging logic for both streaming and non-streaming."""
+        """Shared logging logic for both streaming and non-streaming (success)."""
         record = {
             "request_id": request_id,
             "timestamp": timestamp,
@@ -120,6 +122,47 @@ def create_app(
             preview_text += " … [truncated in console – full in log file]"
         console.print(preview_text)
 
+    async def log_error(
+        request_id: str,
+        timestamp: str,
+        request: Request,
+        path_with_query: str,
+        payload: dict,
+        exc: Exception,
+        daily_dir: Path,
+    ) -> Path:
+        error_file = daily_dir / f"ERROR_{timestamp}_{request_id}.json"
+
+        record = {
+            "request_id": request_id,
+            "timestamp": timestamp,
+            "method": request.method,
+            "path": path_with_query,
+            "client_ip": request.client.host,
+            "upstream_url": str(client.base_url),
+            "request_headers": dict(request.headers),
+            "request_body": payload,
+            "status_code": None,
+            "error": {
+                "type": type(exc).__name__,
+                "message": str(exc),
+                # Fragile & broken — replace with standard traceback
+                "traceback": traceback.format_exc() if hasattr(exc, '__traceback__') else None,
+            },
+            "success": False,
+        }
+
+        try:
+            error_file.write_text(
+                json.dumps(record, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception as write_exc:
+            logger.error(f"Failed to write error log {error_file}", exc_info=write_exc)
+
+        logger.exception(f"Request failed • id={request_id}")
+        return error_file
+
     @app.api_route("/{path:path}", methods=["GET", "POST", "OPTIONS"])
     @app.api_route("/", methods=["GET", "POST", "OPTIONS"])
     async def proxy(request: Request, path: str = ""):
@@ -143,15 +186,16 @@ def create_app(
             return Response("Invalid JSON", 400)
 
         is_embeddings = "embeddings" in path.lower()
-        stream_requested: bool = payload.pop("stream", False) if not is_embeddings else False
+        stream_requested = payload.pop("stream", False) if not is_embeddings else False
 
         # Prepare forwarded headers
-        forwarded_for = request.headers.get("x-forwarded-for", "")
+        forwarded_for = request.headers.get("x-forwarded-for", request.client.host or "unknown")
         if forwarded_for:
             forwarded_for += ", "
         forwarded_for += request.client.host or "unknown"
 
-        extra_headers: Dict[str, str] = {
+        # Remove duplicate forwarded_for logic
+        extra_headers = {
             "X-Forwarded-For": forwarded_for,
             "X-Forwarded-Proto": request.headers.get("x-forwarded-proto", "http"),
             "X-Forwarded-Host": request.headers.get("host", request.url.hostname),
@@ -167,10 +211,15 @@ def create_app(
 
         start = datetime.now(timezone.utc)
         timestamp = start.strftime("%Y-%m-%dT%H-%M-%S%z")
-        log_file = log_dir / f"{timestamp}_{request_id}.json"
+
+        date_str = start.strftime("%Y-%m-%d")
+        daily_dir = log_dir / date_str
+        daily_dir.mkdir(parents=True, exist_ok=True)
+        success_log_file = daily_dir / f"{timestamp}_{request_id}.json"
 
         if is_embeddings:
             # ── Embeddings path ─────────────────────────────────────────────
+            # (embeddings block unchanged except log file & error logging)
             try:
                 response = await client.embeddings.create(
                     **payload,
@@ -180,7 +229,7 @@ def create_app(
                 duration_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
                 logger.info(
                     f"[bold cyan]←[/] embeddings completed in {duration_ms:.0f} ms   id={request_id}"
-                )
+                )  
 
                 # For logging: take first embedding or summary
                 content_summary = ""
@@ -190,7 +239,7 @@ def create_app(
 
                 bytes_transferred = len(json.dumps(response.model_dump()).encode("utf-8"))
 
-                await log_request_and_response(
+                await log_success(
                     request_id=request_id,
                     timestamp=timestamp,
                     request=request,
@@ -199,9 +248,9 @@ def create_app(
                     duration_ms=duration_ms,
                     usage_info=None,  # embeddings usually have usage
                     content=content_summary,
-                    bytes_transferred=bytes_transferred,
+                    bytes_transferred=bytes_transferred, 
                     was_streaming=False,
-                    log_file=log_file,
+                    log_file=success_log_file,
                 )
 
                 return JSONResponse(
@@ -210,8 +259,11 @@ def create_app(
                 )
 
             except Exception as exc:
-                logger.exception(f"Embeddings upstream error • id={request_id}")
-                return Response(f"Upstream error: {exc}", 502)
+                await log_error(
+                    request_id, timestamp, request, path_with_query, payload, exc, daily_dir
+                )
+                raise
+                # Alternative: return Response(f"Upstream error: {exc}", 502)
 
         try:
             if stream_requested:
@@ -222,9 +274,9 @@ def create_app(
                     extra_headers=extra_headers,
                 )
 
-                duration_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+                # duration measured later for streaming
                 logger.info(
-                    f"[bold cyan]←[/] streaming started • {duration_ms:.0f} ms   id={request_id}"
+                    f"[bold cyan]←[/] streaming started   id={request_id}"
                 )
 
                 full_content_pieces: list[str] = []
@@ -288,11 +340,17 @@ def create_app(
 
                     except Exception as exc:
                         logger.exception("Streaming error", extra={"request_id": request_id})
+                        await log_error(
+                            request_id, timestamp, request, path_with_query, payload, exc, daily_dir
+                        )
                         raise
 
+                    # finally block already logs success
                     finally:
                         full_content = "".join(full_content_pieces)
-                        await log_request_and_response(
+                        end = datetime.now(timezone.utc)
+                        duration_ms = (end - start).total_seconds() * 1000
+                        await log_success(
                             request_id=request_id,
                             timestamp=timestamp,
                             request=request,
@@ -301,9 +359,9 @@ def create_app(
                             duration_ms=duration_ms,
                             usage_info=usage_info,
                             content=full_content,
-                            bytes_transferred=bytes_received,
+                            bytes_transferred=bytes_received, 
                             was_streaming=True,
-                            log_file=log_file,
+                            log_file=success_log_file,
                         )
 
                 return StreamingResponse(
@@ -338,7 +396,7 @@ def create_app(
                 # Approximate bytes for logging
                 bytes_transferred = len(json.dumps(response.model_dump()).encode("utf-8"))
 
-                await log_request_and_response(
+                await log_success(
                     request_id=request_id,
                     timestamp=timestamp,
                     request=request,
@@ -349,7 +407,7 @@ def create_app(
                     content=content,
                     bytes_transferred=bytes_transferred,
                     was_streaming=False,
-                    log_file=log_file,
+                    log_file=success_log_file,
                 )
 
                 return JSONResponse(
@@ -358,8 +416,11 @@ def create_app(
                 )
 
         except Exception as exc:  # outer catch-all
-            logger.exception(f"Upstream error • id={request_id}")
-            return Response(f"Upstream error: {exc}", 502)
+            await log_error(
+                request_id, timestamp, request, path_with_query, payload, exc, daily_dir
+            )
+            raise
+            # or: return Response(f"Upstream error: {exc}", 502)
 
     return app
 
