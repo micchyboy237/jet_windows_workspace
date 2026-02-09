@@ -35,13 +35,16 @@ OUTPUT_DIR = os.path.join(
     "generated",
     os.path.splitext(os.path.basename(__file__))[0],
 )
+SEGMENTS_DIR = os.path.join(OUTPUT_DIR, "segments")
+
 pending_subtitles: dict[int, dict] = {}  # utterance_id → partial/complete data
 
 # For safety — clean up entries older than ~30 utterances
 MAX_PENDING = 50
 
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(SEGMENTS_DIR, exist_ok=True)
+
 ALL_SPEECH_META_PATH = os.path.join(OUTPUT_DIR, "all_speech_meta.json")
 ALL_TRANSLATION_META_PATH = os.path.join(OUTPUT_DIR, "all_translation_meta.json")
 ALL_SPEECH_PROBS_INDEX_PATH = os.path.join(OUTPUT_DIR, "all_speech_probs.json")
@@ -154,8 +157,6 @@ async def stream_microphone(ws) -> None:
     max_energy: float = 0.0  # peak RMS in segment
     min_energy: float = float("inf")  # lowest RMS in speech chunk
 
-    segments_dir = os.path.join(OUTPUT_DIR, "segments")
-    os.makedirs(segments_dir, exist_ok=True)
     current_segment_num: int | None = None
     current_segment_buffer: bytearray | None = None
     speech_chunks_in_segment: int = 0
@@ -346,7 +347,7 @@ async def stream_microphone(ws) -> None:
                                 len(
                                     [
                                         d
-                                        for d in os.listdir(segments_dir)
+                                        for d in os.listdir(SEGMENTS_DIR)
                                         if d.startswith("segment_")
                                     ]
                                 )
@@ -475,7 +476,7 @@ async def stream_microphone(ws) -> None:
                                 and current_segment_buffer is not None
                             ):
                                 segment_dir = os.path.join(
-                                    segments_dir, f"segment_{current_segment_num:04d}"
+                                    SEGMENTS_DIR, f"segment_{current_segment_num:04d}"
                                 )
                                 os.makedirs(segment_dir, exist_ok=True)
 
@@ -1201,9 +1202,19 @@ def format_bytes(size: int) -> str:
     return f"{size:.1f} PB"
 
 
+def _on_clear():
+    log.info("Clear operation completed successfully ✓")
+    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    os.makedirs(SEGMENTS_DIR, exist_ok=True)
+
+
 if __name__ == "__main__":
     app = QApplication([])  # Re-uses existing instance if any
-    overlay = LiveSubtitlesOverlay.create(app=app, title="Live Japanese Subtitles")
+    overlay = LiveSubtitlesOverlay.create(
+        app=app,
+        title="Live Japanese Subtitles",
+        on_clear=_on_clear,
+    )
 
     def recording_thread() -> None:
         asyncio.run(main())
