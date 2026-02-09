@@ -1,409 +1,306 @@
-# live_subtitles_client.py
+# JetScripts/audio/run_record_mic_speech_detection.py
 
-import os
-import shutil
+import argparse
 import asyncio
 import base64
 import json
-import logging
-import time
-from collections import deque
-from dataclasses import dataclass
-from typing import Deque
+import os
+import shutil
+import threading
+from pathlib import Path
 
-import sounddevice as sd
+import numpy as np
 import websockets
-from pysilero_vad import SileroVoiceActivityDetector
-from rich.logging import RichHandler
-import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
-import numpy as np  # needed for saving wav with frombuffer
+from jet.audio.helpers.silence import SAMPLE_RATE
+from jet.audio.record_mic_speech_detection import record_from_mic
+from jet.audio.speech.silero.speech_types import SpeechSegment
+from jet.audio.speech.wav_utils import save_wav_file
+from jet.file.utils import save_file
+from jet.logger import logger
 
-import datetime
-
-OUTPUT_DIR = os.path.join(
-    os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
+OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# =============================
-# Logging setup
-# =============================
+WS_URI = os.getenv("LOCAL_WS_IP", "ws://127.0.0.1:8765")
+SEND_TO_WEBSOCKET = True  # Can be overridden by CLI
+SAVE_LOCALLY = True
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True, markup=True)]
-)
-log = logging.getLogger("mic-streamer")
+segment_dirs: dict[
+    int, Path
+] = {}  # segment_num → segment_dir (for saving subtitle later)
 
-# =============================
-# Configuration (now flexible)
-# =============================
+SRT_PATH = OUTPUT_DIR / "full_subtitles.srt"
+srt_lock: asyncio.Lock | None = None
+total_srt_duration: float = 0.0
 
-@dataclass(frozen=True)
-class Config:
-    ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
-    sample_rate: int = 16000
-    channels: int = 1
-    dtype: str = "int16"
-    vad_threshold: float = 0.5
-    vad_model_path: str | None = None  # allow custom model if needed
-    max_rtt_history: int = 10
-    reconnect_attempts: int = 5
-    reconnect_delay: float = 3.0
 
-config = Config()
+def save_segment_data(speech_seg: SpeechSegment, seg_audio_np: np.ndarray):
+    segment_root = Path(OUTPUT_DIR) / "segments"
+    segment_root.mkdir(parents=True, exist_ok=True)
 
-# =============================
-# SRT global state for subtitle syncing
-# =============================
-
-# Global SRT sequence counter (1-based)
-srt_sequence = 1
-
-# Track when each segment actually started (wall-clock time)
-segment_start_wallclock: dict[int, float] = {}  # segment_num → time.time()
-
-# =============================
-# Initialize Silero VAD - STATIC INFO ONLY
-# =============================
-
-# Use static constants - safe without instance
-VAD_CHUNK_SAMPLES = SileroVoiceActivityDetector.chunk_samples()
-VAD_CHUNK_BYTES = SileroVoiceActivityDetector.chunk_bytes()
-log.info("[VAD] chunk_samples=%s, chunk_bytes=%s", VAD_CHUNK_SAMPLES, VAD_CHUNK_BYTES)
-
-# =============================
-# RTT tracking – fixed & improved
-# =============================
-
-ProcessingTime = float
-recent_rtts: Deque[ProcessingTime] = deque(maxlen=config.max_rtt_history)
-pending_sends: deque[float] = deque()  # One entry per sent chunk
-
-# =============================
-# Audio capture + streaming (with segment & silence tracking)
-# =============================
-
-async def stream_microphone(ws) -> None:
-    # Lazy instantiate VAD only when streaming starts
-    model_path = config.vad_model_path
-    if model_path is None:
-        # Use bundled default as per library design
-        from pysilero_vad import _DEFAULT_MODEL_PATH
-        model_path = _DEFAULT_MODEL_PATH
-    vad = SileroVoiceActivityDetector(model_path)
-
-    # Speech segment tracking
-    speech_start_time: float | None = None
-    current_speech_seconds: float = 0.0
-    silence_start_time: float | None = None
-    max_silence_seconds: float = 1.5  # Stop segment after 1.5s silence
-
-    segments_dir = os.path.join(OUTPUT_DIR, "segments")
-    os.makedirs(segments_dir, exist_ok=True)
-    current_segment_num: int | None = None
-    current_segment_buffer: bytearray | None = None
-    speech_chunks_in_segment: int = 0
-
-    pcm_buffer = bytearray()
-    chunks_sent = 0
-    chunks_detected = 0
-    total_chunks_processed = 0
-
-    def audio_callback(indata, frames: int, time_, status) -> None:
-        nonlocal pcm_buffer
-        if status:
-            log.warning("Audio callback status: %s", status)
-        pcm_buffer.extend(bytes(indata))
-
-    with sd.RawInputStream(
-        samplerate=config.sample_rate,
-        blocksize=VAD_CHUNK_SAMPLES,
-        channels=config.channels,
-        dtype=config.dtype,
-        callback=audio_callback,
-    ) as stream:
-        log.info("[microphone] Microphone streaming started")
+    # Find next available segment directory name (segment_001, segment_002, ...)
+    existing = sorted(segment_root.glob("segment_*"))
+    used_numbers = set()
+    for seg in existing:
         try:
-            while True:
-                await asyncio.sleep(0.01)
-                processed = 0
-                while len(pcm_buffer) >= VAD_CHUNK_BYTES:
-                    chunk = bytes(pcm_buffer[:VAD_CHUNK_BYTES])
-                    del pcm_buffer[:VAD_CHUNK_BYTES]
-                    total_chunks_processed += 1
+            used_numbers.add(int(seg.name.split("_")[1]))
+        except Exception:
+            continue
 
-                    speech_prob: float = vad(chunk)
-                    if speech_prob >= config.vad_threshold:
-                        chunks_detected += 1
-                        processed += 1
-                        # Reset silence timer
-                        silence_start_time = None
-                        if speech_start_time is None:
-                            speech_start_time = time.monotonic()
-                            # Start new segment
-                            current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
-                            segment_start_wallclock[current_segment_num] = time.time()
-                            current_segment_buffer = bytearray()
-                            speech_chunks_in_segment = 0  # reset for new segment
-                            log.info("[speech] Speech started | segment_%04d", current_segment_num)
-                        # Append chunk to current segment buffer
-                        if current_segment_buffer is not None:
-                            current_segment_buffer.extend(chunk)
-                            speech_chunks_in_segment += 1  # count chunk in segment
-                        send_start = time.monotonic()
-                        pending_sends.append(send_start)
-                        payload = {
-                            "type": "audio",
-                            "sample_rate": config.sample_rate,
-                            "pcm": base64.b64encode(chunk).decode("ascii"),
-                        }
-                        try:
-                            await ws.send(json.dumps(payload))
-                            chunks_sent += 1
-                        except websockets.ConnectionClosed:
-                            log.warning("WebSocket closed during send")
-                            return
-                    else:
-                        # Silence chunk
-                        if speech_start_time is not None and silence_start_time is None:
-                            silence_start_time = time.monotonic()
-                        # Check if silence too long → end segment
-                        if (speech_start_time is not None and silence_start_time is not None
-                            and time.monotonic() - silence_start_time > max_silence_seconds):
-                            # Compute precise duration using number of samples in the segment buffer
-                            if current_segment_buffer is not None:
-                                num_samples = len(current_segment_buffer) // 2  # int16 = 2 bytes
-                                duration = num_samples / config.sample_rate
-                            else:
-                                num_samples = 0
-                                duration = 0.0
+    # Pick smallest unused positive integer for segment id/dir
+    seg_number = 1
+    while seg_number in used_numbers:
+        seg_number += 1
 
-                            log.info(
-                                "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
-                                duration, speech_chunks_in_segment
+    seg_dir = segment_root / f"segment_{seg_number:03d}"
+    seg_dir.mkdir(parents=True, exist_ok=True)
+
+    wav_path = seg_dir / "sound.wav"
+    metadata_path = seg_dir / "metadata.json"
+
+    seg_sound_file = save_wav_file(wav_path, seg_audio_np)
+    metadata_path.write_text(json.dumps(speech_seg, indent=2), encoding="utf-8")
+
+    logger.success(f"Segment {seg_number} data saved to:")
+    logger.success(seg_sound_file, bright=True)
+    logger.success(metadata_path, bright=True)
+
+    # Remember this directory for later subtitle saving
+    if SAVE_LOCALLY:
+        segment_dirs[seg_number] = seg_dir
+
+    return seg_number, seg_dir  # return for potential use
+
+
+def audio_float32_to_pcm_base64(audio: np.ndarray) -> str:
+    """Convert normalized float32 [-1,1] → int16 PCM → base64"""
+    if audio.dtype != np.float32:
+        audio = audio.astype(np.float32)
+    int16 = np.clip(audio * 32767.0, -32768.0, 32767.0).astype(np.int16)
+    pcm_bytes = int16.tobytes()
+    return base64.b64encode(pcm_bytes).decode("ascii")
+
+
+async def send_segment(
+    websocket, speech_seg: SpeechSegment, audio_np: np.ndarray, seg_idx: int
+):
+    duration_sec = len(audio_np) / SAMPLE_RATE
+    payload = {
+        "type": "complete_utterance",
+        "pcm": audio_float32_to_pcm_base64(audio_np),
+        "sample_rate": int(SAMPLE_RATE),
+        "duration_sec": round(duration_sec, 3),
+        "segment_num": seg_idx,
+        # optional extras
+        "avg_vad_confidence": speech_seg.get("confidence", None),
+    }
+    try:
+        await websocket.send(json.dumps(payload, ensure_ascii=False))
+        logger.info(f"[WS] Sent segment {seg_idx}  | {duration_sec:.2f}s")
+    except Exception as e:
+        logger.error(f"[WS] Failed to send segment {seg_idx}: {e}")
+
+
+async def receive_subtitles(websocket, subtitles_list: list[dict]):
+    """Background task: listen for final_subtitle messages from server"""
+    try:
+        async for message in websocket:
+            try:
+                data = json.loads(message)
+                if data.get("type") == "final_subtitle":
+                    logger.success(
+                        f"[WS] Received final_subtitle | utterance {data.get('utterance_id')}"
+                    )
+                    subtitles_list.append(data)
+
+                    # --- Incremental SRT append (non-blocking) ---
+                    global total_srt_duration
+                    duration = data.get("duration_sec", 0.0)
+
+                    start_sec = total_srt_duration
+                    end_sec = start_sec + duration
+                    total_srt_duration += duration
+
+                    def format_srt_time(seconds: float) -> str:
+                        hours = int(seconds // 3600)
+                        minutes = int((seconds % 3600) // 60)
+                        secs = int(seconds % 60)
+                        millis = int((seconds - int(seconds)) * 1000)
+                        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+                    index = len(subtitles_list)
+                    text = data.get("translation_en", "").strip()
+
+                    if text and srt_lock:
+                        async with srt_lock:
+                            block = (
+                                f"{index}\n"
+                                f"{format_srt_time(start_sec)} --> {format_srt_time(end_sec)}\n"
+                                f"{text}\n\n"
                             )
 
-                            # Save segment audio + metadata
-                            if current_segment_num is not None and current_segment_buffer is not None:
-                                segment_dir = os.path.join(segments_dir, f"segment_{current_segment_num:04d}")
-                                os.makedirs(segment_dir, exist_ok=True)
-
-                                # Compute precise duration from audio length
-                                num_samples = len(current_segment_buffer) // 2  # int16 = 2 bytes per sample
-                                duration = num_samples / config.sample_rate
-
-                                wav_path = os.path.join(segment_dir, "sound.wav")
-                                wavfile.write(
-                                    wav_path,
-                                    config.sample_rate,
-                                    np.frombuffer(current_segment_buffer, dtype=np.int16)
+                            await asyncio.to_thread(
+                                lambda: SRT_PATH.open("a", encoding="utf-8").write(
+                                    block
                                 )
+                            )
 
-                                metadata = {
-                                    "segment_id": current_segment_num,
-                                    "duration_seconds": round(duration, 3),
-                                    "approx_time_duration_seconds": round(time.monotonic() - speech_start_time, 3),
-                                    "num_chunks": speech_chunks_in_segment,
-                                    "num_samples": num_samples,
-                                    "start_time_monotonic": speech_start_time,
-                                    "end_time_monotonic": time.monotonic(),
-                                    "sample_rate": config.sample_rate,
-                                    "channels": config.channels,
-                                }
-                                meta_path = os.path.join(segment_dir, "metadata.json")
-                                with open(meta_path, "w", encoding="utf-8") as f:
-                                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+                    # Optional: pretty-print received subtitle
+                    ja = data.get("transcription_ja", "").strip()
+                    en = data.get("translation_en", "").strip()
+                    logger.info(f"  JA: {ja[:80]}{'...' if len(ja) > 80 else ''}")
+                    logger.info(f"  EN: {en[:80]}{'...' if len(en) > 80 else ''}")
 
-                                # log.info("[save] Segment saved → %s | precise_duration: %.3fs", segment_dir, duration)
+                    # Try to save per-segment subtitle file
+                    seg_num = data.get("segment_num")
+                    if seg_num is not None and seg_num in segment_dirs:
+                        seg_dir = segment_dirs[seg_num]
+                        subtitle_path = seg_dir / "subtitle.json"
+                        with subtitle_path.open("w", encoding="utf-8") as f:
+                            json.dump(data, f, ensure_ascii=False, indent=2)
+                        logger.success(f"Saved per-segment subtitle → {subtitle_path}")
+                    elif seg_num is not None:
+                        logger.warning(
+                            f"No matching segment folder found for segment_num={seg_num}"
+                        )
 
-                            # Signal end of utterance to server
-                            try:
-                                await ws.send(json.dumps({"type": "end_of_utterance"}))
-                                log.info("[speech → server] Sent end_of_utterance marker")
-                            except websockets.ConnectionClosed:
-                                log.warning("WebSocket closed while sending end marker")
-                                return
-
-                            speech_start_time = None
-                            silence_start_time = None
-                            current_segment_num = None
-                            current_segment_buffer = None
-                            speech_chunks_in_segment = 0  # reset counter
-
-                    # if speech_prob >= config.vad_threshold:
-                    #     avg_rtt = sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
-                    #     log.info(
-                    #         "[speech → server] Sent chunk %d | prob: %.3f | segment: %.2fs%s",
-                    #         chunks_sent,
-                    #         speech_prob,
-                    #         time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
-                    #         f" | avg_rtt: {avg_rtt:.3f}s" if avg_rtt is not None else ""
-                    #     )
-                # if processed > 0:
-                #     log.debug("Processed %d speech chunk(s) this cycle", processed)
-                # Periodic status update
-                if total_chunks_processed % 100 == 0:
-                    status = "SPEAKING" if speech_start_time else "SILENCE"
-                    seg_dur = time.monotonic() - speech_start_time if speech_start_time else 0.0
-                    log.info(
-                        "[status] chunks_processed: %d | sent: %d | detected: %d | state: %s | seg: %.2fs",
-                        total_chunks_processed, chunks_sent, chunks_detected, status, seg_dur
+                else:
+                    logger.debug(
+                        f"[WS] Received unknown message type: {data.get('type')}"
                     )
-        except asyncio.CancelledError:
-            log.info("[task] Streaming task cancelled")
-            raise
-        finally:
-            log.info(
-                "[microphone] Stopped | Processed: %d | Detected: %d | Sent: %d",
-                total_chunks_processed, chunks_detected, chunks_sent
-            )
-            if recent_rtts:
-                log.info("Final avg server processing time: %.3fs", sum(recent_rtts) / len(recent_rtts))
+            except json.JSONDecodeError:
+                logger.warning("[WS] Invalid JSON received from server")
+            except Exception as e:
+                logger.error(f"[WS] Error processing incoming message: {e}")
+    except websockets.exceptions.ConnectionClosed:
+        logger.info("[WS] Server closed connection")
+    except Exception as e:
+        logger.error(f"[WS] Receiver task error: {e}")
 
-# =============================
-# Subtitle SRT writing helpers
-# =============================
-
-def write_srt_block(
-    sequence: int,
-    start_sec: float,
-    duration_sec: float,
-    ja: str,
-    en: str,
-    file_path: str | os.PathLike
-) -> None:
-    """Append one subtitle block to an SRT file."""
-    start_dt = datetime.datetime.fromtimestamp(start_sec)
-    end_dt   = datetime.datetime.fromtimestamp(start_sec + duration_sec)
-
-    start_str = start_dt.strftime("%H:%M:%S") + f",{int((start_dt.microsecond / 1000)) :03d}"
-    end_str   = end_dt.strftime("%H:%M:%S")   + f",{int((end_dt.microsecond / 1000))   :03d}"
-
-    block = (
-        f"{sequence}\n"
-        f"{start_str} --> {end_str}\n"
-        f"{ja.strip()}\n"
-        f"{en.strip()}\n"
-        "\n"
-    )
-
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, "a", encoding="utf-8") as f:
-        f.write(block)
-
-    # log.info("[SRT] Appended block #%d to %s", sequence, os.path.basename(file_path))
-
-# =============================
-# Subtitles/RTT receiver with SRT writing
-# =============================
-
-async def receive_subtitles(ws) -> None:
-    global srt_sequence
-
-    all_srt_path = os.path.join(OUTPUT_DIR, "all_subtitles.srt")
-
-    async for msg in ws:
-        try:
-            data = json.loads(msg)
-            if data.get("type") != "subtitle":
-                continue
-
-            ja = data.get("transcription", "").strip()
-            en = data.get("translation", "").strip()
-            utterance_id = data.get("utterance_id")
-            duration_sec = data.get("duration_sec", 0.0)
-
-            if pending_sends:
-                rtt = time.monotonic() - pending_sends.popleft()
-                recent_rtts.append(rtt)
-
-            if not (ja or en):
-                log.debug("[subtitle] Empty transcription received")
-                continue
-
-            log.info("[subtitle] JA: %s", ja)
-            if en:
-                log.info("[subtitle] EN: %s", en)
-
-            # Find which segment this belongs to (utterance_id == segment_num)
-            segment_num = utterance_id + 1   # usually 0-based from server → 1-based folder
-            segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
-
-            start_time = segment_start_wallclock.get(segment_num)
-            if start_time is None:
-                log.warning("[SRT] No start time recorded for segment_%04d — using current time", segment_num)
-                start_time = time.time() - duration_sec
-
-            # Write per-segment SRT
-            per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
-            write_srt_block(
-                sequence=srt_sequence,
-                start_sec=start_time,
-                duration_sec=duration_sec,
-                ja=ja,
-                en=en,
-                file_path=per_seg_srt
-            )
-
-            # Append to global SRT
-            write_srt_block(
-                sequence=srt_sequence,
-                start_sec=start_time,
-                duration_sec=duration_sec,
-                ja=ja,
-                en=en,
-                file_path=all_srt_path
-            )
-
-            srt_sequence += 1
-
-        except Exception as e:
-            log.exception("[subtitle receive] Error processing message: %s", e)
-
-# =============================
-# Main with reconnection logic
-# =============================
-
-async def main() -> None:
-    attempt = 0
-    while True:
-        try:
-            async with websockets.connect(
-                config.ws_url,
-                max_size=None,
-                compression=None,
-                ping_interval=30,
-                ping_timeout=30,
-                close_timeout=10,
-            ) as ws:
-                attempt = 0  # reset on success
-                log.info("Connected to %s", config.ws_url)
-                await asyncio.gather(
-                    stream_microphone(ws),
-                    receive_subtitles(ws),
-                )
-                break  # normal exit
-
-        except (websockets.ConnectionClosedOK, websockets.ConnectionClosedError):
-            log.warning("Connection closed")
-        except OSError as e:
-            log.error("Network error: %s", e)
-        except Exception as e:
-            log.exception("Unexpected error: %s", e)
-
-        attempt += 1
-        if attempt >= config.reconnect_attempts:
-            log.error("Max reconnection attempts reached. Exiting.")
-            break
-
-        delay = config.reconnect_delay * (2 ** (attempt - 1))  # exponential backoff
-        log.info("Reconnecting in %.1fs (attempt %d/%d)...", delay, attempt, config.reconnect_attempts)
-        await asyncio.sleep(delay)
-
-    log.info("Client shutdown complete")
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--ws",
+        action="store_true",
+        default=SEND_TO_WEBSOCKET,
+        help="Send segments to live subtitles websocket",
+    )
+    parser.add_argument(
+        "--no-save", action="store_true", help="Disable local file saving"
+    )
+    args = parser.parse_args()
+
+    # Update module-level flags (no global keyword needed)
+    SEND_TO_WEBSOCKET = args.ws
+    SAVE_LOCALLY = not args.no_save
+
+    duration_seconds = None
+    trim_silent = True
+    quit_on_silence = False
+
+    async def main():
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+
+        global srt_lock, total_srt_duration
+        srt_lock = asyncio.Lock()
+        total_srt_duration = 0.0
+
+        SRT_PATH.write_text("", encoding="utf-8")  # reset file at start
+
+        def mic_worker():
+            for item in record_from_mic(
+                duration_seconds,
+                trim_silent=trim_silent,
+                quit_on_silence=quit_on_silence,
+            ):
+                asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+
+        mic_thread = threading.Thread(target=mic_worker, daemon=True)
+        mic_thread.start()
+
+        websocket = None
+        segment_counter = 0
+        received_subtitles: list[dict] = []
+
+        # Clear any old mapping
+        segment_dirs.clear()
+
+        if SEND_TO_WEBSOCKET:
+            try:
+                websocket = await websockets.connect(WS_URI)
+                logger.success(f"Connected to live subtitles server → {WS_URI}")
+            except Exception as e:
+                logger.error(f"Cannot connect to WebSocket: {e}")
+                websocket = None
+
+        # Start receiver task if connected
+        receiver_task = None
+        if websocket:
+            receiver_task = asyncio.create_task(
+                receive_subtitles(websocket, received_subtitles)
+            )
+
+        segments: list[dict] = []
+
+        try:
+            while True:
+                speech_seg, seg_audio_np, full_audio_np = await queue.get()
+
+                speech_seg_copy = speech_seg.copy()
+                for key in ["start", "end"]:
+                    if key in speech_seg_copy:
+                        speech_seg_copy[key] = round(
+                            speech_seg_copy[key] / SAMPLE_RATE, 3
+                        )
+
+                segment_counter += 1
+
+                if SAVE_LOCALLY:
+                    seg_number, _ = save_segment_data(speech_seg_copy, seg_audio_np)
+                segments.append(speech_seg_copy)
+                save_file(segments, OUTPUT_DIR / "all_segments.json", verbose=False)
+
+                output_file = f"{OUTPUT_DIR}/full_recording.wav"
+                save_wav_file(output_file, full_audio_np)
+
+                if SEND_TO_WEBSOCKET and websocket:
+                    # Send sequentially (safe and ordered)
+                    await send_segment(
+                        websocket, speech_seg_copy, seg_audio_np, segment_counter
+                    )
+
+        except KeyboardInterrupt:
+            logger.info("Recording stopped by user")
+
+        finally:
+            # Give receiver some time to get pending responses
+            if receiver_task:
+                await asyncio.sleep(2.0)
+                receiver_task.cancel()
+                try:
+                    await receiver_task
+                except asyncio.CancelledError:
+                    pass
+
+            if websocket:
+                try:
+                    await websocket.close()
+                    logger.info("WebSocket connection closed")
+                except Exception:
+                    pass
+
+            # Save collected subtitles
+            if received_subtitles:
+                json_path = OUTPUT_DIR / "subtitles_raw.json"
+
+                save_file(received_subtitles, json_path, verbose=True)
+                logger.success(f"Collected {len(received_subtitles)} subtitle entries")
+            else:
+                logger.info("No subtitles received from server")
+
     asyncio.run(main())
