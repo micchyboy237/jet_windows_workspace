@@ -25,8 +25,8 @@ from rich.logging import RichHandler
 from utils import split_sentences_ja
 import threading
 
-from segment_speaker_labeler import SegmentSpeakerLabeler
-from segment_emotion_classifier import SegmentEmotionClassifier
+# from segment_speaker_labeler import SegmentSpeakerLabeler
+# from segment_emotion_classifier import SegmentEmotionClassifier
 
 
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
@@ -120,8 +120,8 @@ from translate_jp_en import (
     translation_confidence_score,
 )
 
-logger.info("Loading speaker labeler pyannote model & clustering strategy...")
-labeler = SegmentSpeakerLabeler()
+# logger.info("Loading speaker labeler pyannote model & clustering strategy...")
+# labeler = SegmentSpeakerLabeler()
 
 # logger.info("Loading emotion classifier model...")
 # emotion_classifier = SegmentEmotionClassifier(device=-1)
@@ -465,46 +465,46 @@ async def handler(websocket):
                     await websocket.send(json.dumps(text_payload, ensure_ascii=False))
                     logger.info(f"[{client_id}] sent final_subtitle #{current_utterance_idx}")
 
-                    # 6. Speaker analysis
-                    audio_curr = None
-                    audio_prev = None
-                    cluster_speakers = None
-                    similarity_prev = None
-                    is_same_speaker_as_prev = False
-
-                    if len(curr_buffer) > 0:
-                        try:
-                            audio_curr = pcm_bytes_to_waveform(curr_buffer)
-
-                            if prev_buffer is not None and len(prev_buffer) > 0:
-                                audio_prev = pcm_bytes_to_waveform(prev_buffer)
-
-                                cluster_results = labeler.cluster_segments([audio_prev, audio_curr])
-                                if len(cluster_results) == 2:
-                                    cluster_speakers = cluster_results
-                                    similarity_prev = labeler.similarity(audio_curr, audio_prev)
-                                    is_same_speaker_as_prev = labeler.is_same_speaker(audio_curr, audio_prev)
-
-                        except Exception as e:
-                            logger.exception(f"Speaker clustering failed for utterance #{current_utterance_idx}: {e}")
-                    else:
-                        logger.warning(f"[{client_id}] Skipping speaker analysis — empty current buffer (utterance #{current_utterance_idx})")
-
-                    # Send speaker payload
-                    speaker_payload = {
-                        "type": "speaker_update",
-                        "utterance_id": current_utterance_idx,
-                        "segment_idx": curr_segment_idx,
-                        "segment_num": curr_segment_num,
-                        "segment_type": "speech",
-                        "is_same_speaker_as_prev": is_same_speaker_as_prev,
-                        "similarity_prev": similarity_prev,
-                        "cluster_speakers": cluster_speakers,
-                    }
-                    await websocket.send(json.dumps(speaker_payload, ensure_ascii=False))
-                    logger.info(f"[{client_id}] sent speaker_update #{current_utterance_idx}")
-
                     # Handle both "speech" and "non_speech"
+
+                    # # 6. Speaker analysis
+                    # audio_curr = None
+                    # audio_prev = None
+                    # cluster_speakers = None
+                    # similarity_prev = None
+                    # is_same_speaker_as_prev = False
+
+                    # if len(curr_buffer) > 0:
+                    #     try:
+                    #         audio_curr = pcm_bytes_to_waveform(curr_buffer)
+
+                    #         if prev_buffer is not None and len(prev_buffer) > 0:
+                    #             audio_prev = pcm_bytes_to_waveform(prev_buffer)
+
+                    #             cluster_results = labeler.cluster_segments([audio_prev, audio_curr])
+                    #             if len(cluster_results) == 2:
+                    #                 cluster_speakers = cluster_results
+                    #                 similarity_prev = labeler.similarity(audio_curr, audio_prev)
+                    #                 is_same_speaker_as_prev = labeler.is_same_speaker(audio_curr, audio_prev)
+
+                    #     except Exception as e:
+                    #         logger.exception(f"Speaker clustering failed for utterance #{current_utterance_idx}: {e}")
+                    # else:
+                    #     logger.warning(f"[{client_id}] Skipping speaker analysis — empty current buffer (utterance #{current_utterance_idx})")
+
+                    # # Send speaker payload
+                    # speaker_payload = {
+                    #     "type": "speaker_update",
+                    #     "utterance_id": current_utterance_idx,
+                    #     "segment_idx": curr_segment_idx,
+                    #     "segment_num": curr_segment_num,
+                    #     "segment_type": "speech",
+                    #     "is_same_speaker_as_prev": is_same_speaker_as_prev,
+                    #     "similarity_prev": similarity_prev,
+                    #     "cluster_speakers": cluster_speakers,
+                    # }
+                    # await websocket.send(json.dumps(speaker_payload, ensure_ascii=False))
+                    # logger.info(f"[{client_id}] sent speaker_update #{current_utterance_idx}")
 
                     # # --- Emotion classification for this utterance ---
                     # # classify current speech buffer
