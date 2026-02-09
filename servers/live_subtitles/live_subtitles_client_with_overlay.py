@@ -1,37 +1,40 @@
 # live_subtitles_client_with_overlay.py
 
-import contextlib
-import os
-from pathlib import Path
-import shutil
 import asyncio
 import base64
+import contextlib
+import datetime
 import json
-import time
+import os
 import queue
+import shutil
+import sys
+import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Literal
+from pathlib import Path
+from threading import Thread
+from typing import Literal
 
+import numpy as np  # needed for saving wav with frombuffer
+import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
 import sounddevice as sd
 import websockets
-from pysilero_vad import SileroVoiceActivityDetector
-# from rich.logging import RichHandler
-from jet.logger import logger as log
-import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
-import numpy as np  # needed for saving wav with frombuffer
-
-import datetime
-
-import sys
-from threading import Thread
-from PyQt6.QtWidgets import QApplication
 from jet.audio.helpers.base import audio_buffer_duration
 from jet.audio.helpers.energy import compute_rms, rms_to_loudness_label
+from jet.audio.norm.norm_speech_loudness import normalize_speech_loudness
+
+# from rich.logging import RichHandler
+from jet.logger import logger as log
 from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
+from PyQt6.QtWidgets import QApplication
+from pysilero_vad import SileroVoiceActivityDetector
 
 OUTPUT_DIR = os.path.join(
-    os.path.dirname(__file__), "generated", os.path.splitext(os.path.basename(__file__))[0])
+    os.path.dirname(__file__),
+    "generated",
+    os.path.splitext(os.path.basename(__file__))[0],
+)
 pending_subtitles: dict[int, dict] = {}  # utterance_id → partial/complete data
 
 # For safety — clean up entries older than ~30 utterances
@@ -56,22 +59,24 @@ _audio_buffer_is_dirty: bool = False
 # Configuration (now flexible)
 # =============================
 
+
 @dataclass(frozen=True)
 class Config:
     ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
-    min_speech_duration: float = 0.25         # JP backchannels: 「はい」「え？」
+    min_speech_duration: float = 0.25  # JP backchannels: 「はい」「え？」
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
-    vad_threshold: float = 0.3                 # kept for logging / legacy
-    vad_start_threshold: float = 0.3          # NEW: hysteresis start
-    vad_end_threshold: float = 0.1            # NEW: hysteresis end
-    pre_roll_seconds: float = 0.30             # NEW: capture mora onsets
-    max_silence_seconds: float = 0.9           # JP clause pauses
+    vad_threshold: float = 0.3  # kept for logging / legacy
+    vad_start_threshold: float = 0.3  # NEW: hysteresis start
+    vad_end_threshold: float = 0.1  # NEW: hysteresis end
+    pre_roll_seconds: float = 0.30  # NEW: capture mora onsets
+    max_silence_seconds: float = 0.9  # JP clause pauses
     vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
     reconnect_delay: float = 3.0
+
 
 config = Config()
 
@@ -99,7 +104,7 @@ log.info("[VAD] chunk_samples=%s, chunk_bytes=%s", VAD_CHUNK_SAMPLES, VAD_CHUNK_
 
 audio_buffer: deque[
     tuple[float, bytes, float, float, Literal["speech", "non_speech", "silent"]]
-] = deque()   # (time, pcm, vad_prob, rms, chunk_type)
+] = deque()  # (time, pcm, vad_prob, rms, chunk_type)
 
 # NEW: pre-roll buffer for safe speech onset
 pre_roll_buffer: deque[bytes] = deque(
@@ -111,12 +116,13 @@ pre_roll_buffer: deque[bytes] = deque(
 # =============================
 
 ProcessingTime = float
-recent_rtts: Deque[ProcessingTime] = deque(maxlen=config.max_rtt_history)
+recent_rtts: deque[ProcessingTime] = deque(maxlen=config.max_rtt_history)
 pending_sends: deque[float] = deque()  # One entry per sent chunk
 
 # =============================
 # Audio capture + streaming (with segment & silence tracking)
 # =============================
+
 
 async def stream_microphone(ws) -> None:
     # Lazy instantiate VAD only when streaming starts
@@ -124,6 +130,7 @@ async def stream_microphone(ws) -> None:
     if model_path is None:
         # Use bundled default as per library design
         from pysilero_vad import _DEFAULT_MODEL_PATH
+
         model_path = _DEFAULT_MODEL_PATH
     vad = SileroVoiceActivityDetector(model_path)
 
@@ -134,19 +141,19 @@ async def stream_microphone(ws) -> None:
     speech_start_time: float | None = None
     current_speech_seconds: float = 0.0
     silence_start_time: float | None = None
-    max_vad_confidence: float = 0.0           # ← new
-    last_vad_confidence: float = 0.0          # ← new
+    max_vad_confidence: float = 0.0  # ← new
+    last_vad_confidence: float = 0.0  # ← new
     speech_duration_sec: float = 0.0
-    first_vad_confidence: float = 0.0         # ← new: confidence of the first speech chunk
-    min_vad_confidence: float = 1.0           # ← new: lowest confidence during speech
-    vad_confidence_sum: float = 0.0           # ← new: for average calculation
-    speech_chunk_count: int = 0               # ← new: number of speech chunks (for avg)
+    first_vad_confidence: float = 0.0  # ← new: confidence of the first speech chunk
+    min_vad_confidence: float = 1.0  # ← new: lowest confidence during speech
+    vad_confidence_sum: float = 0.0  # ← new: for average calculation
+    speech_chunk_count: int = 0  # ← new: number of speech chunks (for avg)
 
     # ← NEW: audio energy tracking
-    speech_energy_sum: float = 0.0          # sum of RMS values for speech chunks
+    speech_energy_sum: float = 0.0  # sum of RMS values for speech chunks
     speech_energy_sum_squares: float = 0.0  # sum of squares for variance / std dev
-    max_energy: float = 0.0                 # peak RMS in segment
-    min_energy: float = float("inf")        # lowest RMS in speech chunk
+    max_energy: float = 0.0  # peak RMS in segment
+    min_energy: float = float("inf")  # lowest RMS in speech chunk
 
     segments_dir = os.path.join(OUTPUT_DIR, "segments")
     os.makedirs(segments_dir, exist_ok=True)
@@ -160,7 +167,7 @@ async def stream_microphone(ws) -> None:
     # NEW: decouple websocket sending from audio processing
     send_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=300)
 
-    speech_prob_history: list[float] = []           # ← NEW: per-segment VAD probs
+    speech_prob_history: list[float] = []  # ← NEW: per-segment VAD probs
     all_prob_history: list[float] = []
     chunk_type: Literal["speech", "non_speech", "silent"] = "silent"
     chunks_sent = 0
@@ -220,7 +227,11 @@ async def stream_microphone(ws) -> None:
                     # chunk is exactly VAD_CHUNK_BYTES long (sounddevice blocksize)
                     # but we double-check for safety
                     if len(chunk) != VAD_CHUNK_BYTES:
-                        log.warning("[audio] Unexpected chunk size: %d (expected %d)", len(chunk), VAD_CHUNK_BYTES)
+                        log.warning(
+                            "[audio] Unexpected chunk size: %d (expected %d)",
+                            len(chunk),
+                            VAD_CHUNK_BYTES,
+                        )
                         continue
 
                     # NEW: always keep pre-roll audio
@@ -230,7 +241,7 @@ async def stream_microphone(ws) -> None:
 
                     # ← NEW: compute RMS energy for this chunk
                     chunk_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
-                    rms = np.sqrt(np.mean(chunk_np ** 2))
+                    rms = np.sqrt(np.mean(chunk_np**2))
 
                     has_sound = rms > 0.0  # diagnostic only (do NOT gate speech)
 
@@ -256,16 +267,50 @@ async def stream_microphone(ws) -> None:
 
                     chunk_type = "speech" if is_speech_chunk else "non_speech"
 
+                    # ────────────────────────────────────────────────
+                    # Temporary VAD debug logging ────────────────────
+                    # Option A: log EVERY chunk (good for short test runs)
+                    # log.debug(
+                    #     "[vad every] rms=%.4f | prob=%.3f | decision=%-9s | qsize=%3d | ongoing=%s",
+                    #     rms,
+                    #     speech_prob,
+                    #     "SPEECH" if is_speech_chunk else "non-speech",
+                    #     audio_queue.qsize(),
+                    #     "yes" if is_speech_ongoing else "no",
+                    # )
+
+                    # Option B: only log near-misses when NOT already speaking
+                    # (less spam during long silence periods)
+                    if (
+                        not is_speech_ongoing
+                        and 0.05 < speech_prob < config.vad_start_threshold
+                    ):
+                        log.info(
+                            "[near-miss] rms=%.4f | prob=%.3f | threshold=%.2f | would start? %s",
+                            rms,
+                            speech_prob,
+                            config.vad_start_threshold,
+                            "YES"
+                            if speech_prob >= config.vad_start_threshold
+                            else "no",
+                        )
+                    # ────────────────────────────────────────────────
+
                     if has_sound:
                         # Always add to continuous buffer (audible speech or non_speech)
                         chunk_time = time.monotonic()
                         global _audio_buffer_is_dirty
-                        audio_buffer.append((chunk_time, chunk, speech_prob, rms, chunk_type))
-                        audio_total_samples += len(chunk) // 2   # int16
+                        audio_buffer.append(
+                            (chunk_time, chunk, speech_prob, rms, chunk_type)
+                        )
+                        audio_total_samples += len(chunk) // 2  # int16
                         _audio_buffer_is_dirty = True
 
                     # Trim old data
-                    while audio_total_samples / config.sample_rate > CONTINUOUS_AUDIO_MAX_SECONDS:
+                    while (
+                        audio_total_samples / config.sample_rate
+                        > CONTINUOUS_AUDIO_MAX_SECONDS
+                    ):
                         if audio_buffer:
                             _, old_chunk, _, _, _ = audio_buffer.popleft()
                             audio_total_samples -= len(old_chunk) // 2
@@ -274,11 +319,12 @@ async def stream_microphone(ws) -> None:
                     if total_chunks_processed % 60 == 0 and total_chunks_processed > 0:
                         _write_last_5min_wav()
 
-
                     if len(all_prob_history) % 100 == 0:
                         # Save all probs
                         _append_to_global_all_probs(all_prob_history)
-                        all_prob_history = all_prob_history[-20:]   # optional: keep small overlap
+                        all_prob_history = all_prob_history[
+                            -20:
+                        ]  # optional: keep small overlap
 
                     if chunk_type == "speech":
                         chunks_detected += 1
@@ -295,7 +341,16 @@ async def stream_microphone(ws) -> None:
                             segment_type = "speech"
                             speech_start_time = time.monotonic()
                             # Start new segment
-                            current_segment_num = len([d for d in os.listdir(segments_dir) if d.startswith("segment_")]) + 1
+                            current_segment_num = (
+                                len(
+                                    [
+                                        d
+                                        for d in os.listdir(segments_dir)
+                                        if d.startswith("segment_")
+                                    ]
+                                )
+                                + 1
+                            )
                             segment_start_wallclock[current_segment_num] = time.time()
                             current_segment_buffer = bytearray()
 
@@ -304,36 +359,33 @@ async def stream_microphone(ws) -> None:
                                 current_segment_buffer.extend(pre_chunk)
 
                             speech_chunks_in_segment = 0  # reset for new segment
-                            max_vad_confidence = 0.0                # ← reset
-                            last_vad_confidence = 0.0               # ← reset
-                            first_vad_confidence = speech_prob      # ← capture first speech prob
-                            min_vad_confidence = speech_prob       # ← initialize min with first value
-                            vad_confidence_sum = 0.0               # ← reset
-                            speech_prob_history = []                # ← reset for new segment
-                            speech_chunk_count = 0                 # ← reset
+                            max_vad_confidence = 0.0  # ← reset
+                            last_vad_confidence = 0.0  # ← reset
+                            first_vad_confidence = (
+                                speech_prob  # ← capture first speech prob
+                            )
+                            min_vad_confidence = (
+                                speech_prob  # ← initialize min with first value
+                            )
+                            vad_confidence_sum = 0.0  # ← reset
+                            speech_prob_history = []  # ← reset for new segment
+                            speech_chunk_count = 0  # ← reset
                             # ← NEW resets
                             speech_energy_sum = 0.0
                             speech_energy_sum_squares = 0.0
                             max_energy = 0.0
                             min_energy = float("inf")
-                            log.success("[speech] Speech started | segment_%04d", current_segment_num)
+                            log.success(
+                                "[speech] Speech started | segment_%04d",
+                                current_segment_num,
+                            )
                             speech_duration_sec = 0.0
 
-                            # Signal start of utterance to server
-                            try:
-                                await send_queue.put({"type": "start_of_utterance"})
-
-                                log.success("[speech → server] Sent start_of_utterance marker", bright=True)
-                            except websockets.ConnectionClosed:
-                                log.warning("WebSocket closed while sending end marker")
-                                return
-                        # Append chunk to current segment buffer
-                        if current_segment_buffer is not None:
-                            current_segment_buffer.extend(chunk)
-                            speech_chunks_in_segment += 1  # count chunk in segment
                         # Accumulate for average
                         vad_confidence_sum += speech_prob
-                        speech_prob_history.append(speech_prob)         # ← NEW: store every accepted prob
+                        speech_prob_history.append(
+                            speech_prob
+                        )  # ← NEW: store every accepted prob
                         speech_chunk_count += 1
 
                         if rms > max_energy:
@@ -341,82 +393,33 @@ async def stream_microphone(ws) -> None:
                         if rms < min_energy:
                             min_energy = rms
                         speech_energy_sum += rms
-                        speech_energy_sum_squares += rms ** 2
-
-                        payload = {
-                            "type": "audio",
-                            "ongoing_speech": True,
-                            "chunk_type": "speech",
-                            "sample_rate": config.sample_rate,
-                            "pcm": base64.b64encode(chunk).decode("ascii"),
-                        }
-
+                        speech_energy_sum_squares += rms**2
                         speech_duration_sec += VAD_CHUNK_SAMPLES / config.sample_rate
-                        try:
-                            send_queue.put_nowait(payload)
-                        except asyncio.QueueFull:
-                            log.error("[ws] send queue full – dropping audio frame")
-
-                        chunks_sent += 1
-
+                        if current_segment_buffer is not None:
+                            speech_chunks_in_segment += 1
 
                     else:
-                        # Include non_speech chunks between speeches and trailing
-                        if is_speech_ongoing and chunk_type == "non_speech":
-
-                        # Inlude all non_speech chunks
-                        # if has_sound and chunk_type == "non_speech":
-
-                            # We are inside an utterance → send non-speech too
-                            payload = {
-                                "type": "audio",
-                                "ongoing_speech": is_speech_ongoing,
-                                "chunk_type": chunk_type,
-                                "sample_rate": config.sample_rate,
-                                "pcm": base64.b64encode(chunk).decode("ascii"),
-                            }
-                            try:
-                                send_queue.put_nowait(payload)
-                            except asyncio.QueueFull:
-                                log.error("[ws] send queue full – dropping audio frame")
-
-                            log.debug(
-                                "[non-speech → server] Sent chunk %d | rms=%.4f | speech=%.3f | dur=%.2fs | label=%s",
-                                chunks_sent,
-                                temp_rms,
-                                speech_prob,
-                                time.monotonic() - speech_start_time if speech_start_time else current_speech_seconds,
-                                # f" | RTT={avg_rtt:.3f}s" if avg_rtt is not None else "",
-                                # energy_info,
-                                energy_label
-                            )
-
                         # Silence chunk
                         if is_speech_ongoing and silence_start_time is None:
                             silence_start_time = time.monotonic()
                         # Check if silence too long → end segment
-                        if (is_speech_ongoing and silence_start_time is not None
-                            and time.monotonic() - silence_start_time > config.max_silence_seconds):
+                        if (
+                            is_speech_ongoing
+                            and silence_start_time is not None
+                            and time.monotonic() - silence_start_time
+                            > config.max_silence_seconds
+                        ):
                             # Compute precise duration using number of samples in the segment buffer
-                            duration = audio_buffer_duration(current_segment_buffer, config.sample_rate)
+                            duration = audio_buffer_duration(
+                                current_segment_buffer, config.sample_rate
+                            )
 
                             if speech_duration_sec < config.min_speech_duration:
                                 log.warning(
                                     "[speech] Segment too short (%.3fs < %.3fs) — discarded",
-                                    speech_duration_sec, config.min_speech_duration
+                                    speech_duration_sec,
+                                    config.min_speech_duration,
                                 )
-
-                                try:
-                                    await send_queue.put({
-                                        "type": "end_of_utterance",
-                                        "discarded": True,
-                                        "reason": "too_short",
-                                        "duration_sec": round(speech_duration_sec, 3),
-                                    })
-                                    log.info("[speech → server] Sent end_of_utterance (discarded)")
-                                except websockets.ConnectionClosed:
-                                    log.warning("WebSocket closed while sending discarded end marker")
-                                    return
 
                                 # Now reset local state
                                 segment_type = "non_speech"
@@ -428,28 +431,71 @@ async def stream_microphone(ws) -> None:
                                 speech_prob_history = []
                                 continue
 
-
                             log.success(
                                 "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
-                                duration, speech_chunks_in_segment
+                                duration,
+                                speech_chunks_in_segment,
+                            )
+                            # ------------------------------------------------------------------
+                            # Loudness normalization (client-side) – applied to the full utterance
+                            # (pre-roll + all chunks including short intra-utterance silences)
+                            # This gives the server consistent-level speech for better transcription.
+                            # ------------------------------------------------------------------
+                            original_bytes = bytes(current_segment_buffer)
+                            audio_int16 = np.frombuffer(original_bytes, dtype=np.int16)
+                            audio_float = audio_int16.astype(np.float32) / 32768.0
+
+                            normalized_float = normalize_speech_loudness(
+                                audio_float,
+                                sample_rate=config.sample_rate,
+                            )
+
+                            # Convert back to int16 with proper scaling and hard clipping
+                            normalized_int16 = np.clip(
+                                normalized_float * 32767.0, -32768, 32767
+                            ).astype(np.int16)
+
+                            # Replace the buffer with the normalized version
+                            # → local WAV files and sent payload will both be normalized
+                            current_segment_buffer = bytearray(
+                                normalized_int16.tobytes()
+                            )
+
+                            log.info(
+                                "[norm] Applied speech loudness normalization to segment_%04d "
+                                "(%.2f s → target -13 LUFS)",
+                                current_segment_num,
+                                duration,
                             )
 
                             # Save segment audio + metadata
-                            if current_segment_num is not None and current_segment_buffer is not None:
-                                segment_dir = os.path.join(segments_dir, f"segment_{current_segment_num:04d}")
+                            if (
+                                current_segment_num is not None
+                                and current_segment_buffer is not None
+                            ):
+                                segment_dir = os.path.join(
+                                    segments_dir, f"segment_{current_segment_num:04d}"
+                                )
                                 os.makedirs(segment_dir, exist_ok=True)
 
                                 # Compute precise duration from audio length
-                                duration = audio_buffer_duration(current_segment_buffer, config.sample_rate)
-                                num_samples = len(current_segment_buffer) // 2  # int16 = 2 bytes per sample
+                                duration = audio_buffer_duration(
+                                    current_segment_buffer, config.sample_rate
+                                )
+                                num_samples = (
+                                    len(current_segment_buffer) // 2
+                                )  # int16 = 2 bytes per sample
 
                                 wav_path = os.path.join(segment_dir, "sound.wav")
                                 wavfile.write(
                                     wav_path,
                                     config.sample_rate,
-                                    np.frombuffer(current_segment_buffer, dtype=np.int16)
+                                    normalized_int16,  # already normalized ndarray
                                 )
-                                base_time = stream_start_time or segment_start_wallclock[current_segment_num]
+                                base_time = (
+                                    stream_start_time
+                                    or segment_start_wallclock[current_segment_num]
+                                )
 
                                 # Use relative seconds from stream start (fallback to current segment start time if stream_start_time isn't set)
                                 metadata = {
@@ -457,7 +503,11 @@ async def stream_microphone(ws) -> None:
                                     "duration_sec": round(duration, 3),
                                     "num_chunks": speech_chunks_in_segment,
                                     "num_samples": num_samples,
-                                    "start_sec": round(segment_start_wallclock[current_segment_num] - base_time, 3),
+                                    "start_sec": round(
+                                        segment_start_wallclock[current_segment_num]
+                                        - base_time,
+                                        3,
+                                    ),
                                     "end_sec": round(time.time() - base_time, 3),
                                     "sample_rate": config.sample_rate,
                                     "channels": config.channels,
@@ -466,44 +516,73 @@ async def stream_microphone(ws) -> None:
                                         "last": round(last_vad_confidence, 4),
                                         "min": round(min_vad_confidence, 4),
                                         "max": round(max_vad_confidence, 4),
-                                        "ave": round(vad_confidence_sum / speech_chunk_count, 4)
-                                            if speech_chunk_count > 0
-                                            else 0.0,
+                                        "ave": round(
+                                            vad_confidence_sum / speech_chunk_count, 4
+                                        )
+                                        if speech_chunk_count > 0
+                                        else 0.0,
                                     },
                                     "audio_energy": {
                                         # ← CHANGED: explicitly convert numpy float32 → Python float
-                                        "rms_min": float(round(min_energy, 4)) if min_energy != float("inf") else 0.0,
+                                        "rms_min": float(round(min_energy, 4))
+                                        if min_energy != float("inf")
+                                        else 0.0,
                                         "rms_max": float(round(max_energy, 4)),
-                                        "rms_ave": float(round(speech_energy_sum / speech_chunk_count, 4))
-                                            if speech_chunk_count > 0
-                                            else 0.0,
-                                        "rms_std": float(round(
-                                            np.sqrt(
-                                                (speech_energy_sum_squares / speech_chunk_count)
-                                                - (speech_energy_sum / speech_chunk_count) ** 2
-                                            ),
-                                            4,
-                                        ))
+                                        "rms_ave": float(
+                                            round(
+                                                speech_energy_sum / speech_chunk_count,
+                                                4,
+                                            )
+                                        )
+                                        if speech_chunk_count > 0
+                                        else 0.0,
+                                        "rms_std": float(
+                                            round(
+                                                np.sqrt(
+                                                    (
+                                                        speech_energy_sum_squares
+                                                        / speech_chunk_count
+                                                    )
+                                                    - (
+                                                        speech_energy_sum
+                                                        / speech_chunk_count
+                                                    )
+                                                    ** 2
+                                                ),
+                                                4,
+                                            )
+                                        )
                                         if speech_chunk_count > 0
                                         else 0.0,
                                     },
                                 }
 
                                 # Define and write speech_probs.json **first**
-                                probs_path = os.path.join(segment_dir, "speech_probs.json")
+                                probs_path = os.path.join(
+                                    segment_dir, "speech_probs.json"
+                                )
                                 with open(probs_path, "w", encoding="utf-8") as f:
-                                    json.dump({
-                                        "segment_id": current_segment_num,
-                                        "vad_threshold": config.vad_threshold,
-                                        "chunk_count": len(speech_prob_history),
-                                        "probs": [round(p, 4) for p in speech_prob_history],
-                                    }, f, indent=2, ensure_ascii=False)
+                                    json.dump(
+                                        {
+                                            "segment_id": current_segment_num,
+                                            "vad_threshold": config.vad_threshold,
+                                            "chunk_count": len(speech_prob_history),
+                                            "probs": [
+                                                round(p, 4) for p in speech_prob_history
+                                            ],
+                                        },
+                                        f,
+                                        indent=2,
+                                        ensure_ascii=False,
+                                    )
 
                                 # Now we can safely reference probs_path in metadata
                                 metadata["speech_probs_path"] = str(probs_path)
                                 metadata["speech_prob_count"] = len(speech_prob_history)
 
-                                speech_meta_path = os.path.join(segment_dir, "speech_meta.json")
+                                speech_meta_path = os.path.join(
+                                    segment_dir, "speech_meta.json"
+                                )
                                 with open(speech_meta_path, "w", encoding="utf-8") as f:
                                     json.dump(metadata, f, indent=2, ensure_ascii=False)
 
@@ -511,43 +590,69 @@ async def stream_microphone(ws) -> None:
                                 all_speech_meta = []
                                 if os.path.exists(ALL_SPEECH_META_PATH):
                                     try:
-                                        with open(ALL_SPEECH_META_PATH, "r", encoding="utf-8") as f:
+                                        with open(
+                                            ALL_SPEECH_META_PATH, encoding="utf-8"
+                                        ) as f:
                                             all_speech_meta = json.load(f)
                                     except Exception:
                                         pass  # start fresh if corrupted
-                                relative_start = segment_start_wallclock[current_segment_num] - base_time
-                                all_speech_meta.append({
-                                    "segment_id": current_segment_num,
-                                    **metadata,
-                                    "start_sec": round(relative_start, 3),
-                                    "end_sec": round(relative_start + duration, 3),
-                                    "duration_sec": round(duration, 3),
-                                    "segment_dir": f"segment_{current_segment_num:04d}",
-                                    "wav_path": str(wav_path),
-                                    "meta_path": str(speech_meta_path),
-                                })
-                                with open(ALL_SPEECH_META_PATH, "w", encoding="utf-8") as f:
-                                    json.dump(all_speech_meta, f, indent=2, ensure_ascii=False)
+                                relative_start = (
+                                    segment_start_wallclock[current_segment_num]
+                                    - base_time
+                                )
+                                all_speech_meta.append(
+                                    {
+                                        "segment_id": current_segment_num,
+                                        **metadata,
+                                        "start_sec": round(relative_start, 3),
+                                        "end_sec": round(relative_start + duration, 3),
+                                        "duration_sec": round(duration, 3),
+                                        "segment_dir": f"segment_{current_segment_num:04d}",
+                                        "wav_path": str(wav_path),
+                                        "meta_path": str(speech_meta_path),
+                                    }
+                                )
+                                with open(
+                                    ALL_SPEECH_META_PATH, "w", encoding="utf-8"
+                                ) as f:
+                                    json.dump(
+                                        all_speech_meta, f, indent=2, ensure_ascii=False
+                                    )
 
                                 # NEW: Append to global all_speech_probs index
                                 _append_to_global_speech_probs_index(
-                                    current_segment_num, duration, segment_start_wallclock, base_time, probs_path, speech_prob_history)
+                                    current_segment_num,
+                                    duration,
+                                    segment_start_wallclock,
+                                    base_time,
+                                    probs_path,
+                                    speech_prob_history,
+                                )
 
                             # ── Compute average VAD confidence right here ────────────────────────────────
-                            avg_vad = round(
-                                vad_confidence_sum / speech_chunk_count, 4
-                            ) if speech_chunk_count > 0 else 0.0
+                            avg_vad = (
+                                round(vad_confidence_sum / speech_chunk_count, 4)
+                                if speech_chunk_count > 0
+                                else 0.0
+                            )
 
-                            # Signal end of utterance to server
-                            try:
-                                await send_queue.put({
-                                    "type": "end_of_utterance",
-                                    "avg_vad_confidence": avg_vad,
-                                })
-                                log.success("[speech → server] Sent end_of_utterance marker", bright=True)
-                            except websockets.ConnectionClosed:
-                                log.warning("WebSocket closed while sending end marker")
-                                return
+                            payload = {
+                                "type": "complete_utterance",
+                                "sample_rate": config.sample_rate,
+                                "pcm": base64.b64encode(
+                                    normalized_int16.tobytes()
+                                ).decode("ascii"),
+                                "avg_vad_confidence": avg_vad,
+                                "segment_num": current_segment_num,
+                                "duration_sec": round(duration, 3),
+                            }
+                            await send_queue.put(payload)
+                            log.success(
+                                "[complete_utterance → server] Sent segment_%04d | %s | %.2fs",
+                                current_segment_num,
+                                format_bytes(len(normalized_int16.tobytes())),
+                                duration,
+                            )
 
                             segment_type = "non_speech"
                             speech_start_time = None
@@ -555,17 +660,26 @@ async def stream_microphone(ws) -> None:
                             current_segment_num = None
                             current_segment_buffer = None
                             speech_chunks_in_segment = 0  # reset counter
-                            speech_prob_history = [] # clear after save
+                            speech_prob_history = []  # clear after save
+
+                    # Add every chunk (speech or short silence) to the local buffer while utterance is ongoing
+                    if (
+                        speech_start_time is not None
+                        and current_segment_buffer is not None
+                    ):
+                        current_segment_buffer.extend(chunk)
 
                     if chunk_type == "speech":
-                        avg_rtt = sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
-                        
+                        avg_rtt = (
+                            sum(recent_rtts) / len(recent_rtts) if recent_rtts else None
+                        )
+
                         energy_info = ""
                         if speech_chunk_count > 0:
-                            avg_rms   = speech_energy_sum / speech_chunk_count
-                            rms_std   = np.sqrt(
-                                (speech_energy_sum_squares / speech_chunk_count) -
-                                (speech_energy_sum / speech_chunk_count) ** 2
+                            avg_rms = speech_energy_sum / speech_chunk_count
+                            rms_std = np.sqrt(
+                                (speech_energy_sum_squares / speech_chunk_count)
+                                - (speech_energy_sum / speech_chunk_count) ** 2
                             )
                             energy_info = (
                                 f" | rms: avg={avg_rms:.4f} ±{rms_std:.4f} "
@@ -573,11 +687,13 @@ async def stream_microphone(ws) -> None:
                             )
 
                         log.orange(
-                            "[speech] Sent %d chunks | rms=%.4f | speech=%.3f | dur=%.2fs%s",
-                            chunks_sent,
+                            "[speech] %d chunks | rms=%.4f | speech=%.3f | dur=%.2fs%s",
+                            speech_chunk_count,
                             temp_rms,
                             speech_prob,
-                            time.monotonic() - speech_start_time if speech_start_time else 0.0,
+                            time.monotonic() - speech_start_time
+                            if speech_start_time
+                            else 0.0,
                             f" | RTT={avg_rtt:.3f}s" if avg_rtt is not None else "",
                         )
 
@@ -587,10 +703,18 @@ async def stream_microphone(ws) -> None:
                 # Periodic status update
                 if total_chunks_processed % 100 == 0:
                     status = "SPEAKING" if speech_start_time else "SILENCE"
-                    seg_dur = time.monotonic() - speech_start_time if speech_start_time else 0.0
+                    seg_dur = (
+                        time.monotonic() - speech_start_time
+                        if speech_start_time
+                        else 0.0
+                    )
                     log.info(
                         "[status] chunks_processed: %d | sent: %d | detected: %d | state: %s | seg: %.2fs",
-                        total_chunks_processed, chunks_sent, chunks_detected, status, seg_dur
+                        total_chunks_processed,
+                        speech_chunk_count,
+                        chunks_detected,
+                        status,
+                        seg_dur,
                     )
         except asyncio.CancelledError:
             log.info("[task] Streaming task cancelled")
@@ -602,15 +726,23 @@ async def stream_microphone(ws) -> None:
 
             log.info(
                 "[microphone] Stopped | Processed: %d | Detected: %d | Sent: %d",
-                total_chunks_processed, chunks_detected, chunks_sent
+                total_chunks_processed,
+                chunks_detected,
+                chunks_sent,
             )
             if recent_rtts:
-                log.info("Final avg server processing time: %.3fs", sum(recent_rtts) / len(recent_rtts))
+                log.info(
+                    "Final avg server processing time: %.3fs",
+                    sum(recent_rtts) / len(recent_rtts),
+                )
 
             # ── Flush remaining global probabilities ───────────────────────────────
             if all_prob_history:
                 _append_to_global_all_probs(all_prob_history)
-                log.info("Flushed %d remaining probabilities on stream shutdown", len(all_prob_history))
+                log.info(
+                    "Flushed %d remaining probabilities on stream shutdown",
+                    len(all_prob_history),
+                )
 
             # Final save of continuous audio
             if audio_buffer:
@@ -619,13 +751,17 @@ async def stream_microphone(ws) -> None:
 
             # Optional: also flush speech_prob_history if segment is active
             if is_speech_ongoing and speech_prob_history:
-                log.warning("Active speech segment was interrupted — saving partial prob history")
+                log.warning(
+                    "Active speech segment was interrupted — saving partial prob history"
+                )
                 # You could save it to a special "interrupted_segment_XXX" folder
                 # or just append to a global interrupted_probs.json
+
 
 # =============================
 # Subtitle SRT writing helpers
 # =============================
+
 
 def write_srt_block(
     sequence: int,
@@ -633,22 +769,18 @@ def write_srt_block(
     duration_sec: float,
     ja: str,
     en: str,
-    file_path: str | os.PathLike
+    file_path: str | os.PathLike,
 ) -> None:
     """Append one subtitle block to an SRT file."""
     start_dt = datetime.datetime.fromtimestamp(start_sec)
-    end_dt   = datetime.datetime.fromtimestamp(start_sec + duration_sec)
+    end_dt = datetime.datetime.fromtimestamp(start_sec + duration_sec)
 
-    start_str = start_dt.strftime("%H:%M:%S") + f",{int((start_dt.microsecond / 1000)) :03d}"
-    end_str   = end_dt.strftime("%H:%M:%S")   + f",{int((end_dt.microsecond / 1000))   :03d}"
-
-    block = (
-        f"{sequence}\n"
-        f"{start_str} --> {end_str}\n"
-        f"{ja.strip()}\n"
-        f"{en.strip()}\n"
-        "\n"
+    start_str = (
+        start_dt.strftime("%H:%M:%S") + f",{int(start_dt.microsecond / 1000):03d}"
     )
+    end_str = end_dt.strftime("%H:%M:%S") + f",{int(end_dt.microsecond / 1000):03d}"
+
+    block = f"{sequence}\n{start_str} --> {end_str}\n{ja.strip()}\n{en.strip()}\n\n"
 
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, "a", encoding="utf-8") as f:
@@ -656,9 +788,11 @@ def write_srt_block(
 
     # log.info("[SRT] Appended block #%d to %s", sequence, os.path.basename(file_path))
 
+
 # =============================
 # Thin message receiver — receives WebSocket messages and dispatches to handler
 # =============================
+
 
 async def receive_messages(ws) -> None:
     """Thin receiver: recv → parse → dispatch by type"""
@@ -692,6 +826,7 @@ async def receive_messages(ws) -> None:
 # =============================
 # Main with reconnection logic
 # =============================
+
 
 async def main() -> None:
     attempt = 0
@@ -727,7 +862,12 @@ async def main() -> None:
             break
 
         delay = config.reconnect_delay * (2 ** (attempt - 1))  # exponential backoff
-        log.info("Reconnecting in %.1fs (attempt %d/%d)...", delay, attempt, config.reconnect_attempts)
+        log.info(
+            "Reconnecting in %.1fs (attempt %d/%d)...",
+            delay,
+            attempt,
+            config.reconnect_attempts,
+        )
         await asyncio.sleep(delay)
 
     log.info("Client shutdown complete")
@@ -741,7 +881,7 @@ async def handle_final_subtitle(data: dict) -> None:
     if utterance_id is None:
         log.warning("[final_subtitle] Missing utterance_id")
         return
-    
+
     ja = data.get("transcription_ja", "").strip()
     en = data.get("translation_en", "").strip()
     if not (ja or en):
@@ -766,11 +906,12 @@ async def handle_final_subtitle(data: dict) -> None:
         log.info("[final_subtitle] EN: %s", en[:80])
     log.info(
         "[quality] Transc: %.3f %s | Transl: %.3f %s",
-        trans_conf or 0.0, trans_quality or "N/A",
-        transl_conf or 0.0, transl_quality or "N/A"
+        trans_conf or 0.0,
+        trans_quality or "N/A",
+        transl_conf or 0.0,
+        transl_quality or "N/A",
     )
 
-    
     start_time = segment_start_wallclock.get(segment_num)
     if start_time is None:
         log.warning("[timing] No start time found for segment_%04d", segment_num)
@@ -855,12 +996,13 @@ async def handle_speaker_update(data: dict) -> None:
 
 
 async def handle_emotion_classification_update(data: dict) -> None:
-    log.info("[emotion_classification_update] Handling new emotion classification update...")
+    log.info(
+        "[emotion_classification_update] Handling new emotion classification update..."
+    )
     utterance_id = data.get("utterance_id")
     if utterance_id is None:
         log.warning("[emotion_classification_update] Missing utterance_id")
         return
-
 
     segment_idx = data["segment_idx"]
     segment_num = data["segment_num"]
@@ -883,8 +1025,12 @@ async def handle_emotion_classification_update(data: dict) -> None:
     }
 
     # Write per-segment emotion classification info
-    emotion_classification_all_path = os.path.join(segment_dir, "emotion_classification_all.json")
-    emotion_classification_meta_path = os.path.join(segment_dir, "emotion_classification_meta.json")
+    emotion_classification_all_path = os.path.join(
+        segment_dir, "emotion_classification_all.json"
+    )
+    emotion_classification_meta_path = os.path.join(
+        segment_dir, "emotion_classification_meta.json"
+    )
     with open(emotion_classification_all_path, "w", encoding="utf-8") as f:
         json.dump(emotion_classification_all, f, indent=2, ensure_ascii=False)
     with open(emotion_classification_meta_path, "w", encoding="utf-8") as f:
@@ -901,27 +1047,26 @@ async def _update_display_and_files(utt_id: int) -> None:
     if "ja" not in entry:
         return
 
-    ja             = entry["ja"]
-    en             = entry["en"]
-    duration_sec   = entry["duration_sec"]
+    ja = entry["ja"]
+    en = entry["en"]
+    duration_sec = entry["duration_sec"]
     relative_start = entry["relative_start"]
-    relative_end   = entry["relative_end"]
-    segment_idx    = entry["segment_idx"]
-    segment_num    = entry["segment_num"]
-    segment_type    = entry["segment_type"]
-    start_time     = entry["start_wallclock"]
+    relative_end = entry["relative_end"]
+    segment_idx = entry["segment_idx"]
+    segment_num = entry["segment_num"]
+    segment_type = entry["segment_type"]
+    start_time = entry["start_wallclock"]
 
-    avg_vad_conf   = entry["avg_vad_conf"]
+    avg_vad_conf = entry["avg_vad_conf"]
 
-    trans_conf     = entry.get("trans_conf")
-    trans_quality  = entry.get("trans_quality")
-    transl_conf    = entry.get("transl_conf")
+    trans_conf = entry.get("trans_conf")
+    trans_quality = entry.get("trans_quality")
+    transl_conf = entry.get("transl_conf")
     transl_quality = entry.get("transl_quality")
 
     subdir = "segments" if segment_type == "speech" else "segments_non_speech"
     segment_dir = os.path.join(OUTPUT_DIR, subdir, f"segment_{segment_num:04d}")
     Path(segment_dir).mkdir(parents=True, exist_ok=True)
-
 
     # ── Overlay ────────────────────────────────────────────────────────────────
     overlay.add_message(
@@ -932,9 +1077,13 @@ async def _update_display_and_files(utt_id: int) -> None:
         duration_sec=round(duration_sec, 2),
         segment_number=segment_num,
         avg_vad_confidence=round(avg_vad_conf, 3),
-        transcription_confidence=round(trans_conf, 3) if trans_conf is not None else None,
+        transcription_confidence=round(trans_conf, 3)
+        if trans_conf is not None
+        else None,
         transcription_quality=trans_quality,
-        translation_confidence=round(transl_conf, 3) if transl_conf is not None else None,
+        translation_confidence=round(transl_conf, 3)
+        if transl_conf is not None
+        else None,
         translation_quality=transl_quality,
         # New speaker fields (overlay can ignore them if not ready)
         # is_same_speaker_as_prev=is_same,
@@ -954,7 +1103,6 @@ async def _update_display_and_files(utt_id: int) -> None:
         entry["srt_written"] = True
 
 
-
 def _append_to_global_speech_probs_index(
     segment_num: int,
     duration: float,
@@ -967,7 +1115,7 @@ def _append_to_global_speech_probs_index(
     all_probs_index: list[dict] = []
     if os.path.exists(ALL_SPEECH_PROBS_INDEX_PATH):
         try:
-            with open(ALL_SPEECH_PROBS_INDEX_PATH, "r", encoding="utf-8") as f:
+            with open(ALL_SPEECH_PROBS_INDEX_PATH, encoding="utf-8") as f:
                 all_probs_index = json.load(f)
         except Exception as e:
             log.warning("Could not load all_speech_probs.json: %s", e)
@@ -990,14 +1138,12 @@ def _append_to_global_speech_probs_index(
         json.dump(all_probs_index, f, indent=2, ensure_ascii=False)
 
 
-def _append_to_global_all_probs(
-    new_probs: list[float]
-) -> None:
+def _append_to_global_all_probs(new_probs: list[float]) -> None:
     """Append segment info to the global all_speech_probs.json index."""
     all_probs: list[float] = []
     if os.path.exists(ALL_PROBS_PATH):
         try:
-            with open(ALL_PROBS_PATH, "r", encoding="utf-8") as f:
+            with open(ALL_PROBS_PATH, encoding="utf-8") as f:
                 all_probs = json.load(f)
         except Exception as e:
             log.warning("Could not load all_probs.json: %s", e)
@@ -1039,14 +1185,14 @@ def _write_last_5min_wav():
 def format_bytes(size: int) -> str:
     """
     Convert a byte count to a human-readable string (e.g., '5.2 MB', '1.3 GB').
-    
+
     Args:
         size: Number of bytes (integer)
-    
+
     Returns:
         Formatted string with 1 decimal place
     """
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
         if size < 1024:
             return f"{size:.1f} {unit}"
         size /= 1024.0
@@ -1057,10 +1203,10 @@ def format_bytes(size: int) -> str:
 if __name__ == "__main__":
     app = QApplication([])  # Re-uses existing instance if any
     overlay = LiveSubtitlesOverlay.create(app=app, title="Live Japanese Subtitles")
-    
+
     def recording_thread() -> None:
         asyncio.run(main())
-    
+
     Thread(target=recording_thread, daemon=True).start()
     # Start Qt event loop – this keeps the overlay responsive and visible
     sys.exit(app.exec())
