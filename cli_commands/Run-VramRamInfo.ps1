@@ -1,6 +1,9 @@
 # Run-VramRamInfo.ps1
 # Continuously display GPU, system RAM, and disk information in CSV format with color-coded output
 
+# Configuration
+$refreshIntervalSeconds = 0.5   # Change this value to adjust refresh rate (e.g. 0.5, 1, 2, 5)
+
 # Function to get system RAM info in CSV format
 function Get-SystemRamInfo {
     $os = Get-CimInstance -ClassName Win32_OperatingSystem
@@ -92,6 +95,6 @@ while ($true) {
     Write-ColoredOutput -line $diskInfo
     Write-Host ""  # Add newline for separation between iterations
 
-    # Wait for 1 second before refreshing
-    Start-Sleep -Seconds 1
+    # Wait for n seconds before refreshing
+    Start-Sleep -Seconds $refreshIntervalSeconds
 }

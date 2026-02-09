@@ -1,3 +1,4 @@
+import argparse
 import shutil
 import os
 import glob
@@ -32,9 +33,7 @@ def run_shell_command(command: List[str], description: str) -> Optional[str]:
     """Execute a shell command and log the result."""
     try:
         logger.debug(f"Executing {description}: {' '.join(command)}")
-        result = subprocess.run(
-            command, check=True, capture_output=True, text=True
-        )
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
         logger.debug(f"{description} output: {result.stdout}")
         return result.stdout
     except subprocess.CalledProcessError as e:
@@ -57,8 +56,9 @@ def download_onnx_model(
         model_file: Source model file path relative to snapshot directory.
         target_file: Target model file path relative to snapshot directory.
     """
-    snapshot_dir = Path(cache_dir) / \
-        f"models--{repo_id.replace('/', '--')}" / "snapshots"
+    snapshot_dir = (
+        Path(cache_dir) / f"models--{repo_id.replace('/', '--')}" / "snapshots"
+    )
     # Dynamically retrieve the latest snapshot hash for the repo
     api = HfApi()
     snapshots: List[GitCommitInfo] = api.list_repo_commits(repo_id)
@@ -74,16 +74,17 @@ def download_onnx_model(
                 logger.info(f"Removing old snapshot directory: {folder}")
                 try:
                     import shutil
+
                     shutil.rmtree(folder)
                 except Exception as e:
                     logger.error(f"Failed to remove {folder}: {e}")
 
     # Verify available files in the repository and select model file by priority
     logger.info(
-        f"Checking available files in repo {repo_id} for snapshot {snapshot_hash}")
+        f"Checking available files in repo {repo_id} for snapshot {snapshot_hash}"
+    )
     try:
-        repo_files = api.list_repo_files(
-            repo_id=repo_id, revision=snapshot_hash)
+        repo_files = api.list_repo_files(repo_id=repo_id, revision=snapshot_hash)
         logger.debug(f"Available files: {repo_files}")
 
         # Define priority order for model files
@@ -91,7 +92,7 @@ def download_onnx_model(
             "onnx/model_qint8_arm64.onnx",
             "onnx/model_quantized.onnx",
             "onnx/model.onnx",
-            "model.onnx"
+            "model.onnx",
         ]
         selected_model_file = None
         for candidate in model_file_candidates:
@@ -101,7 +102,8 @@ def download_onnx_model(
 
         if selected_model_file is None:
             logger.error(
-                f"No suitable model file found in repository {repo_id} for snapshot {snapshot_hash}")
+                f"No suitable model file found in repository {repo_id} for snapshot {snapshot_hash}"
+            )
             raise FileNotFoundError(
                 f"No suitable model file found in repository {repo_id} snapshot {snapshot_hash}.\nExpected one of {model_file_candidates}, but available files: {repo_files}"
             )
@@ -115,9 +117,7 @@ def download_onnx_model(
 
     # Download only the selected model file
     logger.info(
-        "Downloading file %s from repo id: %s...",
-        source_path,
-        selected_model_file
+        "Downloading file %s from repo id: %s...", source_path, selected_model_file
     )
 
     try:
@@ -144,10 +144,10 @@ def download_onnx_model(
 
     # Verify that the source model file exists
     if not source_path.exists():
-        logger.error(
-            f"Model file {source_path} does not exist after download.")
+        logger.error(f"Model file {source_path} does not exist after download.")
         raise FileNotFoundError(
-            f"Model file {source_path} not found in snapshot {snapshot_hash}")
+            f"Model file {source_path} not found in snapshot {snapshot_hash}"
+        )
 
     # Execute shell commands
     try:
@@ -160,7 +160,8 @@ def download_onnx_model(
         # Check if target_path exists and log
         if target_path.exists():
             logger.warning(
-                f"Target file {target_path} already exists. Overwriting with cp -f.")
+                f"Target file {target_path} already exists. Overwriting with cp -f."
+            )
 
         # Ensure target directory exists before copying
         target_dir = target_path.parent
@@ -186,16 +187,15 @@ def download_onnx_model(
                     try:
                         # Get the real path of the symlink
                         real_path = item.resolve()
-                        logger.info(
-                            f"Removing symlink {item} pointing to {real_path}")
+                        logger.info(f"Removing symlink {item} pointing to {real_path}")
                         item.unlink()  # Remove the symlink
                         if real_path.exists():
-                            logger.info(
-                                f"Removing referenced file {real_path}")
+                            logger.info(f"Removing referenced file {real_path}")
                             real_path.unlink()  # Remove the referenced file
                     except Exception as e:
                         logger.error(
-                            f"Failed to remove symlink {item} or its target: {e}")
+                            f"Failed to remove symlink {item} or its target: {e}"
+                        )
 
         # ls -l <onnx_dir> only if onnx_dir exists
         if onnx_dir.exists() and onnx_dir.is_dir():
@@ -204,8 +204,7 @@ def download_onnx_model(
                 f"Listing directory {onnx_dir}",
             )
         else:
-            logger.info(
-                "onnx/ directory does not exist, skipping ls -l command")
+            logger.info("onnx/ directory does not exist, skipping ls -l command")
 
         # du -sh <target_path>
         run_shell_command(
@@ -217,7 +216,6 @@ def download_onnx_model(
     except Exception as e:
         logger.error(f"Shell command execution failed: {str(e)}")
         raise
-
 
 
 def has_onnx_model_in_repo(repo_id: str, token: Optional[str] = None) -> bool:
@@ -238,34 +236,43 @@ def has_onnx_model_in_repo(repo_id: str, token: Optional[str] = None) -> bool:
 
         # Check local cache first
         local_onnx_paths = get_onnx_model_paths(
-            repo_id, cache_dir=MODELS_CACHE_DIR, token=token)
+            repo_id, cache_dir=MODELS_CACHE_DIR, token=token
+        )
         if local_onnx_paths:
             logger.info(
-                f"ONNX model(s) found in local cache for {repo_id}: {local_onnx_paths}")
+                f"ONNX model(s) found in local cache for {repo_id}: {local_onnx_paths}"
+            )
             return True
 
         # Fall back to remote repository check
         logger.info(
-            f"No ONNX models found in local cache, checking remote repository: {repo_id}")
+            f"No ONNX models found in local cache, checking remote repository: {repo_id}"
+        )
         api = HfApi()
         repo_files = api.list_repo_files(repo_id=repo_id, token=token)
         logger.debug(f"Files found in {repo_id}: {repo_files}")
         has_onnx = (
-            "model.onnx" in repo_files or
-            any(file.startswith("model_") and file.endswith("_arm64.onnx") for file in repo_files) or
-            any("quantized" in file and file.endswith(".onnx")
-                for file in repo_files)
+            "model.onnx" in repo_files
+            or any(
+                file.startswith("model_") and file.endswith("_arm64.onnx")
+                for file in repo_files
+            )
+            or any(
+                "quantized" in file and file.endswith(".onnx") for file in repo_files
+            )
         )
         logger.info(
-            f"ONNX model (standard, ARM64, or quantized) found in {repo_id}: {has_onnx}")
+            f"ONNX model (standard, ARM64, or quantized) found in {repo_id}: {has_onnx}"
+        )
         return has_onnx
     except Exception as e:
-        logger.error(
-            f"Error checking ONNX models in repository {repo_id}: {str(e)}")
+        logger.error(f"Error checking ONNX models in repository {repo_id}: {str(e)}")
         return False
 
 
-def get_onnx_model_paths(repo_id: str, cache_dir: str = MODELS_CACHE_DIR, token: Optional[str] = None) -> List[str]:
+def get_onnx_model_paths(
+    repo_id: str, cache_dir: str = MODELS_CACHE_DIR, token: Optional[str] = None
+) -> List[str]:
     """
     Retrieve a list of ONNX model file paths (standard, ARM64, or quantized) in the local Hugging Face cache for a repository.
 
@@ -277,8 +284,7 @@ def get_onnx_model_paths(repo_id: str, cache_dir: str = MODELS_CACHE_DIR, token:
         List[str]: List of absolute ONNX model file paths found in the local cache.
     """
     try:
-        logger.info(
-            f"Retrieving local ONNX model paths for repository: {repo_id}")
+        logger.info(f"Retrieving local ONNX model paths for repository: {repo_id}")
         # Convert repo_id to cache folder name (e.g., "sentence-transformers/all-MiniLM-L6-v2" to cache folder)
         repo_folder_name = repo_id.replace("/", "--")
         repo_path = os.path.join(cache_dir, f"models--{repo_folder_name}")
@@ -286,7 +292,8 @@ def get_onnx_model_paths(repo_id: str, cache_dir: str = MODELS_CACHE_DIR, token:
         # Check if the repo exists in the local cache
         if not os.path.exists(repo_path):
             logger.warning(
-                f"Repository {repo_id} not found in local cache at {repo_path}")
+                f"Repository {repo_id} not found in local cache at {repo_path}"
+            )
             return []
 
         # Walk through the repo directory to find ONNX files
@@ -294,20 +301,23 @@ def get_onnx_model_paths(repo_id: str, cache_dir: str = MODELS_CACHE_DIR, token:
         for root, _, files in os.walk(repo_path):
             for file in files:
                 if (
-                    file == "model.onnx" or
-                    (file.startswith("model_") and file.endswith("_arm64.onnx")) or
-                    ("quantized" in file and file.endswith(".onnx"))
+                    file == "model.onnx"
+                    or (file.startswith("model_") and file.endswith("_arm64.onnx"))
+                    or ("quantized" in file and file.endswith(".onnx"))
                 ):
                     full_path = os.path.join(root, file)
                     onnx_paths.append(full_path)
 
         logger.info(
-            f"Found {len(onnx_paths)} ONNX model paths for {repo_id}: {onnx_paths}")
+            f"Found {len(onnx_paths)} ONNX model paths for {repo_id}: {onnx_paths}"
+        )
         return sorted(onnx_paths)
     except Exception as e:
         logger.error(
-            f"Error retrieving local ONNX model paths for repository {repo_id}: {str(e)}")
+            f"Error retrieving local ONNX model paths for repository {repo_id}: {str(e)}"
+        )
         return []
+
 
 class ProgressBar:
     """Custom progress bar implementation mimicking tqdm behavior."""
@@ -322,8 +332,15 @@ class ProgressBar:
     def set_lock(cls, lock):
         cls._lock = lock
 
-    def __init__(self, iterable=None, total: Optional[int] = None, desc: str = "",
-                 unit: str = "it", unit_scale: bool = False, **kwargs):
+    def __init__(
+        self,
+        iterable=None,
+        total: Optional[int] = None,
+        desc: str = "",
+        unit: str = "it",
+        unit_scale: bool = False,
+        **kwargs,
+    ):
         self.iterable = iterable
         self.total = total or (len(iterable) if iterable is not None else None)
         self.unit = unit
@@ -373,8 +390,9 @@ class ProgressBar:
 
         if self.total is None:
             # Simple counter for unknown total
-            print(f"\r{self.desc}: {self._format_size(self.current)}",
-                  end="", flush=True)
+            print(
+                f"\r{self.desc}: {self._format_size(self.current)}", end="", flush=True
+            )
             return
 
         # Calculate progress
@@ -384,14 +402,18 @@ class ProgressBar:
 
         # Format size and speed
         size_str = self._format_size(self.current)
-        speed = self.current / \
-            max((datetime.now() - self.start_time).total_seconds(), 0.001)
+        speed = self.current / max(
+            (datetime.now() - self.start_time).total_seconds(), 0.001
+        )
         speed_str = self._format_size(speed) + "/s"
 
         # Update display
         percent = progress * 100
         print(
-            f"\r{self.desc}: |{bar}| {percent:.1f}% {size_str} {speed_str}", end="", flush=True)
+            f"\r{self.desc}: |{bar}| {percent:.1f}% {size_str} {speed_str}",
+            end="",
+            flush=True,
+        )
 
     def _format_size(self, size: float) -> str:
         """Format size with appropriate units."""
@@ -405,7 +427,9 @@ class ProgressBar:
         return f"{size:.1f}P{self.unit}"
 
 
-def remove_cache_locks(cache_dir: str = MODELS_CACHE_DIR, max_attempts: int = 5, wait_interval: float = 0.1) -> None:
+def remove_cache_locks(
+    cache_dir: str = MODELS_CACHE_DIR, max_attempts: int = 5, wait_interval: float = 0.1
+) -> None:
     """
     Remove all lock files from the specified cache directory with retries.
 
@@ -427,12 +451,14 @@ def remove_cache_locks(cache_dir: str = MODELS_CACHE_DIR, max_attempts: int = 5,
                     logger.debug(f"Removed lock file: {lock_file}")
                 except OSError as e:
                     logger.warning(
-                        f"Attempt {attempt}: Failed to remove lock file {lock_file}: {str(e)}")
+                        f"Attempt {attempt}: Failed to remove lock file {lock_file}: {str(e)}"
+                    )
             if lock_files and attempt < max_attempts:
                 time.sleep(wait_interval)
         if glob.glob(lock_pattern, recursive=True):
             logger.warning(
-                "Some lock files could not be removed after maximum attempts")
+                "Some lock files could not be removed after maximum attempts"
+            )
     except Exception as e:
         logger.error(f"Error while removing lock files: {str(e)}")
         raise
@@ -493,7 +519,9 @@ def download_hf_model(
             "onnx/*/*.onnx",
             "openvino/*",
         ]
-        logger.info(f"Repository {repo_id_str} contains safetensors → ignoring *.bin files")
+        logger.info(
+            f"Repository {repo_id_str} contains safetensors → ignoring *.bin files"
+        )
     else:
         # No safetensors → download the legacy .bin weights (and everything else except ONNX/OpenVINO)
         allow_patterns = None
@@ -503,7 +531,9 @@ def download_hf_model(
             "onnx/*/*.onnx",
             "openvino/*",
         ]
-        logger.info(f"No safetensors found in {repo_id_str} → downloading *.bin weights")
+        logger.info(
+            f"No safetensors found in {repo_id_str} → downloading *.bin weights"
+        )
 
     try:
         snapshot_download(
@@ -575,14 +605,48 @@ def download_hf_space(
 
 
 if __name__ == "__main__":
-    repo_id = "knowledgator/modern-gliner-bi-large-v1.0"
-    cache_dir = MODELS_CACHE_DIR
-    clean_cache = False
+    parser = argparse.ArgumentParser(
+        description="Download Hugging Face model or Space repository."
+    )
+    # Example: repo_id such as "segment-any-text/sat-12l-sm"
+    parser.add_argument(
+        "repo_id",
+        nargs="?",
+        type=str,
+        help='Repo ID (e.g. "segment-any-text/sat-12l-sm") [required]',
+    )
+    parser.add_argument(
+        "--repo_id",
+        dest="repo_id_kw",
+        type=str,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--cache_dir",
+        type=str,
+        default=MODELS_CACHE_DIR,
+        help="Cache directory location",
+    )
+    parser.add_argument(
+        "--clean_cache",
+        action="store_true",
+        default=False,
+        help="Clean cache before download",
+    )
+    args = parser.parse_args()
+
+    # Prefer --repo_id (keyword) if given, else positional
+    repo_id = args.repo_id_kw if args.repo_id_kw is not None else args.repo_id
+    cache_dir = args.cache_dir
+    clean_cache = args.clean_cache
+
+    if not repo_id:
+        parser.error('the following argument is required: repo_id (positional or as --repo_id)')
 
     logger.info(f"Downloading files from repo id: {repo_id}...")
 
     try:
-        download_hf_model(repo_id, clean_cache=clean_cache)
+        download_hf_model(repo_id, cache_dir=cache_dir, clean_cache=clean_cache)
 
         if has_onnx_model_in_repo(repo_id):
             download_onnx_model(repo_id)
@@ -595,7 +659,7 @@ if __name__ == "__main__":
         logger.info(f"Downloading files from repo id (space): {repo_id}...")
 
         try:
-            download_hf_space(repo_id, clean_cache=clean_cache)
-        except Exception as e:
-            logger.error(f"Download failed: {str(e)}")
+            download_hf_space(repo_id, cache_dir=cache_dir, clean_cache=clean_cache)
+        except Exception as e2:
+            logger.error(f"Download failed: {str(e2)}")
             raise

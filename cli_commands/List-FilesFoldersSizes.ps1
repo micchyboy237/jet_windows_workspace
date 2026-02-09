@@ -1,5 +1,52 @@
-Get-ChildItem -Force |
-  Sort-Object LastWriteTime -Descending |   # Sort first, then process
+# List-FilesFoldersSizes.ps1
+#
+# PURPOSE:
+#   Displays files and folders with their sizes and last modified dates.
+#   Shows recursive size for directories, color coding, human-readable sizes.
+#
+# FEATURES:
+#   - Recursive folder size calculation
+#   - Cyan folders / Gray files
+#   - Yellow <DIR> marker
+#   - Sort by LastWriteTime (oldest first by default)
+#
+# USAGE EXAMPLES:
+#
+#   # Current directory, oldest first (default)
+#   .\List-FilesFoldersSizes.ps1
+#
+#   # Current directory, newest first
+#   .\List-FilesFoldersSizes.ps1 -Descending
+#   .\List-FilesFoldersSizes.ps1 -d
+#
+#   # Specific folder, oldest first
+#   .\List-FilesFoldersSizes.ps1 -Path C:\Projects
+#   .\List-FilesFoldersSizes.ps1 -p C:\Projects
+#
+#   # Specific folder, newest first (short form)
+#   .\List-FilesFoldersSizes.ps1 -p .. -d
+#
+#   # Explicit oldest first (rarely needed)
+#   .\List-FilesFoldersSizes.ps1 -Ascending -p .\src
+#   .\List-FilesFoldersSizes.ps1 -a -p .\src
+#
+
+param(
+    [Alias("p")]
+    [string]$Path = ".",
+
+    [Alias("a")]
+    [switch]$Ascending = $true,
+
+    [Alias("d")]
+    [switch]$Descending
+)
+
+# If both -Descending and -Ascending provided, Descending takes precedence
+if ($Descending) { $Ascending = $false }
+
+Get-ChildItem -Path $Path -Force |
+  Sort-Object LastWriteTime -Descending:(!$Ascending) |
   ForEach-Object {
     $size = if ($_.PSIsContainer) {
               (Get-ChildItem $_ -Recurse -Force -File -ErrorAction SilentlyContinue |

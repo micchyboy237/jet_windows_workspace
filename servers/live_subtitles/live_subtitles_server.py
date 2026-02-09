@@ -123,8 +123,8 @@ from translate_jp_en import (
 logger.info("Loading speaker labeler pyannote model & clustering strategy...")
 labeler = SegmentSpeakerLabeler()
 
-logger.info("Loading emotion classifier model...")
-emotion_classifier = SegmentEmotionClassifier(device=-1)
+# logger.info("Loading emotion classifier model...")
+# emotion_classifier = SegmentEmotionClassifier(device=-1)
 
 logger.info("Models loaded.")
 
@@ -506,36 +506,36 @@ async def handler(websocket):
 
                     # Handle both "speech" and "non_speech"
 
-                    # --- Emotion classification for this utterance ---
-                    # classify current speech buffer
-                    emo_results = emotion_classifier.classify(curr_buffer, state.sample_rate)
-                    # get top prediction
-                    if emo_results:
-                        top = emo_results[0]
-                        top_label = top.get("label")
-                        top_score = top.get("score")
-                    else:
-                        top_label = None
-                        top_score = None
+                    # # --- Emotion classification for this utterance ---
+                    # # classify current speech buffer
+                    # emo_results = emotion_classifier.classify(curr_buffer, state.sample_rate)
+                    # # get top prediction
+                    # if emo_results:
+                    #     top = emo_results[0]
+                    #     top_label = top.get("label")
+                    #     top_score = top.get("score")
+                    # else:
+                    #     top_label = None
+                    #     top_score = None
 
-                    # optional: classify previous buffer if present
-                    # prev_results = None
-                    # if prev_buffer is not None:
-                        # prev_results = emotion_classifier.classify(prev_buffer, state.sample_rate)
+                    # # optional: classify previous buffer if present
+                    # # prev_results = None
+                    # # if prev_buffer is not None:
+                    #     # prev_results = emotion_classifier.classify(prev_buffer, state.sample_rate)
                     
-                    emotion_classification_payload = {
-                        "type": "emotion_classification_update",
-                        "utterance_id": current_utterance_idx,
-                        "segment_idx": curr_segment_idx,
-                        "segment_num": curr_segment_num,
-                        "segment_type": "speech",
-                        "emotion_top_label": top_label,
-                        "emotion_top_score": top_score,
-                        "emotion_all": emo_results,
-                        # "emotion_prev_all": prev_results,
-                    }
-                    await websocket.send(json.dumps(emotion_classification_payload, ensure_ascii=False))
-                    logger.info(f"[{client_id}] sent speech emotion_classification_update #{curr_segment_num} | msg_type: {msg_type}")
+                    # emotion_classification_payload = {
+                    #     "type": "emotion_classification_update",
+                    #     "utterance_id": current_utterance_idx,
+                    #     "segment_idx": curr_segment_idx,
+                    #     "segment_num": curr_segment_num,
+                    #     "segment_type": "speech",
+                    #     "emotion_top_label": top_label,
+                    #     "emotion_top_score": top_score,
+                    #     "emotion_all": emo_results,
+                    #     # "emotion_prev_all": prev_results,
+                    # }
+                    # await websocket.send(json.dumps(emotion_classification_payload, ensure_ascii=False))
+                    # logger.info(f"[{client_id}] sent speech emotion_classification_update #{curr_segment_num} | msg_type: {msg_type}")
 
                 else:
                     logger.warning(f"[{client_id}] Unknown message type: {msg_type}")
