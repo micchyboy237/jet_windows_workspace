@@ -85,8 +85,20 @@ def normalize_speech_loudness(
     Normalize speech audio using speech-probability-weighted LUFS.
     """
 
-    if audio.ndim != 1:
-        raise ValueError("Speech normalization expects mono audio")
+    # Accept and repair common multichannel input
+    if audio.ndim == 2:
+        if audio.shape[1] == 1:
+            audio = audio[:, 0]  # squeeze trivial stereo
+        else:
+            # Average channels → simple downmix
+            audio = np.mean(audio.astype(np.float64), axis=1).astype(audio.dtype)
+    elif audio.ndim > 2:
+        raise ValueError(
+            f"Unsupported audio shape {audio.shape} — "
+            "expected 1D (mono) or 2D (frames, channels)"
+        )
+
+    orig_dtype = audio.dtype
 
     meter = pyln.Meter(sample_rate)
 
@@ -94,7 +106,7 @@ def normalize_speech_loudness(
     probs = _speech_probability(audio, sample_rate)
 
     if np.max(probs) < 0.1:
-        return audio.copy()
+        return audio.astype(return_dtype or orig_dtype, copy=True)
 
     # 2. Weighted audio for LUFS measurement
     weighted_audio = audio * probs
@@ -108,12 +120,11 @@ def normalize_speech_loudness(
         else:
             result = audio / peak * peak_target
 
-        if return_dtype is not None:
-            return result.astype(return_dtype)
-        return result.astype(np.float32)
+        target_dtype = return_dtype or orig_dtype
+        return _cast_audio_dtype(result, target_dtype)
 
     if speech_lufs <= min_lufs_threshold:
-        return audio.copy()
+        return audio.astype(return_dtype or orig_dtype, copy=True)
 
     if max_loudness_threshold is not None:
         target_lufs = min(target_lufs, speech_lufs, max_loudness_threshold)
@@ -134,7 +145,21 @@ def normalize_speech_loudness(
     normalized = np.clip(normalized, -1.0, 1.0)
 
     # 5. Respect return dtype
-    if return_dtype is not None:
-        return normalized.astype(return_dtype)
+    target_dtype = return_dtype or orig_dtype
+    return _cast_audio_dtype(normalized, target_dtype)
 
-    return normalized.astype(np.float32)
+
+def _cast_audio_dtype(audio: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    """
+    Cast normalized float audio back to target dtype.
+    Integers are scaled from [-1, 1] to full-scale range.
+    """
+    if np.issubdtype(dtype, np.floating):
+        return audio.astype(dtype)
+
+    if np.issubdtype(dtype, np.integer):
+        info = np.iinfo(dtype)
+        scaled = audio * info.max
+        return np.clip(scaled, info.min, info.max).astype(dtype)
+
+    raise TypeError(f"Unsupported audio dtype: {dtype}")
