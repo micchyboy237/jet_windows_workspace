@@ -10,6 +10,7 @@ import queue
 import shutil
 import sys
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,7 +51,12 @@ ALL_TRANSLATION_META_PATH = os.path.join(OUTPUT_DIR, "all_translation_meta.json"
 ALL_SPEECH_PROBS_INDEX_PATH = os.path.join(OUTPUT_DIR, "all_speech_probs.json")
 ALL_PROBS_PATH = os.path.join(OUTPUT_DIR, "all_probs.json")
 
-CONTINUOUS_AUDIO_MAX_SECONDS = 320.0  # a bit more than 5 min
+CONTINUOUS_AUDIO_MAX_SECONDS = 320.0
+
+MAX_SPEECH_DURATION_SEC = 90.0
+CHUNK_DURATION_SEC = 6.0
+CHUNK_OVERLAP_SEC = 2.0
+CONTEXT_PROMPT_MAX_WORDS = 40
 
 audio_total_samples: int = 0
 LAST_5MIN_WAV = os.path.join(OUTPUT_DIR, "last_5_mins.wav")
@@ -78,6 +84,11 @@ class Config:
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
     reconnect_delay: float = 3.0
+    max_speech_duration_sec: float = MAX_SPEECH_DURATION_SEC
+
+    # Make sure defaults are applied
+    if max_speech_duration_sec <= 0:
+        max_speech_duration_sec = 90.0
 
 
 config = Config()
@@ -121,6 +132,11 @@ ProcessingTime = float
 recent_rtts: deque[ProcessingTime] = deque(maxlen=config.max_rtt_history)
 pending_sends: deque[float] = deque()  # One entry per sent chunk
 
+latest_transcription_text: str = ""
+utterance_id_generator = uuid.uuid4  # callable
+current_utterance_id: int | None = None
+
+
 # =============================
 # Audio capture + streaming (with segment & silence tracking)
 # =============================
@@ -136,8 +152,13 @@ async def stream_microphone(ws) -> None:
         model_path = _DEFAULT_MODEL_PATH
     vad = SileroVoiceActivityDetector(model_path)
 
-    # Declare globals that are modified inside this function
+    # Ensure globals are in a known state at function start
     global audio_total_samples, audio_buffer
+    global latest_transcription_text
+    global utterance_id_counter, current_utterance_id
+    global chunk_index, utterance_start_time  # used & assigned
+
+    # Remove dangling utterance_id warning/reset, now handled elsewhere.
 
     # Speech segment tracking
     speech_start_time: float | None = None
@@ -163,6 +184,15 @@ async def stream_microphone(ws) -> None:
 
     # Increased buffer to absorb transient stalls (network / disk / logging)
     audio_queue: queue.Queue[bytes] = queue.Queue(maxsize=300)
+
+    # Utterance-level/chunking state for live chunked sending
+    utterance_audio_buffer = bytearray()
+    last_chunk_sent_time = None
+    utterance_start_time = None
+    last_overlap_samples = int(CHUNK_OVERLAP_SEC * config.sample_rate)
+
+    global chunk_index
+    chunk_index = 0
 
     # NEW: decouple websocket sending from audio processing
     send_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=300)
@@ -238,6 +268,7 @@ async def stream_microphone(ws) -> None:
                     pre_roll_buffer.append(chunk)
 
                     is_speech_ongoing = speech_start_time is not None
+                    is_utterance_ongoing = current_utterance_id is not None
 
                     # ← NEW: compute RMS energy for this chunk
                     chunk_np = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
@@ -381,6 +412,7 @@ async def stream_microphone(ws) -> None:
                                 "[speech] Speech started | segment_%04d",
                                 current_segment_num,
                             )
+                            start_new_utterance()  # ← crucial: start tracking utterance here
                             speech_duration_sec = 0.0
 
                         # Accumulate for average
@@ -388,7 +420,8 @@ async def stream_microphone(ws) -> None:
                         speech_prob_history.append(
                             speech_prob
                         )  # ← NEW: store every accepted prob
-                        speech_chunk_count += 1
+
+                        speech_chunk_count += 1  # per segment
 
                         if rms > max_energy:
                             max_energy = rms
@@ -397,8 +430,48 @@ async def stream_microphone(ws) -> None:
                         speech_energy_sum += rms
                         speech_energy_sum_squares += rms**2
                         speech_duration_sec += VAD_CHUNK_SAMPLES / config.sample_rate
-                        if current_segment_buffer is not None:
+                        if current_segment_buffer is not None:  # still per segment
                             speech_chunks_in_segment += 1
+
+                        # --- utterance-level chunk sending ---
+                        if is_utterance_ongoing:
+                            utterance_audio_buffer.extend(chunk)
+                            now = time.monotonic()
+
+                            should_send_chunk = last_chunk_sent_time is None or (
+                                now - last_chunk_sent_time >= CHUNK_DURATION_SEC
+                            )
+                            duration_exceeded = (
+                                utterance_start_time is not None
+                                and now - utterance_start_time
+                                > config.max_speech_duration_sec
+                            )
+
+                            if should_send_chunk or duration_exceeded:
+                                await send_audio_chunk(
+                                    send_queue,
+                                    utterance_audio_buffer,
+                                    segment_num=current_segment_num,
+                                    avg_vad=round(
+                                        vad_confidence_sum / speech_chunk_count, 4
+                                    )
+                                    if speech_chunk_count > 0
+                                    else 0.0,
+                                    is_final=False,
+                                    chunk_index=chunk_index,
+                                    context_prompt=build_context_prompt(),
+                                )
+                                last_chunk_sent_time = now
+                                chunk_index += 1
+                                # Keep overlap
+                                overlap_start = (
+                                    len(utterance_audio_buffer)
+                                    - last_overlap_samples * 2
+                                )
+                                if overlap_start > 0:
+                                    utterance_audio_buffer = utterance_audio_buffer[
+                                        overlap_start:
+                                    ]
 
                     else:
                         # Silence chunk
@@ -408,9 +481,33 @@ async def stream_microphone(ws) -> None:
                         if (
                             is_speech_ongoing
                             and silence_start_time is not None
-                            and time.monotonic() - silence_start_time
-                            > config.max_silence_seconds
+                            and (
+                                time.monotonic() - silence_start_time
+                                > config.max_silence_seconds
+                                or (
+                                    utterance_start_time is not None
+                                    and time.monotonic() - utterance_start_time
+                                    > config.max_speech_duration_sec
+                                )
+                            )
                         ):
+                            # Final chunk (if utterance ongoing)
+                            if is_utterance_ongoing and len(utterance_audio_buffer) > 0:
+                                await send_audio_chunk(
+                                    send_queue,
+                                    utterance_audio_buffer,
+                                    segment_num=current_segment_num,
+                                    avg_vad=round(
+                                        vad_confidence_sum / speech_chunk_count, 4
+                                    )
+                                    if speech_chunk_count > 0
+                                    else 0.0,
+                                    is_final=True,
+                                    chunk_index=chunk_index,
+                                    context_prompt=build_context_prompt(),
+                                )
+
+                                chunks_sent += 1
                             # Compute precise duration using number of samples in the segment buffer
                             duration = audio_buffer_duration(
                                 current_segment_buffer, config.sample_rate
@@ -427,7 +524,7 @@ async def stream_microphone(ws) -> None:
                                 segment_type = "non_speech"
                                 speech_start_time = None
                                 silence_start_time = None
-                                current_segment_num = None
+                                current_segment_num = 0
                                 current_segment_buffer = None
                                 speech_chunks_in_segment = 0
                                 speech_prob_history = []
@@ -638,23 +735,17 @@ async def stream_microphone(ws) -> None:
                                 else 0.0
                             )
 
-                            payload = {
-                                "type": "complete_utterance",
-                                "sample_rate": config.sample_rate,
-                                "pcm": base64.b64encode(
-                                    normalized_int16.tobytes()
-                                ).decode("ascii"),
-                                "avg_vad_confidence": avg_vad,
-                                "segment_num": current_segment_num,
-                                "duration_sec": round(duration, 3),
-                            }
-                            await send_queue.put(payload)
+                            # Already sent via chunk — no need to re-send full here
+                            # But we still log
                             log.success(
-                                "[complete_utterance → server] Sent segment_%04d | %s | %.2fs",
+                                "[speech] Finalized segment_%04d | %.2fs | sent as chunks",
                                 current_segment_num,
-                                format_bytes(len(normalized_int16.tobytes())),
                                 duration,
                             )
+                            # Reset utterance state
+                            current_utterance_id = None
+                            utterance_audio_buffer = bytearray()
+                            chunk_index = 0
 
                             segment_type = "non_speech"
                             speech_start_time = None
@@ -667,6 +758,7 @@ async def stream_microphone(ws) -> None:
                     # Add every chunk (speech or short silence) to the local buffer while utterance is ongoing
                     if (
                         speech_start_time is not None
+                        and current_utterance_id is None  # new utterance
                         and current_segment_buffer is not None
                     ):
                         current_segment_buffer.extend(chunk)
@@ -686,6 +778,7 @@ async def stream_microphone(ws) -> None:
                             energy_info = (
                                 f" | rms: avg={avg_rms:.4f} ±{rms_std:.4f} "
                                 f"[min={min_energy:.4f} max={max_energy:.4f}]"
+                                f" | utterance dur: {(time.monotonic() - utterance_start_time):.1f}s"
                             )
 
                         log.orange(
@@ -812,6 +905,9 @@ async def receive_messages(ws) -> None:
             elif msg_type == "emotion_classification_update":
                 await handle_emotion_classification_update(data)
 
+            elif msg_type == "partial_subtitle":
+                await handle_partial_subtitle(data)
+
             else:
                 log.warning("[ws] Ignoring unknown message type: %s", msg_type)
 
@@ -875,9 +971,72 @@ async def main() -> None:
     log.info("Client shutdown complete")
 
 
+async def handle_partial_subtitle(data: dict) -> None:
+    """Handle incremental/partial transcription updates from server."""
+    log.debug("[partial_subtitle] Received partial update")
+
+    utterance_id = data.get("utterance_id")
+    if utterance_id is None:
+        log.warning("[partial_subtitle] Missing utterance_id")
+        return
+
+    ja = data.get("transcription_ja", "").strip()
+    en = data.get("translation_en", "").strip()
+    if not (ja or en):
+        return
+
+    # Reuse most of the same logic as final, but mark as partial
+    segment_idx = data.get("segment_idx")
+    segment_num = data.get("segment_num")
+    segment_type = data.get("segment_type", "speech")
+    duration_sec = data.get("duration_sec", 0.0)
+    avg_vad_conf = data.get("avg_vad_confidence", 0.0)
+    trans_conf = data.get("transcription_confidence")
+    trans_quality = data.get("transcription_quality")
+    transl_conf = data.get("translation_confidence")
+    transl_quality = data.get("translation_quality")
+    server_meta = data.get("meta", {})
+
+    # For partials, we update the overlay in real-time (no SRT write yet)
+    start_time = segment_start_wallclock.get(segment_num, time.time())
+    relative_start = (
+        (start_time - (stream_start_time or start_time)) if stream_start_time else 0.0
+    )
+    relative_end = relative_start + duration_sec
+
+    # Show partial result (can be overwritten by next partial or final)
+    overlay.add_message(
+        message_id=utterance_id,
+        source_text=ja,
+        translated_text=en,
+        start_sec=round(relative_start, 2),
+        end_sec=round(relative_end, 2),
+        duration_sec=round(duration_sec, 2),
+        segment_number=segment_num,
+        avg_vad_confidence=round(avg_vad_conf, 3),
+        transcription_confidence=round(trans_conf, 3)
+        if trans_conf is not None
+        else None,
+        transcription_quality=trans_quality,
+        translation_confidence=round(transl_conf, 3)
+        if transl_conf is not None
+        else None,
+        translation_quality=transl_quality,
+        is_partial=True,  # ← optional flag if your overlay supports it
+    )
+
+    log.info(
+        "[partial] utt %s | JA: %s",
+        utterance_id,
+        ja[:60] + "..." if len(ja) > 60 else ja,
+    )
+    if en:
+        log.debug("[partial] EN: %s", en[:60] + "..." if len(en) > 60 else en)
+
+
 async def handle_final_subtitle(data: dict) -> None:
     log.info("[final_subtitle] Handling new final subtitle update...")
-    global srt_sequence, stream_start_time
+    global srt_sequence, stream_start_time, latest_transcription_text
 
     utterance_id = data.get("utterance_id")
     if utterance_id is None:
@@ -887,8 +1046,10 @@ async def handle_final_subtitle(data: dict) -> None:
     ja = data.get("transcription_ja", "").strip()
     en = data.get("translation_en", "").strip()
     if not (ja or en):
-        log.debug("[final_subtitle] Empty text received for utt %d", utterance_id)
+        log.debug("[final_subtitle] Empty text received for utt %s", utterance_id)
         return
+
+    latest_transcription_text = ja
 
     # segment_num = utterance_id + 1
     segment_idx = data["segment_idx"]
@@ -903,7 +1064,7 @@ async def handle_final_subtitle(data: dict) -> None:
     transl_quality = data.get("translation_quality")
     server_meta = data.get("meta", {})
 
-    log.info("[final_subtitle] utt %d | JA: %s", utterance_id, ja[:80])
+    log.info("[final_subtitle] utt %s | JA: %s", utterance_id, ja[:80])
     if en:
         log.info("[final_subtitle] EN: %s", en[:80])
     log.info(
@@ -981,12 +1142,12 @@ async def handle_speaker_update(data: dict) -> None:
 
     # if utterance_id in pending_subtitles:
     #     pending_subtitles[utterance_id]["speaker_meta"] = speaker_meta
-    #     log.info("[speaker_update] Enriched utt %d", utterance_id)
+    #     log.info("[speaker_update] Enriched utt %s", utterance_id)
     #     await _update_display_and_files(utterance_id)
     # else:
     #     # Rare: speaker info arrived before text
     #     pending_subtitles[utterance_id] = {"speaker_meta": speaker_meta}
-    #     log.debug("[speaker_update] Stored early speaker info for utt %d", utterance_id)
+    #     log.debug("[speaker_update] Stored early speaker info for utt %s", utterance_id)
 
     # Write per-segment speakers info
     speaker_clusters_path = os.path.join(segment_dir, "speaker_cluster.json")
@@ -1039,6 +1200,100 @@ async def handle_emotion_classification_update(data: dict) -> None:
         json.dump(emotion_classification_meta, f, indent=2, ensure_ascii=False)
 
 
+# --- Helper functions for partial & final utterance sending (Context Prompting) ---
+
+CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
+
+
+async def send_audio_chunk(
+    send_queue: asyncio.Queue,
+    buffer: bytearray,
+    segment_num: int = 0,
+    avg_vad: float = 0.0,
+    is_final: bool = False,
+    chunk_index: int = 0,
+    context_prompt: str = "",
+) -> None:
+    if len(buffer) == 0:
+        return
+
+    # ─── Normalize before sending ────────────────────────────────────────
+    try:
+        # Convert bytearray → int16 → float32 [-1,1]
+        audio_int16 = np.frombuffer(buffer, dtype=np.int16)
+        if len(audio_int16) == 0:
+            log.warning("[norm] Empty buffer before normalization — skipping send")
+            return
+
+        audio_float = audio_int16.astype(np.float32) / 32768.0
+
+        # Apply speech-probability-weighted loudness normalization
+        normalized_float = normalize_speech_loudness(
+            audio_float,
+            sample_rate=config.sample_rate,
+        )
+
+        # Back to int16
+        normalized_int16 = np.clip(normalized_float * 32767.0, -32768, 32767).astype(
+            np.int16
+        )
+
+        # Use normalized PCM for transmission
+        pcm_to_send = normalized_int16.tobytes()
+
+        log.debug(
+            "[norm] Normalized chunk %d | %s → %s | is_final=%s",
+            chunk_index,
+            format_bytes(len(buffer)),
+            format_bytes(len(pcm_to_send)),
+            is_final,
+        )
+
+    except Exception as e:
+        log.error("[norm] Normalization failed — sending original audio: %s", e)
+        pcm_to_send = bytes(buffer)  # fallback
+
+    # ─── Build payload with normalized audio ─────────────────────────────
+    payload = {
+        "type": "complete_utterance" if is_final else "speech_chunk",
+        "sample_rate": config.sample_rate,
+        "pcm": base64.b64encode(pcm_to_send).decode("ascii"),
+        "chunk_index": chunk_index,
+        "is_final": is_final,
+        "context_prompt": context_prompt,
+        "segment_num": segment_num,
+        "utterance_id": current_utterance_id,
+        "avg_vad_confidence": avg_vad,
+    }
+
+    await send_queue.put(payload)
+    log.info(
+        "[%s] Sent chunk %d | %s | %s",
+        "final" if is_final else "intermediate",
+        chunk_index,
+        format_bytes(len(pcm_to_send)),
+        "with final context" if is_final else "with context",
+    )
+
+
+def build_context_prompt() -> str:
+    global latest_transcription_text
+    if not latest_transcription_text:
+        return ""
+    words = latest_transcription_text.strip().split()
+    if len(words) <= CONTEXT_PROMPT_MAX_WORDS:
+        return " ".join(words)
+    return " ".join(words[-CONTEXT_PROMPT_MAX_WORDS:])
+
+
+def start_new_utterance():
+    global current_utterance_id, utterance_start_time, chunk_index
+    current_utterance_id = str(uuid.uuid4())
+    utterance_start_time = time.monotonic()
+    chunk_index = 0
+    log.info("[utterance] Started new utterance %s", current_utterance_id)
+
+
 async def _update_display_and_files(utt_id: int) -> None:
     if utt_id not in pending_subtitles:
         return
@@ -1072,6 +1327,7 @@ async def _update_display_and_files(utt_id: int) -> None:
 
     # ── Overlay ────────────────────────────────────────────────────────────────
     overlay.add_message(
+        message_id=utt_id,
         source_text=ja,
         translated_text=en,
         start_sec=round(relative_start, 2),
