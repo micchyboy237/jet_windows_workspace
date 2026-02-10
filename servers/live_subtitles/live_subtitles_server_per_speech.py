@@ -1,4 +1,4 @@
-# live_subtitles_server.py
+# live_subtitles_server_per_speech.py
 """
 Modern WebSocket live subtitles server (compatible with websockets ≥ 12.0 / 14.0+)
 Receives Japanese audio chunks, buffers until end-of-utterance, transcribes & translates.
@@ -138,12 +138,18 @@ logger.info("Models loaded.")
 class ConnectionState:
     def __init__(self, client_id: str):
         self.client_id = client_id
-        self.utterance_count = 0
-        self.speech_segment_count = 0
-        # Future: self.non_speech_segment_count = 0
+        self.current_utterance_id: str | None = None
+        self.audio_buffer: bytearray = bytearray()
+        self.chunk_count: int = 0
+        self.last_context_prompt: str | None = None
+        self.utterance_start: datetime | None = None
 
-    # The following methods now do nothing; retained to ease future code upgrades.
+    def reset_utterance(self):
+        self.audio_buffer = bytearray()
+        self.chunk_count = 0
+
     def append_chunk(self, pcm_bytes: bytes, sample_rate: int):
+        # Not used currently; present for compatibility.
         pass
 
     def clear_buffer(self):
@@ -172,16 +178,18 @@ def transcribe_and_translate(
     audio_bytes: bytes,
     sr: int,
     client_id: str,
-    utterance_idx: int,
+    utterance_id: str,
+    segment_num: int,
     end_of_utterance_received_at: datetime,  # when end marker was received (UTC)
     received_at: datetime | None = None,  # when first chunk received (UTC, optional)
+    context_prompt: str | None = None,
     out_dir: Path | None = None,
 ) -> tuple[str, str, float, dict]:
     """Blocking function — run in executor."""
     processing_started_at = datetime.now(timezone.utc)
 
     timestamp = processing_started_at.strftime("%Y%m%d_%H%M%S")
-    stem = f"utterance_{client_id}_{utterance_idx:04d}_{timestamp}"
+    stem = f"utterance_{client_id}_{segment_num:04d}_{timestamp}"
 
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -200,6 +208,7 @@ def transcribe_and_translate(
         language="ja",
         beam_size=5,
         vad_filter=False,
+        initial_prompt=context_prompt,
         condition_on_previous_text=False,
     )
 
@@ -258,7 +267,7 @@ def transcribe_and_translate(
         ja_text[:70] + "..." if len(ja_text) > 70 else ja_text,
     )
     logger.info(
-        "[translation]   log_prob=%s → quality=%s | en=%s",
+        "[translation] log_prob=%s → quality=%s | en=%s",
         f"{translation_logprob:.4f}" if translation_logprob is not None else "N/A",
         translation_quality,
         en_text[:70] + "..." if len(en_text) > 70 else en_text,
@@ -275,7 +284,7 @@ def transcribe_and_translate(
     # ─── Build metadata ───────────────────────────────────────────
     meta = {
         "client_id": client_id,
-        "utterance_index": utterance_idx,
+        "utterance_id": utterance_id,
         "timestamp_iso": processing_started_at.isoformat(),
         "received_at": received_at.isoformat() if received_at else None,
         "end_of_utterance_received_at": end_of_utterance_received_at.isoformat(),
@@ -302,6 +311,9 @@ def transcribe_and_translate(
                 else None
             ),
             "quality_label": translation_quality,
+        },
+        "context": {
+            "prompt_used": context_prompt,
         },
         "segments": segments_list,
     }
@@ -351,61 +363,45 @@ async def handler(websocket):
             try:
                 data = json.loads(message)
                 msg_type = data.get("type")
-                if msg_type == "complete_utterance":
-                    logger.info(f"[{client_id}] Received complete_utterance")
+                if msg_type in ("speech_chunk", "complete_utterance"):
                     pcm_b64 = data.get("pcm")
                     if not pcm_b64:
-                        logger.warning(
-                            f"[{client_id}] Missing pcm in complete_utterance"
-                        )
+                        logger.warning(f"[{client_id}] Missing pcm")
                         continue
                     pcm_bytes = base64.b64decode(pcm_b64)
                     sr = data.get("sample_rate", 16000)
-                    avg_vad_confidence = data.get("avg_vad_confidence")
+                    utterance_id = data.get("utterance_id")
                     segment_num = data.get("segment_num")
-                    duration_sec = data.get(
-                        "duration_sec", round(len(pcm_bytes) / (2 * sr), 3)
-                    )
+                    chunk_index = data.get("chunk_index", 0)
+                    is_final = data.get("is_final", False)
+                    context_prompt = data.get("context_prompt")
 
-                    state.utterance_count += 1
-                    utterance_id = state.utterance_count
-                    state.speech_segment_count += 1
-                    if segment_num is None:
-                        segment_num = state.speech_segment_count
-                    segment_idx = state.speech_segment_count
+                    if utterance_id != state.current_utterance_id:
+                        state.current_utterance_id = utterance_id
+                        state.reset_utterance()
+                        state.utterance_start = datetime.now(timezone.utc)
 
-                    loop = asyncio.get_running_loop()
-                    ja, en, transcription_confidence, meta = await loop.run_in_executor(
-                        executor,
-                        transcribe_and_translate,
-                        pcm_bytes,
+                    state.audio_buffer.extend(pcm_bytes)
+                    state.chunk_count += 1
+                    state.last_context_prompt = context_prompt
+
+                    # Transcribe EVERY chunk progressively
+                    logger.info(f"[{client_id}] Processing chunk {chunk_index} for utt {utterance_id} {'(final)' if is_final else '(partial)'}")
+                    await process_utterance(
+                        websocket,
+                        state,
                         sr,
-                        state.client_id,
                         utterance_id,
-                        datetime.now(timezone.utc),
-                        None,
-                        DEFAULT_OUT_DIR,
+                        segment_num,
+                        context_prompt,
+                        data,
+                        is_final=is_final,
                     )
-                    text_payload = {
-                        "type": "final_subtitle",
-                        "utterance_id": utterance_id,
-                        "segment_idx": segment_idx,
-                        "segment_num": segment_num,
-                        "segment_type": "speech",
-                        "avg_vad_confidence": avg_vad_confidence,
-                        "transcription_ja": meta["transcription"]["text_ja"],
-                        "translation_en": meta["translation"]["text_en"],
-                        "duration_sec": round(duration_sec, 3),
-                        "transcription_confidence": meta["transcription"]["confidence"],
-                        "transcription_quality": meta["transcription"]["quality_label"],
-                        "translation_confidence": meta["translation"].get("confidence"),
-                        "translation_quality": meta["translation"]["quality_label"],
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }
-                    await websocket.send(json.dumps(text_payload, ensure_ascii=False))
-                    logger.info(
-                        f"[{client_id}] Sent final_subtitle for utterance {utterance_id}"
-                    )
+
+                    if is_final:
+                        logger.info(f"[{client_id}] Final chunk received for utt {utterance_id}")
+                        state.reset_utterance()
+
                 else:
                     logger.warning(f"[{client_id}] Unknown message type: {msg_type}")
             except json.JSONDecodeError:
@@ -417,6 +413,73 @@ async def handler(websocket):
     finally:
         connected_states.pop(websocket, None)
         logger.info(f"[{client_id}] Disconnected")
+
+
+async def process_utterance(
+    websocket,
+    state: ConnectionState,
+    sample_rate: int,
+    utterance_id: str,
+    segment_num: int,
+    context_prompt: str | None,
+    data: dict,
+    is_final: bool = False,      # <-- Added: is_final to signature
+) -> None:
+    if len(state.audio_buffer) < 1000:
+        logger.warning(f"[{state.client_id}] Empty or too small utterance {utterance_id}")
+        return
+
+    # Calculate fallback duration if client didn't send it
+    audio_duration_sec = len(state.audio_buffer) / (2 * sample_rate)
+
+    loop = asyncio.get_running_loop()
+    ja, en, conf, meta = await loop.run_in_executor(
+        executor,
+        transcribe_and_translate,
+        bytes(state.audio_buffer),
+        sample_rate,
+        state.client_id,
+        utterance_id,
+        segment_num,
+        datetime.now(timezone.utc),
+        None,
+        context_prompt,
+        DEFAULT_OUT_DIR,
+    )
+
+    # Extract values from client message with safe defaults
+    segment_idx = data.get("segment_idx")
+    segment_num = data.get("segment_num")
+    segment_type = data.get("segment_type", "speech")
+    client_duration = data.get("duration_sec")
+    avg_vad_confidence = data.get("avg_vad_confidence", 0.0)
+
+    if segment_idx is None:
+        segment_idx = 0  # or calculate from chunk_index if you want
+
+    # Prefer client-provided duration, fallback to calculated
+    duration_sec = client_duration if client_duration is not None else audio_duration_sec
+
+    payload = {
+        "type": "final_subtitle" if is_final else "partial_subtitle",
+        "utterance_id": utterance_id,
+        "segment_idx": segment_idx,
+        "segment_num": segment_num,
+        "segment_type": segment_type,
+        "avg_vad_confidence": avg_vad_confidence,
+        "transcription_ja": meta["transcription"]["text_ja"],
+        "translation_en": meta["translation"]["text_en"],
+        "duration_sec": round(duration_sec, 3),
+        "transcription_confidence": meta["transcription"]["confidence"],
+        "transcription_quality": meta["transcription"]["quality_label"],
+        "translation_confidence": meta["translation"].get("confidence"),
+        "translation_quality": meta["translation"]["quality_label"],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "meta": meta,
+    }
+
+    await websocket.send(json.dumps(payload, ensure_ascii=False))
+    logger.info(f"[{state.client_id}] Sent {'final' if is_final else 'partial'} subtitle for utt {utterance_id}")
 
 
 def pcm_bytes_to_waveform(pcm: bytes | bytearray, *, dtype=np.int16) -> np.ndarray:
