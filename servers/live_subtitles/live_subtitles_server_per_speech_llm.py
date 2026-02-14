@@ -108,15 +108,31 @@ def transcribe_and_translate(
 
     ja_text = trans_result.text_ja.strip()
 
-    en_text, translation_logprob, translation_confidence, translation_quality = (
-        translate_japanese_to_english_structured(
-            ja_text,
-            max_decoding_length=512,
-            min_tokens_for_confidence=3,
-            enable_scoring=ENABLE_TRANSLATION_SCORING,
-            context_prompt=prev_ja,
+    if ja_text:
+        en_text, translation_logprob, translation_confidence, translation_quality = (
+            translate_japanese_to_english_structured(
+                ja_text,
+                max_decoding_length=512,
+                min_tokens_for_confidence=3,
+                enable_scoring=ENABLE_TRANSLATION_SCORING,
+                context_prompt=prev_ja,
+            )
         )
-    )
+    else:
+        # ────────────────────────────────────────────────────────────────
+        # No meaningful Japanese text was transcribed
+        # ────────────────────────────────────────────────────────────────
+        en_text = ""
+        translation_logprob = None
+        translation_confidence = None
+        translation_quality = None
+
+        # Optional: you can log this situation if you want to track
+        # how often empty transcriptions occur
+        logger.debug(
+            f"[{client_id}] Empty transcription (utterance {utterance_id}, "
+            f"segment {segment_num}, rms={normalized_rms:.3f})"
+        )
 
     processing_finished_at = datetime.now(timezone.utc)
     processing_duration = (processing_finished_at - processing_started_at).total_seconds()
