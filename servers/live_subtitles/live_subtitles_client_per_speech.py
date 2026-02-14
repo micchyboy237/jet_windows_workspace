@@ -56,7 +56,7 @@ CONTINUOUS_AUDIO_MAX_SECONDS = 320.0
 MAX_SPEECH_DURATION_SEC = 90.0
 CHUNK_DURATION_SEC = 6.0
 CHUNK_OVERLAP_SEC = 2.0
-CONTEXT_PROMPT_MAX_WORDS = 40
+CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
 
 audio_total_samples: int = 0
 LAST_5MIN_WAV = os.path.join(OUTPUT_DIR, "last_5_mins.wav")
@@ -177,6 +177,7 @@ async def stream_microphone(ws) -> None:
     speech_energy_sum_squares: float = 0.0  # sum of squares for variance / std dev
     max_energy: float = 0.0  # peak RMS in segment
     min_energy: float = float("inf")  # lowest RMS in speech chunk
+    utterance_normalized_rms: float | None = None
 
     current_segment_num: int | None = None
     current_segment_buffer: bytearray | None = None
@@ -278,8 +279,8 @@ async def stream_microphone(ws) -> None:
 
                     # Start temp code
                     normalized_chunk_np = chunk_np / 32767.0
-                    temp_rms = compute_rms(normalized_chunk_np)
-                    energy_label = rms_to_loudness_label(temp_rms)
+                    normalized_chunk_rms = compute_rms(normalized_chunk_np)
+                    chunk_energy_label = rms_to_loudness_label(normalized_chunk_rms)
                     # End temp code
 
                     # Skip processing if there is no sufficiently loud sound in the audio chunk
@@ -304,8 +305,8 @@ async def stream_microphone(ws) -> None:
                     # Option A: log EVERY audible chunk (good for short test runs)
                     if rms:
                         log.debug(
-                            "[vad every] rms=%.4f | prob=%.3f | decision=%-9s | qsize=%3d | ongoing=%s",
-                            rms,
+                            "[vad every] rms=%s | prob=%.3f | decision=%-9s | qsize=%3d | ongoing=%s",
+                            chunk_energy_label,
                             speech_prob,
                             "SPEECH" if is_speech_chunk else "non-speech",
                             audio_queue.qsize(),
@@ -451,6 +452,7 @@ async def stream_microphone(ws) -> None:
                                 await send_audio_chunk(
                                     send_queue,
                                     utterance_audio_buffer,
+                                    utterance_normalized_rms,
                                     segment_num=current_segment_num,
                                     avg_vad=round(
                                         vad_confidence_sum / speech_chunk_count, 4
@@ -459,6 +461,7 @@ async def stream_microphone(ws) -> None:
                                     else 0.0,
                                     is_final=False,
                                     chunk_index=chunk_index,
+                                    speech_chunk_count=speech_chunk_count,
                                     context_prompt=build_context_prompt(),
                                 )
                                 last_chunk_sent_time = now
@@ -496,6 +499,7 @@ async def stream_microphone(ws) -> None:
                                 await send_audio_chunk(
                                     send_queue,
                                     utterance_audio_buffer,
+                                    utterance_normalized_rms,
                                     segment_num=current_segment_num,
                                     avg_vad=round(
                                         vad_confidence_sum / speech_chunk_count, 4
@@ -504,6 +508,7 @@ async def stream_microphone(ws) -> None:
                                     else 0.0,
                                     is_final=True,
                                     chunk_index=chunk_index,
+                                    speech_chunk_count=speech_chunk_count,
                                     context_prompt=build_context_prompt(),
                                 )
 
@@ -559,6 +564,9 @@ async def stream_microphone(ws) -> None:
                             current_segment_buffer = bytearray(
                                 normalized_int16.tobytes()
                             )
+
+                            # ── Compute stable utterance-level normalized RMS once ───────
+                            utterance_normalized_rms = compute_rms(normalized_float)
 
                             log.info(
                                 "[norm] Applied speech loudness normalization to segment_%04d "
@@ -746,6 +754,7 @@ async def stream_microphone(ws) -> None:
                             current_utterance_id = None
                             utterance_audio_buffer = bytearray()
                             chunk_index = 0
+                            utterance_normalized_rms = None
 
                             segment_type = "non_speech"
                             speech_start_time = None
@@ -782,9 +791,9 @@ async def stream_microphone(ws) -> None:
                             )
 
                         log.orange(
-                            "[speech] %d chunks | rms=%.4f | speech=%.3f | dur=%.2fs%s",
+                            "[speech] %d chunks | rms=%s | speech=%.3f | dur=%.2fs%s",
                             speech_chunk_count,
-                            temp_rms,
+                            chunk_energy_label,
                             speech_prob,
                             time.monotonic() - speech_start_time
                             if speech_start_time
@@ -991,6 +1000,7 @@ async def handle_partial_subtitle(data: dict) -> None:
     segment_type = data.get("segment_type", "speech")
     duration_sec = data.get("duration_sec", 0.0)
     avg_vad_conf = data.get("avg_vad_confidence", 0.0)
+    normalized_rms = data.get("normalized_rms", 0.0)
     trans_conf = data.get("transcription_confidence")
     trans_quality = data.get("transcription_quality")
     transl_conf = data.get("translation_confidence")
@@ -1014,6 +1024,8 @@ async def handle_partial_subtitle(data: dict) -> None:
         duration_sec=round(duration_sec, 2),
         segment_number=segment_num,
         avg_vad_confidence=round(avg_vad_conf, 3),
+        normalized_rms=round(normalized_rms, 3),
+        normalized_rms_label=rms_to_loudness_label(normalized_rms),
         transcription_confidence=round(trans_conf, 3)
         if trans_conf is not None
         else None,
@@ -1058,6 +1070,7 @@ async def handle_final_subtitle(data: dict) -> None:
 
     duration_sec = data.get("duration_sec", 0.0)
     avg_vad_conf = data.get("avg_vad_confidence")
+    normalized_rms = data.get("normalized_rms")
     trans_conf = data.get("transcription_confidence")
     trans_quality = data.get("transcription_quality")
     transl_conf = data.get("translation_confidence")
@@ -1099,6 +1112,7 @@ async def handle_final_subtitle(data: dict) -> None:
         "segment_num": segment_num,
         "segment_type": segment_type,
         "avg_vad_conf": avg_vad_conf,
+        "normalized_rms": normalized_rms,
         "trans_conf": trans_conf,
         "trans_quality": trans_quality,
         "transl_conf": transl_conf,
@@ -1200,18 +1214,15 @@ async def handle_emotion_classification_update(data: dict) -> None:
         json.dump(emotion_classification_meta, f, indent=2, ensure_ascii=False)
 
 
-# --- Helper functions for partial & final utterance sending (Context Prompting) ---
-
-CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
-
-
 async def send_audio_chunk(
     send_queue: asyncio.Queue,
     buffer: bytearray,
+    utterance_normalized_rms: float,
     segment_num: int = 0,
     avg_vad: float = 0.0,
     is_final: bool = False,
     chunk_index: int = 0,
+    speech_chunk_count: int = 0,
     context_prompt: str = "",
 ) -> None:
     if len(buffer) == 0:
@@ -1237,17 +1248,15 @@ async def send_audio_chunk(
         normalized_int16 = np.clip(normalized_float * 32767.0, -32768, 32767).astype(
             np.int16
         )
+        # Use stable utterance-level value (may be None → fallback)
+        normalized_rms = (
+            utterance_normalized_rms
+            if utterance_normalized_rms is not None
+            else compute_rms(normalized_float)  # fallback for safety
+        )
 
         # Use normalized PCM for transmission
         pcm_to_send = normalized_int16.tobytes()
-
-        log.debug(
-            "[norm] Normalized chunk %d | %s → %s | is_final=%s",
-            chunk_index,
-            format_bytes(len(buffer)),
-            format_bytes(len(pcm_to_send)),
-            is_final,
-        )
 
     except Exception as e:
         log.error("[norm] Normalization failed — sending original audio: %s", e)
@@ -1263,16 +1272,21 @@ async def send_audio_chunk(
         "context_prompt": context_prompt,
         "segment_num": segment_num,
         "utterance_id": current_utterance_id,
+        "normalized_rms": normalized_rms,
         "avg_vad_confidence": avg_vad,
     }
 
     await send_queue.put(payload)
-    log.info(
-        "[%s] Sent chunk %d | %s | %s",
-        "final" if is_final else "intermediate",
+
+    log_fn = log.success if is_final else log.orange
+    log_fn(
+        "[%s] Sent chunk %d (%d so far) | rms=%s | vad=%.3f",
+        "final" if is_final else "partial",
         chunk_index,
-        format_bytes(len(pcm_to_send)),
-        "with final context" if is_final else "with context",
+        speech_chunk_count,
+        rms_to_loudness_label(normalized_rms),
+        avg_vad,
+        bright=True,
     )
 
 
@@ -1315,6 +1329,7 @@ async def _update_display_and_files(utt_id: int) -> None:
     start_time = entry["start_wallclock"]
 
     avg_vad_conf = entry["avg_vad_conf"]
+    normalized_rms = entry["normalized_rms"]
 
     trans_conf = entry.get("trans_conf")
     trans_quality = entry.get("trans_quality")
@@ -1335,6 +1350,8 @@ async def _update_display_and_files(utt_id: int) -> None:
         duration_sec=round(duration_sec, 2),
         segment_number=segment_num,
         avg_vad_confidence=round(avg_vad_conf, 3),
+        normalized_rms=round(normalized_rms, 3),
+        normalized_rms_label=rms_to_loudness_label(normalized_rms),
         transcription_confidence=round(trans_conf, 3)
         if trans_conf is not None
         else None,
