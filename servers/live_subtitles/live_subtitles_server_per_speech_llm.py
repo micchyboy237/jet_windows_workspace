@@ -15,8 +15,11 @@ import numpy as np
 # ────────────────────────────────────────────────────────────────────────────────
 # Imports from refactored modules
 # ────────────────────────────────────────────────────────────────────────────────
-from transcribe_jp_whisper import transcribe_japanese_whisper, TranscriptionResult
-from translate_jp_en_opus import translate_japanese_to_english
+from transcribe_jp_llm import (
+    transcribe_japanese_llm_from_bytes,
+    TranscriptionResult,
+)
+from translate_jp_en_llm import translate_japanese_to_english_structured
 from logger import logger
 
 logger.info("Live subtitles server starting...")
@@ -70,21 +73,12 @@ def transcribe_and_translate(
     context_prompt: str | None = None,
     out_dir: Path | None = None,
 ) -> tuple[str, str, float, dict]:
-    """Blocking function — run in executor."""
+
     processing_started_at = datetime.now(timezone.utc)
 
-    # Prepare path if we want to keep the audio
-    temp_path = None
-    if out_dir:
-        ts = processing_started_at.strftime("%Y%m%d_%H%M%S")
-        temp_path = out_dir / f"utterance_{client_id}_{segment_num:04d}_{ts}.wav"
-
-    # Core transcription (now in separate module)
-    trans_result: TranscriptionResult = transcribe_japanese_whisper(
+    trans_result: TranscriptionResult = transcribe_japanese_llm_from_bytes(
         audio_bytes=audio_bytes,
         sample_rate=sr,
-        context_prompt=context_prompt,
-        save_temp_wav=temp_path,
         client_id=client_id,
         utterance_id=utterance_id,
         segment_num=segment_num,
@@ -92,71 +86,35 @@ def transcribe_and_translate(
 
     ja_text = trans_result.text_ja
 
-    # Translation
-    en_text, translation_logprob, translation_confidence, translation_quality = translate_japanese_to_english(
+    en_text, translation_logprob, translation_confidence, translation_quality = translate_japanese_to_english_structured(
         ja_text,
-        beam_size=4,
         max_decoding_length=512,
         min_tokens_for_confidence=3,
         enable_scoring=ENABLE_TRANSLATION_SCORING,
     )
 
+
     processing_finished_at = datetime.now(timezone.utc)
-    queue_wait_duration = (processing_started_at - end_of_utterance_received_at).total_seconds()
-    processing_duration = (processing_finished_at - processing_started_at).total_seconds()
 
     meta = {
         **trans_result.metadata,
         "timestamp_iso": processing_started_at.isoformat(),
-        "received_at": received_at.isoformat() if received_at else None,
-        "end_of_utterance_received_at": end_of_utterance_received_at.isoformat(),
-        "processing_started_at": processing_started_at.isoformat(),
-        "processing_finished_at": processing_finished_at.isoformat(),
-        "queue_wait_seconds": round(queue_wait_duration, 3),
-        "processing_duration_seconds": round(processing_duration, 3),
         "transcription": {
             "text_ja": ja_text,
-            "avg_logprob": trans_result.avg_logprob,
-            "confidence": round(trans_result.confidence, 4),
-            "quality_label": trans_result.quality_label,
+            "confidence": None,
+            "quality_label": "N/A",
         },
         "translation": {
             "text_en": en_text,
-            "log_prob": round(translation_logprob, 4) if translation_logprob is not None else None,
-            "confidence": round(translation_confidence, 4) if translation_confidence is not None else None,
+            "log_prob": round(translation_logprob, 4) if translation_logprob else None,
+            "confidence": round(translation_confidence, 4) if translation_confidence else None,
             "quality_label": translation_quality,
         },
         "segments": trans_result.segments,
         "normalized_rms": normalized_rms,
-        "context": {
-            "prompt_used": context_prompt,
-        },
     }
 
-    # Logging
-    preview_ja = ja_text[:70] + "..." if len(ja_text) > 70 else ja_text
-    preview_en = en_text[:70] + "..." if len(en_text) > 70 else en_text
-
-    logger.info(
-        "[transcribe] conf=%.3f | qual=%s | ja=%s",
-        trans_result.confidence,
-        trans_result.quality_label,
-        preview_ja,
-    )
-    logger.info(
-        "[translate] qual=%s | en=%s",
-        translation_quality,
-        preview_en,
-    )
-
-    # Save metadata if permanent storage is enabled
-    if out_dir and temp_path:
-        meta_path = temp_path.with_suffix(".json")
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
-        logger.debug(f"Saved metadata → {meta_path}")
-
-    return ja_text, en_text, trans_result.confidence, meta
+    return ja_text, en_text, 0.0, meta
 
 
 async def handler(websocket):

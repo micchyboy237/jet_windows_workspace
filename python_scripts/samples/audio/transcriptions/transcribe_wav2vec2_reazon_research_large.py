@@ -1,4 +1,4 @@
-# transcribe_jonatasgrosman_wav2vec2.py
+# transcribe_wav2vec2_reazon_research_large.py
 
 from typing import Dict, Tuple, List, Union, Optional, TypedDict, Literal
 import os
@@ -14,6 +14,8 @@ from rich.text import Text                    # new
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 import logging
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
+
+from translators.translate_jp_en_opus import translate_japanese_to_english  # already imported in your code
 
 # Audio input type: file-like, np/tensor, bytes, etc
 AudioInput = Union[
@@ -535,7 +537,7 @@ def example(audio_path):
         asr.console.rule("Transcription Result")
         asr.console.print(f"[bold]File:[/bold] {result['file']}")
         asr.console.print(f"[bold]Duration:[/bold] {result['duration_sec']} s")
-        asr.console.print(f"[bold]Chunks:[/bold] {result['chunks_info']}")
+        asr.console.print(f"[bold]Chunks:[/bold] {result.get('chunks_info', '—')}")
         asr.console.print(f"[bold]Text:[/bold]\n{result['text']}")
 
         if (conf := result.get("avg_confidence")) is not None:
@@ -557,6 +559,27 @@ def example(audio_path):
             asr.console.print(
                 f"[bold]Sequence log-prob:[/bold] {slp:.3f} → [[{color}]{cat}[/{color}]]"
             )
+
+        # ── NEW: Translate to English and show both JA + EN ───────────────────────
+        if result["text"].strip():
+            asr.console.rule("Translation", style="cyan")
+
+            # Japanese (original)
+            asr.console.print("[bold cyan]Japanese (Original):[/bold cyan]")
+            asr.console.print(f"{result['text']}\n")
+
+            # English translation
+            try:
+                with asr.console.status("[yellow]Translating to English...", spinner="dots"):
+                    en_text = translate_japanese_to_english(result["text"])
+                asr.console.print("[bold green]English (Translated):[/bold green]")
+                asr.console.print(f"{en_text.strip()}\n")
+            except Exception as e:
+                asr.console.print(
+                    f"[bold red]Translation failed:[/bold red] {e}",
+                    highlight=True
+                )
+                asr.console.print("[dim](showing only Japanese text above)[/dim]")
 
         if result.get("token_logprobs"):
             asr.console.print(f"[dim]Token logprobs (first 15):[/dim] {result['token_logprobs'][:15]}")

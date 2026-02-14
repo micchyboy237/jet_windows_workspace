@@ -38,10 +38,12 @@ $categories = @(
             @{ Num=2;  Size="Small";  Name="Llama-3.2-3B-Instruct";              File="Llama-3.2-3B-Instruct-Q4_K_M.gguf";                              Ctx=8192; Gpu=999; Jinja=$true;  Desc="Fast & very popular 3B model" }
             @{ Num=3;  Size="Small";  Name="Gemma-3-4B-it";                      File="gemma-3-4b-it-Q4_K_M.gguf";                                      Ctx=8192; Gpu=999; Jinja=$true;  Desc="Fresh Gemma 2025 release" }
             @{ Num=4;  Size="Small";  Name="Qwen3-4B-Instruct-2507";             File="Qwen3-4B-Instruct-2507-Q4_K_M.gguf";                             Ctx=8192; Gpu=999; Jinja=$true;  Desc="Very recent strong 4B model" }
-            @{ Num=5;  Size="Medium"; Name="Mistral-Nemo-Instruct-2407";         File="Mistral-Nemo-Instruct-2407-Q4_K_M.gguf";                         Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Excellent quality - feels like 12B" }
-            @{ Num=6;  Size="Medium"; Name="DeepSeek-R1-Distill-Qwen-7B";        File="DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf";                        Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Strong reasoning focused distill" }
-            @{ Num=7;  Size="Medium"; Name="Meta-Llama-3.1-8B-Instruct";         File="Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf";                         Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Still very capable classic 8B" }
-            @{ Num=8;  Size="Medium"; Name="Hermes-3-Llama-3.1-8B";              File="Hermes-3-Llama-3.1-8B-Q4_K_M.gguf";                              Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Excellent reasoning & chat" }
+            @{ Num=5;  Size="Small";  Name="DeepSeek-R1-Distill-Qwen-1.5B Q5_K_M"; File="DeepSeek-R1-Distill-Qwen-1.5B-Q5_K_M.gguf";                     Ctx=8192; Gpu=999; Jinja=$true;  Desc="Very fast 1.5B - good quality" }
+            @{ Num=6;  Size="Small";  Name="DeepSeek-R1-Distill-Qwen-1.5B Q5_K_L"; File="DeepSeek-R1-Distill-Qwen-1.5B-Q5_K_L.gguf";                     Ctx=8192; Gpu=999; Jinja=$true;  Desc="1.5B - highest quality Q5" }
+            @{ Num=7;  Size="Medium"; Name="Mistral-Nemo-Instruct-2407";         File="Mistral-Nemo-Instruct-2407-Q4_K_M.gguf";                         Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Excellent quality - feels like 12B" }
+            @{ Num=8;  Size="Medium"; Name="DeepSeek-R1-Distill-Qwen-7B";        File="DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf";                        Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Strong reasoning focused distill" }
+            @{ Num=9;  Size="Medium"; Name="Meta-Llama-3.1-8B-Instruct";         File="Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf";                         Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Still very capable classic 8B" }
+            @{ Num=10; Size="Medium"; Name="Hermes-3-Llama-3.1-8B";              File="Hermes-3-Llama-3.1-8B-Q4_K_M.gguf";                              Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Excellent reasoning & chat" }
         )
     },
     @{
@@ -53,16 +55,51 @@ $categories = @(
     @{
         Name = "Vision / Multimodal"
         Items = @(
-            @{ Num=1; Size="Medium"; Name="Qwen2.5-VL-7B-Instruct";              
+            @{ Num=1; Size="Small"; Name="Gemma-3-4B-it (Vision)";
+               File="ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf";
+               Ctx=8192; Gpu=30; Jinja=$true;
+               Desc="Lightweight & efficient 2025 vision model";
+               MmprojFile="ggml-org_gemma-3-4b-it-GGUF_mmproj-model-f16.gguf"
+            }
+            @{ Num=2; Size="Medium"; Name="Qwen2.5-VL-7B-Instruct";              
                File="Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf";                  
                Ctx=8192; Gpu=28; Jinja=$true; 
                Desc="Strong vision + text (OCR, charts, objects)"; 
                MmprojFile="mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf" 
             }
-            # ... other vision models ...
         )
     }
-    # ... keep your other categories (Embeddings, Japanese, Uncensored) ...
+    @{
+        Name = "Embeddings / RAG"
+        Items = @(
+            @{ Num=1; Size="Small";  Name="nomic-embed-text-v1.5";               File="embed_models\nomic-embed-text-v1.5.Q4_K_M.gguf";               Ctx=8192; Gpu=999; Jinja=$false; Desc="Very strong & popular embedding" }
+            @{ Num=2; Size="Small";  Name="nomic-embed-text-v2-moe";             File="embed_models\nomic-embed-text-v2-moe.Q4_K_M.gguf";             Ctx=8192; Gpu=999; Jinja=$false; Desc="Latest & most capable Nomic" }
+            @{ Num=3; Size="Small";  Name="all-MiniLM-L12-v2 (q4)";              File="embed_models\all-MiniLM-L12-v2-q4_0.gguf";                      Ctx=8192; Gpu=999; Jinja=$false; Desc="Classic fast & compact" }
+            @{ Num=4; Size="Tiny";   Name="embedding-gemma-300M";                File="embed_models\embeddinggemma-300M-Q8_0.gguf";                    Ctx=8192; Gpu=999; Jinja=$false; Desc="Gemma-based embedding model" }
+        )
+    },
+    @{
+        Name = "Japanese <-> English Translators"
+        Items = @(
+            @{ Num=1; Size="Tiny";   Name="LFM2-350M-ENJP-MT";                   File="translators\LFM2-350M-ENJP-MT.Q4_K_M.gguf";                                                  Ctx=2048; Gpu=999; Jinja=$false; Desc="Very fast - acceptable quality" }
+            @{ Num=2; Size="Small";  Name="gemma-2-2b-jpn-it-translate";         File="translators\gemma-2-2b-jpn-it-translate-Q4_K_M.gguf";                                         Ctx=2048; Gpu=999; Jinja=$false; Desc="Good for short/medium text"; Extra="--override-kv tokenizer.ggml.add_bos_token=bool:false" }
+            @{ Num=3; Size="Small";  Name="shisa-v2.1-llama3.2-3b Q4";           File="translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf";                                              Ctx=8192; Gpu=999; Jinja=$true;  Desc="Modern 3B - excellent speed/quality" }
+            @{ Num=4; Size="Small";  Name="shisa-v2.1-llama3.2-3b IQ4_XS";       File="translators\shisa-v2.1-llama3.2-3b.IQ4_XS.gguf";                                              Ctx=8192; Gpu=999; Jinja=$true;  Desc="Slightly better quality than Q4" }
+            @{ Num=5; Size="Medium"; Name="Llama-3-ELYZA-JP-8B IQ2XXS";          File="translators\Llama-3-ELYZA-JP-8B.i1-IQ2_XXS.gguf";                                             Ctx=4096; Gpu=25;  Jinja=$true;  Desc="Very heavy quantization" }
+            @{ Num=6; Size="Medium"; Name="ALMA-7B-Ja-V2";                       File="translators\ALMA-7B-Ja-V2.Q4_K_M.gguf";                                                       Ctx=4096; Gpu=30;  Jinja=$false; Desc="Strong classic Japanese model" }
+        )
+    },
+    @{
+        Name = "Uncensored / Spicy Models"
+        Items = @(
+            @{ Num=1; Size="Tiny";   Name="nano_imp_1b-q8_0";                    File="nsfw\nano_imp_1b-q8_0.gguf";                                                                  Ctx=4096; Gpu=999; Jinja=$false; Desc="Extremely fast - minimal quality" }
+            @{ Num=2; Size="Small";  Name="dolphin-2_6-phi-2";                   File="nsfw\dolphin-2_6-phi-2.Q4_K_M.gguf";                                                          Ctx=4096; Gpu=999; Jinja=$false; Desc="Small but surprisingly capable" }
+            @{ Num=3; Size="Small";  Name="Fiendish_LLAMA_3B";                   File="nsfw\Fiendish_LLAMA_3B.Q4_K_M.gguf";                                                          Ctx=8192; Gpu=999; Jinja=$true;  Desc="Very direct 3B model" }
+            @{ Num=4; Size="Small";  Name="Llama-3.2-3B uncensored";             File="nsfw\Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf";                                           Ctx=8192; Gpu=999; Jinja=$true;  Desc="Popular base loosened" }
+            @{ Num=5; Size="Small";  Name="Impish_LLAMA_4B";                     File="nsfw\SicariusSicariiStuff_Impish_LLAMA_4B-Q4_K_M.gguf";                                      Ctx=8192; Gpu=999; Jinja=$true;  Desc="4B spicy variant" }
+            @{ Num=6; Size="Medium"; Name="WizardLM-7B uncensored";              File="nsfw\WizardLM-7B-uncensored.Q4_K_M.gguf";                                                     Ctx=8192; Gpu=40;  Jinja=$true;  Desc="Classic uncensored 7B" }
+        )
+    }
 )
 
 while ($true) {

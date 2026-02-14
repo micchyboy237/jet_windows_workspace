@@ -17,12 +17,12 @@ _model_cache = {"model": None, "key": None}
 
 
 def _get_model_key(
-    model_name: str, style_or_domain: str | None, language: str
+    model_name: str, style_or_domain: str = "ud", language: str = "en"
 ) -> tuple:
     return (model_name, style_or_domain, language)
 
 
-def _load_model(model_name: str, style_or_domain: str | None, language: str) -> SaT:
+def _load_model(model_name: str, style_or_domain: str = "ud", language: str = "en") -> SaT:
     model_key = _get_model_key(model_name, style_or_domain, language)
     if _model_cache["key"] != model_key:
         try:
@@ -193,9 +193,7 @@ def extract_sentences(
     text: str | list[str],
     model_name: str = "sat-12l-sm",
     use_gpu: bool = False,
-    do_paragraph_segmentation: bool = False,
-    paragraph_threshold: float = 0.5,
-    style_or_domain: str | None = None,
+    style_or_domain: str = "ud",
     language: str = "en",
     valid_only: bool = False,
     verbose: bool = False,
@@ -230,8 +228,7 @@ def extract_sentences(
     # ------------------------------------------------------------------
     raw_output = sat.split(
         text,
-        do_paragraph_segmentation=do_paragraph_segmentation,
-        paragraph_threshold=paragraph_threshold,
+        do_paragraph_segmentation=False,
         verbose=verbose,
     )
 
@@ -256,16 +253,6 @@ def extract_sentences(
             newline_count = len(s) - len(s.rstrip("\n"))
             processed.extend([""] * newline_count)
     inner_segmented = processed
-
-    # For batched input texts
-    if do_paragraph_segmentation and isinstance(text, list):
-        inner_segmented = _flatten_list(inner_segmented)
-        # Insert empty spaces in between items
-        inner_segmented = [
-            s
-            for i, s in enumerate(inner_segmented)
-            for s in ([s, ""] if i < len(inner_segmented) - 1 else [s])
-        ]
 
     # Clean out trailing whitespaces after newline
     inner_segmented = [
@@ -298,6 +285,8 @@ def extract_sentences(
     return sentences
 
 
+import argparse
+
 if __name__ == "__main__":
     from rich.console import Console
     from rich.panel import Panel
@@ -305,9 +294,7 @@ if __name__ == "__main__":
 
     from html_text_extractor import extract_html_text
 
-    console = Console()
-
-    def print_example_header(title: str):
+    def print_example_header(title: str, console: Console):
         console.print(
             Panel.fit(
                 Text(title, style="bold cyan"),
@@ -316,66 +303,86 @@ if __name__ == "__main__":
             )
         )
 
-    # Only the HTML example retained
-    HTML_SAMPLE = """<div class="article-body">
-    <h1>Understanding Sentence Segmentation</h1>
-    <p>Modern NLP models can split text very accurately. <strong>SaT</strong> is one of the best open-source options in 2025.</p>
-    <p>However, real-world content often contains:</p>
-    <ul>
-        <li>Headings and subheadings</li>
-        <li>Lists and bullets</li>
-        <li>Tables and captions</li>
-        <li>References and footnotes</li>
-    </ul>
-    <p>Good sentence extractors should filter out most of these noise elements when <code>valid_only=True</code>.</p>
-    <blockquote>
-        "Clean segmentation makes downstream tasks much easier." — NLP researcher, 2024
-    </blockquote>
-    <p>That's why we love using wtpsplit + SaT!</p>
-</div>
-<footer>Last updated: Feb 2026</footer>"""
-
-    html_text = extract_html_text(HTML_SAMPLE)
-
-    print_example_header("HTML document example")
-    console.print(
-        "[yellow]Input contains typical article HTML structure[/yellow]\n"
+    parser = argparse.ArgumentParser(description="Extract sentences from HTML/text using SaT and wtpsplit.")
+    parser.add_argument(
+        "-f", "--file", type=str, default=None, help="Path to file to process (HTML/plain text)."
+    )
+    parser.add_argument(
+        "-v", "--valid-only", action="store_true", help="Filter to only valid sentences."
+    )
+    parser.add_argument(
+        "--model-name", type=str, default="sat-12l-sm",
+        help="Name of SaT model to use (default: %(default)s)."
+    )
+    parser.add_argument(
+        "--language", type=str, default="en", help="Input language code (default: %(default)s)."
+    )
+    parser.add_argument(
+        "--use-gpu", action="store_true", help="Use GPU if available."
     )
 
-    console.print("[bold]Extracted sentences (valid_only=False):[/bold]")
-    sentences = extract_sentences(
-        html_text,
-        model_name="sat-12l-sm",
-        language="en",
-        use_gpu=False,
-        valid_only=False,
-    )
-    for i, s in enumerate(sentences, 1):
-        console.print(f"[dim]{i:2d}.[/dim] {s}")
+    args = parser.parse_args()
 
-    # console.print("\n[bold]Valid sentences only:[/bold]")
-    # valid_sentences = extract_sentences(
-    #     html_text,
-    #     model_name="sat-12l-sm",
-    #     language="en",
-    #     use_gpu=True,
-    #     valid_only=True,
-    # )
-    # for i, s in enumerate(valid_sentences, 1):
-    #     console.print(f"[dim]{i:2d}.[/dim] {s}")
+    console = Console()
 
-    # console.print("\n[bold]With paragraph segmentation:[/bold]")
-    # paragraphs = extract_sentences(
-    #     html_text,
-    #     model_name="sat-12l-sm",
-    #     do_paragraph_segmentation=True,
-    #     paragraph_threshold=0.5,
-    #     use_gpu=True,
-    #     valid_only=False,
-    # )
-    # for i, para in enumerate(paragraphs, 1):
-    #     console.print(f"[bold cyan]Paragraph {i}:[/bold cyan]")
-    #     console.print(para)
-    #     console.print()
+    if not args.file:
+        # Use built-in HTML_SAMPLE if file is not provided
+        HTML_SAMPLE = """<div class="article-body">
+        <h1>Understanding Sentence Segmentation</h1>
+        <p>Modern NLP models can split text very accurately. <strong>SaT</strong> is one of the best open-source options in 2025.</p>
+        <p>However, real-world content often contains:</p>
+        <ul>
+            <li>Headings and subheadings</li>
+            <li>Lists and bullets</li>
+            <li>Tables and captions</li>
+            <li>References and footnotes</li>
+        </ul>
+        <p>Good sentence extractors should filter out most of these noise elements when <code>valid_only=True</code>.</p>
+        <blockquote>
+            "Clean segmentation makes downstream tasks much easier." — NLP researcher, 2024
+        </blockquote>
+        <p>That's why we love using wtpsplit + SaT!</p>
+    </div>
+    <footer>Last updated: Feb 2026</footer>"""
+        html_text = extract_html_text(HTML_SAMPLE)
 
-    console.print("\n[italic dim]Done.[/italic dim]")
+        print_example_header("HTML document example", console)
+        console.print(
+            "[yellow]Input contains typical article HTML structure[/yellow]\n"
+        )
+
+        console.print("[bold]Extracted sentences (valid_only=%s):[/bold]" % args.valid_only)
+        sentences = extract_sentences(
+            html_text,
+            model_name=args.model_name,
+            use_gpu=args.use_gpu,
+            valid_only=args.valid_only,
+            language=args.language,
+        )
+        for i, s in enumerate(sentences, 1):
+            console.print(f"[dim]{i:2d}.[/dim] {s}")
+
+        console.print("\n[italic dim]Done.[/italic dim]")
+    else:
+        # Process user-provided file
+        with open(args.file, encoding="utf-8") as f:
+            input_text = f.read()
+
+        # Heuristically treat HTML
+        if args.file.lower().endswith(".html") or ("<" in input_text and ">" in input_text):
+            input_text = extract_html_text(input_text)
+
+        print_example_header(f"Processing file: {args.file} (sentences)", console)
+
+        items = extract_sentences(
+            input_text,
+            model_name=args.model_name,
+            use_gpu=args.use_gpu,
+            valid_only=args.valid_only,
+            language=args.language,
+        )
+        for i, s in enumerate(items, 1):
+            prefix = f"[dim]{i:2d}.[/dim] "
+            console.print(prefix + s)
+
+        console.print("\n[italic dim]Done.[/italic dim]")

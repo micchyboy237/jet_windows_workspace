@@ -12,7 +12,7 @@ Write-Host ""
 
 $modelChoice = Read-Host "Enter the number of your choice (1-4)"
 
-$flashAttnDefault = "off"
+$flashAttnDefault = "on"
 $batchDefault     = 512
 $ubatchDefault    = 512
 
@@ -51,8 +51,8 @@ switch ($modelChoice) {
     }
 }
 
-$useFlashAttn = Read-Host "`nUse flash attention? [y/N] (recommended: N for short texts + Vulkan)"
-$flash = if ($useFlashAttn -match '^[yY]') { "on" } else { "off" }
+$useFlashAttn = Read-Host "`nUse flash attention? [Y/n] (recommended: Y for better memory efficiency)"
+$flash = if ($useFlashAttn -match '^[nN]') { "off" } else { "on" }
 
 $modelPath = "C:\Users\druiv\.cache\llama.cpp\embed_models\$modelName"
 
@@ -91,6 +91,8 @@ $cmd = "llama-server.exe " +
        "--flash-attn $flash " +
        "--cache-type-k q8_0 --cache-type-v q8_0 " +
        "--cont-batching " +
+       "--parallel 4 " +
+       "--threads-http 4 " +
        "--log-file `"C:\Users\druiv\.cache\logs\llama.cpp\embedding_logs`" " +
        "--log-colors on " +
        "--log-timestamps " +

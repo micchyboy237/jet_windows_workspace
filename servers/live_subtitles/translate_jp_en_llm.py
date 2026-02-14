@@ -1,8 +1,11 @@
-from typing import Dict, Any, Union, Iterator, List, Tuple, Optional
 import time
 import uuid
+import json
+import math
+from typing import Dict, Any, Union, Iterator, List, Tuple, Optional
 from threading import Lock
 
+from rich import print
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
@@ -26,8 +29,8 @@ MODEL_SETTINGS = {
     "n_gpu_layers": -1,
     "flash_attn": True,
     "logits_all": True,
-    "cache_type_k": "q8_0",
-    "cache_type_v": "q8_0",
+    "type_k": 8,
+    "type_v": 8,
     "tokenizer_kwargs": {"add_bos_token": False},
     "n_batch": 128,
     "n_threads": 6,
@@ -44,29 +47,9 @@ TRANSLATION_DEFAULTS = {
     "min_p": 0.5,
     "repeat_penalty": 1.05,
     "max_tokens": 512,
-    # # For confidence scores
-    # "logprobs": True,
-    # "top_logprobs": 3
 }
 
-# ────────────────────────────────────────────────
-# Lazy + thread-safe model loading
-# ────────────────────────────────────────────────
-_llm: Llama | None = None
-_llm_lock = Lock()
-
-
-def get_llm() -> Llama:
-    """Lazily initialize and return the Llama instance (thread-safe)"""
-    global _llm
-    if _llm is None:
-        with _llm_lock:
-            if _llm is None:
-                console.print("[bold yellow]Loading LFM2-350M translator...[/bold yellow]")
-                _llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
-                console.print("[bold green]Translation LLM ready ✓[/bold green]")
-    return _llm
-
+llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
 
 # ────────────────────────────────────────────────
 # Main translation interface
@@ -123,8 +106,83 @@ def translate_japanese_to_english(
         **generation_params
     }
 
-    llm = get_llm()
     return llm.create_chat_completion(**params)
+
+
+def translation_quality_label(avg_logprob: float) -> str:
+    if not math.isfinite(avg_logprob):
+        return "N/A"
+    if avg_logprob > -0.3:
+        return "Very High"
+    if avg_logprob > -0.7:
+        return "High"
+    if avg_logprob > -1.2:
+        return "Medium"
+    if avg_logprob > -2.0:
+        return "Low"
+    return "Very Low"
+
+
+def translate_japanese_to_english_structured(
+    text: str,
+    *,
+    beam_size: int = 1,   # kept for compatibility with server
+    max_decoding_length: int = 512,
+    min_tokens_for_confidence: int = 3,
+    enable_scoring: bool = True,
+    **generation_params,
+) -> Tuple[str, Optional[float], Optional[float], str]:
+    """
+    Server-safe translation wrapper.
+    Returns:
+        (
+            english_text,
+            avg_logprob,
+            confidence,
+            quality_label
+        )
+    """
+
+    params = {
+        "max_tokens": max_decoding_length,
+        "logprobs": True if enable_scoring else None,
+        "top_logprobs": 1 if enable_scoring else None,
+        **generation_params,
+    }
+
+
+    try:
+        response = translate_japanese_to_english(
+            text=text,
+            stream=False,
+            **params,
+        )
+
+        choice = response["choices"][0]
+        message = choice["message"]["content"]
+        logprobs_data = choice.get("logprobs")
+
+        avg_logprob = None
+        confidence = None
+        quality = "N/A"
+
+        if enable_scoring and logprobs_data and logprobs_data.get("content"):
+            token_logprobs = [
+                tok["logprob"]
+                for tok in logprobs_data["content"]
+                if tok.get("logprob") is not None
+            ]
+
+            if len(token_logprobs) >= min_tokens_for_confidence:
+                avg_logprob = sum(token_logprobs) / len(token_logprobs)
+                confidence = float(math.exp(avg_logprob))
+                quality = translation_quality_label(avg_logprob)
+
+        return message.strip(), avg_logprob, confidence, quality
+
+    finally:
+        # critical for llama_cpp stability
+        llm.reset()
 
 
 def translate_text(text: str, logprobs: Optional[int] = None, **generation_params) -> dict:
@@ -146,7 +204,6 @@ def translate_text(text: str, logprobs: Optional[int] = None, **generation_param
         **_generation_params,
     )
 
-    llm = get_llm()
     all_logprobs: List[Tuple[str, float, List[dict]]] = []
     try:
         role: str = None
@@ -196,10 +253,18 @@ def translate_text(text: str, logprobs: Optional[int] = None, **generation_param
 # ────────────────────────────────────────────────
 if __name__ == "__main__":
     logprobs = None
-    # logprobs = 1
-
+    # logprobs = 5
     examples = [
-        "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
+        """
+世界各国が水面下で熾烈な情報戦を繰り広げる時代 にらみ合う2つの国 東のオスタニア、西のウェスタリス
+戦争を企てるオスタニア政府要人の動向 戦争を企てるオスタニア政府要人の動向を探るべく
+ウェスタリスはオペレーションストリクスを発動 作戦を担うスゴーデエージェントたそがれ 100の顔を使い分ける彼の任務は
+家族の顔を使い分ける彼の任務は 家族を作ること 父ロイドフォージャー 精神科医 正体、コードネームたそがれ
+母ヨルフォージャー 母、夜フォージャー、市役所職員、正体、殺し屋、コードネーム、イバラ姫、娘。
+娘、アーニャフォージャー、正体、心を読むことができるエスパー。
+正体、心を読むことができるエスパー、犬、ボンドフォージャー、正体、未来を予知できる超能力権、物狩りのため、疑似家族を作り
+、互いに正体を隠した。 二次家族を作り互いに正体を隠した彼らのミッションは続く
+""",
     ]
 
     for i, jp_text in enumerate(examples, 1):
@@ -210,12 +275,18 @@ if __name__ == "__main__":
 
         console.print("[bold green]English (streaming):[/bold green]")
         result = translate_text(jp_text, logprobs=logprobs)
+        full_text = result.pop("text")
         all_logprobs = result.pop("logprobs")
 
         from rich.pretty import pprint
 
-        print(f"\n[bold cyan]Translation {i + 1}:[/bold cyan]")
+        print(f"\n[bold cyan]Logprobs {i}:[/bold cyan]")
+        pprint(all_logprobs)
+
+        print(f"\n[bold cyan]Meta {i}:[/bold cyan]")
         pprint(result, expand_all=True)
 
-        print(f"\n[bold cyan]Logprobs {i + 1}:[/bold cyan]")
-        pprint(all_logprobs[:2])
+        print(f"\n[bold cyan]Translation {i}:[/bold cyan]")
+        pprint(full_text, expand_all=True)
+
+    print()

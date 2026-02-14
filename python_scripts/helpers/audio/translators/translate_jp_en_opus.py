@@ -1,4 +1,4 @@
-# servers/live_subtitles/translate_jp_en.py
+# /translate_jp_en_opus.py
 """
 Standalone Japanese → English translation module using CTranslate2 + Helsinki-NLP/opus-mt-ja-en
 """
@@ -7,9 +7,9 @@ import math
 from typing import List, Optional, Tuple
 
 from transformers import AutoTokenizer
-from translator_types import Translator
+from translators.translator_types import Translator
 
-from utils import split_sentences_ja   # Assuming you have this utility
+from translators.utils import split_sentences_ja   # Assuming you have this utility
 
 # Configuration
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
@@ -64,23 +64,24 @@ def translate_japanese_to_english(
     max_decoding_length: int = 512,
     min_tokens_for_confidence: int = 3,
     logprobs: Optional[int] = None,
-) -> Tuple[str, Optional[float], Optional[float], str]:
-    """
-    Translate Japanese text to English using OPUS-MT model via CTranslate2.
+) -> str:
+# ) -> Tuple[str, Optional[float], Optional[float], str]:
+#     """
+#     Translate Japanese text to English using OPUS-MT model via CTranslate2.
 
-    Args:
-        text_ja: Japanese input text (can contain multiple sentences)
-        beam_size: Beam size for decoding
-        max_decoding_length: Maximum length of generated sequence
-        min_tokens_for_confidence: Minimum number of tokens to consider for confidence
+#     Args:
+#         text_ja: Japanese input text (can contain multiple sentences)
+#         beam_size: Beam size for decoding
+#         max_decoding_length: Maximum length of generated sequence
+#         min_tokens_for_confidence: Minimum number of tokens to consider for confidence
 
-    Returns:
-        Tuple of:
-            - translated English text (sentences joined by \n)
-            - translation log probability (of the best hypothesis)
-            - normalized confidence score [0.0–1.0]
-            - quality label ("High", "Good", "Medium", "Low", "N/A")
-    """
+#     Returns:
+#         Tuple of:
+#             - translated English text (sentences joined by \n)
+#             - translation log probability (of the best hypothesis)
+#             - normalized confidence score [0.0–1.0]
+#             - quality label ("High", "Good", "Medium", "Low", "N/A")
+#     """
 
 
     if not text_ja.strip():
@@ -139,7 +140,8 @@ def translate_japanese_to_english(
     en_text = "\n".join(en_sentences).strip()
     quality_label = translation_quality_label(translation_logprob)
 
-    return en_text, translation_logprob, translation_confidence, quality_label
+    # return en_text, translation_logprob, translation_confidence, quality_label
+    return en_text
 
 
 # ────────────────────────────────────────────────

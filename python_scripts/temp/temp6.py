@@ -1,32 +1,41 @@
-from sudachipy import tokenizer, dictionary
-from rich import print
-from rich.pretty import pprint
+from llama_cpp import Llama
+from typing import List, Dict
 
-sent = "あのーえっと今日はですねえー晴れてますあのー昨日じゃなくて一昨日は雨だったんですけど"
+llm = Llama(
+    model_path=r"C:\Users\druiv\.cache\llama.cpp\DeepSeek-R1-Distill-Qwen-1.5B-Q5_K_M.gguf",
+    n_gpu_layers=-1,           # adjust for your GTX 1660
+    n_ctx=8192,
+    verbose=False
+)
 
-sudachi = dictionary.Dictionary().create()
-mode = tokenizer.Tokenizer.SplitMode.C  # C = most natural grouping
+def create_thinking_messages(user_question: str) -> List[Dict[str, str]]:
+    """Helper to force thinking according to DeepSeek recommendation"""
+    return [
+        {
+            "role": "user",
+            "content": user_question
+        },
+        {
+            "role": "assistant",
+            "content": "<think>\n"          # ← official recommended force-start
+        }
+    ]
 
-# inside the loop:
-tokens = sudachi.tokenize(sent, mode)
-surfaces = [token.surface() for token in tokens]
+# Example usage
+messages = create_thinking_messages("What is 17 × 23? Please reason step by step and box the answer.")
 
-print("\nSudachi Tokens:")
-pprint(tokens)
+stream = llm.create_chat_completion(
+    messages=messages,
+    temperature=0.6,           # DeepSeek recommended range
+    max_tokens=400,
+    stream=True,
+    # stop=["</think>"]          # optional: stop after thinking if you want only reasoning
+)
 
-print("\nSurfaces:")
-pprint(surfaces)
-
-
-
-
-from fugashi import Tagger
-
-tagger = Tagger('-Owakati')
-tagger.parse(sent)
-# => '麩 菓子 は 、 麩 を 主材 料 と し た 日本 の 菓子 。'
-
-print("\n\nFugashi Tokens:")
-for word in tagger(sent):
-    print(word, word.feature.lemma, word.pos, sep='\t')
-    # "feature" is the Unidic feature data as a named tuple
+# Stream and print only the content deltas
+response_text = ""
+for chunk in stream:
+    content = chunk["choices"][0]["delta"].get("content", "")
+    if content:
+        print(content, end="", flush=True)
+    response_text += content

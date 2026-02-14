@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Generator, Optional, Tuple, Union
+from typing import Generator, Optional, Tuple, Union, List
 import os
 from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
-import torch
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
@@ -15,9 +14,9 @@ from tqdm import tqdm
 from faster_whisper import WhisperModel
 from faster_whisper.transcribe import Segment
 
-# from translators.translate_llm import translate_text
-from translators.utils import split_sentences_ja
 from utils.audio_utils import AudioInput, split_audio
+from translators.utils import split_sentences_ja
+from translators.translate_jp_en_opus import translate_japanese_to_english
 
 console = Console()
 
@@ -27,10 +26,7 @@ def normalize_audio_to_16khz_mono_float32(
     sr: Optional[int] = None,
     target_sr: int = 16000,
 ) -> tuple[npt.NDArray[np.float32], int]:
-    """
-    Convert any supported AudioInput to mono float32 numpy array at 16 kHz.
-    Returns (normalized_audio, used_sample_rate)
-    """
+    # ── (unchanged — your original implementation) ──
     if isinstance(audio, (str, os.PathLike)):
         path = Path(audio)
         try:
@@ -61,20 +57,16 @@ def normalize_audio_to_16khz_mono_float32(
         if len(data.shape) > 1:
             data = np.mean(data, axis=1)
         data = data.astype(np.float32)
-        # Normalize if it looks like integer PCM
         if np.max(np.abs(data)) > 1.5:
             data /= 32768.0
 
     elif isinstance(audio, torch.Tensor):
         data = audio.cpu().numpy()
-        return normalize_audio_to_16khz_mono_float32(
-            data, sr=sr, target_sr=target_sr
-        )
+        return normalize_audio_to_16khz_mono_float32(data, sr=sr, target_sr=target_sr)
 
     else:
         raise TypeError(f"Unsupported audio type: {type(audio)}")
 
-    # Resample if needed
     if sr != target_sr:
         from scipy.signal import resample
         num_samples = int(len(data) * target_sr / sr)
@@ -98,18 +90,9 @@ def transcribe_progressive(
     overlap_s: float = 3.0,
     **transcribe_kwargs,
 ) -> Generator[Tuple[Segment, str], None, None]:
-    """
-    Progressive transcription using overlapping audio chunks.
-    Supports flexible AudioInput types.
-
-    Yields:
-        (latest_segment, current_full_transcript_text)
-    """
-    # Normalize audio once at the beginning
+    # ── (unchanged — your original implementation) ──
     audio_np, sr = normalize_audio_to_16khz_mono_float32(
-        audio,
-        sr=sr,
-        target_sr=16000,
+        audio, sr=sr, target_sr=16000
     )
 
     full_text_parts: list[str] = []
@@ -130,7 +113,6 @@ def transcribe_progressive(
         unit="chunk",
         disable=not show_progress,
     ) as pbar:
-
         for chunk_audio, chunk_start_time in audio_chunks:
             segments, _ = model.transcribe(
                 chunk_audio,
@@ -144,7 +126,6 @@ def transcribe_progressive(
             )
 
             for segment in segments:
-                # Offset timestamps to global time
                 segment.start += chunk_start_time
                 segment.end += chunk_start_time
 
@@ -166,34 +147,27 @@ def transcribe_progressive(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#   Usage example
-# ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Option 1: file path
-    audio_input: AudioInput = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
+    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
 
-    # Option 2: numpy array (uncomment to test)
-    # from scipy.io import wavfile
-    # sr, audio_raw = wavfile.read(audio_input)
-    # if len(audio_raw.shape) > 1:
-    #     audio_raw = audio_raw.mean(axis=1)
-    # audio_input = audio_raw.astype(np.float32) / 32768.0
-    # original_sr = sr
-
-    # Load model once
     model = WhisperModel(
         "kotoba-tech/kotoba-whisper-v2.0-faster",
         device="cuda",
         compute_type="float32",
     )
 
-    with Live(console=console, refresh_per_second=4) as live:
-        full_transcript = ""
+    # State for sentence-level translation
+    translated_sentences: List[str] = []
+    ja_sentences_so_far: List[str] = []
 
+    # Full translation cache — we'll keep the last full translation
+    full_en_translation: str = ""
+    last_full_ja_for_translation: str = ""
+
+    with Live(console=console, refresh_per_second=3) as live:
         for segment, current_text in transcribe_progressive(
             model=model,
-            audio=audio_input,
-            # sr=44100,  # only needed if passing raw numpy/bytes
+            audio=audio_path,
             language="ja",
             beam_size=5,
             show_progress=True,
@@ -201,87 +175,58 @@ if __name__ == "__main__":
             overlap_s=3.0,
         ):
             ja_text = current_text.strip()
-            ja_sents = split_sentences_ja(ja_text)
 
-            if ja_sents:
-                sent_count = len(ja_sents)
-                display_sents = ja_sents[-3:] if sent_count > 3 else ja_sents
-                if sent_count > 3:
-                    display_sents = ["…"] + display_sents
-                sentences_display = "\n".join(
-                    f"  {i+1}. {sent}" for i, sent in enumerate(display_sents)
-                )
-            else:
-                sent_count = 0
-                sentences_display = "[dim](no complete sentences yet)[/dim]"
+            # ── Sentence-level translation (incremental) ──
+            new_ja_sents = split_sentences_ja(ja_text)
 
-            live.update(
-                f"[bold green]Live Japanese Transcript[/bold green]  "
-                f"[cyan]({sent_count} sentence{'s' if sent_count != 1 else ''})[/cyan]\n\n"
-                f"{sentences_display}\n\n"
-                f"[dim]Latest segment: {segment.start:.1f}–{segment.end:.1f}s[/dim]\n"
-                f"[dim]Raw accumulating text:[/dim] {ja_text}"
-            )
+            if len(new_ja_sents) > len(ja_sentences_so_far):
+                new_sentences = new_ja_sents[len(ja_sentences_so_far) :]
+                for sent in new_sentences:
+                    if sent.strip():
+                        try:
+                            en = translate_japanese_to_english(sent.strip())
+                            translated_sentences.append(en.strip())
+                        except Exception as e:
+                            translated_sentences.append(f"[err: {str(e)}]")
+                ja_sentences_so_far = new_ja_sents[:]
 
-# ──────────────────────────────────────────────────────────────────────────────
-#   Usage example
-# ──────────────────────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
+            # ── Full text translation (only when meaningfully changed) ──
+            if len(ja_text) > len(last_full_ja_for_translation) + 8:
+                try:
+                    full_en_translation = translate_japanese_to_english(ja_text)
+                except Exception as e:
+                    full_en_translation = f"[full translation error: {str(e)}]"
+                last_full_ja_for_translation = ja_text
 
-    # Load model once (reuse for multiple calls)
-    model = WhisperModel(
-        "kotoba-tech/kotoba-whisper-v2.0-faster",
-        device="cuda",
-        compute_type="float32",
-    )
-    chunk_duration_s: float = 15.0
-    overlap_s: float = 3.0
+            # ── Prepare display ──
+            display_count = 5
+            ja_to_show = ja_sentences_so_far[-display_count:]
+            en_to_show = translated_sentences[-display_count:]
 
-    # Example: load your 20-second (or longer) audio
-    from scipy.io import wavfile
-    sr, audio = wavfile.read(audio_path)
-    if len(audio.shape) > 1:
-        audio = audio.mean(axis=1)          # to mono
-    audio = audio.astype(np.float32) / 32768.0
+            # Align lengths
+            max_lines = max(len(ja_to_show), len(en_to_show))
+            ja_to_show = [""] * (max_lines - len(ja_to_show)) + ja_to_show
+            en_to_show = [""] * (max_lines - len(en_to_show)) + en_to_show
 
-    # Real-time-like progressive display
-    with Live(console=console, refresh_per_second=4) as live:
-        full_transcript = ""
+            lines = []
+            for ja, en in zip(ja_to_show, en_to_show):
+                ja_line = ja.strip() or "…"
+                en_line = en.strip() or "…"
+                lines.append(f"  JA: {ja_line}")
+                lines.append(f"  EN: {en_line}")
+                lines.append("")
 
-        for segment, current_text in transcribe_progressive(
-            model,
-            audio,
-            sr=sr,
-            language="ja",
-            beam_size=5,
-            show_progress=True,
-        ):
-            ja_text = current_text.strip()
-            ja_sents = split_sentences_ja(ja_text)
+            sentences_block = "\n".join(lines).rstrip()
 
-            # Build nicely formatted sentence display
-            if ja_sents:
-                sent_count = len(ja_sents)
-                # Show numbered sentences (last few for readability)
-                display_sents = []
-                if sent_count <= 3:
-                    display_sents = ja_sents
-                else:
-                    # Show last 3 sentences + "..." if there are more
-                    display_sents = ["…"] + ja_sents[-3:] if sent_count > 3 else ja_sents
-
-                sentences_display = "\n".join(
-                    f"  {i+1}. {sent}" for i, sent in enumerate(display_sents)
-                )
-            else:
-                sent_count = 0
-                sentences_display = "[dim](no complete sentences yet)[/dim]"
+            if not sentences_block.strip():
+                sentences_block = "[dim](まだ完全な文がありません)[/dim]"
 
             live.update(
-                f"[bold green]Live Japanese Transcript[/bold green]  "
-                f"[cyan]({sent_count} sentence{'s' if sent_count != 1 else ''})[/cyan]\n\n"
-                f"{sentences_display}\n\n"
-                f"[dim]Latest segment: {segment.start:.1f}–{segment.end:.1f}s[/dim]\n"
-                f"[dim]Raw accumulating text:[/dim] {ja_text}"
+                f"[bold green]Live Transcription — JA + EN[/bold green]  "
+                f"[cyan]({len(ja_sentences_so_far)} 文)[/cyan]\n\n"
+                f"{sentences_block}\n"
+                f"{'─' * 60}\n"
+                f"[dim]Latest segment: {segment.start:.1f}–{segment.end:.1f}s[/dim]   "
+                f"[dim]Full JA:[/dim]\n{ja_text}\n"
+                f"[dim]Full EN:[/dim]\n{full_en_translation}"
             )

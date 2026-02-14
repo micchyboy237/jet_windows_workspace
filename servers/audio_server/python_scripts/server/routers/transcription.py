@@ -7,6 +7,7 @@ from typing import Optional, Literal, Annotated, Union
 from pathlib import Path
 from fastapi import APIRouter, File, UploadFile, HTTPException, Query, Request, Depends
 from faster_whisper import WhisperModel
+from starlette.requests import ClientDisconnect
 from pydantic import BaseModel
 from python_scripts.server.models.responses import TranscriptionResponse
 from python_scripts.server.services.transcribe_service import transcribe_audio
@@ -27,9 +28,20 @@ async def _extract_audio_content(request: Request) -> tuple[bytes, int]:
     """Shared logic to extract audio bytes from multipart or raw body (identical to existing endpoints)."""
     content_type = request.headers.get("content-type", "")
     is_multipart = content_type.startswith("multipart/form-data")
-    
+
     if is_multipart:
-        form = await request.form()
+        try:
+            form = await request.form()
+        except ClientDisconnect:
+            log.info("Client disconnected during multipart form parsing")
+            raise HTTPException(
+                status_code=499,
+                detail="Client closed connection during upload"
+            )
+        except Exception as exc:
+            log.warning(f"Multipart parsing failed: {exc.__class__.__name__}")
+            raise HTTPException(400, "Invalid multipart form data") from exc
+
         upload_file: Optional[UploadFile] = None
         for field in ["file", "audio", "data", "upload"]:
             if field in form and hasattr(form[field], "filename"):
@@ -37,13 +49,25 @@ async def _extract_audio_content(request: Request) -> tuple[bytes, int]:
                 break
         if not upload_file:
             raise HTTPException(400, "No audio file found in multipart form")
-        content = await upload_file.read()
+
+        try:
+            content = await upload_file.read()
+        except ClientDisconnect:
+            log.info("Client disconnected while reading uploaded file content")
+            raise HTTPException(499, "Client closed connection during file upload")
     else:
-        content = await request.body()
+        try:
+            content = await request.body()
+        except ClientDisconnect:
+            log.info("Client disconnected during raw body read")
+            raise HTTPException(499, "Client closed connection during upload")
+
         if not content:
             raise HTTPException(400, "Empty body")
-    
-    # Optional raw PCM conversion (same as in transcribe_translate)
+
+    # ──────────────────────────────────────────────────────────────
+    # The rest remains unchanged (content-type detection, PCM→WAV conversion, etc.)
+    # ...
     content_type_detected = request.headers.get("content-type", "").split(";", 1)[0].strip()
     if content_type_detected in ("application/octet-stream", "") or content_type_detected.endswith("/octet-stream"):
         try:
@@ -61,7 +85,7 @@ async def _extract_audio_content(request: Request) -> tuple[bytes, int]:
                 log.info(f"[bold blue]Converted raw PCM to WAV[/] → {len(audio_np):,} samples")
         except Exception as e:
             log.warning(f"Raw PCM conversion failed: {e}")
-    
+
     return content, len(content)
 
 @router.post("/transcribe", response_model=TranscriptionResponse)

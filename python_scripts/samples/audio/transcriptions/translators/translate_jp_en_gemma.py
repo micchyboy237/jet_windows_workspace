@@ -1,203 +1,128 @@
-from typing import Literal, Dict, Any, Union, List
-import time
-import uuid
+# Recommended installation (run once)
+# For Mac M1/Metal:
+# pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir \
+#     -C cmake.args="-DLLAMA_METAL=ON"
 
+# For Windows NVIDIA GTX 1660:
+# pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir \
+#     -C cmake.args="-DLLAMA_CUBLAS=ON"
+
+from typing import Optional, Dict, Any
+from llama_cpp import Llama
 from rich.console import Console
-from rich.markdown import Markdown
-from llama_cpp import Llama, LlamaState
-from llama_cpp.llama_types import CreateCompletionResponse, CompletionChoice, CompletionUsage
-from split_sentences_ja import split_sentences_ja
 
 console = Console()
 
-# ────────────────────────────────────────────────
-# Config – adjust paths & settings to match your setup
-# ────────────────────────────────────────────────
+# ── Model configuration ──────────────────────────────────────────────
+MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\gemma-2-2b-jpn-it-translate-Q4_K_M.gguf"
 
-MODEL_PATH = (
-    r"C:\Users\druiv\.cache\llama.cpp\translators\gemma-2-2b-jpn-it-translate-Q4_K_M.gguf"
-)
+MODEL_SETTINGS = {
+    "n_ctx": 1024,
+    "n_gpu_layers": -1,
+    "flash_attn": True,
+    "logits_all": True,
+    "type_k": 8,
+    "type_v": 8,
+    "tokenizer_kwargs": {"add_bos_token": False},
+    "n_batch": 128,
+    "n_threads": 6,
+    "n_threads_batch": 6,
+    "use_mlock": True,
+    "use_mmap": True,
+    "verbose": False,
+}
 
-CTX_SIZE        = 4096              # ← increased for growing context
-GPU_LAYERS      = -1
-CACHE_TYPE_K    = "q8_0"
-CACHE_TYPE_V    = "q8_0"
-TOK_ADD_BOS     = False
+# Recommended defaults for Japanese → English translation
+TRANSLATION_DEFAULTS = {
+    "temperature": 0.65,
+    "top_p": 0.92,
+    "min_p": 0.05,
+    # "repeat_penalty": 1.05,
+    "max_tokens": 512,
+    # "stop": ["<|im_end|>", "<|im_start|>"],
+    "echo": False,
+    # For confidence scores
+    # "logprobs": 3,
+}
 
-# ────────────────────────────────────────────────
-# Initialize model (once!)
-# ────────────────────────────────────────────────
+# You can also try Q5_K_M / Q6_K if you have enough VRAM/RAM (~4–5GB needed)
+# Q4_K_M → good speed/quality balance on your GTX 1660 / M1
 
-llm = Llama(
-    model_path=MODEL_PATH,
-    n_ctx=CTX_SIZE,
-    n_gpu_layers=GPU_LAYERS,
-    flash_attn=True,
-    logits_all=True,           # required for logprobs
-    cache_type_k=CACHE_TYPE_K,
-    cache_type_v=CACHE_TYPE_V,
-    tokenizer_kwargs={"add_bos_token": TOK_ADD_BOS},
-    verbose=True,
-)
-
-# We'll keep track of the current KV cache state and the tokens we've already processed
-current_state: LlamaState | None = None
-processed_tokens: List[int] = []   # growing list of all tokens seen so far
+llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
 
 
-def translate_text_incremental(
-    new_ja_text: str,
-    max_tokens: int = 1024,
-    temperature: float = 0.0,
-    top_p: float = 0.9,
-    top_k: int = 40,
-    repeat_penalty: float = 1.1,
-    stop: Union[str, list[str], None] = None,
-    logprobs: int | None = None,
-    echo: bool = False,
-) -> CreateCompletionResponse:
+def translate_text(
+    text: str,
+    # temperature: float = 0.65,
+    # max_tokens: int = 1024,
+    # top_p: float = 0.92,
+    # repeat_penalty: float = 1.05,
+    **generation_params,
+) -> str:
     """
-    Incrementally translate Japanese text to English using a chat-formatted prompt for Gemma-2.
-    Applies various recommended fixes for improved output (see docstring).
+    Translate Japanese text to natural, high-quality English using Shisa v2.1 3B
+    
+    Args:
+        text: Japanese input text (can be paragraph, dialogue, novel snippet, etc.)
+        temperature: Lower = more literal/accurate, Higher = more creative
+        max_tokens: Safety limit for very long outputs
+    
+    Returns:
+        Clean English translation
     """
-    global current_state, processed_tokens
+    prompt = f"""\
+Translate the following Japanese text into natural English.
 
-    # (5) Clean up Japanese text before translation. Can tweak as needed for your OCR data.
-    clean_ja_text = new_ja_text.replace(" ", "").replace("、", "、 ").strip()
+JA: {text}
+EN: """
 
-    # 2. (Keep track of previous Japanese chunks if needed)
-    previous_text = (
-        llm.detokenize(processed_tokens).decode("utf-8", errors="ignore").strip()
-        if processed_tokens
-        else ""
+    params: Dict[str, Any] = {
+        "prompt": prompt,
+        **TRANSLATION_DEFAULTS,
+        **generation_params
+    }
+
+    response = llm(
+        # prompt,
+        # max_tokens=max_tokens,
+        # temperature=temperature,
+        # top_p=top_p,
+        # min_p=0.05,
+        # repeat_penalty=repeat_penalty,
+        # stop=["<|im_end|>", "<|im_start|>"],
+        # echo=False,
+        **params
     )
-    # For chat template, just concat as context
-    ja_block = (previous_text + "\n" + clean_ja_text).strip() if previous_text else clean_ja_text
 
-    # (1) Use chat template for Gemma-2
-    messages = [
-        {
-            "role": "user",
-            "content": f"""Translate the following Japanese text to natural, fluent English.
-
-Japanese:
-{ja_block}
-
-Provide only the English translation, nothing else:"""
-        }
-    ]
-
-    # (3) & (2) Max tokens, stop instructions
-    if stop is None:
-        stop = ["\n\n", "</s>"]
-
-    # Streaming is not set up for logprobs; can add if needed
-    generation_params: Dict[str, Any] = {
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "top_p": top_p,
-        "top_k": top_k,
-        "repeat_penalty": repeat_penalty,
-        "stop": stop,
-        "logprobs": logprobs,
-        # "echo": echo,  # (4) echo=True if logprobs wanted on prompt
-        "frequency_penalty": 0.0,
-        "presence_penalty": 0.0,
-        "mirostat_mode": 0,
-        "seed": None,
-        "stream": False,
-    }
-
-    if current_state is not None:
-        llm.load_state(current_state)
-
-    raw_response = llm.create_chat_completion(**generation_params)
-
-    current_state = llm.save_state()
-    # Optionally update processed_tokens: No easy auto-growth for chat, so may be left as is.
-
-    # Format response
-    response: CreateCompletionResponse = {
-        "id": f"cmpl-{uuid.uuid4().hex[:8]}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": llm.model_path.rsplit("/", 1)[-1] if llm.model_path else "gemma-2-2b-jpn-it",
-        "choices": raw_response["choices"],
-        "usage": raw_response.get("usage") or CompletionUsage(
-            prompt_tokens=0, # Not tracked in chat (unless you want to tokenize yourself)
-            completion_tokens=0,
-            total_tokens=0
-        ),
-    }
-
-    return response
+    translated = response["choices"][0]["text"].strip()
+    return translated
 
 
-# ────────────────────────────────────────────────
-# Example: Incrementally translate growing text
-# ────────────────────────────────────────────────
-
+# ── Example usage ────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Reset state for this example
-    current_state = None
-    processed_tokens = []
-
-    # Example growing Japanese text (split into chunks)
-    full_ja_text = """
-世界各国が水面下で熾烈な情報戦を繰り広げる時代にらみ合う2つの国東のオスタニア西の西のウェスタリス戦争を企てるオスタニア
-政の動向を探るべくウェスタリスはオペレーションを担うディエンとたそがれ100の顔を使い分正体ロイドフォージャー
-コードネームたそがれ母ヨルフォージャー市役所職員正体殺し屋コードネーム茨原姫 母ヨルフォージャー正体
-仕事職員正体、コロシアコードネームイバラヒメ娘。妻に正体、正体、心を読むことができるエスパー犬、女ボンドフォージャー、正
-体、未来を予知できる超能力家族を作り物狩りのため疑似家族を作り互いに正体を隠した彼らのミッションは続く
-"""
-
-    ja_sentences = split_sentences_ja(full_ja_text)
-    # For demo: process in chunks
-    chunks = [
-        "\n".join(ja_sentences[:2]),
-        "\n".join(ja_sentences[2:5]),
-        "\n".join(ja_sentences[5:]),
+    # Test sentences (feel free to replace with your real text)
+    japanese_samples = [
+        """
+世界各国が水面下で熾烈な情報戦を繰り広げる時代 にらみ合う2つの国 東のオスタニア、西のウェスタリス
+戦争を企てるオスタニア政府要人の動向 戦争を企てるオスタニア政府要人の動向を探るべく
+ウェスタリスはオペレーションストリクスを発動 作戦を担うスゴーデエージェントたそがれ 100の顔を使い分ける彼の任務は
+家族の顔を使い分ける彼の任務は 家族を作ること 父ロイドフォージャー 精神科医 正体、コードネームたそがれ
+母ヨルフォージャー 母、夜フォージャー、市役所職員、正体、殺し屋、コードネーム、イバラ姫、娘。
+娘、アーニャフォージャー、正体、心を読むことができるエスパー。
+正体、心を読むことができるエスパー、犬、ボンドフォージャー、正体、未来を予知できる超能力権、物狩りのため、疑似家族を作り
+、互いに正体を隠した。 二次家族を作り互いに正体を隠した彼らのミッションは続く
+""",
     ]
 
-    max_tokens = 1024
-    temperature = 0.0
-    logprobs = 1  # or try None if debugging
+    console.print("[bold magenta]Japanese → English Translation Demo[/bold magenta]\n")
 
-    for i, chunk in enumerate(chunks, 1):
-        print(f"\n[bold green]Chunk {i}/{len(chunks)}:[/bold green]")
-        print(Markdown(f"**New Japanese:**\n{chunk}"))
+    for i, ja_text in enumerate(japanese_samples, 1):
+        console.print(f"[bold white]Example {i}:[/bold white]")
+        console.print(f"[dim]{ja_text}[/dim]\n")
 
-        result = translate_text_incremental(
-            new_ja_text=chunk,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            logprobs=logprobs,
-            # echo=True, # logprobs on prompt if needed
-        )
+        with console.status("[bold green]Translating...[/bold green]"):
+            english = translate_text(ja_text)
 
-        choice = result["choices"][0].copy()
-        full_text = choice.pop("message", {}).get("content", "") if "message" in choice else choice.pop("text", "")
-        all_logprobs = choice.pop("logprobs", [])
-
-        print(f"\n[bold cyan]Logprobs (first few):[/bold cyan]")
-        from rich.pretty import pprint
-        
-        logprobs_data = choice.get("logprobs")
-
-        if logprobs_data is None:
-            print("[yellow]No logprobs returned by the model[/yellow]")
-        elif not isinstance(logprobs_data, list):
-            print(f"[yellow]Unexpected logprobs type: {type(logprobs_data).__name__}[/yellow]")
-            pprint(logprobs_data)
-        elif len(logprobs_data) == 0:
-            print("[dim]Logprobs list is empty[/dim]")
-        else:
-            pprint(logprobs_data[:3])
-
-        print(f"\n[bold cyan]Meta:[/bold cyan]")
-        pprint(choice, expand_all=True)
-
-        print(f"\n[bold cyan]Translation so far:[/bold cyan]")
-        print(full_text.strip())
-        print("-" * 80)
+        console.print("[bold cyan]→ English:[/bold cyan]")
+        console.print(f"{english}\n")
+        console.rule(style="dim")
