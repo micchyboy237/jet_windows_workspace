@@ -1,42 +1,61 @@
 from __future__ import annotations
-
 import time
-from typing import List
-
+from typing import List, Union
 from llama_cpp import Llama
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 
-
 console = Console()
-
 
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\nsfw\Fiendish_LLAMA_3B.Q4_K_M.gguf"
 
 MODEL_SETTINGS = {
     "n_ctx": 2048,
-    "n_threads": 8,  # adjust to your CPU
+    "n_threads": 8,
     "n_batch": 256,
     "verbose": False,
     "n_gpu_layers": -1,
 }
 
 TRANSLATION_DEFAULTS = {
-    "max_tokens": 512,
-    "temperature": 0.15,
-    "top_p": 0.9,
-    "repeat_penalty": 1.1,
-    "stop": ["### Japanese", "### English"]
-    # # For confidence scores
-    # "logprobs": True,
-    # "top_logprobs": 3
+    "max_tokens": 768,
+    "temperature": 0.20,
+    "top_p": 0.92,
+    "repeat_penalty": 1.12,
+    "stop": ["</s>", "<|end|>", "\n\n\n", "Original>", "English:"],
 }
 
+# ────────────────────────────────────────────────────────────────
+#  Inspired by standard.txt + tuned for more natural & lewd output
+# ────────────────────────────────────────────────────────────────
+PROMPT_TEMPLATE = """\
+You are an expert English translator specializing in Japanese → English subtitle translation for Japanese Adult Videos (JAV).
+
+Rules you MUST follow:
+- Preserve the exact adult/erotic/lewd/teasing/pornographic tone and intent
+- Polite & suggestive → gradually more direct/explicit/vulgar as arousal increases
+- Use natural-sounding, sexy English that matches the character's personality
+- During sex: very explicit, dirty, vulgar language is expected and desired
+- Fix obvious Whisper transcription errors when context makes it clear
+- Keep the SAME NUMBER of lines as input — translate line-by-line
+- Do NOT merge, split, or skip lines
+- Output format: ONLY numbered English lines — nothing else
+
+Examples of desired tone:
+1. 気持ちいい… → "It feels so good…" / "Fuck… it feels amazing…"
+2. だめっ、だめぇ！ → "Nooo! Stop— ahh!" / "I can't— I'm gonna cum!"
+3. もっと奥まで入れて… → "Deeper… fuck me deeper…" 
+4. いやらしい声出ちゃう… → "I can't help making such dirty sounds…"
+
+Now translate the following Japanese subtitle lines:
+
+{japanese_text}
+
+English:
+"""
 
 class FiendishLlama:
-    """Singleton-style model loader to avoid reloading on every call."""
-
     _instance: Llama | None = None
 
     @classmethod
@@ -44,108 +63,127 @@ class FiendishLlama:
         if cls._instance is None:
             with console.status("[bold green]Loading Fiendish_LLAMA_3B ...[/bold green]"):
                 start = time.perf_counter()
-
-                cls._instance = Llama(
-                    model_path=MODEL_PATH,
-                    **MODEL_SETTINGS
-                )
-
+                cls._instance = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
                 took = time.perf_counter() - start
             console.print(f"[green]Model loaded in {took:.1f} seconds[/green]\n")
-
         return cls._instance
 
 
-def build_translation_prompt(japanese_lines: List[str]) -> str:
-    """
-    Builds a completion-style prompt inspired by pornify.txt, but toned down for more
-    natural, faithful pornified translations. Output is simplified to only the English
-    lines, one per line under an 'English:' header—no Original lines, no prefixes,
-    no summary/scene tags.
-    """
-    # Filter empty lines and create numbered list for clear one-to-one mapping
-    numbered_lines = []
-    for i, line in enumerate(japanese_lines, 1):
+def build_translation_prompt(japanese_lines: Union[str, List[str]]) -> str:
+    if isinstance(japanese_lines, str):
+        japanese_lines = [japanese_lines]
+
+    # Filter empty lines but keep original count/structure
+    cleaned_lines = []
+    for line in japanese_lines:
         stripped = line.strip()
-        if stripped:
-            numbered_lines.append(f"{i}. {stripped}")
+        if stripped:  # only add non-empty
+            cleaned_lines.append(stripped)
+        else:
+            cleaned_lines.append("")  # preserve blank lines if they existed
 
-    lines_part = "\n".join(numbered_lines)
+    numbered = []
+    for i, line in enumerate(cleaned_lines, 1):
+        if line.strip():
+            numbered.append(f"{i}. {line}")
+        else:
+            numbered.append(f"{i}.")
 
-    prompt = f"""You are a skilled translator specializing in Japanese-to-English subtitles for adult videos. Your goal is to "pornify" the dialogue: make it sound like natural, explicit American adult film talk—filthy and erotic, but faithful to the original meaning and tone.
+    japanese_text = "\n".join(numbered)
 
-**Key Rules:**
-- Preserve the original intent and personality: Shy/resistant lines stay teasing or reluctantly horny; explicit lines get raw and vulgar.
-- Amplify the eroticism naturally: Add porn-style phrasing (e.g., "cock," "pussy," "fuck me," "I'm so wet") where it fits the context, but do not invent new actions, details, or completely change the meaning.
-- Match JAV escalation: Start subtle/teasing if the original is polite, build to direct and filthy as it gets more explicit.
-- Keep it concise and punchy for subtitles.
-- Fix obvious AI transcription errors using context, but never add or remove entire ideas.
-- One-to-one: Translate each numbered line exactly once, in order.
-
-**Examples of toned-down pornification:**
-1. やめて…そんなふうに見ないで。
-   → Don't look at me like that... you're making me so wet already.
-
-2. もう我慢できない…っ
-   → I can't hold back anymore... I need your cock inside me.
-
-3. そこ…だめ、感じちゃう…！
-   → Right there... fuck, that feels too good, don't stop!
-
-4. あっ、ダメっ…イっちゃう、イっちゃうよぉ…♡
-   → Ahh, no... I'm cumming, I'm cumming so hard! ♡
-
-5. もっと奥まで…お願い…突いてぇ…！
-   → Deeper... please, fuck me deeper, pound me harder!
-
-Translate the following lines exactly in order. Output ONLY the English translations, one per line, starting with "English:" on the first line. No original text, no numbering, no extra commentary, no summary.
-
-{lines_part}
-
-English:
-"""
-
-    return prompt.strip()
+    return PROMPT_TEMPLATE.format(japanese_text=japanese_text).strip()
 
 
-def translate_jp_to_en(japanese_lines: List[str]) -> str:
+def translate_jp_to_en(japanese_input: Union[str, List[str]]) -> str:
     """
-    Translate Japanese adult dialogue lines into natural, uncensored English.
+    Translate Japanese adult dialogue (str or list[str]) → natural uncensored English
     """
     llm = FiendishLlama.get()
-    prompt = build_translation_prompt(japanese_lines)
+    prompt = build_translation_prompt(japanese_input)
 
-    completion = llm.create_completion(
-        prompt=prompt,
-        **TRANSLATION_DEFAULTS,
-    )
+    completion = llm(prompt=prompt, **TRANSLATION_DEFAULTS)
+    text = completion["choices"][0]["text"].strip()
 
-    return completion["choices"][0]["text"].strip()
+    # Minimal post-processing — remove leading numbers if model adds them again
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            # Remove possible "1. " "2. " etc that some models love to add
+            if line[0].isdigit() and line[1:3] in (". ", ") "):
+                line = line.split(" ", 1)[1].strip()
+            lines.append(line)
+
+    return "\n".join(lines)
+
+
+# ────────────────────────────────────────────────────────────────
+#               Diverse & realistic JAV-style samples
+# ────────────────────────────────────────────────────────────────
+DIVERSE_SAMPLES = [
+    # Polite teasing → escalating
+    [
+        "ふふっ…そんなに見つめられたら恥ずかしいよ…",
+        "もう…触らないでって言ってるのに…",
+        "あっ…そこ…気持ちいい…",
+        "だめっ、イっちゃう…！",
+    ],
+
+    # Whisper-style error + horny girlfriend
+    [
+        "はぁはぁ…もう我慢できないよぉ…",
+        "おちんぽ…早く入れてぇ…",
+        "奥まで…ずんずんって…してぇ♡",
+        "あっ、だめ、そこぉ！イく、イっちゃうよぉ！",
+    ],
+
+    # Hotel affair style — nervous at first
+    [
+        "こんなところで…本当にいいの…？",
+        "声…出ちゃうから…手で口塞いで…",
+        "んっ…！すごい…奥まで入ってる…",
+        "もっと…激しくして…お願い…！",
+    ],
+
+    # Very vulgar / intense scene
+    [
+        "マンコぐちゃぐちゃだよ…見て…",
+        "お前のチンポでめちゃくちゃにされてる…♡",
+        "中に出して！奥にいっぱい出してぇ！",
+        "あぁっ！イク！一緒にイこぉ！！",
+    ],
+
+    # Single long line (common in some transcriptions)
+    "んっ…あっ…だめぇ…そんなに激しくされたら…おかしくなっちゃうよぉ…！もう…イきたい…イかせてぇ…！",
+
+    # Teasing / denial style
+    [
+        "まだイっちゃダメだよ？♡",
+        "我慢して…もっと気持ちよくしてあげるから…",
+        "ほら…おちんぽビクビクしてる…かわいい…",
+        "いいよ…もう我慢しなくていい…出して？",
+    ],
+]
 
 
 def main():
-    console.rule("JAV Dialogue Translation Example", style="cyan")
+    console.rule("JAV Dialogue Translation — Fiendish 3B", style="magenta")
 
-    japanese_dialogue = [
-        "恥ずかしい…見ないでください…",
-        "んっ…そこ、弱いんです…",
-        "はぁ…はぁ…気持ちいい…",
-        "もう…ダメかも…頭おかしくなりそう…",
-        "お願い…もっと激しくして…壊して…！",
-        "あぁんっ！すごい…奥まで届いてる…♡",
-        "出さないで…まだ中にいてて…",
-    ]
+    for i, sample in enumerate(DIVERSE_SAMPLES, 1):
+        console.print(f"\n[bold underline]Sample {i}[/bold underline]")
 
-    console.print("[bold magenta]Japanese:[/bold magenta]")
-    for line in japanese_dialogue:
-        console.print(f"  {line}")
+        console.print("[bold magenta]Japanese:[/bold magenta]")
+        for line in sample:
+            console.print(f"  {line}")
 
-    console.print("\n[bold cyan]Translating …[/bold cyan]")
+        console.print("\n[bold cyan]Translating…[/bold cyan]")
+        time.sleep(0.4)  # just for visual pacing
 
-    english = translate_jp_to_en(japanese_dialogue)
+        english = translate_jp_to_en(sample)
 
-    console.print("\n[bold cyan]English:[/bold cyan]")
-    console.print(english)
+        console.print("[bold green]English:[/bold green]")
+        console.print(english)
+        console.print("─" * 60)
 
 
 if __name__ == "__main__":

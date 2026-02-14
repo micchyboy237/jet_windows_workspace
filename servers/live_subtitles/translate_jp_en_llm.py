@@ -22,10 +22,12 @@ console = Console()
 # ────────────────────────────────────────────────
 # Configuration – easy to tweak
 # ────────────────────────────────────────────────
-MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\LFM2-350M-ENJP-MT.Q4_K_M.gguf"
+MODEL_PATH = (
+    r"C:\Users\druiv\.cache\llama.cpp\translators\LFM2-350M-ENJP-MT.Q4_K_M.gguf"
+)
 
 MODEL_SETTINGS = {
-    "n_ctx": 1024,
+    "n_ctx": 4096,  # Increased to reduce context warning and allow longer context
     "n_gpu_layers": -1,
     "flash_attn": True,
     "logits_all": True,
@@ -40,14 +42,20 @@ MODEL_SETTINGS = {
     "verbose": False,
 }
 
-# Recommended defaults for Japanese → English translation
 TRANSLATION_DEFAULTS = {
-    "temperature": 0.5,
-    "top_p": 1.0,
-    "min_p": 0.5,
-    "repeat_penalty": 1.05,
+    "temperature": 0.7,   # Slightly lower for less hallucination on small model
+    "top_p": 0.95,
+    "min_p": 0.05,
+    "repeat_penalty": 1.12,  # Tighter to reduce repetitions
     "max_tokens": 512,
 }
+
+SYSTEM_MESSAGE = """You are a professional subtitle translator from Japanese to English for anime, drama, and general media.
+Correct any transcription errors using the provided context for consistency.
+Preserve the exact number of lines as the input Japanese text.
+Use natural, fluent, and engaging English while maintaining the original tone.
+Preserve symbols such as 🎼.
+Output ONLY the translated English text. No explanations, no Japanese text, no additional content, and no repetition of instructions."""
 
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
 
@@ -90,11 +98,7 @@ def translate_japanese_to_english(
     messages: List[ChatCompletionRequestMessage] = [
         {
             "role": "system",
-            "content": (
-                "You are a professional, natural-sounding Japanese-to-English translator. "
-                "Translate accurately while making the English sound fluent and idiomatic "
-                "as if written by a native English speaker."
-            ),
+            "content": SYSTEM_MESSAGE,
         },
         {"role": "user", "content": text.strip()},
     ]
@@ -103,7 +107,7 @@ def translate_japanese_to_english(
         "messages": messages,
         "stream": stream,
         **TRANSLATION_DEFAULTS,
-        **generation_params
+        **generation_params,
     }
 
     return llm.create_chat_completion(**params)
@@ -126,10 +130,11 @@ def translation_quality_label(avg_logprob: float) -> str:
 def translate_japanese_to_english_structured(
     text: str,
     *,
-    beam_size: int = 1,   # kept for compatibility with server
+    beam_size: int = 1,  # kept for compatibility with server
     max_decoding_length: int = 512,
     min_tokens_for_confidence: int = 3,
     enable_scoring: bool = True,
+    context_prompt: str | None = None,
     **generation_params,
 ) -> Tuple[str, Optional[float], Optional[float], str]:
     """
@@ -150,6 +155,13 @@ def translate_japanese_to_english_structured(
         **generation_params,
     }
 
+    user_content = text.strip()
+    if context_prompt:
+        user_content = (
+            f"Previous context (do NOT translate again, just use for reference):\n"
+            f"{context_prompt}\n\n"
+            f"Current line to translate:\n{user_content}"
+        )
 
     try:
         response = translate_japanese_to_english(
@@ -185,14 +197,13 @@ def translate_japanese_to_english_structured(
         llm.reset()
 
 
-def translate_text(text: str, logprobs: Optional[int] = None, **generation_params) -> dict:
+def translate_text(
+    text: str, logprobs: Optional[int] = None, **generation_params
+) -> dict:
     """Translate with beautiful real-time streaming display using rich"""
     full_text = ""
 
-    _generation_params: Dict[str, Any] = {
-        **TRANSLATION_DEFAULTS,
-        **generation_params
-    }
+    _generation_params: Dict[str, Any] = {**TRANSLATION_DEFAULTS, **generation_params}
 
     if logprobs:
         _generation_params["logprobs"] = True
@@ -208,7 +219,7 @@ def translate_text(text: str, logprobs: Optional[int] = None, **generation_param
     try:
         role: str = None
         finish_reason: str = None
-    
+
         with Live(auto_refresh=False) as live:
             for chunk in stream:
                 if "choices" not in chunk or not chunk["choices"]:
@@ -218,7 +229,10 @@ def translate_text(text: str, logprobs: Optional[int] = None, **generation_param
                 delta = choice.get("delta", {})
                 logprobs = choice["logprobs"] or {}
                 logprobs_content = logprobs.get("content", [])
-                logprobs_tokens = [(l["token"], l["logprob"], l["top_logprobs"]) for l in logprobs_content]
+                logprobs_tokens = [
+                    (l["token"], l["logprob"], l["top_logprobs"])
+                    for l in logprobs_content
+                ]
 
                 if "role" in delta:
                     role = delta["role"]
@@ -251,42 +265,23 @@ def translate_text(text: str, logprobs: Optional[int] = None, **generation_param
 # ────────────────────────────────────────────────
 # Quick demo
 # ────────────────────────────────────────────────
+# ────────────────────────────────────────────────
+# Quick demo
+# ────────────────────────────────────────────────
 if __name__ == "__main__":
-    logprobs = None
-    # logprobs = 5
-    examples = [
-        """
-世界各国が水面下で熾烈な情報戦を繰り広げる時代 にらみ合う2つの国 東のオスタニア、西のウェスタリス
-戦争を企てるオスタニア政府要人の動向 戦争を企てるオスタニア政府要人の動向を探るべく
-ウェスタリスはオペレーションストリクスを発動 作戦を担うスゴーデエージェントたそがれ 100の顔を使い分ける彼の任務は
-家族の顔を使い分ける彼の任務は 家族を作ること 父ロイドフォージャー 精神科医 正体、コードネームたそがれ
-母ヨルフォージャー 母、夜フォージャー、市役所職員、正体、殺し屋、コードネーム、イバラ姫、娘。
-娘、アーニャフォージャー、正体、心を読むことができるエスパー。
-正体、心を読むことができるエスパー、犬、ボンドフォージャー、正体、未来を予知できる超能力権、物狩りのため、疑似家族を作り
-、互いに正体を隠した。 二次家族を作り互いに正体を隠した彼らのミッションは続く
-""",
-    ]
+    console.rule("LFM2-350M-ENJP-MT Translator Demo", style="bold magenta")
 
-    for i, jp_text in enumerate(examples, 1):
-        console.rule(f"Example {i}")
-        console.print("[dim]Japanese:[/dim]")
-        console.print(jp_text, style="italic cyan")
-        console.print()
-
-        console.print("[bold green]English (streaming):[/bold green]")
-        result = translate_text(jp_text, logprobs=logprobs)
-        full_text = result.pop("text")
-        all_logprobs = result.pop("logprobs")
-
-        from rich.pretty import pprint
-
-        print(f"\n[bold cyan]Logprobs {i}:[/bold cyan]")
-        pprint(all_logprobs)
-
-        print(f"\n[bold cyan]Meta {i}:[/bold cyan]")
-        pprint(result, expand_all=True)
-
-        print(f"\n[bold cyan]Translation {i}:[/bold cyan]")
-        pprint(full_text, expand_all=True)
-
-    print()
+    eng, avg_logprob, conf, qual = translate_japanese_to_english_structured(
+        text='🎼世界 核府 が 水面下 で 熾烈 な 情報 線 を 繰り 広げる 時代、ニラ 繰り 広げる 時代、睨み 合う 二 つの 国、東の オスタニア、西 の ウェスタリス。',
+        context_prompt='🎼世界 核府 が 水面下 で 熾烈 な 情報戦 を 繰り 広げる 時代。',
+        # temperature=0.75,
+        max_decoding_length=512,
+        min_tokens_for_confidence=3,
+        enable_scoring=False,
+    )
+    console.print(f"   → [green]{eng}[/green]")
+    if avg_logprob is not None:
+        console.print(
+            f"   [dim]logprob: {avg_logprob:.3f}  |  conf: {conf:.3%}  |  {qual}[/dim]"
+        )
+    console.print()
