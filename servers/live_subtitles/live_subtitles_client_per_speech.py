@@ -54,8 +54,8 @@ ALL_PROBS_PATH = os.path.join(OUTPUT_DIR, "all_probs.json")
 CONTINUOUS_AUDIO_MAX_SECONDS = 320.0
 
 MAX_SPEECH_DURATION_SEC = 90.0
-CHUNK_DURATION_SEC = 6.0
-CHUNK_OVERLAP_SEC = 2.0
+CHUNK_DURATION_SEC = 5.0
+CHUNK_OVERLAP_SEC = 1.0
 CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
 
 audio_total_samples: int = 0
@@ -1271,7 +1271,8 @@ async def send_audio_chunk(
         "is_final": is_final,
         "context_prompt": context_prompt,
         "segment_num": segment_num,
-        "utterance_id": current_utterance_id,
+        # "utterance_id": current_utterance_id,
+        "utterance_id": str(uuid.uuid4()),
         "normalized_rms": normalized_rms,
         "avg_vad_confidence": avg_vad,
     }
