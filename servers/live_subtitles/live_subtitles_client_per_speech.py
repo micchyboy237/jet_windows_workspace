@@ -1271,8 +1271,7 @@ async def send_audio_chunk(
         "is_final": is_final,
         "context_prompt": context_prompt,
         "segment_num": segment_num,
-        # "utterance_id": current_utterance_id,
-        "utterance_id": str(uuid.uuid4()),
+        "utterance_id": current_utterance_id,
         "normalized_rms": normalized_rms,
         "avg_vad_confidence": avg_vad,
     }
