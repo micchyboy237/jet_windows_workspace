@@ -11,6 +11,7 @@ Write-Host "4. all-MiniLM-L12-v2-q4_0           (fastest, lower quality)"
 Write-Host ""
 
 $modelChoice = Read-Host "Enter the number of your choice (1-4)"
+$port = 8081
 
 # ---- Runtime scaling variables ----
 $parallel     = 4
@@ -85,7 +86,7 @@ $cmd = "llama-server.exe " +
        "-m `"$modelPath`" " +
        "--embedding " +
        "--pooling cls " +
-       "--host 0.0.0.0 --port 8001 " +
+       "--host 0.0.0.0 --port $port " +
        "-c $ctxSize -ub $batchSize -b $batchSize " +
        "--n-gpu-layers -1 " +
        "--threads $threads --threads-batch $threads " +

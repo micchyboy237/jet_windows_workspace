@@ -3,9 +3,9 @@
 [CmdletBinding()]
 param(
     [Alias("p")]
-    [Parameter(HelpMessage = "Port for llama-server to listen on (default: 8000)")]
+    [Parameter(HelpMessage = "Port for llama-server to listen on (default: 8080)")]
     [ValidateRange(1, 65535)]
-    [int]$Port = 8000
+    [int]$Port = 8080
 )
 
 Write-Host "`n  Llama.cpp Server Launcher  " -BackgroundColor DarkCyan -ForegroundColor Black
