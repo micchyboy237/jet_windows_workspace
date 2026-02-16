@@ -1,49 +1,43 @@
 # Start-LlamaServer-Embedding.ps1
 # Optimized for: Ryzen 5 3600 + GTX 1660 (6GB) + 16GB RAM
+# 4 parallel workers
+# Context and batch reflect natural model context (not multiplied)
 
-Write-Host "Starting llama.cpp embedding server launcher (optimized for short-text workloads)" -ForegroundColor Cyan
-
+Write-Host "Starting llama.cpp embedding server launcher (optimized for short-to-medium text workloads)" -ForegroundColor Cyan
 Write-Host "Select an embedding model to start:`n" -ForegroundColor Cyan
-Write-Host "1. embeddinggemma-300M-Q8_0"
-Write-Host "2. nomic-embed-text-v1.5.Q4_K_M          (recommended for balance)"
-Write-Host "3. nomic-embed-text-v2-moe.Q4_K_M"
-Write-Host "4. all-MiniLM-L12-v2-q4_0               (fastest, lower quality)"
+Write-Host "1. embeddinggemma-300M-Q8_0         (2048 natural ctx)"
+Write-Host "2. nomic-embed-text-v1.5.Q4_K_M     (4096 natural ctx)"
+Write-Host "3. nomic-embed-text-v2-moe.Q4_K_M   (2048 natural ctx)"
+Write-Host "4. all-MiniLM-L12-v2-q4_0           (1024 natural ctx)"
 Write-Host ""
 
 $modelChoice = Read-Host "Enter the number of your choice (1-4)"
 
-$flashAttnDefault = "on"
-$batchDefault     = 512
-$ubatchDefault    = 512
+# ---- Runtime configuration ----
+$parallel    = 4
+$threadsHttp = 4
+$threads     = 10
 
 switch ($modelChoice) {
     "1" {
-        $modelName = "embeddinggemma-300M-Q8_0.gguf"
-        $b         = $batchDefault
-        $ub        = $ubatchDefault
-        $gpu       = -1
-        $vramEst   = "~140-180 MB"
+        $modelName  = "embeddinggemma-300M-Q8_0.gguf"
+        $naturalCtx = 2048
+        $vramEst    = "~200-300 MB"
     }
     "2" {
-        $modelName = "nomic-embed-text-v1.5.Q4_K_M.gguf"
-        $b         = $batchDefault
-        $ub        = $ubatchDefault
-        $gpu       = -1
-        $vramEst   = "~170-220 MB"
+        $modelName  = "nomic-embed-text-v1.5.Q4_K_M.gguf"
+        $naturalCtx = 4096
+        $vramEst    = "~250-400 MB"
     }
     "3" {
-        $modelName = "nomic-embed-text-v2-moe.Q4_K_M.gguf"
-        $b         = $batchDefault
-        $ub        = $ubatchDefault
-        $gpu       = -1
-        $vramEst   = "~300-380 MB"
+        $modelName  = "nomic-embed-text-v2-moe.Q4_K_M.gguf"
+        $naturalCtx = 2048
+        $vramEst    = "~350-480 MB"
     }
     "4" {
-        $modelName = "all-MiniLM-L12-v2-q4_0.gguf"
-        $b         = $batchDefault
-        $ub        = $ubatchDefault
-        $gpu       = -1
-        $vramEst   = "~120-160 MB"
+        $modelName  = "all-MiniLM-L12-v2-q4_0.gguf"
+        $naturalCtx = 1024
+        $vramEst    = "~150-220 MB"
     }
     default {
         Write-Host "Invalid selection. Please choose 1-4." -ForegroundColor Red
@@ -51,22 +45,32 @@ switch ($modelChoice) {
     }
 }
 
-$useFlashAttn = Read-Host "`nUse flash attention? [Y/n] (recommended: Y for better memory efficiency)"
+# ---- Derived values ----
+$ctxSize   = $naturalCtx
+$batchSize = $naturalCtx
+
+$useFlashAttn = Read-Host "`nUse flash attention? [Y/n] (recommended: Y)"
 $flash = if ($useFlashAttn -match '^[nN]') { "off" } else { "on" }
 
 $modelPath = "C:\Users\druiv\.cache\llama.cpp\embed_models\$modelName"
-
 if (-not (Test-Path $modelPath)) {
     Write-Host "Model file not found: $modelPath" -ForegroundColor Red
     exit 1
 }
 
 Write-Host "`nSummary:" -ForegroundColor Cyan
-Write-Host "  Model          : $modelName"
-Write-Host "  Batch / ubatch : $b / $ub"
-Write-Host "  Flash Attention: $flash"
-Write-Host "  GPU layers     : $gpu (full offload)"
-Write-Host "  Est. VRAM      : $vramEst"
+Write-Host " Model             : $modelName"
+Write-Host " Natural Context   : $naturalCtx"
+Write-Host " Parallel Workers  : $parallel"
+Write-Host " Context Size      : $ctxSize"
+Write-Host " Batch Size        : $batchSize"
+Write-Host " Pooling           : cls"
+Write-Host " Flash Attention   : $flash"
+Write-Host " GPU layers        : -1 (full offload)"
+Write-Host " Threads           : $threads"
+Write-Host " HTTP Threads      : $threadsHttp"
+Write-Host " KV cache quant    : f16 / f16"
+Write-Host " Est. VRAM         : $vramEst"
 Write-Host ""
 
 $confirm = Read-Host "Start server with these settings? [Y/n]"
@@ -76,33 +80,29 @@ if ($confirm -match '^[nN]') {
 }
 
 Write-Host "`nStarting embedding server with model: $modelName" -ForegroundColor Green
-Write-Host "Context: $b tokens | GPU: Full Offload | Flash-attn: $flash" -ForegroundColor Yellow
 Write-Host "---------------------------------------------`n"
 
-# --- Optimized Command ---
 $cmd = "llama-server.exe " +
        "-m `"$modelPath`" " +
        "--embedding " +
+       "--pooling cls " +
        "--host 0.0.0.0 --port 8001 " +
-       "-c $b -ub $ub -b $b " +
-       "--n-gpu-layers $gpu " +
-       "--threads 6 --threads-batch 6 " +
+       "-c $ctxSize -ub $batchSize -b $batchSize " +
+       "--n-gpu-layers -1 " +
+       "--threads $threads --threads-batch $threads " +
        "--mlock --no-mmap " +
        "--flash-attn $flash " +
-       "--cache-type-k q8_0 --cache-type-v q8_0 " +
+       "--cache-type-k f16 --cache-type-v f16 " +
        "--cont-batching " +
-       "--parallel 4 " +
-       "--threads-http 4 " +
+       "--parallel $parallel " +
+       "--threads-http $threadsHttp " +
+       "--metrics " +
        "--log-file `"C:\Users\druiv\.cache\logs\llama.cpp\embedding_logs`" " +
        "--log-colors on " +
        "--log-timestamps " +
        "--log-prefix " +
        "--verbose "
 
-# Optional: quieter logs (uncomment if desired)
-# $cmd += " --log-disable"
-
 Write-Host "Running: $cmd`n" -ForegroundColor Gray
 
-# Start server
 Invoke-Expression $cmd

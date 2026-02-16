@@ -1,23 +1,21 @@
 import argparse
+import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import traceback
-from typing import Optional, Dict, Any, AsyncGenerator, Union
+import shutil
+from typing import Dict, Any
 
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletion
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 from rich.logging import RichHandler
 from rich.console import Console
-from rich.syntax import Syntax
-from rich.table import Table
 import uvicorn
 
 import logging
 import uuid
-import ftfy
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,175 +27,118 @@ logger = logging.getLogger("llama_proxy")
 console = Console()
 
 
-def safe_extract_response_data(response: Any) -> Dict[str, Any]:
-    """Extract data safely from OpenAI response (handles LegacyAPIResponse)."""
-    data: Dict[str, Any] = {}
-
-    if hasattr(response, "model_dump"):
-        try:
-            data = response.model_dump(exclude_none=True)
-            return data
-        except Exception:
-            pass
-
-    if hasattr(response, "_response") and hasattr(response._response, "json"):
-        try:
-            data = response._response.json()
-            return data
-        except Exception:
-            pass
-
-    logger.warning("Failed to extract response data", extra={"type": str(type(response))})
-    return data
-
-
 def create_app(
     upstream_url: str,
     log_dir: Path | str,
 ) -> FastAPI:
     app = FastAPI(
-        title="LLaMA.cpp Reverse Proxy (OpenAI client)",
-        description="Thin proxy with rich logging & request tracing using official OpenAI SDK",
-        version="0.5.0",
+        title="LLaMA.cpp Transparent Reverse Proxy",
+        description="Forwards all OpenAI-compatible requests with minimal interference + rich request logging",
+        version="0.6.0",
     )
 
-    log_dir = Path(log_dir)
+    log_dir = Path(log_dir).resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_dir = log_dir.resolve()  # make sure we have absolute path
     upstream_base = upstream_url.rstrip("/")
 
-    # Shared async client pointing to llama.cpp server
-    client = AsyncOpenAI(
+    # Official OpenAI client (used mostly for base_url + internal httpx client)
+    openai_client = AsyncOpenAI(
         base_url=f"{upstream_base}/v1",
         api_key="sk-no-key-required",
         timeout=None,
         max_retries=0,
     )
 
-    async def log_success(
-        request_id: str,
-        timestamp: str,
-        request: Request,
-        path_with_query: str,
-        payload: dict,
-        duration_ms: float,
-        usage_info: Optional[Dict[str, Any]],
-        assistant_message: Optional[Dict[str, Any]],
-        bytes_transferred: int,
-        was_streaming: bool,
-        log_file: Path,
-    ) -> None:
-        """Shared logging logic for both streaming and non-streaming (success)."""
-        record = {
-            "request_id": request_id,
-            "timestamp": timestamp,
-            "method": request.method,
-            "path": path_with_query,
-            "client_ip": request.client.host,
-            "upstream_url": str(client.base_url),
-            "request_headers": dict(request.headers),
-            "request_body": payload,
-            "status_code": 200,
-            "response_headers": {},
-            "response_body": {
-                "message": assistant_message or {},
-                "usage": usage_info,
-            },
-            "duration_ms": round(duration_ms, 1),
-            "bytes_received": bytes_transferred,
-            "was_streaming": was_streaming,
-        }
+    # Low-level httpx client for transparent forwarding
+    http_client = openai_client._client
 
+    def build_upstream_url(path: str, query: str | None = None) -> str:
+        """Build correct upstream URL without duplicating /v1"""
+        clean_path = path.lstrip("/")
+        # If incoming path starts with v1/ → strip it (since base_url already has /v1)
+        if clean_path.startswith("v1/"):
+            clean_path = clean_path[3:]
+        url = f"{upstream_base}/{clean_path.lstrip('/')}"
+        if query:
+            url += "?" + query
+        return url
+
+    async def write_log_background(
+        log_file: Path,
+        record: Dict[str, Any],
+    ) -> None:
+        """Non-blocking log writer – fire and forget"""
         try:
             log_file.write_text(
                 json.dumps(record, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-        except Exception as exc:
-            logger.error(f"Failed to write log {log_file}", exc_info=exc)
+        except Exception as e:
+            logger.warning(f"Background log write failed: {e}")
 
-        # Console output
-        table = Table(title=f"LLM Call  [dim]{request_id}[/]", show_header=False)
-        table.add_row("[bold]Request[/]", f"{request.method} {path_with_query}")
-        table.add_row("[bold]Client[/]", request.client.host or "?")
-        table.add_row("[bold]Upstream[/]", str(client.base_url))
-        table.add_row("[bold]Status[/]", "200")
-        table.add_row("[bold]Duration[/]", f"{duration_ms:.0f} ms")
-        table.add_row("[bold]Bytes[/]", f"{bytes_transferred:,}")
-        if usage_info:
-            table.add_row(
-                "[bold]Usage[/]",
-                f"prompt={usage_info.get('prompt_tokens')} | "
-                f"completion={usage_info.get('completion_tokens')} | "
-                f"total={usage_info.get('total_tokens')}",
-            )
+    # ────────────────────────────────────────────────
+    #           NEW: Log cleanup logic
+    # ────────────────────────────────────────────────
 
-        console.rule(f"[bold cyan]LLM Call • {request_id}", style="cyan")
-        console.print(table)
+    async def cleanup_old_logs(max_age_days: int = 14):
+        """Delete daily log folders older than max_age_days"""
+        if max_age_days < 1:
+            return
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+        cutoff_str = cutoff_date.strftime("%Y-%m-%d")
 
-        if payload:
-            console.print("[bold green]→ Request body[/]")
-            console.print(Syntax(json.dumps(payload, indent=2), "json", word_wrap=True))
+        for item in list(log_dir.iterdir()):
+            if not item.is_dir():
+                continue
+            if not item.name.startswith("20") or len(item.name) != 10:
+                continue  # skip non-date-looking folders
+            try:
+                folder_date = datetime.strptime(item.name, "%Y-%m-%d").replace(
+                    tzinfo=timezone.utc
+                )
+                if folder_date < cutoff_date:
+                    logger.info(
+                        f"Cleaning up old logs: removing {item} (older than {max_age_days} days)"
+                    )
+                    shutil.rmtree(item, ignore_errors=True)
+            except ValueError:
+                continue  # not a valid date folder
+            except Exception as e:
+                logger.warning(f"Failed to clean directory {item}: {e}")
 
-        console.print("[bold blue]← Response content[/]")
-        if assistant_message:
-            if assistant_message.get("content"):
-                preview = assistant_message["content"][:800]
-                if len(assistant_message["content"]) > 800:
-                    preview += " … [truncated]"
-                console.print(preview)
-            elif assistant_message.get("tool_calls"):
-                tc_summary = ", ".join(tc.get("function", {}).get("name", "?") for tc in assistant_message["tool_calls"])
-                console.print(f"[yellow]Tool calls:[/] {tc_summary}")
-            else:
-                console.print("[dim]Empty assistant message[/]")
-        else:
-            console.print("[dim]No assistant message captured[/]")
+    # Periodic cleanup task
+    async def periodic_log_cleanup():
+        while True:
+            try:
+                await cleanup_old_logs(max_age_days=14)  # ← you can change this number
+            except Exception as e:
+                logger.error(f"Log cleanup task failed: {e}")
+            await asyncio.sleep(3600)  # every 1 hour
 
-    async def log_error(
-        request_id: str,
-        timestamp: str,
-        request: Request,
-        path_with_query: str,
-        payload: dict,
-        exc: Exception,
-        daily_dir: Path,
-    ) -> Path:
-        error_file = daily_dir / f"ERROR_{timestamp}_{request_id}.json"
+    # ────────────────────────────────────────────────
+    #           FastAPI lifecycle hooks
+    # ────────────────────────────────────────────────
 
-        record = {
-            "request_id": request_id,
-            "timestamp": timestamp,
-            "method": request.method,
-            "path": path_with_query,
-            "client_ip": request.client.host,
-            "upstream_url": str(client.base_url),
-            "request_headers": dict(request.headers),
-            "request_body": payload,
-            "status_code": None,
-            "error": {
-                "type": type(exc).__name__,
-                "message": str(exc),
-                # Fragile & broken — replace with standard traceback
-                "traceback": traceback.format_exc() if hasattr(exc, '__traceback__') else None,
-            },
-            "success": False,
-        }
+    @app.on_event("startup")
+    async def startup_event():
+        # Clean old logs once when the server starts
+        await cleanup_old_logs(max_age_days=14)
+        # Start periodic cleanup in background
+        asyncio.create_task(periodic_log_cleanup())
+        logger.info("Log cleanup tasks started (keeping last 14 days)")
 
-        try:
-            error_file.write_text(
-                json.dumps(record, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-        except Exception as write_exc:
-            logger.error(f"Failed to write error log {error_file}", exc_info=write_exc)
+    # ────────────────────────────────────────────────
+    #           Your existing proxy endpoint
+    # ────────────────────────────────────────────────
 
-        logger.exception(f"Request failed • id={request_id}")
-        return error_file
-
-    @app.api_route("/{path:path}", methods=["GET", "POST", "OPTIONS"])
-    @app.api_route("/", methods=["GET", "POST", "OPTIONS"])
-    async def proxy(request: Request, path: str = ""):
+    @app.api_route(
+        "/{path:path}",
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+    )
+    @app.api_route(
+        "/", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
+    )
+    async def proxy_all(request: Request, path: str = ""):
         request_id = str(uuid.uuid4())[:8]
         path_with_query = str(request.url.path)
         if request.url.query:
@@ -207,277 +148,145 @@ def create_app(
             f"[bold green]→[/] {request.method} {path_with_query} • [dim]id={request_id}[/]"
         )
 
-        # Allow both /chat/completions and /embeddings endpoints
-        if request.method != "POST" or not any(x in path.lower() for x in ["chat/completions", "embeddings"]):
-            return Response("Only chat/completions and embeddings endpoints are proxied", 501)
+        # Prepare forwarded headers (remove hop-by-hop)
+        headers_to_forward: Dict[str, str] = {
+            k: v
+            for k, v in request.headers.items()
+            if k.lower()
+            not in {
+                "host",
+                "content-length",
+                "transfer-encoding",
+                "connection",
+                "keep-alive",
+                "upgrade",
+                "te",
+            }
+        }
 
-        body = await request.body()
-        try:
-            payload = json.loads(body)
-        except json.JSONDecodeError:
-            return Response("Invalid JSON", 400)
-
-        is_embeddings = "embeddings" in path.lower()
-        stream_requested = payload.pop("stream", False) if not is_embeddings else False
-
-        # Prepare forwarded headers
-        forwarded_for = request.headers.get("x-forwarded-for", request.client.host or "unknown")
+        # Forwarding chain info
+        forwarded_for = request.headers.get(
+            "x-forwarded-for", request.client.host or "unknown"
+        )
         if forwarded_for:
             forwarded_for += ", "
         forwarded_for += request.client.host or "unknown"
 
-        extra_headers = {
-            "X-Forwarded-For": forwarded_for,
-            "X-Forwarded-Proto": request.headers.get("x-forwarded-proto", "http"),
-            "X-Forwarded-Host": request.headers.get("host", request.url.hostname),
-            "X-Request-ID": request_id,
-        }
-
-        for k, v in request.headers.items():
-            if k.lower() not in {
-                "host", "content-length", "transfer-encoding",
-                "connection", "keep-alive", "upgrade"
-            }:
-                extra_headers[k] = v
+        headers_to_forward["X-Forwarded-For"] = forwarded_for
+        headers_to_forward["X-Forwarded-Proto"] = request.headers.get(
+            "x-forwarded-proto", "http"
+        )
+        headers_to_forward["X-Forwarded-Host"] = request.headers.get(
+            "host", request.url.hostname
+        )
+        headers_to_forward["X-Request-ID"] = request_id
 
         start = datetime.now(timezone.utc)
         timestamp = start.strftime("%Y-%m-%dT%H-%M-%S%z")
-
         date_str = start.strftime("%Y-%m-%d")
         daily_dir = log_dir / date_str
         daily_dir.mkdir(parents=True, exist_ok=True)
-        success_log_file = daily_dir / f"{timestamp}_{request_id}.json"
-
-        if is_embeddings:
-            # ── Embeddings path ─────────────────────────────────────────────
-            try:
-                response = await client.embeddings.create(
-                    **payload,
-                )
-
-                duration_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
-                logger.info(
-                    f"[bold cyan]←[/] embeddings completed in {duration_ms:.0f} ms   id={request_id}"
-                )  
-
-                content_summary = ""
-                if response.data and response.data[0].embedding:
-                    emb = response.data[0].embedding
-                    content_summary = f"embedding vector (dim={len(emb)}) • first 8: {emb[:8]}"
-
-                bytes_transferred = len(json.dumps(response.model_dump()).encode("utf-8"))
-
-                await log_success(
-                    request_id=request_id,
-                    timestamp=timestamp,
-                    request=request,
-                    path_with_query=path_with_query,
-                    payload=payload,
-                    duration_ms=duration_ms,
-                    usage_info=None,  # embeddings usually have usage
-                    content=content_summary,
-                    bytes_transferred=bytes_transferred, 
-                    was_streaming=False,
-                    log_file=success_log_file,
-                )
-
-                return JSONResponse(
-                    content=response.model_dump(exclude_none=True),
-                    status_code=200,
-                )
-
-            except Exception as exc:
-                await log_error(
-                    request_id, timestamp, request, path_with_query, payload, exc, daily_dir
-                )
-                raise
+        log_file = daily_dir / f"{timestamp}_{request_id}.json"
 
         try:
-            if stream_requested:
-                # ── Streaming chat path ──
-                stream = await client.chat.completions.create(
-                    **payload,
-                    stream=True,
-                    extra_headers=extra_headers,
-                )
+            target_url = build_upstream_url(path, request.url.query)
 
-                logger.info(
-                    f"[bold cyan]←[/] streaming started   id={request_id}"
-                )
-
-                full_content_pieces: list[str] = []
-                last_delta: Optional[Dict[str, Any]] = None
-                usage_info: Optional[Dict[str, Any]] = None
-                chunks: list[bytes] = []
-                bytes_received = 0
-
-                async def stream_and_log() -> AsyncGenerator[bytes, None]:
-                    nonlocal bytes_received, usage_info, last_delta
-                    last_preview_time = datetime.now(timezone.utc)
-                    preview_throttle_sec = 1.5
-
-                    try:
-                        async for chunk in stream:
-                            if not getattr(chunk, "choices", None):
-                                if hasattr(chunk, "usage") and chunk.usage:
-                                    usage_info = chunk.usage.model_dump()
-                                    logger.info(
-                                        f"[dim]usage captured[/] prompt={usage_info.get('prompt_tokens')} "
-                                        f"completion={usage_info.get('completion_tokens')} "
-                                        f"total={usage_info.get('total_tokens')} • id={request_id}"
-                                    )
-                                chunk_data = chunk.model_dump_json(exclude_none=True)
-                                sse_line = f"data: {chunk_data}\n\n"
-                                sse_bytes = sse_line.encode("utf-8")
-                                bytes_received += len(sse_bytes)
-                                chunks.append(sse_bytes)
-                                yield sse_bytes
-                                continue
-
-                            delta = chunk.choices[0].delta
-                            # Keep the latest delta (useful for tool_calls / refusal / structured fields)
-                            last_delta = delta.model_dump(exclude_none=True)
-
-                            if delta.content is not None:
-                                fixed = ftfy.fix_text(delta.content)
-                                full_content_pieces.append(fixed)
-
-                            chunk_data = chunk.model_dump_json(exclude_none=True)
-                            sse_line = f"data: {chunk_data}\n\n"
-                            sse_bytes = sse_line.encode("utf-8")
-                            bytes_received += len(sse_bytes)
-                            chunks.append(sse_bytes)
-
-                            now = datetime.now(timezone.utc)
-                            if (now - last_preview_time).total_seconds() >= preview_throttle_sec:
-                                if delta.content:
-                                    preview = ftfy.fix_text(delta.content.strip())[:120]
-                                    if len(preview) == 120:
-                                        preview += "…"
-                                    if preview.strip():
-                                        logger.info(
-                                            f"[dim]chunk preview[/] {preview} "
-                                            f"[dim]({bytes_received:,} bytes so far)[/]"
-                                        )
-                                last_preview_time = now
-
-                            yield sse_bytes
-
-                        done = b"data: [DONE]\n\n"
-                        yield done
-                        chunks.append(done)
-                        bytes_received += len(done)
-
-                    except Exception as exc:
-                        logger.exception("Streaming error", extra={"request_id": request_id})
-                        await log_error(
-                            request_id, timestamp, request, path_with_query, payload, exc, daily_dir
-                        )
-                        raise
-
-                    finally:
-                        end = datetime.now(timezone.utc)
-                        duration_ms = (end - start).total_seconds() * 1000
-
-                        # Build final assistant message for logging
-                        final_message: Dict[str, Any] = {"role": "assistant"}
-                        full_content = "".join(full_content_pieces).strip()
-                        if full_content:
-                            final_message["content"] = full_content
-
-                        # If we have tool_calls in the last delta, include them
-                        if last_delta and "tool_calls" in last_delta:
-                            final_message["tool_calls"] = last_delta["tool_calls"]
-
-                        await log_success(
-                            request_id=request_id,
-                            timestamp=timestamp,
-                            request=request,
-                            path_with_query=path_with_query,
-                            payload=payload,
-                            duration_ms=duration_ms,
-                            usage_info=usage_info,
-                            assistant_message=final_message,
-                            bytes_transferred=bytes_received, 
-                            was_streaming=True,
-                            log_file=success_log_file,
-                        )
-
-                return StreamingResponse(
-                    stream_and_log(),
-                    status_code=200,
-                    headers={
-                        "Content-Type": "text/event-stream",
-                        "Cache-Control": "no-cache",
-                        "X-Accel-Buffering": "no",
-                    },
-                    media_type="text/event-stream",
-                )
-
-            else:
-                # ── Non-streaming chat path ──────────────────────────────────────
-                response: ChatCompletion = await client.chat.completions.create(
-                    **payload,
-                    stream=False,
-                    extra_headers=extra_headers,
-                )
-
-                duration_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
-                logger.info(
-                    f"[bold cyan]←[/] completed in {duration_ms:.0f} ms   id={request_id}"
-                )
-
-                raw_data = safe_extract_response_data(response)
-                usage_info = raw_data.get("usage")
-
-                if usage_info is None:
-                    logger.warning(f"No usage stats available from upstream id={request_id}")
-
-                choices = raw_data.get("choices", [])
-                assistant_message: Dict[str, Any] = {}
-                if choices and len(choices) > 0:
-                    msg = choices[0].get("message")
-                    if isinstance(msg, dict):
-                        assistant_message = msg
-
-                bytes_transferred = len(json.dumps(raw_data).encode("utf-8"))
-
-                await log_success(
-                    request_id=request_id,
-                    timestamp=timestamp,
-                    request=request,
-                    path_with_query=path_with_query,
-                    payload=payload,
-                    duration_ms=duration_ms,
-                    usage_info=usage_info,
-                    assistant_message=assistant_message,
-                    bytes_transferred=bytes_transferred,
-                    was_streaming=False,
-                    log_file=success_log_file,
-                )
-
-                return JSONResponse(
-                    content=raw_data,
-                    status_code=200,
-                )
-
-        except Exception as exc:  # outer catch-all
-            await log_error(
-                request_id, timestamp, request, path_with_query, payload, exc, daily_dir
+            upstream_resp = await http_client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers_to_forward,
+                content=await request.body(),
+                timeout=None,
+                follow_redirects=True,
             )
-            raise
+
+            duration_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+
+            # Minimal structured log
+            record = {
+                "request_id": request_id,
+                "timestamp": timestamp,
+                "method": request.method,
+                "path": path_with_query,
+                "client_ip": request.client.host,
+                "upstream_url": target_url,
+                "status_code": upstream_resp.status_code,
+                "duration_ms": round(duration_ms, 1),
+                "forwarded_headers": {
+                    k: v
+                    for k, v in headers_to_forward.items()
+                    if k.lower().startswith("x-")
+                },
+            }
+
+            # Non-blocking log write
+            asyncio.create_task(write_log_background(log_file, record))
+
+            logger.info(
+                f"[bold cyan]←[/] {upstream_resp.status_code} "
+                f"{duration_ms:.0f} ms   [dim]id={request_id}[/]"
+            )
+
+            # Forward response — streaming if applicable
+            content_type = upstream_resp.headers.get("content-type", "")
+            is_stream = (
+                "text/event-stream" in content_type.lower()
+                or "application/x-ndjson" in content_type.lower()
+            )
+
+            if is_stream:
+                return StreamingResponse(
+                    upstream_resp.aiter_bytes(),
+                    status_code=upstream_resp.status_code,
+                    headers=dict(upstream_resp.headers),
+                    media_type=content_type,
+                )
+            else:
+                content = await upstream_resp.aread()
+                return Response(
+                    content=content,
+                    status_code=upstream_resp.status_code,
+                    headers=dict(upstream_resp.headers),
+                    media_type=upstream_resp.headers.get("content-type"),
+                )
+
+        except Exception as exc:
+            duration_ms = (datetime.now(timezone.utc) - start).total_seconds() * 1000
+
+            error_record = {
+                "request_id": request_id,
+                "timestamp": timestamp,
+                "method": request.method,
+                "path": path_with_query,
+                "client_ip": request.client.host,
+                "error": {
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                "duration_ms": round(duration_ms, 1),
+                "success": False,
+            }
+
+            asyncio.create_task(write_log_background(log_file, error_record))
+            logger.exception(f"Proxy error • id={request_id}")
+
+            return Response(
+                content=f"Upstream error: {str(exc)}",
+                status_code=502,
+            )
 
     return app
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Reverse proxy for LLaMA servers with rich logging (OpenAI SDK version)",
+        description="Transparent reverse proxy for llama.cpp / OpenAI-compatible servers with rich logging",
     )
     parser.add_argument(
         "--upstream-url",
         default="http://127.0.0.1:8000",
-        help="Base URL of the upstream LLaMA server",
+        help="Base URL of the upstream llama.cpp server (without /v1)",
     )
     parser.add_argument(
         "--host",
@@ -493,8 +302,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-dir",
         type=Path,
-        default=Path.home() / ".cache" / "logs" / "llama.cpp" / "proxy",
-        help="Directory to store request/response logs",
+        default=Path.home() / ".cache" / "logs" / "llama_proxy",
+        help="Directory to store request logs",
     )
     return parser.parse_args()
 
