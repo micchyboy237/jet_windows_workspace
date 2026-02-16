@@ -1,22 +1,21 @@
 # Start-LlamaServer-Embedding.ps1
-# Optimized for: Ryzen 5 3600 + GTX 1660 (6GB) + 16GB RAM
-# 4 parallel workers
-# Context and batch reflect natural model context (not multiplied)
+# Optimized for: Ryzen 5 3600 + GTX 1660 (6GB) + 16GB RAM - 2026 best practices
+# 4 parallel workers, ctx scaled automatically per worker
 
 Write-Host "Starting llama.cpp embedding server launcher (optimized for short-to-medium text workloads)" -ForegroundColor Cyan
 Write-Host "Select an embedding model to start:`n" -ForegroundColor Cyan
-Write-Host "1. embeddinggemma-300M-Q8_0         (2048 natural ctx)"
-Write-Host "2. nomic-embed-text-v1.5.Q4_K_M     (4096 natural ctx)"
-Write-Host "3. nomic-embed-text-v2-moe.Q4_K_M   (2048 natural ctx)"
-Write-Host "4. all-MiniLM-L12-v2-q4_0           (1024 natural ctx)"
+Write-Host "1. embeddinggemma-300M-Q8_0         (fast, 2048 natural ctx)"
+Write-Host "2. nomic-embed-text-v1.5.Q4_K_M     (long context capable)"
+Write-Host "3. nomic-embed-text-v2-moe.Q4_K_M   (MOE variant)"
+Write-Host "4. all-MiniLM-L12-v2-q4_0           (fastest, lower quality)"
 Write-Host ""
 
 $modelChoice = Read-Host "Enter the number of your choice (1-4)"
 
-# ---- Runtime configuration ----
-$parallel    = 4
-$threadsHttp = 4
-$threads     = 10
+# ---- Runtime scaling variables ----
+$parallel     = 4
+$threadsHttp  = 4
+$threads      = 10
 
 switch ($modelChoice) {
     "1" {
@@ -45,9 +44,9 @@ switch ($modelChoice) {
     }
 }
 
-# ---- Derived values ----
-$ctxSize   = $naturalCtx
-$batchSize = $naturalCtx
+# ---- Derived values (DRY + scalable) ----
+$ctxSize   = $naturalCtx * $parallel
+$batchSize = $ctxSize
 
 $useFlashAttn = Read-Host "`nUse flash attention? [Y/n] (recommended: Y)"
 $flash = if ($useFlashAttn -match '^[nN]') { "off" } else { "on" }
@@ -62,7 +61,7 @@ Write-Host "`nSummary:" -ForegroundColor Cyan
 Write-Host " Model             : $modelName"
 Write-Host " Natural Context   : $naturalCtx"
 Write-Host " Parallel Workers  : $parallel"
-Write-Host " Context Size      : $ctxSize"
+Write-Host " Final Context     : $ctxSize"
 Write-Host " Batch Size        : $batchSize"
 Write-Host " Pooling           : cls"
 Write-Host " Flash Attention   : $flash"
