@@ -37,6 +37,8 @@ class ConnectionState:
         self.audio_buffer: bytearray = bytearray()
         self.chunk_count: int = 0
         self.last_context_prompt: str | None = None
+        self.last_ja: str | None = None
+        self.last_en: str | None = None
         self.utterance_start: datetime | None = None
 
     def reset_utterance(self):
@@ -68,6 +70,8 @@ def transcribe_and_translate(
     normalized_rms: float,
     received_at: datetime | None = None,
     context_prompt: str | None = None,
+    last_ja: str | None = None,
+    last_en: str | None = None,
     out_dir: Path | None = None,
 ) -> tuple[str, str, float, dict]:
     """Blocking function — run in executor."""
@@ -83,7 +87,7 @@ def transcribe_and_translate(
     trans_result: TranscriptionResult = transcribe_japanese_whisper(
         audio_bytes=audio_bytes,
         sample_rate=sr,
-        context_prompt=context_prompt,
+        context_prompt=last_ja,
         save_temp_wav=temp_path,
         client_id=client_id,
         utterance_id=utterance_id,
@@ -129,7 +133,8 @@ def transcribe_and_translate(
         "segments": trans_result.segments,
         "normalized_rms": normalized_rms,
         "context": {
-            "prompt_used": context_prompt,
+            "last_ja": last_ja,
+            "last_en": last_en,
         },
     }
 
@@ -210,6 +215,8 @@ async def handler(websocket):
                         utterance_id,
                         segment_num,
                         context_prompt,
+                        state.last_ja,
+                        state.last_en,
                         data,
                         normalized_rms,
                         is_final=is_final,
@@ -241,6 +248,8 @@ async def process_utterance(
     utterance_id: str,
     segment_num: int,
     context_prompt: str | None,
+    last_ja: str | None,
+    last_en: str | None,
     data: dict,
     normalized_rms: float,
     is_final: bool = False,
@@ -263,6 +272,8 @@ async def process_utterance(
         normalized_rms,
         None,
         context_prompt,
+        last_ja,
+        last_en,
         DEFAULT_OUT_DIR,
     )
 
@@ -271,6 +282,18 @@ async def process_utterance(
     client_duration = data.get("duration_sec")
     avg_vad_confidence = data.get("avg_vad_confidence", 0.0)
     normalized_rms = data.get("normalized_rms")
+
+    log_prefix = "FINAL" if is_final else "PARTIAL"
+
+    logger.info(
+        f"[{state.client_id}] {log_prefix} utt {utterance_id}\n"
+        f"last ja: {last_ja}\n"
+        f"last en: {last_en}\n"
+        f"ja: {ja!r}\n"
+        f"en: {en!r}\n"
+        f"tr_conf: {meta['translation']['confidence']}\n"
+        f"qual: {meta['translation']['quality_label']}"
+    )
 
     duration_sec = client_duration if client_duration is not None else state.get_duration_sec(sample_rate)
 
@@ -293,8 +316,12 @@ async def process_utterance(
         "meta": meta,
     }
 
+    state.last_ja = ja
+    state.last_en = en
+
     await websocket.send(json.dumps(payload, ensure_ascii=False))
     logger.info(f"[{state.client_id}] Sent {'final' if is_final else 'partial'} subtitle for utt {utterance_id}")
+
 
 
 def pcm_bytes_to_waveform(pcm: bytes | bytearray, *, dtype=np.int16) -> np.ndarray:

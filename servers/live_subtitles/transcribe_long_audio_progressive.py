@@ -227,7 +227,7 @@ if __name__ == "__main__":
 #   Usage example
 # ──────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
+    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
 
     # Load model once (reuse for multiple calls)
     model = WhisperModel(

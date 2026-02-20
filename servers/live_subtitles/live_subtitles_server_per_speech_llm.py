@@ -11,6 +11,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 import numpy as np
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -20,7 +21,7 @@ from transcribe_jp_llm import (
     transcribe_japanese_llm_from_bytes,
     TranscriptionResult,
 )
-from translate_jp_en_llm import translate_japanese_to_english_structured
+from translate_jp_en_llm import translate_japanese_to_english
 from logger import logger
 
 logger.info("Live subtitles server starting...")
@@ -91,8 +92,8 @@ def transcribe_and_translate(
     end_of_utterance_received_at: datetime,
     normalized_rms: float,
     received_at: datetime | None = None,
-    prev_ja: str | None = None,
-    prev_en: str | None = None,
+    last_ja: str | None = None,
+    last_en: str | None = None,
     out_dir: Path | None = None,
 ) -> tuple[str, str, float, dict]:
 
@@ -109,14 +110,19 @@ def transcribe_and_translate(
     ja_text = trans_result.text_ja.strip()
 
     if ja_text:
-        en_text, translation_logprob, translation_confidence, translation_quality = (
-            translate_japanese_to_english_structured(
-                ja_text,
-                max_decoding_length=512,
-                min_tokens_for_confidence=3,
-                enable_scoring=ENABLE_TRANSLATION_SCORING,
-                context_prompt=prev_ja,
-            )
+        # Build proper conversation history (user = previous JA, assistant = previous EN)
+        # Only include if both exist to form a complete previous turn
+        history: Optional[list[dict[str, str]]] = None
+        if last_ja and last_en:
+            history = [
+                {"role": "user", "content": last_ja.strip()},
+                {"role": "assistant", "content": last_en.strip()},
+            ]
+        en_text, translation_logprob, translation_confidence, translation_quality = translate_japanese_to_english(
+            ja_text,
+            max_tokens=768,
+            enable_scoring=ENABLE_TRANSLATION_SCORING,
+            history=history,
         )
     else:
         # ────────────────────────────────────────────────────────────────
@@ -154,8 +160,9 @@ def transcribe_and_translate(
         },
         "segments": trans_result.segments,
         "normalized_rms": normalized_rms,
-        "prev_ja": prev_ja,
-        "prev_en": prev_en,
+        "context": {
+            "history": history,
+        },
     }
 
     return ja_text, en_text, 0.0, meta
@@ -240,8 +247,8 @@ async def process_utterance(
     sample_rate: int,
     utterance_id: str,
     segment_num: int,
-    prev_ja: str | None,
-    prev_en: str | None,
+    last_ja: str | None,
+    last_en: str | None,
     data: dict,
     normalized_rms: float,
     is_final: bool = False,
@@ -265,8 +272,8 @@ async def process_utterance(
         datetime.now(timezone.utc),
         normalized_rms,
         None,
-        prev_ja,
-        prev_en,
+        last_ja,
+        last_en,
         DEFAULT_OUT_DIR,
     )
 
@@ -274,8 +281,8 @@ async def process_utterance(
 
     logger.info(
         f"[{state.client_id}] {log_prefix} utt {utterance_id}\n"
-        f"last ja: {prev_ja}\n"
-        f"last en: {prev_en}\n"
+        f"last ja: {last_ja}\n"
+        f"last en: {last_en}\n"
         f"ja: {ja!r}\n"
         f"en: {en!r}\n"
         f"tr_conf: {meta['translation']['confidence']}\n"
@@ -323,11 +330,11 @@ async def process_utterance(
         "meta": meta,  # includes context_prompt
     }
 
-    await websocket.send(json.dumps(payload, ensure_ascii=False))
-    logger.debug(f"[{state.client_id}] Sent {payload['type']} for utt {utterance_id}")
-
     state.last_ja = ja
     state.last_en = en
+
+    await websocket.send(json.dumps(payload, ensure_ascii=False))
+    logger.debug(f"[{state.client_id}] Sent {payload['type']} for utt {utterance_id}")
 
 
 def pcm_bytes_to_waveform(pcm: bytes | bytearray, *, dtype=np.int16) -> np.ndarray:

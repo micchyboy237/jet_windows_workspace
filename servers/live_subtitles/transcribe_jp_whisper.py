@@ -109,7 +109,8 @@ def transcribe_japanese_whisper(
         beam_size=5,
         vad_filter=False,
         initial_prompt=context_prompt,
-        condition_on_previous_text=False,
+        # prefix=context_prompt,
+        # condition_on_previous_text=bool(context_prompt),
     )
 
     segments = list(segments_iter)
