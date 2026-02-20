@@ -53,6 +53,7 @@ ALL_PROBS_PATH = os.path.join(OUTPUT_DIR, "all_probs.json")
 
 CONTINUOUS_AUDIO_MAX_SECONDS = 320.0
 
+MIN_SPEECH_DURATION_SEC = 0.25
 MAX_SPEECH_DURATION_SEC = 90.0
 CHUNK_DURATION_SEC = 6.0
 CHUNK_OVERLAP_SEC = 0.0
@@ -72,11 +73,12 @@ _audio_buffer_is_dirty: bool = False
 @dataclass(frozen=True)
 class Config:
     ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
-    min_speech_duration: float = 0.25  # JP backchannels: 「はい」「え？」
+    min_speech_duration: float = MIN_SPEECH_DURATION_SEC
+    max_speech_duration_sec: float = MAX_SPEECH_DURATION_SEC
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
-    vad_start_threshold: float = 0.05  # hysteresis start
+    vad_start_threshold: float = 0.15  # hysteresis start
     vad_end_threshold: float = 0.01  # hysteresis end
     pre_roll_seconds: float = 0.35  # capture mora onsets
     max_silence_seconds: float = 0.9  # JP clause pauses
@@ -84,7 +86,6 @@ class Config:
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
     reconnect_delay: float = 3.0
-    max_speech_duration_sec: float = MAX_SPEECH_DURATION_SEC
 
     # Make sure defaults are applied
     if max_speech_duration_sec <= 0:
@@ -190,6 +191,7 @@ async def stream_microphone(ws) -> None:
     utterance_audio_buffer = bytearray()
     last_chunk_sent_time = None
     utterance_start_time = None
+    speech_duration_accumulated = 0.0
     last_overlap_samples = int(CHUNK_OVERLAP_SEC * config.sample_rate)
 
     global chunk_index
@@ -360,6 +362,45 @@ async def stream_microphone(ws) -> None:
                             -20:
                         ]  # optional: keep small overlap
 
+                    def reset_speech():
+                        nonlocal speech_chunks_in_segment
+                        nonlocal max_vad_confidence
+                        nonlocal last_vad_confidence
+                        nonlocal first_vad_confidence
+                        nonlocal min_vad_confidence
+                        nonlocal vad_confidence_sum
+                        nonlocal speech_prob_history
+                        nonlocal speech_chunk_count
+                        nonlocal speech_energy_sum
+                        nonlocal speech_energy_sum_squares
+                        nonlocal max_energy
+                        nonlocal min_energy
+                        nonlocal speech_duration_sec
+
+                        speech_chunks_in_segment = 0  # reset for new segment
+                        max_vad_confidence = 0.0  # ← reset
+                        last_vad_confidence = 0.0  # ← reset
+                        first_vad_confidence = (
+                            speech_prob  # ← capture first speech prob
+                        )
+                        min_vad_confidence = (
+                            speech_prob  # ← initialize min with first value
+                        )
+                        vad_confidence_sum = 0.0  # ← reset
+                        speech_prob_history = []  # ← reset for new segment
+                        speech_chunk_count = 0  # ← reset
+                        # ← NEW resets
+                        speech_energy_sum = 0.0
+                        speech_energy_sum_squares = 0.0
+                        max_energy = 0.0
+                        min_energy = float("inf")
+                        log.success(
+                            "[speech] Speech started | segment_%04d",
+                            current_segment_num,
+                        )
+                        start_new_utterance()  # ← crucial: start tracking utterance here
+                        speech_duration_sec = 0.0
+
                     if chunk_type == "speech":
                         chunks_detected += 1
                         processed += 1
@@ -392,35 +433,17 @@ async def stream_microphone(ws) -> None:
                             for pre_chunk in pre_roll_buffer:
                                 current_segment_buffer.extend(pre_chunk)
 
-                            speech_chunks_in_segment = 0  # reset for new segment
-                            max_vad_confidence = 0.0  # ← reset
-                            last_vad_confidence = 0.0  # ← reset
-                            first_vad_confidence = (
-                                speech_prob  # ← capture first speech prob
-                            )
-                            min_vad_confidence = (
-                                speech_prob  # ← initialize min with first value
-                            )
-                            vad_confidence_sum = 0.0  # ← reset
-                            speech_prob_history = []  # ← reset for new segment
-                            speech_chunk_count = 0  # ← reset
-                            # ← NEW resets
-                            speech_energy_sum = 0.0
-                            speech_energy_sum_squares = 0.0
-                            max_energy = 0.0
-                            min_energy = float("inf")
-                            log.success(
-                                "[speech] Speech started | segment_%04d",
-                                current_segment_num,
-                            )
-                            start_new_utterance()  # ← crucial: start tracking utterance here
-                            speech_duration_sec = 0.0
+                            reset_speech()
+
+                        elif not has_sound:
+                            reset_speech()
 
                         # Accumulate for average
                         vad_confidence_sum += speech_prob
-                        speech_prob_history.append(
-                            speech_prob
-                        )  # ← NEW: store every accepted prob
+                        speech_prob_history.append(speech_prob)
+                        speech_duration_accumulated += (
+                            VAD_CHUNK_SAMPLES / config.sample_rate
+                        )
 
                         speech_chunk_count += 1  # per segment
 
@@ -439,8 +462,9 @@ async def stream_microphone(ws) -> None:
                             utterance_audio_buffer.extend(chunk)
                             now = time.monotonic()
 
-                            should_send_chunk = last_chunk_sent_time is None or (
-                                now - last_chunk_sent_time >= CHUNK_DURATION_SEC
+                            should_send_chunk = (
+                                last_chunk_sent_time is None
+                                or now - last_chunk_sent_time >= CHUNK_DURATION_SEC
                             )
                             duration_exceeded = (
                                 utterance_start_time is not None
@@ -448,7 +472,15 @@ async def stream_microphone(ws) -> None:
                                 > config.max_speech_duration_sec
                             )
 
+                            # Only send partial chunks once enough accumulated speech is available
                             if should_send_chunk or duration_exceeded:
+                                if (
+                                    speech_duration_accumulated
+                                    < config.min_speech_duration
+                                ):
+                                    # Do not send partial chunks if still below min duration
+                                    continue
+
                                 await send_audio_chunk(
                                     send_queue,
                                     utterance_audio_buffer,
@@ -494,7 +526,39 @@ async def stream_microphone(ws) -> None:
                                 )
                             )
                         ):
-                            # Final chunk (if utterance ongoing)
+                            # ────────────────────────────────────────────────
+                            # Final segment decision
+                            # ────────────────────────────────────────────────
+                            duration = audio_buffer_duration(
+                                current_segment_buffer, config.sample_rate
+                            )
+
+                            if speech_duration_accumulated < config.min_speech_duration:
+                                log.warning(
+                                    "[speech] Final segment too short (%.3fs < %.3fs) — discarded",
+                                    speech_duration_accumulated,
+                                    config.min_speech_duration,
+                                )
+                                # Reset without saving or sending final chunk
+                                segment_type = "non_speech"
+                                speech_start_time = None
+                                silence_start_time = None
+                                current_segment_num = None
+                                current_segment_buffer = None
+                                speech_chunks_in_segment = 0
+                                speech_prob_history = []
+                                utterance_audio_buffer = bytearray()
+                                chunk_index = 0
+                                speech_duration_accumulated = 0.0
+                                current_utterance_id = None
+                                continue
+
+                            log.success(
+                                "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
+                                duration,
+                                speech_chunks_in_segment,
+                            )
+                            # Send final chunk if anything remains
                             if is_utterance_ongoing and len(utterance_audio_buffer) > 0:
                                 await send_audio_chunk(
                                     send_queue,
@@ -511,69 +575,10 @@ async def stream_microphone(ws) -> None:
                                     speech_chunk_count=speech_chunk_count,
                                     context_prompt=build_context_prompt(),
                                 )
-
                                 chunks_sent += 1
-                            # Compute precise duration using number of samples in the segment buffer
-                            duration = audio_buffer_duration(
-                                current_segment_buffer, config.sample_rate
-                            )
-
-                            if speech_duration_sec < config.min_speech_duration:
-                                log.warning(
-                                    "[speech] Segment too short (%.3fs < %.3fs) — discarded",
-                                    speech_duration_sec,
-                                    config.min_speech_duration,
-                                )
-
-                                # Now reset local state
-                                segment_type = "non_speech"
-                                speech_start_time = None
-                                silence_start_time = None
-                                current_segment_num = 0
-                                current_segment_buffer = None
-                                speech_chunks_in_segment = 0
-                                speech_prob_history = []
-                                continue
-
-                            log.success(
-                                "[speech] Speech segment ended | duration: %.2fs | chunks: %d",
-                                duration,
-                                speech_chunks_in_segment,
-                            )
-                            # ------------------------------------------------------------------
-                            # Loudness normalization (client-side) – applied to the full utterance
-                            # (pre-roll + all chunks including short intra-utterance silences)
-                            # This gives the server consistent-level speech for better transcription.
-                            # ------------------------------------------------------------------
+                            # Save ORIGINAL audio (matches what server received)
                             original_bytes = bytes(current_segment_buffer)
                             audio_int16 = np.frombuffer(original_bytes, dtype=np.int16)
-                            audio_float = audio_int16.astype(np.float32) / 32768.0
-
-                            normalized_float = normalize_speech_loudness(
-                                audio_float,
-                                sample_rate=config.sample_rate,
-                            )
-
-                            # Convert back to int16 with proper scaling and hard clipping
-                            normalized_int16 = np.clip(
-                                normalized_float * 32767.0, -32768, 32767
-                            ).astype(np.int16)
-
-                            # Replace the buffer with the normalized version
-                            # → local WAV files and sent payload will both be normalized
-                            current_segment_buffer = bytearray(
-                                normalized_int16.tobytes()
-                            )
-
-                            # ── Compute stable utterance-level normalized RMS once ───────
-                            utterance_normalized_rms = compute_rms(normalized_float)
-
-                            log.info(
-                                "[norm] Applied speech loudness normalization to segment_%04d "
-                                "(%.2f s → target -13 LUFS)",
-                                current_segment_num,
-                                duration,
-                            )
 
                             # Save segment audio + metadata
                             if (
@@ -593,11 +598,17 @@ async def stream_microphone(ws) -> None:
                                     len(current_segment_buffer) // 2
                                 )  # int16 = 2 bytes per sample
 
+                                audio_float = audio_int16.astype(np.float32) / 32768.0
+                                normalized_saved_audio = normalize_speech_loudness(
+                                    audio_float,
+                                    sample_rate=config.sample_rate,
+                                )
+
                                 wav_path = os.path.join(segment_dir, "sound.wav")
                                 wavfile.write(
                                     wav_path,
                                     config.sample_rate,
-                                    normalized_int16,  # already normalized ndarray
+                                    normalized_saved_audio,  # already normalized ndarray
                                 )
                                 base_time = (
                                     stream_start_time
@@ -754,6 +765,7 @@ async def stream_microphone(ws) -> None:
                             current_utterance_id = None
                             utterance_audio_buffer = bytearray()
                             chunk_index = 0
+                            speech_duration_accumulated = 0.0
                             utterance_normalized_rms = None
 
                             segment_type = "non_speech"
@@ -1271,7 +1283,8 @@ async def send_audio_chunk(
         "is_final": is_final,
         "context_prompt": context_prompt,
         "segment_num": segment_num,
-        "utterance_id": current_utterance_id,
+        # "utterance_id": current_utterance_id,
+        "utterance_id": str(uuid.uuid4()),  # Temporarily create new id
         "normalized_rms": normalized_rms,
         "avg_vad_confidence": avg_vad,
     }
