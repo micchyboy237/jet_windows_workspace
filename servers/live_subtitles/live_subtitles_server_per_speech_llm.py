@@ -109,10 +109,10 @@ def transcribe_and_translate(
 
     ja_text = trans_result.text_ja.strip()
 
+    history: Optional[list[dict[str, str]]] = None
     if ja_text:
         # Build proper conversation history (user = previous JA, assistant = previous EN)
         # Only include if both exist to form a complete previous turn
-        history: Optional[list[dict[str, str]]] = None
         if last_ja and last_en:
             history = [
                 {"role": "user", "content": last_ja.strip()},
