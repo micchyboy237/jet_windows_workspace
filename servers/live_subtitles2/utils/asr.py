@@ -24,22 +24,20 @@ class ASRTranscriber:
 
     def __init__(
         self,
-        model_size: str = "medium",
-        device: Optional[str] = None,
-        compute_type: Optional[str] = None,
+        model_name: str = "kotoba-tech/kotoba-whisper-v2.0-faster",
+        device: str = "cuda",
+        compute_type: str = "float32",
     ):
         """Initialize the Whisper model."""
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        if compute_type is None:
-            compute_type = "float16" if device == "cuda" else "int8"
         self.device = device
-        self.model_size = model_size
+        self.model_name = model_name
         if WhisperModel is None:
             self.model = None
         else:
             self.model = WhisperModel(
-                model_size, device=device, compute_type=compute_type
+                model_name,
+                device=device,
+                compute_type=compute_type,
             )
 
     def transcribe_japanese_asr(
@@ -53,7 +51,7 @@ class ASRTranscriber:
             language="ja",
             beam_size=5,
             best_of=5,
-            vad_filter=True,
+            vad_filter=False,
         )
         full_text = "".join(seg.text for seg in segments).strip()
         seg_list: List[TranscriptionSegment] = [

@@ -38,26 +38,24 @@ class JapaneseToEnglishTranslator:
         self.max_output_length = max_output_length
 
     def translate_japanese_to_english(self, text: str) -> str:
-        """Translate JP to EN. Core utility function."""
         if not text or not text.strip():
             return ""
 
-        # Tokenize for CTranslate2 (standard OPUS workflow)
-        tokenized = self.tokenizer(
+        # Fixed version
+        input_ids = self.tokenizer.encode(
             text,
-            return_tensors=False,
             truncation=True,
             max_length=self.max_input_length,
         )
-        input_tokens = self.tokenizer.convert_ids_to_tokens(tokenized["input_ids"])
+        input_tokens = self.tokenizer.convert_ids_to_tokens(input_ids)
 
-        # Perform fast translation
         results = self.translator.translate_batch(
-            [input_tokens], beam_size=4, max_decoding_length=self.max_output_length
+            [input_tokens],
+            beam_size=4,
+            max_decoding_length=self.max_output_length
         )
-        output_tokens = results[0].hypotheses[0]
 
-        # Decode
+        output_tokens = results[0].hypotheses[0]
         translated = self.tokenizer.decode(
             self.tokenizer.convert_tokens_to_ids(output_tokens),
             skip_special_tokens=True,

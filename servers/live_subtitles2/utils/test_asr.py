@@ -1,14 +1,14 @@
 """Tests for Japanese ASR utility."""
 
 import numpy as np
-from utils.asr import ASRTranscriber, TranscriptionSegment
+from .asr import ASRTranscriber, TranscriptionSegment
 
 
 class TestJapaneseASR:
     """Test class to separate behaviors for ASR."""
 
     def setup_method(self):
-        self.transcriber = ASRTranscriber(model_size="tiny")  # tiny for fast test
+        self.transcriber = ASRTranscriber(model_name="small", device="cuda", compute_type="float16")  # small for fast test
 
     def test_transcribe_japanese_asr_short_audio(self):
         # Given: short silent audio as real world test input

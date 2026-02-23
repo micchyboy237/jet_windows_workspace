@@ -1,7 +1,7 @@
 """Tests for Japanese to English translation utility."""
 
 import pytest
-from utils.translation import JapaneseToEnglishTranslator
+from .translation import JapaneseToEnglishTranslator
 
 
 class TestJapaneseToEnglishTranslation:
