@@ -88,7 +88,7 @@ class JPSubtitlesServer:
                     chunk = np.frombuffer(message, dtype=np.float32)
                     result = processor.process_chunk(chunk)
                     if result:
-                        en_text, jp_text = result
+                        en_text, jp_text, is_partial = result
                         if en_text.strip():
                             self.state.total_utterances += 1
                             self.state.clients[client_id]["utterances"] += 1
@@ -101,6 +101,7 @@ class JPSubtitlesServer:
 
                             response = {
                                 "type": "subtitle",
+                                "is_partial": is_partial,
                                 "text": en_text,
                                 "jp_text": jp_text,
                             }
