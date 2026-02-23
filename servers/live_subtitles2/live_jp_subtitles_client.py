@@ -161,13 +161,16 @@ class LiveJPSubtitlesClient:
                         if data.get("type") == "subtitle":
                             en_text = (data.get("text") or "").strip()
                             jp_text = (data.get("jp_text") or "").strip()
-
+                            is_partial = data.get("partial", False)
                             if en_text or jp_text:
                                 self.previous_subtitles.append(self.current_subtitle)
                                 self.current_subtitle = en_text
                                 self.last_jp_text = jp_text
                                 live.update(make_content())
-                                logger.info(f"[EN] {en_text} [dim](JP: {jp_text})[/]")
+                                style = "italic grey" if is_partial else "bold green"
+                                logger.info(
+                                    f"[{style}][EN] {en_text} [dim](JP: {jp_text})[/]"
+                                )
 
                 except asyncio.TimeoutError:
                     live.update(make_content())  # refresh status
