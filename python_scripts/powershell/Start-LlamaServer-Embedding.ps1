@@ -14,8 +14,8 @@ $modelChoice = Read-Host "Enter the number of your choice (1-4)"
 $port = 8081
 
 # ---- Runtime scaling variables ----
-$parallel     = 4
-$threadsHttp  = 4
+$parallel     = 6
+$threadsHttp  = 6
 $threads      = 10
 
 switch ($modelChoice) {
