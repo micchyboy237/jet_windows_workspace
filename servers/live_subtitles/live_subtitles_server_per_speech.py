@@ -97,13 +97,17 @@ def transcribe_and_translate(
     ja_text = trans_result.text_ja
 
     # Translation
-    en_text, translation_logprob, translation_confidence, translation_quality = translate_japanese_to_english(
+    translation_result = translate_japanese_to_english(
         ja_text,
         beam_size=4,
         max_decoding_length=512,
         min_tokens_for_confidence=3,
         enable_scoring=ENABLE_TRANSLATION_SCORING,
     )
+    en_text = translation_result["text"]
+    translation_logprob = translation_result["log_prob"]
+    translation_confidence = translation_result["confidence"]
+    translation_quality = translation_result["quality"]
 
     processing_finished_at = datetime.now(timezone.utc)
     queue_wait_duration = (processing_started_at - end_of_utterance_received_at).total_seconds()

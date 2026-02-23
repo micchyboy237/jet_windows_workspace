@@ -4,26 +4,44 @@ Standalone Japanese → English translation module using CTranslate2 + Helsinki-
 """
 
 import math
-from typing import List, Optional, Tuple
+from typing import List, Optional, TypedDict
 
 from transformers import AutoTokenizer
 from translator_types import Translator
 
-from utils import split_sentences_ja   # Assuming you have this utility
+from utils import split_sentences_ja
 
+
+# ────────────────────────────────────────────────
+# Types
+# ────────────────────────────────────────────────
+
+class TranslationResult(TypedDict):
+    text: str
+    log_prob: Optional[float]
+    confidence: Optional[float]
+    quality: str
+
+
+# ────────────────────────────────────────────────
 # Configuration
+# ────────────────────────────────────────────────
+
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"
 TRANSLATOR_TOKENIZER_NAME = "Helsinki-NLP/opus-mt-ja-en"
 
-# Global instances (loaded once)
 tokenizer = AutoTokenizer.from_pretrained(TRANSLATOR_TOKENIZER_NAME)
+
 translator = Translator(
     TRANSLATOR_MODEL_PATH,
     device="cpu",
     compute_type="int8",
-    # inter_threads=4,
 )
 
+
+# ────────────────────────────────────────────────
+# Confidence Helpers
+# ────────────────────────────────────────────────
 
 def translation_quality_label(log_prob: Optional[float]) -> str:
     """
@@ -53,10 +71,16 @@ def translation_confidence_score(
     """
     if log_prob is None or num_tokens is None or num_tokens <= 0:
         return fallback
+
     effective_tokens = max(min_tokens, num_tokens)
     per_token_prob = math.exp(log_prob / effective_tokens)
+
     return float(min(1.0, max(0.0, per_token_prob)))
 
+
+# ────────────────────────────────────────────────
+# Main Translation Function
+# ────────────────────────────────────────────────
 
 def translate_japanese_to_english(
     text_ja: str,
@@ -64,44 +88,42 @@ def translate_japanese_to_english(
     max_decoding_length: int = 512,
     min_tokens_for_confidence: int = 3,
     enable_scoring: bool = False,
-) -> Tuple[str, Optional[float], Optional[float], str]:
+) -> TranslationResult:
     """
     Translate Japanese text to English using OPUS-MT model via CTranslate2.
-
-    Args:
-        text_ja: Japanese input text (can contain multiple sentences)
-        beam_size: Beam size for decoding
-        max_decoding_length: Maximum length of generated sequence
-        min_tokens_for_confidence: Minimum number of tokens to consider for confidence
-        enable_scoring: Whether to compute and return translation confidence/logprob
-
-    Returns:
-        Tuple of:
-            - translated English text (sentences joined by \n)
-            - translation log probability (of the best hypothesis)
-            - normalized confidence score [0.0–1.0]
-            - quality label ("High", "Good", "Medium", "Low", "N/A")
     """
 
     if not text_ja.strip():
-        return "", None, None, "N/A"
+        return {
+            "text": "",
+            "log_prob": None,
+            "confidence": None,
+            "quality": "N/A",
+        }
 
-    # Split into sentences
     sentences_ja: List[str] = split_sentences_ja(text_ja)
 
     if not sentences_ja:
-        return "", None, None, "N/A"
+        return {
+            "text": "",
+            "log_prob": None,
+            "confidence": None,
+            "quality": "N/A",
+        }
 
-    # Prepare batch of tokenized sentences
     batch_src_tokens = [
         tokenizer.convert_ids_to_tokens(tokenizer.encode(sent.strip()))
         for sent in sentences_ja if sent.strip()
     ]
 
     if not batch_src_tokens:
-        return "", None, None, "N/A"
+        return {
+            "text": "",
+            "log_prob": None,
+            "confidence": None,
+            "quality": "N/A",
+        }
 
-    # Translate batch
     results = translator.translate_batch(
         batch_src_tokens,
         return_scores=enable_scoring,
@@ -118,6 +140,7 @@ def translate_japanese_to_english(
             continue
 
         hyp = result.hypotheses[0]
+
         en_sent = tokenizer.decode(
             tokenizer.convert_tokens_to_ids(hyp),
             skip_special_tokens=True
@@ -126,37 +149,41 @@ def translate_japanese_to_english(
         if en_sent:
             en_sentences.append(en_sent)
 
-        # Assign scores only if scoring is enabled
         if enable_scoring and hasattr(result, "scores") and result.scores:
             translation_logprob = result.scores[0]
             num_output_tokens = len(hyp)
+
             translation_confidence = translation_confidence_score(
                 translation_logprob,
                 num_output_tokens,
-                min_tokens=min_tokens_for_confidence
+                min_tokens=min_tokens_for_confidence,
             )
 
     en_text = "\n".join(en_sentences).strip()
+
     quality_label = (
         translation_quality_label(translation_logprob)
         if enable_scoring
         else "N/A"
     )
 
-    return en_text, translation_logprob, translation_confidence, quality_label
+    return {
+        "text": en_text,
+        "log_prob": translation_logprob,
+        "confidence": translation_confidence,
+        "quality": quality_label,
+    }
 
 
 # ────────────────────────────────────────────────
-# Quick demo
+# Quick Demo
 # ────────────────────────────────────────────────
+
 if __name__ == "__main__":
     from rich.pretty import pprint
     from rich.console import Console
 
     console = Console()
-
-    logprobs = None
-    # logprobs = 1
 
     examples = [
         "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
@@ -164,16 +191,15 @@ if __name__ == "__main__":
 
     for i, jp_text in enumerate(examples, 1):
         console.rule(f"Example {i}")
+
         console.print("[dim]Japanese:[/dim]")
         console.print(jp_text, style="italic cyan")
         console.print()
 
-        console.print("[bold green]English (streaming):[/bold green]")
-        result = translate_japanese_to_english(jp_text, logprobs=logprobs)
-        # all_logprobs = result.pop("logprobs")
+        console.print("[bold green]English:[/bold green]")
+        result = translate_japanese_to_english(
+            jp_text,
+            enable_scoring=True,
+        )
 
-        print(f"\n[bold cyan]Translation {i + 1}:[/bold cyan]")
         pprint(result, expand_all=True)
-
-        # print(f"\n[bold cyan]Logprobs {i + 1}:[/bold cyan]")
-        # pprint(all_logprobs[:2])
