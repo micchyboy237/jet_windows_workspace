@@ -2,25 +2,64 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Optional
 
+import ctranslate2
 import torch
-from transformers import pipeline
+from transformers import AutoTokenizer
 
 
 class JapaneseToEnglishTranslator:
     """Reusable translator class."""
 
-    def __init__(self, model_name: str = "Helsinki-NLP/opus-mt-ja-en"):
+    def __init__(
+        self,
+        model_path: str = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2",
+        tokenizer_name: str = "Helsinki-NLP/opus-mt-ja-en",
+        device: Optional[str] = None,
+        compute_type: Optional[str] = None,
+        max_input_length: int = 512,
+        max_output_length: int = 384,
+    ):
         """Load translation pipeline."""
-        device = 0 if torch.cuda.is_available() else -1
-        self.pipeline = pipeline(
-            "translation", model=model_name, device=device, max_length=400
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        if compute_type is None:
+            compute_type = "int8_float16" if device == "cuda" else "int8"
+
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+        self.translator = ctranslate2.Translator(
+            model_path,
+            device=device,
+            compute_type=compute_type,
         )
+        self.device = device
+        self.max_input_length = max_input_length
+        self.max_output_length = max_output_length
 
     def translate_japanese_to_english(self, text: str) -> str:
         """Translate JP to EN. Core utility function."""
         if not text or not text.strip():
             return ""
-        result: list[dict[str, Any]] = self.pipeline(text)
-        return result[0]["translation_text"].strip()
+
+        # Tokenize for CTranslate2 (standard OPUS workflow)
+        tokenized = self.tokenizer(
+            text,
+            return_tensors=False,
+            truncation=True,
+            max_length=self.max_input_length,
+        )
+        input_tokens = self.tokenizer.convert_ids_to_tokens(tokenized["input_ids"])
+
+        # Perform fast translation
+        results = self.translator.translate_batch(
+            [input_tokens], beam_size=4, max_decoding_length=self.max_output_length
+        )
+        output_tokens = results[0].hypotheses[0]
+
+        # Decode
+        translated = self.tokenizer.decode(
+            self.tokenizer.convert_tokens_to_ids(output_tokens),
+            skip_special_tokens=True,
+        )
+        return translated.strip()
