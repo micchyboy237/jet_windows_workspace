@@ -287,12 +287,14 @@ async def process_utterance(
 
     logger.info(
         f"[{state.client_id}] {log_prefix} utt {utterance_id}\n"
-        f"last ja: {last_ja}\n"
-        f"last en: {last_en}\n"
-        f"ja: {ja!r}\n"
-        f"en: {en!r}\n"
+        f"last ja: {last_ja!r}\n"
+        f"last en: {last_en!r}\n"
+        f"ja:      {ja!r}\n"
+        f"en:      {en!r}\n"
+        f"vad:     {avg_vad_confidence}\n"
         f"tr_conf: {meta['translation']['confidence']}\n"
-        f"qual: {meta['translation']['quality_label']}"
+        f"tl_conf: {meta['transcription']['confidence']}\n"
+        "------------"
     )
 
     duration_sec = client_duration if client_duration is not None else state.get_duration_sec(sample_rate)
