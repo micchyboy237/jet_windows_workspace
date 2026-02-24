@@ -21,6 +21,7 @@ import numpy as np  # needed for saving wav with frombuffer
 import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
 import sounddevice as sd
 import websockets
+from jet.audio.audio_search import find_audio_offsets
 from jet.audio.helpers.base import audio_buffer_duration
 from jet.audio.helpers.energy import compute_rms, rms_to_loudness_label
 from jet.audio.norm.norm_speech_loudness import normalize_speech_loudness
@@ -29,6 +30,7 @@ from jet.audio.speech.speechbrain.vad import SpeechBrainVAD
 # from rich.logging import RichHandler
 from jet.logger import logger as log
 from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
+from jet.transformers.object import make_serializable
 from PyQt6.QtWidgets import QApplication
 
 OUTPUT_DIR = os.path.join(
@@ -326,6 +328,36 @@ async def stream_microphone(ws) -> None:
                         )
 
                     # ────────────────────────────────────────────────
+
+                    def check_if_chunk_already_exists():
+                        # Diaplay every first or 100 chunks
+                        if (
+                            audio_buffer
+                            and current_segment_buffer
+                            and (
+                                len(current_segment_buffer) == 1
+                                or len(current_segment_buffer) % 100 == 0
+                            )
+                        ):
+                            # Extract raw bytes only
+                            raw_bytes = b"".join(chunk[1] for chunk in audio_buffer)
+
+                            # Convert PCM → numpy
+                            audio_buffer_signal = np.frombuffer(
+                                raw_bytes, dtype=config.dtype
+                            )
+                            chunk_signal = np.frombuffer(chunk, dtype=config.dtype)
+                            partial_audio_matches = find_audio_offsets(
+                                audio_buffer_signal,
+                                chunk_signal,
+                                config.sample_rate,
+                            )
+
+                            log.purple(
+                                f"partial_audio_matches ({len(partial_audio_matches)}):\n{json.dumps(make_serializable(partial_audio_matches))}"
+                            )
+
+                    check_if_chunk_already_exists()
 
                     if has_sound:
                         # Always add to continuous buffer (audible speech or non_speech)
@@ -759,7 +791,6 @@ async def stream_microphone(ws) -> None:
                     # Add every chunk (speech or short silence) to the local buffer while utterance is ongoing
                     if (
                         speech_start_time is not None
-                        and current_utterance_id is None  # new utterance
                         and current_segment_buffer is not None
                     ):
                         current_segment_buffer.extend(chunk)
@@ -783,14 +814,14 @@ async def stream_microphone(ws) -> None:
                             )
 
                         log.orange(
-                            "[speech] %d chunks | rms=%s | speech=%.3f | dur=%.2fs%s",
-                            speech_chunk_count,
-                            chunk_energy_label,
-                            speech_prob,
+                            "[speech] dur=%.2fs | %d chunks | speech=%.3f | rms=%.4f - %s",
                             time.monotonic() - speech_start_time
                             if speech_start_time
                             else 0.0,
-                            f" | RTT={avg_rtt:.3f}s" if avg_rtt is not None else "",
+                            speech_chunk_count,
+                            speech_prob,
+                            rms,
+                            chunk_energy_label,
                         )
 
                 # if processed > 0:
