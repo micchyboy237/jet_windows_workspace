@@ -78,8 +78,8 @@ class Config:
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
-    vad_start_threshold: float = 0.15  # hysteresis start
-    vad_end_threshold: float = 0.105  # hysteresis end
+    vad_start_threshold: float = 0.5  # hysteresis start
+    vad_end_threshold: float = 0.25  # hysteresis end
     pre_roll_seconds: float = 0.35  # capture mora onsets
     max_silence_seconds: float = 0.9  # JP clause pauses
     vad_model_path: str | None = None  # allow custom model if needed
@@ -146,10 +146,7 @@ async def stream_microphone(ws) -> None:
     model_path = config.vad_model_path
     if model_path is None:
         log.info("[VAD] Initializing SpeechBrain VAD (vad-crdnn-libriparty)")
-    vad = SpeechBrainVAD(
-        target_sample_rate=config.sample_rate,
-        inference_every_seconds=0.16,  # more frequent than default 0.32
-    )
+    vad = SpeechBrainVAD()
 
     # Ensure globals are in a known state at function start
     global audio_total_samples, audio_buffer
@@ -288,8 +285,7 @@ async def stream_microphone(ws) -> None:
                     #     continue
 
                     # ─── SpeechBrain VAD call ───────────────────────────────
-                    # get_prob expects raw PCM 16-bit bytes
-                    speech_prob: float = vad.get_prob(chunk)
+                    speech_prob: float = vad.get_speech_prob(chunk_np)
                     all_prob_history.append(speech_prob)
 
                     # NEW: hysteresis-based speech decision
