@@ -24,12 +24,12 @@ import websockets
 from jet.audio.helpers.base import audio_buffer_duration
 from jet.audio.helpers.energy import compute_rms, rms_to_loudness_label
 from jet.audio.norm.norm_speech_loudness import normalize_speech_loudness
+from jet.audio.speech.speechbrain.vad import SpeechBrainVAD
 
 # from rich.logging import RichHandler
 from jet.logger import logger as log
 from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
 from PyQt6.QtWidgets import QApplication
-from pysilero_vad import SileroVoiceActivityDetector
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__),
@@ -56,7 +56,7 @@ CONTINUOUS_AUDIO_MAX_SECONDS = 320.0
 MIN_SPEECH_DURATION_SEC = 0.25
 MAX_SPEECH_DURATION_SEC = 90.0
 CHUNK_DURATION_SEC = 6.0
-CHUNK_OVERLAP_SEC = 0.0
+CHUNK_OVERLAP_SEC = 2.0
 CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
 
 audio_total_samples: int = 0
@@ -72,14 +72,14 @@ _audio_buffer_is_dirty: bool = False
 
 @dataclass(frozen=True)
 class Config:
-    ws_url: str = os.getenv("WS_URL", "ws://192.168.68.150:8765")
+    ws_url: str = os.getenv("LOCAL_WS_LIVE_SUBTITLES_URL")
     min_speech_duration: float = MIN_SPEECH_DURATION_SEC
     max_speech_duration_sec: float = MAX_SPEECH_DURATION_SEC
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
-    vad_start_threshold: float = 0.15  # hysteresis start
-    vad_end_threshold: float = 0.01  # hysteresis end
+    vad_start_threshold: float = 0.5  # hysteresis start
+    vad_end_threshold: float = 0.25  # hysteresis end
     pre_roll_seconds: float = 0.35  # capture mora onsets
     max_silence_seconds: float = 0.9  # JP clause pauses
     vad_model_path: str | None = None  # allow custom model if needed
@@ -108,17 +108,15 @@ srt_sequence = 1
 segment_start_wallclock: dict[int, float] = {}  # segment_num → time.time()
 
 # =============================
-# Initialize Silero VAD - STATIC INFO ONLY
+# VAD configuration (now using SpeechBrain)
 # =============================
-
-# Use static constants - safe without instance
-VAD_CHUNK_SAMPLES = SileroVoiceActivityDetector.chunk_samples()
-VAD_CHUNK_BYTES = SileroVoiceActivityDetector.chunk_bytes()
-log.info("[VAD] chunk_samples=%s, chunk_bytes=%s", VAD_CHUNK_SAMPLES, VAD_CHUNK_BYTES)
+VAD_CHUNK_SAMPLES = 512  # typical value used by many models
+VAD_CHUNK_BYTES = VAD_CHUNK_SAMPLES * 2  # int16 = 2 bytes/sample
+# log.info("[VAD] Using chunk size of %d samples (%d bytes)", VAD_CHUNK_SAMPLES, VAD_CHUNK_BYTES)
 
 audio_buffer: deque[
     tuple[float, bytes, float, float, Literal["speech", "non_speech", "silent"]]
-] = deque()  # (time, pcm, vad_prob, rms, chunk_type)
+] = deque()
 
 # NEW: pre-roll buffer for safe speech onset
 pre_roll_buffer: deque[bytes] = deque(
@@ -147,11 +145,11 @@ async def stream_microphone(ws) -> None:
     # Lazy instantiate VAD only when streaming starts
     model_path = config.vad_model_path
     if model_path is None:
-        # Use bundled default as per library design
-        from pysilero_vad import _DEFAULT_MODEL_PATH
-
-        model_path = _DEFAULT_MODEL_PATH
-    vad = SileroVoiceActivityDetector(model_path)
+        log.info("[VAD] Initializing SpeechBrain VAD (vad-crdnn-libriparty)")
+    vad = SpeechBrainVAD(
+        target_sample_rate=config.sample_rate,
+        inference_every_seconds=0.16,  # more frequent than default 0.32
+    )
 
     # Ensure globals are in a known state at function start
     global audio_total_samples, audio_buffer
@@ -185,7 +183,7 @@ async def stream_microphone(ws) -> None:
     speech_chunks_in_segment: int = 0
 
     # Increased buffer to absorb transient stalls (network / disk / logging)
-    audio_queue: queue.Queue[bytes] = queue.Queue(maxsize=300)
+    audio_queue: queue.Queue[bytes] = queue.Queue(maxsize=400)
 
     # Utterance-level/chunking state for live chunked sending
     utterance_audio_buffer = bytearray()
@@ -198,7 +196,7 @@ async def stream_microphone(ws) -> None:
     chunk_index = 0
 
     # NEW: decouple websocket sending from audio processing
-    send_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=300)
+    send_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=400)
 
     speech_prob_history: list[float] = []  # ← NEW: per-segment VAD probs
     all_prob_history: list[float] = []
@@ -289,8 +287,9 @@ async def stream_microphone(ws) -> None:
                     # if not has_sound:
                     #     continue
 
-                    speech_prob: float = vad(chunk)
-
+                    # ─── SpeechBrain VAD call ───────────────────────────────
+                    # get_prob expects raw PCM 16-bit bytes
+                    speech_prob: float = vad.get_prob(chunk)
                     all_prob_history.append(speech_prob)
 
                     # NEW: hysteresis-based speech decision
@@ -304,8 +303,24 @@ async def stream_microphone(ws) -> None:
                     # ────────────────────────────────────────────────
                     # Temporary VAD debug logging ────────────────────
 
-                    # Option A: log EVERY audible chunk (good for short test runs)
-                    if rms:
+                    # Only log near-misses when NOT already speaking
+                    if (
+                        not is_speech_ongoing
+                        and config.vad_end_threshold
+                        < speech_prob
+                        < config.vad_start_threshold
+                    ):
+                        log.warning(
+                            "[near-miss] rms=%.4f | prob=%.3f | threshold=%.2f | would start? %s",
+                            rms,
+                            speech_prob,
+                            config.vad_start_threshold,
+                            "YES"
+                            if speech_prob >= config.vad_start_threshold
+                            else "no",
+                        )
+                    # Log audible chunk (good for short test runs)
+                    elif rms:
                         log.debug(
                             "[vad every] rms=%s | prob=%.3f | decision=%-9s | qsize=%3d | ongoing=%s",
                             chunk_energy_label,
@@ -315,21 +330,6 @@ async def stream_microphone(ws) -> None:
                             "yes" if is_speech_ongoing else "no",
                         )
 
-                    # Option B: only log near-misses when NOT already speaking
-                    # (less spam during long silence periods)
-                    if (
-                        not is_speech_ongoing
-                        and 0.05 < speech_prob < config.vad_start_threshold
-                    ):
-                        log.info(
-                            "[near-miss] rms=%.4f | prob=%.3f | threshold=%.2f | would start? %s",
-                            rms,
-                            speech_prob,
-                            config.vad_start_threshold,
-                            "YES"
-                            if speech_prob >= config.vad_start_threshold
-                            else "no",
-                        )
                     # ────────────────────────────────────────────────
 
                     if has_sound:
@@ -486,9 +486,7 @@ async def stream_microphone(ws) -> None:
                                     utterance_audio_buffer,
                                     utterance_normalized_rms,
                                     segment_num=current_segment_num,
-                                    avg_vad=round(
-                                        vad_confidence_sum / speech_chunk_count, 4
-                                    )
+                                    avg_vad=vad_confidence_sum / speech_chunk_count
                                     if speech_chunk_count > 0
                                     else 0.0,
                                     is_final=False,
@@ -565,9 +563,7 @@ async def stream_microphone(ws) -> None:
                                     utterance_audio_buffer,
                                     utterance_normalized_rms,
                                     segment_num=current_segment_num,
-                                    avg_vad=round(
-                                        vad_confidence_sum / speech_chunk_count, 4
-                                    )
+                                    avg_vad=(vad_confidence_sum / speech_chunk_count)
                                     if speech_chunk_count > 0
                                     else 0.0,
                                     is_final=True,
@@ -618,56 +614,47 @@ async def stream_microphone(ws) -> None:
                                 # Use relative seconds from stream start (fallback to current segment start time if stream_start_time isn't set)
                                 metadata = {
                                     "segment_id": current_segment_num,
-                                    "duration_sec": round(duration, 3),
+                                    "duration_sec": duration,
                                     "num_chunks": speech_chunks_in_segment,
                                     "num_samples": num_samples,
-                                    "start_sec": round(
-                                        segment_start_wallclock[current_segment_num]
-                                        - base_time,
-                                        3,
-                                    ),
-                                    "end_sec": round(time.time() - base_time, 3),
+                                    "start_sec": segment_start_wallclock[
+                                        current_segment_num
+                                    ]
+                                    - base_time,
+                                    "end_sec": time.time() - base_time,
                                     "sample_rate": config.sample_rate,
                                     "channels": config.channels,
                                     "vad_confidence": {
-                                        "first": round(first_vad_confidence, 4),
-                                        "last": round(last_vad_confidence, 4),
-                                        "min": round(min_vad_confidence, 4),
-                                        "max": round(max_vad_confidence, 4),
-                                        "ave": round(
-                                            vad_confidence_sum / speech_chunk_count, 4
-                                        )
+                                        "first": first_vad_confidence,
+                                        "last": last_vad_confidence,
+                                        "min": min_vad_confidence,
+                                        "max": max_vad_confidence,
+                                        "ave": (vad_confidence_sum / speech_chunk_count)
                                         if speech_chunk_count > 0
                                         else 0.0,
                                     },
                                     "audio_energy": {
                                         # ← CHANGED: explicitly convert numpy float32 → Python float
-                                        "rms_min": float(round(min_energy, 4))
+                                        "rms_min": float(min_energy)
                                         if min_energy != float("inf")
                                         else 0.0,
-                                        "rms_max": float(round(max_energy, 4)),
+                                        "rms_max": float(max_energy),
                                         "rms_ave": float(
-                                            round(
-                                                speech_energy_sum / speech_chunk_count,
-                                                4,
-                                            )
+                                            (speech_energy_sum / speech_chunk_count)
                                         )
                                         if speech_chunk_count > 0
                                         else 0.0,
                                         "rms_std": float(
-                                            round(
-                                                np.sqrt(
-                                                    (
-                                                        speech_energy_sum_squares
-                                                        / speech_chunk_count
-                                                    )
-                                                    - (
-                                                        speech_energy_sum
-                                                        / speech_chunk_count
-                                                    )
-                                                    ** 2
-                                                ),
-                                                4,
+                                            np.sqrt(
+                                                (
+                                                    speech_energy_sum_squares
+                                                    / speech_chunk_count
+                                                )
+                                                - (
+                                                    speech_energy_sum
+                                                    / speech_chunk_count
+                                                )
+                                                ** 2
                                             )
                                         )
                                         if speech_chunk_count > 0
@@ -685,9 +672,7 @@ async def stream_microphone(ws) -> None:
                                             "segment_id": current_segment_num,
                                             "vad_threshold": config.vad_start_threshold,
                                             "chunk_count": len(speech_prob_history),
-                                            "probs": [
-                                                round(p, 4) for p in speech_prob_history
-                                            ],
+                                            "probs": list(speech_prob_history),
                                         },
                                         f,
                                         indent=2,
@@ -722,9 +707,9 @@ async def stream_microphone(ws) -> None:
                                     {
                                         "segment_id": current_segment_num,
                                         **metadata,
-                                        "start_sec": round(relative_start, 3),
-                                        "end_sec": round(relative_start + duration, 3),
-                                        "duration_sec": round(duration, 3),
+                                        "start_sec": relative_start,
+                                        "end_sec": relative_start + duration,
+                                        "duration_sec": duration,
                                         "segment_dir": f"segment_{current_segment_num:04d}",
                                         "wav_path": str(wav_path),
                                         "meta_path": str(speech_meta_path),
@@ -1031,20 +1016,16 @@ async def handle_partial_subtitle(data: dict) -> None:
         message_id=utterance_id,
         source_text=ja,
         translated_text=en,
-        start_sec=round(relative_start, 2),
-        end_sec=round(relative_end, 2),
-        duration_sec=round(duration_sec, 2),
+        start_sec=relative_start,
+        end_sec=relative_end,
+        duration_sec=duration_sec,
         segment_number=segment_num,
-        avg_vad_confidence=round(avg_vad_conf, 3),
-        normalized_rms=round(normalized_rms, 3),
+        avg_vad_confidence=avg_vad_conf,
+        normalized_rms=normalized_rms,
         normalized_rms_label=rms_to_loudness_label(normalized_rms),
-        transcription_confidence=round(trans_conf, 3)
-        if trans_conf is not None
-        else None,
+        transcription_confidence=trans_conf if trans_conf is not None else None,
         transcription_quality=trans_quality,
-        translation_confidence=round(transl_conf, 3)
-        if transl_conf is not None
-        else None,
+        translation_confidence=transl_conf if transl_conf is not None else None,
         translation_quality=transl_quality,
         is_partial=True,  # ← optional flag if your overlay supports it
     )
@@ -1358,24 +1339,20 @@ async def _update_display_and_files(utt_id: int) -> None:
         message_id=utt_id,
         source_text=ja,
         translated_text=en,
-        start_sec=round(relative_start, 2),
-        end_sec=round(relative_end, 2),
-        duration_sec=round(duration_sec, 2),
+        start_sec=relative_start,
+        end_sec=relative_end,
+        duration_sec=duration_sec,
         segment_number=segment_num,
-        avg_vad_confidence=round(avg_vad_conf, 3),
-        normalized_rms=round(normalized_rms, 3),
+        avg_vad_confidence=avg_vad_conf,
+        normalized_rms=normalized_rms,
         normalized_rms_label=rms_to_loudness_label(normalized_rms),
-        transcription_confidence=round(trans_conf, 3)
-        if trans_conf is not None
-        else None,
+        transcription_confidence=trans_conf if trans_conf is not None else None,
         transcription_quality=trans_quality,
-        translation_confidence=round(transl_conf, 3)
-        if transl_conf is not None
-        else None,
+        translation_confidence=transl_conf if transl_conf is not None else None,
         translation_quality=transl_quality,
         # New speaker fields (overlay can ignore them if not ready)
         # is_same_speaker_as_prev=is_same,
-        # speaker_similarity=round(similarity, 3) if similarity is not None else None,
+        # speaker_similarity=similarity if similarity is not None else None,
         # speaker_clusters=clusters,
     )
 
@@ -1412,9 +1389,9 @@ def _append_to_global_speech_probs_index(
 
     entry = {
         "segment_id": segment_num,
-        "start_sec": round(relative_start, 3),
-        "end_sec": round(relative_start + duration, 3),
-        "duration_sec": round(duration, 3),
+        "start_sec": relative_start,
+        "end_sec": relative_start + duration,
+        "duration_sec": duration,
         "prob_count": len(speech_prob_history),  # ← fix: use actual count
         "probs_path": str(probs_path),
         "segment_dir": f"segment_{segment_num:04d}",
