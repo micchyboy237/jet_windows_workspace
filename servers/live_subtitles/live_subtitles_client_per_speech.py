@@ -28,7 +28,7 @@ from jet.audio.speech.speechbrain.speech_timestamps_extractor import (
     extract_speech_timestamps,
 )
 from jet.audio.speech.speechbrain.vad import SpeechBrainVAD
-from jet.audio.speech.utils import convert_audio_to_tensor, display_segments
+from jet.audio.speech.utils import display_segments
 
 # from rich.logging import RichHandler
 from jet.logger import logger as log
@@ -60,7 +60,7 @@ CONTINUOUS_AUDIO_MAX_SECONDS = 320.0
 MIN_SPEECH_DURATION_SEC = 0.25
 MAX_SPEECH_DURATION_SEC = 90.0
 CHUNK_DURATION_SEC = 6.0
-CHUNK_OVERLAP_SEC = 2.0
+CHUNK_OVERLAP_SEC = 0.0
 CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
 
 audio_total_samples: int = 0
@@ -138,6 +138,35 @@ pending_sends: deque[float] = deque()  # One entry per sent chunk
 latest_transcription_text: str = ""
 utterance_id_generator = uuid.uuid4  # callable
 current_utterance_id: int | None = None
+
+
+def extract_and_display_buffered_segments(
+    _audio_buffer: bytearray,
+    is_partial: bool = False,
+    chunk_duration: int = CHUNK_DURATION_SEC,
+) -> bytearray:
+    # Temporarily display speech segments table
+    _audio_np = np.frombuffer(_audio_buffer, dtype=np.int16).copy()
+    buffer_segments, all_speech_probs = extract_speech_timestamps(
+        _audio_np,
+        # min_speech_duration_ms=min_speech_duration_ms,
+        # min_silence_duration_ms=min_silence_duration_ms,
+        max_speech_duration_sec=chunk_duration,
+        return_seconds=True,
+        time_resolution=3,
+        with_scores=True,
+        normalize_loudness=False,
+        include_non_speech=True,
+        double_check=True,
+    )
+    if len(buffer_segments):
+        prefix = "Partial" if is_partial else "Complete"
+        log.purple(
+            f"{prefix} segments ({len(buffer_segments)}):\n{json.dumps([{'num': seg['num'], 'duration': seg['duration'], 'prob': seg['prob']} for seg in buffer_segments])}"
+        )
+        display_segments(buffer_segments, done=not is_partial)
+
+    return buffer_segments
 
 
 # =============================
@@ -510,6 +539,12 @@ async def stream_microphone(ws) -> None:
                                     # Do not send partial chunks if still below min duration
                                     continue
 
+                                buffer_segments = extract_and_display_buffered_segments(
+                                    current_segment_buffer,
+                                    is_partial=True,
+                                    chunk_duration=CHUNK_DURATION_SEC,
+                                )
+
                                 await send_audio_chunk(
                                     send_queue,
                                     utterance_audio_buffer,
@@ -585,8 +620,15 @@ async def stream_microphone(ws) -> None:
                                 duration,
                                 speech_chunks_in_segment,
                             )
+
                             # Send final chunk if anything remains
                             if is_utterance_ongoing and len(utterance_audio_buffer) > 0:
+                                buffer_segments = extract_and_display_buffered_segments(
+                                    current_segment_buffer,
+                                    is_partial=False,
+                                    chunk_duration=CHUNK_DURATION_SEC,
+                                )
+
                                 await send_audio_chunk(
                                     send_queue,
                                     utterance_audio_buffer,
@@ -601,31 +643,6 @@ async def stream_microphone(ws) -> None:
                                     context_prompt=build_context_prompt(),
                                 )
                                 chunks_sent += 1
-
-                                # Temporarily display speech segments table
-                                utterance_audio_np = np.frombuffer(
-                                    utterance_audio_buffer, dtype=np.int16
-                                ).copy()
-                                utterance_audio_tensor = convert_audio_to_tensor(
-                                    utterance_audio_np
-                                )
-                                segments, all_speech_probs = extract_speech_timestamps(
-                                    utterance_audio_tensor,
-                                    # min_speech_duration_ms=min_speech_duration_ms,
-                                    # min_silence_duration_ms=min_silence_duration_ms,
-                                    max_speech_duration_sec=CHUNK_DURATION_SEC,
-                                    return_seconds=True,
-                                    time_resolution=3,
-                                    with_scores=True,
-                                    normalize_loudness=False,
-                                    include_non_speech=False,
-                                    double_check=False,
-                                )
-                                if len(segments):
-                                    log.purple(
-                                        f"utterance_audio_buffer segments ({len(segments)}):\n{json.dumps([{'num': seg['num'], 'duration': seg['duration'], 'prob': seg['prob']} for seg in segments])}"
-                                    )
-                                    display_segments(segments)
 
                             # Save ORIGINAL audio (matches what server received)
                             original_bytes = bytes(current_segment_buffer)
@@ -1318,8 +1335,8 @@ async def send_audio_chunk(
         "is_final": is_final,
         "context_prompt": context_prompt,
         "segment_num": segment_num,
-        # "utterance_id": current_utterance_id,
-        "utterance_id": str(uuid.uuid4()),  # Temporarily create new id
+        "utterance_id": current_utterance_id,
+        # "utterance_id": str(uuid.uuid4()),  # Temporarily create new id
         "normalized_rms": normalized_rms,
         "avg_vad_confidence": avg_vad,
     }
