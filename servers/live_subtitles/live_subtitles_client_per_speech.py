@@ -316,12 +316,11 @@ async def stream_microphone(ws) -> None:
                             else "no",
                         )
                     # Log audible chunk (good for short test runs)
-                    elif rms:
+                    elif rms and not is_speech_chunk:
                         log.debug(
-                            "[vad every] rms=%s | prob=%.3f | decision=%-9s | qsize=%3d | ongoing=%s",
+                            "[vad every] rms=%s | prob=%.3f | qsize=%3d | ongoing=%s",
                             chunk_energy_label,
                             speech_prob,
-                            "SPEECH" if is_speech_chunk else "non-speech",
                             audio_queue.qsize(),
                             "yes" if is_speech_ongoing else "no",
                         )
