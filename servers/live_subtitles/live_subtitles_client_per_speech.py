@@ -24,7 +24,11 @@ import websockets
 from jet.audio.helpers.base import audio_buffer_duration
 from jet.audio.helpers.energy import compute_rms, rms_to_loudness_label
 from jet.audio.norm.norm_speech_loudness import normalize_speech_loudness
+from jet.audio.speech.speechbrain.speech_timestamps_extractor import (
+    extract_speech_timestamps,
+)
 from jet.audio.speech.speechbrain.vad import SpeechBrainVAD
+from jet.audio.speech.utils import convert_audio_to_tensor, display_segments
 
 # from rich.logging import RichHandler
 from jet.logger import logger as log
@@ -521,15 +525,15 @@ async def stream_microphone(ws) -> None:
                                 )
                                 last_chunk_sent_time = now
                                 chunk_index += 1
-                                # Keep overlap
-                                overlap_start = (
-                                    len(utterance_audio_buffer)
-                                    - last_overlap_samples * 2
-                                )
-                                if overlap_start > 0:
-                                    utterance_audio_buffer = utterance_audio_buffer[
-                                        overlap_start:
-                                    ]
+                                # # Keep overlap
+                                # overlap_start = (
+                                #     len(utterance_audio_buffer)
+                                #     - last_overlap_samples * 2
+                                # )
+                                # if overlap_start > 0:
+                                #     utterance_audio_buffer = utterance_audio_buffer[
+                                #         overlap_start:
+                                #     ]
 
                     else:
                         # Silence chunk
@@ -597,6 +601,32 @@ async def stream_microphone(ws) -> None:
                                     context_prompt=build_context_prompt(),
                                 )
                                 chunks_sent += 1
+
+                                # Temporarily display speech segments table
+                                utterance_audio_np = np.frombuffer(
+                                    utterance_audio_buffer, dtype=np.int16
+                                ).copy()
+                                utterance_audio_tensor = convert_audio_to_tensor(
+                                    utterance_audio_np
+                                )
+                                segments, all_speech_probs = extract_speech_timestamps(
+                                    utterance_audio_tensor,
+                                    # min_speech_duration_ms=min_speech_duration_ms,
+                                    # min_silence_duration_ms=min_silence_duration_ms,
+                                    max_speech_duration_sec=CHUNK_DURATION_SEC,
+                                    return_seconds=True,
+                                    time_resolution=3,
+                                    with_scores=True,
+                                    normalize_loudness=False,
+                                    include_non_speech=False,
+                                    double_check=False,
+                                )
+                                if len(segments):
+                                    log.purple(
+                                        f"utterance_audio_buffer segments ({len(segments)}):\n{json.dumps([{'num': seg['num'], 'duration': seg['duration'], 'prob': seg['prob']} for seg in segments])}"
+                                    )
+                                    display_segments(segments)
+
                             # Save ORIGINAL audio (matches what server received)
                             original_bytes = bytes(current_segment_buffer)
                             audio_int16 = np.frombuffer(original_bytes, dtype=np.int16)
