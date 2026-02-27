@@ -358,38 +358,6 @@ async def stream_microphone(ws) -> None:
                             "yes" if is_speech_ongoing else "no",
                         )
 
-                    # ────────────────────────────────────────────────
-
-                    # def check_if_chunk_already_exists():
-                    #     # Diaplay every first or 100 chunks
-                    #     if (
-                    #         audio_buffer
-                    #         and current_segment_buffer
-                    #         and (
-                    #             len(current_segment_buffer) == 1
-                    #             or len(current_segment_buffer) % 100 == 0
-                    #         )
-                    #     ):
-                    #         # Extract raw bytes only
-                    #         raw_bytes = b"".join(chunk[1] for chunk in audio_buffer)
-
-                    #         # Convert PCM → numpy
-                    #         audio_buffer_signal = np.frombuffer(
-                    #             raw_bytes, dtype=config.dtype
-                    #         )
-                    #         chunk_signal = np.frombuffer(chunk, dtype=config.dtype)
-                    #         partial_audio_matches = find_audio_offsets(
-                    #             audio_buffer_signal,
-                    #             chunk_signal,
-                    #             config.sample_rate,
-                    #         )
-
-                    #         log.purple(
-                    #             f"partial_audio_matches ({len(partial_audio_matches)}):\n{json.dumps(make_serializable(partial_audio_matches))}"
-                    #         )
-
-                    # check_if_chunk_already_exists()
-
                     if has_sound:
                         # Always add to continuous buffer (audible speech or non_speech)
                         chunk_time = time.monotonic()
