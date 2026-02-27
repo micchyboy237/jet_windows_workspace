@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 from typing import Any, Dict
+
 import websockets
 from rich.console import Console
 from transcribe_jp_whisper import transcribe_japanese_whisper
@@ -21,8 +22,8 @@ async def handle_client(websocket):
                 continue
             audio_bytes = base64.b64decode(data["audio_bytes"])
             client_id = data.get("client_id", "unknown")
-            utterance_id = data.get("utterance_id", "unknown")
-            segment_num = data.get("segment_num", 0)
+            utterance_id = data["utterance_id"]
+            segment_num = data["segment_num"]
             console.print(
                 f"[bold green]Received audio from {client_id} (utt: {utterance_id}, seg: {segment_num})[/bold green]"
             )
@@ -30,7 +31,6 @@ async def handle_client(websocket):
                 audio_bytes,
                 SAMPLE_RATE,
                 client_id=client_id,
-                utterance_id=utterance_id,
                 segment_num=segment_num,
             )
             jp_text = trans_result["text_ja"]
@@ -49,6 +49,8 @@ async def handle_client(websocket):
                 "jp_text": jp_text,
                 "confidence": en_conf,
                 "quality": en_quality,
+                "utterance_id": data["utterance_id"],
+                "segment_num": data["segment_num"],
             }
             await websocket.send(json.dumps(response))
             console.print(f"[bold green]Sent translation: {en_text}[/bold green]")
