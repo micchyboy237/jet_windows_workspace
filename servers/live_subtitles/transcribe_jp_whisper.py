@@ -1,18 +1,17 @@
-# servers/live_subtitles/transcribe_jp_whisper.py
 from __future__ import annotations
-
 import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, TypedDict
-
 import numpy as np
 import scipy.io.wavfile as wavfile
 from faster_whisper import WhisperModel
 from faster_whisper.transcribe import Segment
 from logger import logger
+from rich import Console
 
-# Global model (loaded once)
+console = Console()
+
 logger.info("Loading Whisper model kotoba-tech/kotoba-whisper-v2.0-faster ...")
 WHISPER_MODEL = WhisperModel(
     "kotoba-tech/kotoba-whisper-v2.0-faster",
@@ -38,17 +37,15 @@ def transcription_quality_label(avg_logprob: float) -> str:
 
 def compute_transcription_confidence(
     segments: list[Segment],
-) -> tuple[float, float, str]:  # avg_logprob, confidence, quality_label
+) -> tuple[float, float, str]:
     if not segments:
         return float("-inf"), 0.0, "N/A"
 
     logprob_sum = 0.0
     token_count = 0
-
     for seg in segments:
         if seg.avg_logprob is None:
             continue
-        # More accurate token count if available
         seg_token_count = (
             len(seg.tokens)
             if hasattr(seg, "tokens") and seg.tokens
@@ -76,14 +73,14 @@ class TranscriptionResult(TypedDict):
     metadata: dict[str, Any]
 
 
-def transcribe_japanese_whisper(
+def transcribe_japanese(
     audio_bytes: bytes,
     sample_rate: int,
     *,
+    hotwords: str | list[str] | None = None,          # ← now passed to model
     context_prompt: str | None = None,
     save_temp_wav: Path | None = None,
     client_id: str = "unknown",
-    utterance_id: str = "unknown",
     segment_num: int = 0,
 ) -> TranscriptionResult:
     """
@@ -92,7 +89,6 @@ def transcribe_japanese_whisper(
     """
     processing_started = datetime.now(timezone.utc)
 
-    # ── Prepare audio file ───────────────────────────────────────
     if save_temp_wav:
         audio_path = save_temp_wav
         audio_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,31 +99,37 @@ def transcribe_japanese_whisper(
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
     wavfile.write(str(audio_path), sample_rate, arr)
 
-    # ── Run transcription ─────────────────────────────────────────
+    # Prepare prompt — combine context + hotwords if present
+    prompt_parts = []
+    if context_prompt:
+        prompt_parts.append(context_prompt.strip())
+    if hotwords:
+        if isinstance(hotwords, str):
+            prompt_parts.append(hotwords)
+        else:
+            prompt_parts.append(" ".join(hotwords))
+
+    effective_prompt = " ".join(prompt_parts).strip() if prompt_parts else None
+
     segments_iter, info = WHISPER_MODEL.transcribe(
         str(audio_path),
         language="ja",
         beam_size=5,
         vad_filter=False,
-        initial_prompt=context_prompt,
-        # prefix=context_prompt,
-        # condition_on_previous_text=bool(context_prompt),
+        initial_prompt=effective_prompt,           # ← hotwords go here
     )
 
     segments = list(segments_iter)
-
-    # ── Post-process ──────────────────────────────────────────────
     ja_parts = [seg.text.strip() for seg in segments if seg.text.strip()]
     ja_text = " ".join(ja_parts).strip()
 
     avg_logprob, confidence, quality_label = compute_transcription_confidence(segments)
 
-    # Clean segment dicts (remove tokens to reduce size)
     clean_segments = [
-        {k: v for k, v in seg.__dict__.items() if k != "tokens"} for seg in segments
+        {k: v for k, v in seg.__dict__.items() if k != "tokens"}
+        for seg in segments
     ]
 
-    # Optional: clean up temp file
     if not save_temp_wav:
         try:
             audio_path.unlink()
@@ -140,12 +142,12 @@ def transcribe_japanese_whisper(
 
     meta = {
         "client_id": client_id,
-        "utterance_id": utterance_id,
         "segment_num": segment_num,
         "processing_duration_seconds": round(processing_duration, 3),
         "audio_duration_seconds": round(len(audio_bytes) / (2 * sample_rate), 3),
         "sample_rate": sample_rate,
         "context_prompt": context_prompt,
+        "hotwords": hotwords,
     }
 
     return {

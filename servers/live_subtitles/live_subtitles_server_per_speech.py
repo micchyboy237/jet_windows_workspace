@@ -15,7 +15,7 @@ import numpy as np
 # ────────────────────────────────────────────────────────────────────────────────
 # Imports from refactored modules
 # ────────────────────────────────────────────────────────────────────────────────
-from transcribe_jp_whisper import transcribe_japanese_whisper, TranscriptionResult
+from transcribe_jp_whisper import transcribe_japanese, TranscriptionResult
 from translate_jp_en_opus import translate_japanese_to_english
 from logger import logger
 
@@ -64,7 +64,6 @@ def transcribe_and_translate(
     audio_bytes: bytes,
     sr: int,
     client_id: str,
-    utterance_id: str,
     segment_num: int,
     end_of_utterance_received_at: datetime,
     normalized_rms: float,
@@ -84,17 +83,16 @@ def transcribe_and_translate(
         temp_path = out_dir / f"utterance_{client_id}_{segment_num:04d}_{ts}.wav"
 
     # Core transcription (now in separate module)
-    trans_result: TranscriptionResult = transcribe_japanese_whisper(
+    trans_result: TranscriptionResult = transcribe_japanese(
         audio_bytes=audio_bytes,
         sample_rate=sr,
         # context_prompt=last_ja,
         save_temp_wav=temp_path,
         client_id=client_id,
-        utterance_id=utterance_id,
         segment_num=segment_num,
     )
 
-    ja_text = trans_result.text_ja
+    ja_text = trans_result["text_ja"]
 
     # Translation
     translation_result = translate_japanese_to_english(
@@ -114,7 +112,7 @@ def transcribe_and_translate(
     processing_duration = (processing_finished_at - processing_started_at).total_seconds()
 
     meta = {
-        **trans_result.metadata,
+        **trans_result["metadata"],
         "timestamp_iso": processing_started_at.isoformat(),
         "received_at": received_at.isoformat() if received_at else None,
         "end_of_utterance_received_at": end_of_utterance_received_at.isoformat(),
@@ -124,9 +122,9 @@ def transcribe_and_translate(
         "processing_duration_seconds": round(processing_duration, 3),
         "transcription": {
             "text_ja": ja_text,
-            "avg_logprob": trans_result.avg_logprob,
-            "confidence": round(trans_result.confidence, 4),
-            "quality_label": trans_result.quality_label,
+            "avg_logprob": trans_result["avg_logprob"],
+            "confidence": round(trans_result["confidence"], 4),
+            "quality_label": trans_result["quality_label"],
         },
         "translation": {
             "text_en": en_text,
@@ -134,7 +132,7 @@ def transcribe_and_translate(
             "confidence": round(translation_confidence, 4) if translation_confidence is not None else None,
             "quality_label": translation_quality,
         },
-        "segments": trans_result.segments,
+        "segments": trans_result["segments"],
         "normalized_rms": normalized_rms,
         "context": {
             "last_ja": last_ja,
@@ -148,8 +146,8 @@ def transcribe_and_translate(
 
     logger.info(
         "[transcribe] conf=%.3f | qual=%s | ja=%s",
-        trans_result.confidence,
-        trans_result.quality_label,
+        trans_result["confidence"],
+        trans_result["quality_label"],
         preview_ja,
     )
     logger.info(
@@ -165,7 +163,7 @@ def transcribe_and_translate(
             json.dump(meta, f, ensure_ascii=False, indent=2)
         logger.debug(f"Saved metadata → {meta_path}")
 
-    return ja_text, en_text, trans_result.confidence, meta
+    return ja_text, en_text, trans_result["confidence"], meta
 
 
 async def handler(websocket):
@@ -270,7 +268,6 @@ async def process_utterance(
         bytes(state.audio_buffer),
         sample_rate,
         state.client_id,
-        utterance_id,
         segment_num,
         datetime.now(timezone.utc),  # end_of_utterance_received_at
         normalized_rms,

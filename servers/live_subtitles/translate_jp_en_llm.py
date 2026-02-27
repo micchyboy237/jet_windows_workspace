@@ -1,8 +1,9 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
+
 from llama_cpp import Llama
+from utils import split_sentences_ja
 
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\nsfw\Fiendish_LLAMA_3B.Q4_K_M.gguf"
-
 MODEL_SETTINGS = {
     "n_ctx": 2048,
     "n_gpu_layers": -1,
@@ -18,56 +19,27 @@ MODEL_SETTINGS = {
     "use_mmap": True,
     "verbose": False,
 }
-
 TRANSLATION_DEFAULTS = {
     "max_tokens": 1024,
-    "temperature": 0.8,
+    "temperature": 0.5,
     "top_p": 0.95,
     "top_k": 25,
-    "typical_p": 1.0,           # 1.0 = typical sampling disabled
-    "min_p": 0.0,               # 0.0 = min-p disabled
-    "repeat_penalty": 1.12,     # correct parameter name
-    # "presence_penalty": 0.0,
-    # "frequency_penalty": 0.0,
+    "typical_p": 1.0,
+    "min_p": 0.0,
+    "repeat_penalty": 1.12,
     "stop": ["\n\n", "<|eot_id|>", "<|end_of_text|>"],
     # For confidence scores (uncomment if supported by your backend)
     # "logprobs": True,
     # "top_logprobs": 3
 }
-
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
-
-SYSTEM_PROMPT = """You are a skilled translator specializing in Japanese-to-English subtitles for adult videos. Your goal is to "pornify" the dialogue: make it sound like natural, explicit American adult film talk—filthy and erotic, but faithful to the original meaning and tone.
-
-**Key Rules:**
-- Preserve the original intent and personality: Shy/resistant lines stay teasing or reluctantly horny; explicit lines get raw and vulgar.
-- Amplify the eroticism naturally: Add porn-style phrasing (e.g., "cock," "pussy," "fuck me," "I'm so wet") where it fits the context, but do not invent new actions, details, or completely change the meaning.
-- Match JAV escalation: Start subtle/teasing if the original is polite, build to direct and filthy as it gets more explicit.
-- Keep it concise and punchy for subtitles.
-- Fix obvious AI transcription errors using context, but never add or remove entire ideas.
-- One-to-one: Translate each numbered line exactly once, in order.
-
-**Examples of toned-down pornification:**
-やめて…そんなふうに見ないで。
-Don't look at me like that... you're making me so wet already.
-
-もう我慢できない…っ
-I can't hold back anymore... I need your cock inside me.
-
-そこ…だめ、感じちゃう…！
-Right there... fuck, that feels too good, don't stop!
-
-あっ、ダメっ…イっちゃう、イっちゃうよぉ…♡
-Ahh, no... I'm cumming, I'm cumming so hard! ♡
-
-もっと奥まで…お願い…突いてぇ…！
-Deeper... please, fuck me deeper, pound me harder!
-
-Now translate the Japanese text exactly following these rules."""
-
+SYSTEM_PROMPT = """You are a professional Japanese to English subtitle translator. 
+Translate accurately and naturally into fluent English.
+Preserve tone, intensity, and nuance.
+Do not censor, summarize, explain, or add commentary.
+Output only the translated English lines."""
 USER_PROMPT = """\
 Translate the following lines exactly in order. Output ONLY the English translations, one per line. No original text, no numbering, no extra commentary, no summary.
-
 {japanese_text}
 """
 
@@ -83,7 +55,6 @@ def _build_translation_messages(
     ]
     if history:
         messages.extend(history)
-    # Current utterance as new user message (keeps exact USER_PROMPT)
     messages.append(
         {
             "role": "user",
@@ -115,7 +86,6 @@ def _compute_translation_metrics(
             return None, None, None
         avg_logprob = sum(token_logprobs) / len(token_logprobs)
         translation_logprob = round(avg_logprob, 4)
-        # Generic linear map (typical good range for small models: -3.0 → 0.0)
         confidence = max(0.0, min(1.0, (avg_logprob + 3.0) / 3.0))
         confidence = round(confidence, 4)
         if confidence >= 0.80:
@@ -129,50 +99,45 @@ def _compute_translation_metrics(
         return None, None, None
 
 
-def translate_subtitles(
-    llm: Llama,
-    japanese_text: str,
-    stream: bool = False,
-    **kwargs: Any,
-) -> str:
-    """
-    Explicit Japanese → English subtitle translation with strong uncensoring bias.
-    **kwargs forwarded to create_chat_completion (makes demo work with temperature etc.).
-    """
-    messages = _build_translation_messages(japanese_text)  # no history/context in demo
-    completion_params: Dict[str, Any] = TRANSLATION_DEFAULTS.copy()
-    completion_params.update(kwargs)
-    stream_param = completion_params.pop("stream", stream)
-    response = llm.create_chat_completion(
-        messages=messages, stream=stream_param, **completion_params
-    )
-    if stream:
-        translated = ""
-        for chunk in response:
-            if "choices" in chunk and chunk["choices"]:
-                delta = chunk["choices"][0].get("delta", {})
-                content = delta.get("content", "")
-                if content:
-                    print(content, end="", flush=True)
-                    translated += content
-        print()
-        return translated.strip()
-    else:
-        return response["choices"][0]["message"]["content"].strip()
+class TranslationResult(TypedDict):
+    text: str
+    log_prob: Optional[float]
+    confidence: Optional[float]
+    quality: str
 
 
 def translate_japanese_to_english(
     ja_text: str,
-    max_tokens: int = 512,
+    max_tokens: int = 768,
     enable_scoring: bool = False,
     history: Optional[List[Dict[str, str]]] = None,
-) -> Tuple[str, Optional[float], Optional[float], Optional[str]]:
+) -> TranslationResult:
     """Main entrypoint for live_subtitles_server_per_speech_llm.
-    Reuses prompt helper and defaults; adds optional conversation history + logprob scoring."""
+    Now returns TranslationResult to match opus-style translator."""
     if not ja_text or not ja_text.strip():
-        return "", None, None, None
-
+        return {
+            "text": "",
+            "log_prob": None,
+            "confidence": None,
+            "quality": "N/A",
+        }
     messages = _build_translation_messages(ja_text, history)
+    # --- Sentence splitting (parity with OPUS implementation) ---
+    sentences_ja: List[str] = split_sentences_ja(ja_text)
+
+    if not sentences_ja:
+        return {
+            "text": "",
+            "log_prob": None,
+            "confidence": None,
+            "quality": "N/A",
+        }
+
+    # Preserve 1 sentence → 1 translation line structure
+    batched_text = "\n".join(sent.strip() for sent in sentences_ja if sent.strip())
+
+    messages = _build_translation_messages(batched_text, history)
+    
     completion_params: Dict[str, Any] = {
         **TRANSLATION_DEFAULTS,
         "max_tokens": max_tokens,
@@ -180,40 +145,29 @@ def translate_japanese_to_english(
     }
     if enable_scoring:
         completion_params["logprobs"] = True
-
+        completion_params["top_logprobs"] = 1
     response = llm.create_chat_completion(messages=messages, **completion_params)
     en_text = response["choices"][0]["message"]["content"].strip()
-
     if enable_scoring:
-        translation_logprob, translation_confidence, translation_quality = (
-            _compute_translation_metrics(response)
-        )
+        log_prob, confidence, quality = _compute_translation_metrics(response)
     else:
-        translation_logprob = translation_confidence = translation_quality = None
-
-    return en_text, translation_logprob, translation_confidence, translation_quality
+        log_prob = confidence = quality = None
+    if quality is None:
+        quality = "N/A"
+    return {
+        "text": en_text,
+        "log_prob": log_prob,
+        "confidence": confidence,
+        "quality": quality,
+    }
 
 
 if __name__ == "__main__":
+    from rich import box
     from rich.console import Console
     from rich.panel import Panel
-    from rich import box
-    from rich.logging import RichHandler
-    import logging
-
-    # ────────────────────────────────────────────────
-    # Setup rich logging
-    # ────────────────────────────────────────────────
-    logging.basicConfig(
-        level="NOTSET",
-        format="%(message)s",
-        datefmt="[%X]",
-        handlers=[RichHandler(rich_tracebacks=True, show_path=False)],
-    )
-    log = logging.getLogger("subtitle_translator")
 
     console = Console()
-
     japanese_sample = """
 恥ずかしい…見ないでください…
 んっ…そこ、弱いんです…
@@ -223,42 +177,37 @@ if __name__ == "__main__":
 あぁんっ！すごい…奥まで届いてる…♡
 出さないで…まだ中にいてて…
 """.strip()
-
+    enable_scoring = False
     console.rule(
-        "Japanese → English Translation Demo (new public API)", style="bold cyan"
+        "Japanese → English Translation Demo (scoring ENABLED)", style="bold cyan"
     )
-
-    # Demo without context / scoring (default server path)
     console.print(
         Panel(
             japanese_sample,
-            title="[bold magenta]Japanese Input (no context, scoring=False)[/]",
+            title="[bold magenta]Japanese Input[/] (no history)",
             border_style="magenta",
             padding=(1, 2),
             expand=False,
             box=box.ROUNDED,
         )
     )
-
-    console.print("[dim]Calling translate_japanese_to_english...[/]")
-    en_text, logprob, conf, qual = translate_japanese_to_english(
+    console.print(f"[dim]Translating with enable_scoring={enable_scoring} …[/]")
+    result = translate_japanese_to_english(
         ja_text=japanese_sample,
-        max_tokens=512,
-        enable_scoring=False,
+        max_tokens=768,
+        enable_scoring=enable_scoring,
         history=None,
     )
     console.print(
         Panel(
-            en_text,
-            title="[bold green]English Translation (scoring disabled)[/]",
+            f"{result['text']}\n\n[dim]Metrics:[/] logprob = {result['log_prob']} confidence = {result['confidence']} quality = {result['quality']}",
+            title="[bold green]Translation (scoring enabled)[/]",
             border_style="green",
             padding=(1, 2),
             expand=False,
             box=box.DOUBLE,
         )
     )
-
-    # Demo with conversation history + scoring
     history_example: List[Dict[str, str]] = [
         {"role": "user", "content": "やめて…そんなふうに見ないで。"},
         {
@@ -266,75 +215,38 @@ if __name__ == "__main__":
             "content": "Don't look at me like that... you're making me so wet already.",
         },
     ]
+    console.print("\n" * 2)
     console.print(
         Panel(
-            f"{japanese_sample}\n\n[dim]Context from previous utterance:[/] {history_example}",
-            title="[bold magenta]Japanese Input (with history, scoring=True)[/]",
+            f"{japanese_sample}\n\n[dim]Previous context:[/]\n{history_example}",
+            title="[bold magenta]Japanese Input + dialogue history[/]",
             border_style="magenta",
             padding=(1, 2),
             expand=False,
             box=box.ROUNDED,
         )
     )
-
     console.print(
-        "[dim]Calling translate_japanese_to_english with history + scoring...[/]"
+        f"[dim]Translating with history + enable_scoring={enable_scoring} …[/]"
     )
-    en_text2, logprob2, conf2, qual2 = translate_japanese_to_english(
+    result2 = translate_japanese_to_english(
         ja_text=japanese_sample,
         max_tokens=768,
-        enable_scoring=True,
+        enable_scoring=enable_scoring,
         history=history_example,
     )
     console.print(
         Panel(
-            f"{en_text2}\n\n[dim]Metrics:[/] logprob={logprob2}  confidence={conf2}  quality={qual2}",
-            title="[bold green]English Translation (scoring enabled + history)[/]",
+            f"{result2['text']}\n\n[dim]Metrics:[/] logprob = {result2['log_prob']} confidence = {result2['confidence']} quality = {result2['quality']}",
+            title="[bold green]Translation (with history + scoring)[/]",
             border_style="green",
             padding=(1, 2),
             expand=False,
             box=box.DOUBLE,
         )
     )
-
     console.print(
-        f"[dim]Length:[/] Japanese: {len(japanese_sample)} → English: {len(en_text2)}",
+        f"[dim]Length:[/] Japanese: {len(japanese_sample)} chars → English: {len(result2['text'])} chars",
         style="grey50",
     )
-
     console.rule(style="cyan")
-
-    # # Keep original internal demo for backward compatibility (unchanged)
-    # console.rule(
-    #     "Japanese → English Translation Demo (internal translate_subtitles)",
-    #     style="bold cyan",
-    # )
-    # console.print(
-    #     Panel(
-    #         japanese_sample,
-    #         title="[bold magenta]Japanese Input[/]",
-    #         border_style="magenta",
-    #         padding=(1, 2),
-    #         expand=False,
-    #         box=box.ROUNDED,
-    #     )
-    # )
-    # log.info("Starting non-streaming translation (temperature = 0.65)")
-    # english = translate_subtitles(llm, japanese_sample, temperature=0.65, stream=False)
-    # console.print("\n")
-    # console.print(
-    #     Panel(
-    #         english.strip(),
-    #         title="[bold green]English Translation[/]",
-    #         border_style="green",
-    #         padding=(1, 2),
-    #         expand=False,
-    #         box=box.DOUBLE,
-    #     )
-    # )
-    # log.info("Translation completed")
-    # console.print(
-    #     f"[dim]Length:[/] Japanese: {len(japanese_sample)} → English: {len(english)}",
-    #     style="grey50",
-    # )
-    # console.rule(style="cyan")
