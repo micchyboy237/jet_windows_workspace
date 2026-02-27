@@ -81,8 +81,8 @@ class Config:
     sample_rate: int = 16000
     channels: int = 1
     dtype: str = "int16"
-    vad_start_threshold: float = 0.6  # hysteresis start
-    vad_end_threshold: float = 0.35  # hysteresis end
+    vad_start_threshold: float = 0.5  # hysteresis start
+    vad_end_threshold: float = 0.25  # hysteresis end
     pre_roll_seconds: float = 0.35  # capture mora onsets
     max_silence_seconds: float = 0.9  # JP clause pauses
     vad_model_path: str | None = None  # allow custom model if needed
