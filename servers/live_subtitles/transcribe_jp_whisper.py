@@ -2,16 +2,14 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional, TypedDict
 
 import numpy as np
 import scipy.io.wavfile as wavfile
 from faster_whisper import WhisperModel
 from faster_whisper.transcribe import Segment
-
 from logger import logger
 
 # Global model (loaded once)
@@ -51,7 +49,11 @@ def compute_transcription_confidence(
         if seg.avg_logprob is None:
             continue
         # More accurate token count if available
-        seg_token_count = len(seg.tokens) if hasattr(seg, "tokens") and seg.tokens else max(1, len(seg.text) // 2)
+        seg_token_count = (
+            len(seg.tokens)
+            if hasattr(seg, "tokens") and seg.tokens
+            else max(1, len(seg.text) // 2)
+        )
         logprob_sum += seg.avg_logprob * seg_token_count
         token_count += seg_token_count
 
@@ -65,8 +67,7 @@ def compute_transcription_confidence(
     return avg_logprob, confidence, quality
 
 
-@dataclass
-class TranscriptionResult:
+class TranscriptionResult(TypedDict):
     text_ja: str
     confidence: float
     quality_label: str
@@ -123,7 +124,7 @@ def transcribe_japanese_whisper(
 
     # Clean segment dicts (remove tokens to reduce size)
     clean_segments = [
-        {k: v for k, v in asdict(seg).items() if k != "tokens"} for seg in segments
+        {k: v for k, v in seg.__dict__.items() if k != "tokens"} for seg in segments
     ]
 
     # Optional: clean up temp file
@@ -133,7 +134,9 @@ def transcribe_japanese_whisper(
         except:
             pass
 
-    processing_duration = (datetime.now(timezone.utc) - processing_started).total_seconds()
+    processing_duration = (
+        datetime.now(timezone.utc) - processing_started
+    ).total_seconds()
 
     meta = {
         "client_id": client_id,
@@ -145,11 +148,11 @@ def transcribe_japanese_whisper(
         "context_prompt": context_prompt,
     }
 
-    return TranscriptionResult(
-        text_ja=ja_text,
-        confidence=confidence,
-        quality_label=quality_label,
-        avg_logprob=avg_logprob if math.isfinite(avg_logprob) else None,
-        segments=clean_segments,
-        metadata=meta,
-    )
+    return {
+        "text_ja": ja_text,
+        "confidence": confidence,
+        "quality_label": quality_label,
+        "avg_logprob": avg_logprob if math.isfinite(avg_logprob) else None,
+        "segments": clean_segments,
+        "metadata": meta,
+    }

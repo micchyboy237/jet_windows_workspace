@@ -11,7 +11,7 @@ console = Console()
 SAMPLE_RATE = 16000
 
 
-async def handle_client(websocket, path):
+async def handle_client(websocket):
     """Async handler for each WS client connection."""
     try:
         while True:
