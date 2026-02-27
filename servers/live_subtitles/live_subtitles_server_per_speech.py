@@ -87,7 +87,7 @@ def transcribe_and_translate(
     trans_result: TranscriptionResult = transcribe_japanese_whisper(
         audio_bytes=audio_bytes,
         sample_rate=sr,
-        context_prompt=last_ja,
+        # context_prompt=last_ja,
         save_temp_wav=temp_path,
         client_id=client_id,
         utterance_id=utterance_id,

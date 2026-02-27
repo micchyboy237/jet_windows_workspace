@@ -1,150 +1,128 @@
-"""Audio processing utilities for streaming, including buffer and VAD (with Silero-based partial/final utterance support)."""
-
 from __future__ import annotations
 
-from typing import Optional, Tuple
+import os
+from typing import Union
 
+import librosa
 import numpy as np
-import torch
-from silero_vad import VADIterator, load_silero_vad
+import numpy.typing as npt
 
-from utils.asr import ASRTranscriber
-from utils.translation import JapaneseToEnglishTranslator
+# Optional torch support
+try:
+    import torch
+
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+    torch = None  # type: ignore
+
+AudioInput = Union[
+    str,
+    bytes,
+    os.PathLike,
+    npt.NDArray[np.floating | np.integer],
+    "torch.Tensor",
+]
 
 
-class AudioStreamProcessor:
-    def __init__(
-        self,
-        asr: ASRTranscriber,
-        translator: JapaneseToEnglishTranslator,
-        sample_rate: int = 16000,
-        min_speech_duration_ms: int = 250,
-        max_speech_duration_s: float = 20.0,
-        partial_interval_s: float = 4.5,
-    ):
-        self.asr = asr
-        self.translator = translator
-        self.sample_rate = sample_rate
+def load_audio(
+    audio: AudioInput,
+    sr: int = 16_000,
+    mono: bool = True,
+) -> np.ndarray:
+    """
+    Robust audio loader for ASR pipelines with correct datatype, normalization, layout, and resampling.
 
-        # VAD fixed window
-        self.window_size = 512 if sample_rate == 16000 else 256
+    Handles:
+      - File paths
+      - In-memory WAV bytes
+      - NumPy arrays (any shape/layout/dtype/sr)
+      - Torch tensors
+      - Automatically normalizes to [-1.0, 1.0] float32
+      - Always resamples to target_sr
+      - Correctly converts stereo → mono regardless of channel position
+    Returns
+    -------
+    np.ndarray
+        Shape (samples,), float32, [-1.0, 1.0], exactly `sr` Hz
+    """
+    # ─────── FIX 1: In-memory arrays/tensors have unknown original sr ───────
+    import io
 
-        self.min_speech_samples = int(sample_rate * min_speech_duration_ms / 1000)
-        self.max_speech_samples = int(sample_rate * max_speech_duration_s)
-        self.partial_interval_samples = int(sample_rate * partial_interval_s)
+    current_sr: int | None
+    if isinstance(audio, (str, os.PathLike)):
+        y, current_sr = librosa.load(audio, sr=None, mono=False)
+    elif isinstance(audio, bytes):
+        y, current_sr = librosa.load(io.BytesIO(audio), sr=None, mono=False)
+    elif isinstance(audio, np.ndarray):
+        y = audio.astype(np.float32, copy=False)
+        current_sr = None
+    elif HAS_TORCH and isinstance(audio, torch.Tensor):
+        y = audio.float().cpu().numpy()
+        current_sr = None
+    else:
+        raise TypeError(f"Unsupported audio input type: {type(audio)}")
 
-        self.vad_iterator = None
-        self.current_speech: list[
-            np.ndarray
-        ] = []  # accumulated speech chunks (any size)
-        self.buffer: np.ndarray = np.array(
-            [], dtype=np.float32
-        )  # temp buffer for partial windows
-        self.last_partial_samples: int = 0
-        self.total_speech_samples: int = 0
+    # ─────── FIX 2: Correct normalization (NumPy, not torch) ───────
+    if np.issubdtype(y.dtype, np.integer):
+        y = y / (2 ** (np.iinfo(y.dtype).bits - 1))
+    elif np.abs(y).max() > 1.0 + 1e-6:
+        y = y / np.abs(y).max()
 
-        self._init_vad()
+    # ─────── FIX 3: Always make (channels, time) layout ───────
+    if y.ndim == 1:
+        y = y[None, :]
+    elif y.ndim == 2:
+        if y.shape[0] > y.shape[1]:
+            y = y.T
+    else:
+        raise ValueError(f"Audio must be 1D or 2D, got shape {y.shape}")
 
-    def _init_vad(self):
-        torch.set_num_threads(1)
-        model = load_silero_vad(onnx=True)
-        self.vad_iterator = VADIterator(
-            model,
-            threshold=0.5,
-            sampling_rate=self.sample_rate,
-            min_silence_duration_ms=350,
-            speech_pad_ms=30,
-        )
+    # Mono conversion
+    if mono and y.shape[0] > 1:
+        y = np.mean(y, axis=0, keepdims=True)
 
-    def process_chunk(self, chunk: np.ndarray) -> Optional[Tuple[str, str, bool]]:
-        if len(chunk) == 0:
-            return None
+    # ─────── FIX 4: ALWAYS resample if current_sr is None or wrong ───────
+    if current_sr != sr:
+        y = librosa.resample(y, orig_sr=current_sr or sr, target_sr=sr)
 
-        # Append new chunk to internal buffer
-        self.buffer = np.concatenate([self.buffer, chunk])
+    return y.squeeze()
 
-        results = None
 
-        # Process as many full 512-sample windows as possible
-        while len(self.buffer) >= self.window_size:
-            window = self.buffer[: self.window_size]
-            self.buffer = self.buffer[self.window_size :]
+def convert_audio_to_tensor(
+    audio_data: np.ndarray | list[np.ndarray], sr: int = 16000
+) -> torch.Tensor:
+    """
+    Convert numpy audio array or list of chunks to torch tensor suitable for Silero VAD.
+    - Ensures mono
+    - Converts to float32 in range [-1.0, 1.0]
+    - Requires 16kHz input!
+    """
+    # Accept either a single np.ndarray or a list of chunks
+    if isinstance(audio_data, list):
+        audio = np.concatenate(audio_data, axis=0)
+    else:
+        audio = np.asarray(audio_data)
 
-            # Feed exactly 512 samples (1D float32)
-            window_tensor = (
-                torch.from_numpy(window).float().unsqueeze(0)
-            )  # shape (1, 512)
+    # Normalize integer PCM to float32 in [-1, 1]
+    if np.issubdtype(audio.dtype, np.integer):
+        audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max
+    elif audio.dtype == np.float64:
+        audio = audio.astype(np.float32)
+    # If already float, ensure [-1, 1]
+    elif np.issubdtype(audio.dtype, np.floating):
+        audio = np.clip(audio, -1.0, 1.0)
+    else:
+        raise ValueError("Unsupported audio dtype")
 
-            speech_dict = self.vad_iterator(
-                window_tensor
-            )  # returns dict with 'start'/'end' or None
+    tensor = torch.from_numpy(audio)
 
-            self.total_speech_samples += self.window_size
+    # Convert to mono if multi-channel (average channels)
+    if tensor.ndim > 1:
+        tensor = tensor.mean(dim=1)
 
-            if speech_dict:
-                # Speech END detected → finalize current utterance
-                if self.current_speech:
-                    utterance = np.concatenate(self.current_speech)
-                    if len(utterance) >= self.min_speech_samples:
-                        jp_text, _ = self.asr.transcribe_japanese_asr(
-                            utterance, self.sample_rate
-                        )
-                        jp_text = jp_text.strip()
-                        if jp_text:
-                            en_text = self.translator.translate_japanese_to_english(
-                                jp_text
-                            )
-                            results = (en_text, jp_text, False)  # final
-                            self._reset_state()
-                            break  # or continue to process more if you want
-                self._reset_state()
-            else:
-                # Accumulate (VAD considers this part speech or transition)
-                self.current_speech.append(window.copy())
+    # Sanity checks
+    assert tensor.abs().max() <= 1.0 + 1e-5, "Audio not normalized!"
+    assert sr == 16000, "Wrong sample rate for Silero VAD: must be 16000 Hz"
 
-                # Partial trigger logic (same as before, but based on accumulated samples)
-                current_len = sum(c.shape[0] for c in self.current_speech)
-                since_last = current_len - self.last_partial_samples
-
-                if (
-                    since_last >= self.partial_interval_samples
-                    and current_len >= self.min_speech_samples
-                ):
-                    utterance = np.concatenate(self.current_speech)
-                    jp_text, _ = self.asr.transcribe_japanese_asr(
-                        utterance, self.sample_rate
-                    )
-                    jp_text = jp_text.strip()
-                    if jp_text:
-                        en_text = self.translator.translate_japanese_to_english(jp_text)
-                        self.last_partial_samples = current_len
-                        results = (en_text, jp_text, True)  # partial
-                        # Do NOT reset here — continue accumulating
-
-                # Max length safety
-                if current_len > self.max_speech_samples:
-                    utterance = np.concatenate(self.current_speech)
-                    jp_text, _ = self.asr.transcribe_japanese_asr(
-                        utterance, self.sample_rate
-                    )
-                    jp_text = jp_text.strip()
-                    if jp_text:
-                        en_text = self.translator.translate_japanese_to_english(jp_text)
-                        results = (en_text, jp_text, False)
-                        self._reset_state()
-
-        if results:
-            return results
-
-        return None
-
-    def _reset_state(self):
-        self.current_speech.clear()
-        self.last_partial_samples = 0
-        self.total_speech_samples = 0
-        if self.vad_iterator:
-            self.vad_iterator.reset_states()
-
-    def reset(self):
-        self._reset_state()
-        self.buffer = np.array([], dtype=np.float32)
+    return tensor  # shape: (N_samples,), float32, [-1, 1], 16kHz

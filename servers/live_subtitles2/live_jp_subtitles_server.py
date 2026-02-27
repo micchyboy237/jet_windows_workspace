@@ -17,7 +17,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.live import Live
 from utils.asr import ASRTranscriber
-from utils.audio_utils import AudioStreamProcessor
+from utils.audio_stream_processor import AudioStreamProcessor
 from utils.translation import JapaneseToEnglishTranslator
 from websockets.asyncio.server import serve, ServerConnection
 

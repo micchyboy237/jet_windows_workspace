@@ -78,7 +78,8 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server_per_speech_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
 
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles2",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles2\utils\vad.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles2\utils\audio_stream_processor.py",
     r"",
 ]
 
@@ -96,21 +97,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix
-
-[04:50:01] ERROR    Client error #2019991830400                                          live_jp_subtitles_server.py:111
-                    ╭─────────────── Traceback (most recent call last) ────────────────╮
-                    │ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\l │
-                    │ ive_subtitles2\live_jp_subtitles_server.py:91 in handler         │
-                    │                                                                  │
-                    │    88 │   │   │   │   │   chunk = np.frombuffer(message, dtype=n │
-                    │    89 │   │   │   │   │   result = processor.process_chunk(chunk │
-                    │    90 │   │   │   │   │   if result:                             │
-                    │ ❱  91 │   │   │   │   │   │   en_text, jp_text = result          │
-                    │    92 │   │   │   │   │   │   if en_text.strip():                │
-                    │    93 │   │   │   │   │   │   │   self.state.total_utterances += │
-                    │    94 │   │   │   │   │   │   │   self.state.clients[client_id][ │
-                    ╰────────────────────────────────────────────────────
+Update to replace all silero-vad logic with SpeechBrainVAD
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
