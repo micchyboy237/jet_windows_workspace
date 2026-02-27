@@ -23,7 +23,6 @@ import sounddevice as sd
 import websockets
 from jet.audio.helpers.base import audio_buffer_duration
 from jet.audio.helpers.energy import compute_rms, rms_to_loudness_label
-from jet.audio.norm.norm_speech_loudness import normalize_speech_loudness
 from jet.audio.speech.speechbrain.speech_timestamps_extractor import (
     extract_speech_timestamps,
 )
@@ -206,7 +205,7 @@ async def stream_microphone(ws) -> None:
     speech_energy_sum_squares: float = 0.0  # sum of squares for variance / std dev
     max_energy: float = 0.0  # peak RMS in segment
     min_energy: float = float("inf")  # lowest RMS in speech chunk
-    utterance_normalized_rms: float | None = None
+    utterance_rms: float | None = None
 
     current_segment_num: int | None = None
     current_segment_buffer: bytearray | None = None
@@ -516,7 +515,7 @@ async def stream_microphone(ws) -> None:
                                 await send_audio_chunk(
                                     send_queue,
                                     utterance_audio_buffer,
-                                    utterance_normalized_rms,
+                                    utterance_rms,
                                     segment_num=current_segment_num,
                                     avg_vad=vad_confidence_sum / speech_chunk_count
                                     if speech_chunk_count > 0
@@ -600,7 +599,7 @@ async def stream_microphone(ws) -> None:
                                 await send_audio_chunk(
                                     send_queue,
                                     utterance_audio_buffer,
-                                    utterance_normalized_rms,
+                                    utterance_rms,
                                     segment_num=current_segment_num,
                                     avg_vad=(vad_confidence_sum / speech_chunk_count)
                                     if speech_chunk_count > 0
@@ -634,17 +633,18 @@ async def stream_microphone(ws) -> None:
                                     len(current_segment_buffer) // 2
                                 )  # int16 = 2 bytes per sample
 
-                                audio_float = audio_int16.astype(np.float32) / 32768.0
-                                normalized_saved_audio = normalize_speech_loudness(
-                                    audio_float,
-                                    sample_rate=config.sample_rate,
-                                )
+                                # audio_float = audio_int16.astype(np.float32) / 32768.0
+                                # normalized_saved_audio = normalize_speech_loudness(
+                                #     audio_float,
+                                #     sample_rate=config.sample_rate,
+                                # )
 
                                 wav_path = os.path.join(segment_dir, "sound.wav")
                                 wavfile.write(
                                     wav_path,
                                     config.sample_rate,
-                                    normalized_saved_audio,  # already normalized ndarray
+                                    # normalized_saved_audio,  # already normalized ndarray
+                                    audio_int16,
                                 )
                                 base_time = (
                                     stream_start_time
@@ -791,7 +791,7 @@ async def stream_microphone(ws) -> None:
                             utterance_audio_buffer = bytearray()
                             chunk_index = 0
                             speech_duration_accumulated = 0.0
-                            utterance_normalized_rms = None
+                            utterance_rms = None
 
                             segment_type = "non_speech"
                             speech_start_time = None
@@ -1036,7 +1036,7 @@ async def handle_partial_subtitle(data: dict) -> None:
     segment_type = data.get("segment_type", "speech")
     duration_sec = data.get("duration_sec", 0.0)
     avg_vad_conf = data.get("avg_vad_confidence", 0.0)
-    normalized_rms = data.get("normalized_rms", 0.0)
+    rms = data.get("rms", 0.0)
     trans_conf = data.get("transcription_confidence")
     trans_quality = data.get("transcription_quality")
     transl_conf = data.get("translation_confidence")
@@ -1060,8 +1060,8 @@ async def handle_partial_subtitle(data: dict) -> None:
         duration_sec=duration_sec,
         segment_number=segment_num,
         avg_vad_confidence=avg_vad_conf,
-        normalized_rms=normalized_rms,
-        normalized_rms_label=rms_to_loudness_label(normalized_rms),
+        rms=rms,
+        rms_label=rms_to_loudness_label(rms),
         transcription_confidence=trans_conf if trans_conf is not None else None,
         transcription_quality=trans_quality,
         translation_confidence=transl_conf if transl_conf is not None else None,
@@ -1102,7 +1102,7 @@ async def handle_final_subtitle(data: dict) -> None:
 
     duration_sec = data.get("duration_sec", 0.0)
     avg_vad_conf = data.get("avg_vad_confidence")
-    normalized_rms = data.get("normalized_rms")
+    rms = data.get("rms")
     trans_conf = data.get("transcription_confidence")
     trans_quality = data.get("transcription_quality")
     transl_conf = data.get("translation_confidence")
@@ -1144,7 +1144,7 @@ async def handle_final_subtitle(data: dict) -> None:
         "segment_num": segment_num,
         "segment_type": segment_type,
         "avg_vad_conf": avg_vad_conf,
-        "normalized_rms": normalized_rms,
+        "rms": rms,
         "trans_conf": trans_conf,
         "trans_quality": trans_quality,
         "transl_conf": transl_conf,
@@ -1249,7 +1249,7 @@ async def handle_emotion_classification_update(data: dict) -> None:
 async def send_audio_chunk(
     send_queue: asyncio.Queue,
     buffer: bytearray,
-    utterance_normalized_rms: float,
+    utterance_rms: float,
     segment_num: int = 0,
     avg_vad: float = 0.0,
     is_final: bool = False,
@@ -1268,27 +1268,28 @@ async def send_audio_chunk(
             log.warning("[norm] Empty buffer before normalization — skipping send")
             return
 
-        audio_float = audio_int16.astype(np.float32) / 32768.0
+        # audio_float = audio_int16.astype(np.float32) / 32768.0
 
-        # Apply speech-probability-weighted loudness normalization
-        normalized_float = normalize_speech_loudness(
-            audio_float,
-            sample_rate=config.sample_rate,
-        )
+        # # Apply speech-probability-weighted loudness normalization
+        # normalized_float = normalize_speech_loudness(
+        #     audio_float,
+        #     sample_rate=config.sample_rate,
+        # )
 
-        # Back to int16
-        normalized_int16 = np.clip(normalized_float * 32767.0, -32768, 32767).astype(
-            np.int16
-        )
+        # # Back to int16
+        # normalized_int16 = np.clip(normalized_float * 32767.0, -32768, 32767).astype(
+        #     np.int16
+        # )
         # Use stable utterance-level value (may be None → fallback)
-        normalized_rms = (
-            utterance_normalized_rms
-            if utterance_normalized_rms is not None
-            else compute_rms(normalized_float)  # fallback for safety
-        )
+        # rms = (
+        #     utterance_rms
+        #     if utterance_rms is not None
+        #     else compute_rms(normalized_float)  # fallback for safety
+        # )
+        rms = compute_rms(audio_int16)
 
         # Use normalized PCM for transmission
-        pcm_to_send = normalized_int16.tobytes()
+        pcm_to_send = audio_int16.tobytes()
 
     except Exception as e:
         log.error("[norm] Normalization failed — sending original audio: %s", e)
@@ -1305,7 +1306,7 @@ async def send_audio_chunk(
         "segment_num": segment_num,
         "utterance_id": current_utterance_id,
         # "utterance_id": str(uuid.uuid4()),  # Temporarily create new id
-        "normalized_rms": normalized_rms,
+        "rms": rms,
         "avg_vad_confidence": avg_vad,
     }
 
@@ -1317,7 +1318,7 @@ async def send_audio_chunk(
         "final" if is_final else "partial",
         chunk_index,
         speech_chunk_count,
-        rms_to_loudness_label(normalized_rms),
+        rms_to_loudness_label(rms),
         avg_vad,
         bright=True,
     )
@@ -1362,7 +1363,7 @@ async def _update_display_and_files(utt_id: int) -> None:
     start_time = entry["start_wallclock"]
 
     avg_vad_conf = entry["avg_vad_conf"]
-    normalized_rms = entry["normalized_rms"]
+    rms = entry["rms"]
 
     trans_conf = entry.get("trans_conf")
     trans_quality = entry.get("trans_quality")
@@ -1383,8 +1384,8 @@ async def _update_display_and_files(utt_id: int) -> None:
         duration_sec=duration_sec,
         segment_number=segment_num,
         avg_vad_confidence=avg_vad_conf,
-        normalized_rms=normalized_rms,
-        normalized_rms_label=rms_to_loudness_label(normalized_rms),
+        rms=rms,
+        rms_label=rms_to_loudness_label(rms),
         transcription_confidence=trans_conf if trans_conf is not None else None,
         transcription_quality=trans_quality,
         translation_confidence=transl_conf if transl_conf is not None else None,
