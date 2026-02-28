@@ -16,8 +16,8 @@ from typing import Optional
 from nlp import extract_japanese_nouns
 from hotword_manager import HotwordManager
 from transcribe_jp_llm import transcribe_japanese, TranscriptionResult
-# from translate_jp_en_llm import translate_japanese_to_english
-from translate_jp_en_opus import translate_japanese_to_english
+from translate_jp_en_llm import translate_japanese_to_english
+# from translate_jp_en_opus import translate_japanese_to_english
 from logger import logger
 
 logger.info("Live subtitles server starting...")
@@ -111,10 +111,9 @@ def transcribe_and_translate(
     # Translation
     translation_result = translate_japanese_to_english(
         ja_text,
-        beam_size=4,
-        max_decoding_length=512,
-        min_tokens_for_confidence=3,
+        max_tokens=768,
         enable_scoring=ENABLE_TRANSLATION_SCORING,
+        history=history,
     )
     en_text = translation_result["text"]
     translation_logprob = translation_result["log_prob"]

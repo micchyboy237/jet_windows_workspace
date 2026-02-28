@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 from llama_cpp import Llama
-from utils import split_sentences_ja
 
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\nsfw\Fiendish_LLAMA_3B.Q4_K_M.gguf"
 MODEL_SETTINGS = {
@@ -121,22 +120,9 @@ def translate_japanese_to_english(
             "confidence": None,
             "quality": "N/A",
         }
+
+    # No sentence splitting — send the whole block as-is
     messages = _build_translation_messages(ja_text, history)
-    # --- Sentence splitting (parity with OPUS implementation) ---
-    sentences_ja: List[str] = split_sentences_ja(ja_text)
-
-    if not sentences_ja:
-        return {
-            "text": "",
-            "log_prob": None,
-            "confidence": None,
-            "quality": "N/A",
-        }
-
-    # Preserve 1 sentence → 1 translation line structure
-    batched_text = "\n".join(sent.strip() for sent in sentences_ja if sent.strip())
-
-    messages = _build_translation_messages(batched_text, history)
     
     completion_params: Dict[str, Any] = {
         **TRANSLATION_DEFAULTS,
