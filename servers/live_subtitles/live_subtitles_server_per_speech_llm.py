@@ -108,13 +108,21 @@ def transcribe_and_translate(
     #             {"role": "assistant", "content": last_en.strip()},
     #         ]
 
-    # Translation
+    # Translation OPUS settings
+    # translation_result = translate_japanese_to_english(
+    #     ja_text,
+    #     max_decoding_length=512,
+    #     enable_scoring=ENABLE_TRANSLATION_SCORING,
+    # )
+
+    # Translation LLM settings
     translation_result = translate_japanese_to_english(
         ja_text,
-        max_tokens=768,
+        max_tokens=512,
         enable_scoring=ENABLE_TRANSLATION_SCORING,
         history=history,
     )
+
     en_text = translation_result["text"]
     translation_logprob = translation_result["log_prob"]
     translation_confidence = translation_result["confidence"]

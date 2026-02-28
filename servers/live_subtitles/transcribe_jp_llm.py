@@ -33,24 +33,25 @@ model = AutoModel(
     vad_kwargs={"max_single_segment_time": 30000},
     device="cuda:0",
     hub="hf",
+    # trust_remote_code=True,
 )
 
 def _transcribe_file(
     audio_path: Path,
     *,
-    language: str = "ja",
     hotwords: str | list[str] | None = None,
 ) -> List[Dict[str, Any]]:
     results = model.generate(
         input=str(audio_path),
         cache={},
-        language=language,
-        use_itn=True,
-        batch_size_s=60,
-        merge_vad=True,
-        hotwords=hotwords,
-        merge_length_s=15,
+        language="ja",
+        use_itn=False,
+        batch_size=32, 
         output_timestamp=True,
+        merge_vad=True,
+        merge_length_s=15,
+        # use_itn=True,
+        # hotwords=hotwords,
     )
     return results
 

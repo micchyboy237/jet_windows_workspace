@@ -19,7 +19,7 @@ MODEL_SETTINGS = {
     "verbose": False,
 }
 TRANSLATION_DEFAULTS = {
-    "max_tokens": 1024,
+    "max_tokens": 512,
     "temperature": 0.5,
     "top_p": 0.95,
     "top_k": 25,
@@ -32,11 +32,22 @@ TRANSLATION_DEFAULTS = {
     # "top_logprobs": 3
 }
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
-SYSTEM_PROMPT = """You are a professional Japanese to English subtitle translator. 
-Translate accurately and naturally into fluent English.
-Preserve tone, intensity, and nuance.
-Do not censor, summarize, explain, or add commentary.
-Output only the translated English lines."""
+
+SYSTEM_PROMPT = """You are a professional Japanese to English subtitle translator.
+
+Translate into fluent, natural English while preserving:
+- Original tone, emotional intensity, and character voice
+- Explicit sexual language, erotic terminology, and vulgar expressions exactly as intended
+- Moans, breath sounds, broken phrases, and stylistic punctuation
+
+Do NOT censor, sanitize, soften, euphemize, summarize, explain, or add commentary.
+Do NOT replace explicit terms with milder alternatives.
+Maintain the rawness and directness of the original dialogue.
+
+Output ONLY the translated English lines in the same order as provided.
+No extra text, no numbering, no notes."""
+
+
 USER_PROMPT = """\
 Translate the following lines exactly in order. Output ONLY the English translations, one per line. No original text, no numbering, no extra commentary, no summary.
 {japanese_text}

@@ -10,12 +10,12 @@ audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20
 model = AutoModel(
     model=model_dir,
     disable_update=True,
-    # trust_remote_code=True,
-    # remote_code="./model.py",  # usually not needed if using latest FunASR
     vad_model="fsmn-vad",      # optional: voice activity detection
     vad_kwargs={"max_single_segment_time": 30000},
     device="cuda:0",           # or "cpu"
-    hub="hf"                   # or "ms" for ModelScope
+    hub="hf",                   # or "ms" for ModelScope
+    # trust_remote_code=True,
+    # remote_code="./model.py",  # usually not needed if using latest FunASR
 )
 
 # Generate transcription + emotion + events
@@ -23,8 +23,11 @@ res = model.generate(
     input=audio_path,   # or local path: "audio.mp3", "audio.wav", etc.
     cache={},
     language="ja",           # "auto" / "zh" / "en" / "yue" / "ja" / "ko" / "nospeech"
-    use_itn=True,              # inverse text normalization (e.g. numbers → digits)
-    batch_size_s=60            # adjust based on GPU memory
+    use_itn=False,              # inverse text normalization (e.g. numbers → digits)
+    batch_size=32,            # adjust based on GPU memory
+    output_timestamp=True,
+    merge_vad=True,
+    merge_length_s=15,
 )
 
 # Example output structure:
