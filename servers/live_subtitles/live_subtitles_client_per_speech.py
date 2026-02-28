@@ -514,8 +514,9 @@ async def stream_microphone(ws) -> None:
 
                                 await send_audio_chunk(
                                     send_queue,
-                                    utterance_audio_buffer,
-                                    utterance_rms,
+                                    # utterance_audio_buffer,
+                                    current_segment_buffer,
+                                    # utterance_rms=utterance_rms,
                                     segment_num=current_segment_num,
                                     avg_vad=vad_confidence_sum / speech_chunk_count
                                     if speech_chunk_count > 0
@@ -598,8 +599,9 @@ async def stream_microphone(ws) -> None:
 
                                 await send_audio_chunk(
                                     send_queue,
-                                    utterance_audio_buffer,
-                                    utterance_rms,
+                                    # utterance_audio_buffer,
+                                    current_segment_buffer,
+                                    # utterance_rms,
                                     segment_num=current_segment_num,
                                     avg_vad=(vad_confidence_sum / speech_chunk_count)
                                     if speech_chunk_count > 0
@@ -1249,7 +1251,7 @@ async def handle_emotion_classification_update(data: dict) -> None:
 async def send_audio_chunk(
     send_queue: asyncio.Queue,
     buffer: bytearray,
-    utterance_rms: float,
+    # utterance_rms: float,
     segment_num: int = 0,
     avg_vad: float = 0.0,
     is_final: bool = False,
