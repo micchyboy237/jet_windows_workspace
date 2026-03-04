@@ -1,9 +1,8 @@
-# live_subtitles_client_with_overlay.py
+# live_subtitles_client_per_speech.py
 
 import asyncio
 import base64
 import contextlib
-import datetime
 import json
 import os
 import queue
@@ -13,7 +12,6 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass
-from pathlib import Path
 from threading import Thread
 from typing import Literal
 
@@ -21,8 +19,8 @@ import numpy as np  # needed for saving wav with frombuffer
 import scipy.io.wavfile as wavfile  # Add this import at the top with other imports
 import sounddevice as sd
 import websockets
-from jet.audio.helpers.base import audio_buffer_duration
 from jet.audio.helpers.energy import compute_rms, rms_to_loudness_label
+from jet.audio.speech.speechbrain.speech_accumulator import LiveSpeechSegmentAccumulator
 from jet.audio.speech.speechbrain.speech_timestamps_extractor import (
     extract_speech_timestamps,
 )
@@ -33,6 +31,7 @@ from jet.audio.speech.utils import display_segments
 from jet.logger import logger as log
 from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
 from PyQt6.QtWidgets import QApplication
+from ws_client_subtitles_handlers import WSClientLiveSubtitleHandlers
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__),
@@ -40,8 +39,6 @@ OUTPUT_DIR = os.path.join(
     os.path.splitext(os.path.basename(__file__))[0],
 )
 SEGMENTS_DIR = os.path.join(OUTPUT_DIR, "segments")
-
-pending_subtitles: dict[int, dict] = {}  # utterance_id → partial/complete data
 
 # For safety — clean up entries older than ~30 utterances
 MAX_PENDING = 50
@@ -56,11 +53,18 @@ ALL_PROBS_PATH = os.path.join(OUTPUT_DIR, "all_probs.json")
 
 CONTINUOUS_AUDIO_MAX_SECONDS = 320.0
 
-MIN_SPEECH_DURATION_SEC = 0.25
-MAX_SPEECH_DURATION_SEC = 90.0
+SAMPLE_RATE = 16000
+DTYPE = "int16"
+
 CHUNK_DURATION_SEC = 6.0
 CHUNK_OVERLAP_SEC = 0.0
+MIN_SILENCE_DURATION_SEC = 0.9
+MIN_SPEECH_DURATION_SEC = 0.25
+MAX_SPEECH_DURATION_SEC = 60.0
+MAX_SPEECH_OVERLAP_SEC = 10.0
 CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
+
+SMALL_OVERLAP_SEC = 1.2
 
 audio_total_samples: int = 0
 LAST_5MIN_WAV = os.path.join(OUTPUT_DIR, "last_5_mins.wav")
@@ -76,15 +80,16 @@ _audio_buffer_is_dirty: bool = False
 @dataclass(frozen=True)
 class Config:
     ws_url: str = os.getenv("LOCAL_WS_LIVE_SUBTITLES_URL")
-    min_speech_duration: float = MIN_SPEECH_DURATION_SEC
-    max_speech_duration_sec: float = MAX_SPEECH_DURATION_SEC
-    sample_rate: int = 16000
+    sample_rate: int = SAMPLE_RATE
+    dtype: str = DTYPE
     channels: int = 1
-    dtype: str = "int16"
+    min_silence_duration_sec: float = MIN_SILENCE_DURATION_SEC  # JP clause pauses
+    min_speech_duration_sec: float = MIN_SPEECH_DURATION_SEC
+    max_speech_duration_sec: float = MAX_SPEECH_DURATION_SEC
+    overlap_samples: int = int(MAX_SPEECH_OVERLAP_SEC * SAMPLE_RATE)
     vad_start_threshold: float = 0.5  # hysteresis start
     vad_end_threshold: float = 0.25  # hysteresis end
     pre_roll_seconds: float = 0.35  # capture mora onsets
-    max_silence_seconds: float = 0.9  # JP clause pauses
     vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
@@ -104,11 +109,6 @@ config = Config()
 # Global: when the recording stream actually began (wall-clock)
 stream_start_time: float | None = None
 
-# Global SRT sequence counter (1-based)
-srt_sequence = 1
-
-# Track when each segment actually started (wall-clock time)
-segment_start_wallclock: dict[int, float] = {}  # segment_num → time.time()
 
 # =============================
 # VAD configuration (now using SpeechBrain)
@@ -134,22 +134,36 @@ ProcessingTime = float
 recent_rtts: deque[ProcessingTime] = deque(maxlen=config.max_rtt_history)
 pending_sends: deque[float] = deque()  # One entry per sent chunk
 
-latest_transcription_text: str = ""
+
 utterance_id_generator = uuid.uuid4  # callable
 current_utterance_id: int | None = None
+
+# Track how much was already sent
+last_sent_byte_length: int = 0
 
 
 def extract_and_display_buffered_segments(
     _audio_buffer: bytearray,
     is_partial: bool = False,
     chunk_duration: int = CHUNK_DURATION_SEC,
-) -> bytearray:
-    # Temporarily display speech segments table
+) -> list[dict]:  # ← better return type hint
+    if len(_audio_buffer) < 800:  # < 25 ms @ 16 kHz → almost certainly useless
+        log.debug(
+            "[vad-skip] Buffer too short (%d bytes) → skipping VAD", len(_audio_buffer)
+        )
+        return []
+
     _audio_np = np.frombuffer(_audio_buffer, dtype=np.int16).copy()
+
+    # Optional: also skip if energy is extremely low
+    if np.max(np.abs(_audio_np)) < 5:  # almost silent
+        log.debug("[vad-skip] Near-silent buffer → skipping VAD")
+        return []
+
     buffer_segments, all_speech_probs = extract_speech_timestamps(
         _audio_np,
-        # min_speech_duration_ms=min_speech_duration_ms,
-        # min_silence_duration_ms=min_silence_duration_ms,
+        min_silence_duration_sec=config.min_silence_duration_sec,
+        min_speech_duration_sec=config.min_speech_duration_sec,
         max_speech_duration_sec=chunk_duration,
         return_seconds=True,
         time_resolution=3,
@@ -157,11 +171,14 @@ def extract_and_display_buffered_segments(
         normalize_loudness=False,
         include_non_speech=True,
         double_check=True,
+        apply_energy_VAD=True,
     )
+
     if len(buffer_segments):
         prefix = "Partial" if is_partial else "Complete"
         log.purple(
-            f"{prefix} segments ({len(buffer_segments)}):\n{json.dumps([{'num': seg['num'], 'duration': seg['duration'], 'prob': seg['prob']} for seg in buffer_segments])}"
+            f"{prefix} segments ({len(buffer_segments)}):\n"
+            f"{json.dumps([{'num': seg['num'], 'duration': seg['duration'], 'prob': seg['prob']} for seg in buffer_segments])}"
         )
         display_segments(buffer_segments, done=not is_partial)
 
@@ -182,7 +199,6 @@ async def stream_microphone(ws) -> None:
 
     # Ensure globals are in a known state at function start
     global audio_total_samples, audio_buffer
-    global latest_transcription_text
     global utterance_id_counter, current_utterance_id
     global chunk_index, utterance_start_time  # used & assigned
 
@@ -207,19 +223,17 @@ async def stream_microphone(ws) -> None:
     min_energy: float = float("inf")  # lowest RMS in speech chunk
     utterance_rms: float | None = None
 
-    current_segment_num: int | None = None
-    current_segment_buffer: bytearray | None = None
-    speech_chunks_in_segment: int = 0
-
     # Increased buffer to absorb transient stalls (network / disk / logging)
     audio_queue: queue.Queue[bytes] = queue.Queue(maxsize=400)
 
+    current_segment: LiveSpeechSegmentAccumulator | None = None
+    current_segment_num: int | None = None
+    speech_chunks_in_segment: int = 0
+
     # Utterance-level/chunking state for live chunked sending
-    utterance_audio_buffer = bytearray()
     last_chunk_sent_time = None
     utterance_start_time = None
     speech_duration_accumulated = 0.0
-    last_overlap_samples = int(CHUNK_OVERLAP_SEC * config.sample_rate)
 
     global chunk_index
     chunk_index = 0
@@ -235,6 +249,8 @@ async def stream_microphone(ws) -> None:
     total_chunks_processed = 0
     speech_start_time = None
     segment_type: Literal["speech", "non_speech"] = "non_speech"
+
+    global last_sent_byte_length
 
     async def ws_sender() -> None:
         """Dedicated websocket sender to avoid blocking audio processing."""
@@ -388,43 +404,14 @@ async def stream_microphone(ws) -> None:
                         ]  # optional: keep small overlap
 
                     def reset_speech():
-                        nonlocal speech_chunks_in_segment
-                        nonlocal max_vad_confidence
-                        nonlocal last_vad_confidence
-                        nonlocal first_vad_confidence
-                        nonlocal min_vad_confidence
-                        nonlocal vad_confidence_sum
-                        nonlocal speech_prob_history
-                        nonlocal speech_chunk_count
-                        nonlocal speech_energy_sum
-                        nonlocal speech_energy_sum_squares
-                        nonlocal max_energy
-                        nonlocal min_energy
-                        nonlocal speech_duration_sec
-
-                        speech_chunks_in_segment = 0  # reset for new segment
-                        max_vad_confidence = 0.0  # ← reset
-                        last_vad_confidence = 0.0  # ← reset
-                        first_vad_confidence = (
-                            speech_prob  # ← capture first speech prob
-                        )
-                        min_vad_confidence = (
-                            speech_prob  # ← initialize min with first value
-                        )
-                        vad_confidence_sum = 0.0  # ← reset
-                        speech_prob_history = []  # ← reset for new segment
-                        speech_chunk_count = 0  # ← reset
-                        # ← NEW resets
-                        speech_energy_sum = 0.0
-                        speech_energy_sum_squares = 0.0
-                        max_energy = 0.0
-                        min_energy = float("inf")
+                        nonlocal current_segment
+                        if current_segment is not None:
+                            current_segment.reset()
                         log.success(
                             "[speech] Speech started | segment_%04d",
                             current_segment_num,
                         )
                         start_new_utterance()  # ← crucial: start tracking utterance here
-                        speech_duration_sec = 0.0
 
                     if chunk_type == "speech":
                         chunks_detected += 1
@@ -451,12 +438,14 @@ async def stream_microphone(ws) -> None:
                                 )
                                 + 1
                             )
-                            segment_start_wallclock[current_segment_num] = time.time()
-                            current_segment_buffer = bytearray()
 
-                            # NEW: prepend pre-roll audio (safe onset capture)
-                            for pre_chunk in pre_roll_buffer:
-                                current_segment_buffer.extend(pre_chunk)
+                            current_segment = LiveSpeechSegmentAccumulator(
+                                sample_rate=config.sample_rate,
+                                pre_roll_buffer=pre_roll_buffer,
+                                max_pre_roll_duration_sec=config.pre_roll_seconds,
+                                # Consider also passing last_sent_byte_length if needed later
+                                start_time=speech_start_time,
+                            )
 
                             reset_speech()
 
@@ -479,12 +468,14 @@ async def stream_microphone(ws) -> None:
                         speech_energy_sum += rms
                         speech_energy_sum_squares += rms**2
                         speech_duration_sec += VAD_CHUNK_SAMPLES / config.sample_rate
-                        if current_segment_buffer is not None:  # still per segment
-                            speech_chunks_in_segment += 1
+
+                        # ──────────────── Duration safety (real audio length) ────────────────
+                        current_duration_sec = len(current_segment.buffer) / (
+                            config.sample_rate * 2
+                        )
 
                         # --- utterance-level chunk sending ---
                         if is_utterance_ongoing:
-                            utterance_audio_buffer.extend(chunk)
                             now = time.monotonic()
 
                             should_send_chunk = (
@@ -492,51 +483,116 @@ async def stream_microphone(ws) -> None:
                                 or now - last_chunk_sent_time >= CHUNK_DURATION_SEC
                             )
                             duration_exceeded = (
-                                utterance_start_time is not None
-                                and now - utterance_start_time
-                                > config.max_speech_duration_sec
+                                current_duration_sec > config.max_speech_duration_sec
                             )
+                            # ────────────────────────────────────────────────
+                            # CHANGED: send mostly NEW audio only
+                            #          use small overlap (0.8–1.5s) only at start of chunk
+                            # ────────────────────────────────────────────────
+
+                            small_overlap_bytes = int(
+                                SMALL_OVERLAP_SEC * config.sample_rate * 2
+                            )
+
+                            if last_sent_byte_length == 0:
+                                to_send = current_segment.buffer
+                            else:
+                                # Most of the time: send only new audio
+                                start_idx = last_sent_byte_length
+                                # But add tiny prefix if chunk is very small (helps stability)
+                                if (
+                                    len(current_segment.buffer) - last_sent_byte_length
+                                    < small_overlap_bytes * 2
+                                ):
+                                    start_idx = max(
+                                        0, last_sent_byte_length - small_overlap_bytes
+                                    )
+                                to_send = current_segment.buffer[start_idx:]
 
                             # Only send partial chunks once enough accumulated speech is available
                             if should_send_chunk or duration_exceeded:
-                                if (
-                                    speech_duration_accumulated
-                                    < config.min_speech_duration
-                                ):
-                                    # Do not send partial chunks if still below min duration
-                                    continue
+                                # if (
+                                #     speech_duration_accumulated
+                                #     < config.min_speech_duration_sec
+                                # ):
+                                #     # Do not send partial chunks if still below min duration
+                                #     continue
+
+                                assert current_segment is not None
+
+                                # ─── CRITICAL: Trim BEFORE sending if already too long ───
+                                if duration_exceeded:
+                                    log.warning(
+                                        "[speech] Hard trimming – buffer reached %.1fs (max %.1fs)",
+                                        current_duration_sec,
+                                        config.max_speech_duration_sec,
+                                    )
+                                    # current_segment.trim_audio(
+                                    #     config.max_speech_duration_sec // 2
+                                    # )
+                                    # Option A: trim old content (alternative approach)
+                                    # current_segment.trim_audio(config.max_speech_duration_sec * 0.6)
+
+                                    # Option B: send only new data (recommended for no duplicates)
+                                    # Only send what hasn't been sent before in this segment
+                                    # For hard trim: keep only recent part (already sliced above, but enforce)
+                                    max_keep_bytes = int(
+                                        config.max_speech_duration_sec
+                                        * config.sample_rate
+                                        * 2
+                                    )
+                                    to_send = current_segment.buffer[-max_keep_bytes:]
 
                                 buffer_segments = extract_and_display_buffered_segments(
-                                    current_segment_buffer,
+                                    # current_segment.buffer,
+                                    to_send,
                                     is_partial=True,
                                     chunk_duration=CHUNK_DURATION_SEC,
                                 )
 
+                                stats = current_segment.get_stats()
+
                                 await send_audio_chunk(
                                     send_queue,
-                                    # utterance_audio_buffer,
-                                    current_segment_buffer,
-                                    # utterance_rms=utterance_rms,
+                                    # current_segment.buffer,
+                                    to_send,
+                                    current_segment.start_time,
+                                    duration_sec=stats["duration_sec"],
                                     segment_num=current_segment_num,
-                                    avg_vad=vad_confidence_sum / speech_chunk_count
-                                    if speech_chunk_count > 0
+                                    avg_vad=stats["vad_sum"]
+                                    / stats["speech_chunk_count"]
+                                    if stats["speech_chunk_count"] > 0
                                     else 0.0,
                                     is_final=False,
                                     chunk_index=chunk_index,
-                                    speech_chunk_count=speech_chunk_count,
-                                    context_prompt=build_context_prompt(),
+                                    speech_chunk_count=stats["speech_chunk_count"],
+                                    # context_prompt=build_context_prompt(),
                                 )
+
+                                # IMPORTANT: update to current absolute end, not len(to_send)
+                                last_sent_byte_length = len(current_segment.buffer)
                                 last_chunk_sent_time = now
-                                chunk_index += 1
-                                # # Keep overlap
-                                # overlap_start = (
-                                #     len(utterance_audio_buffer)
-                                #     - last_overlap_samples * 2
-                                # )
-                                # if overlap_start > 0:
-                                #     utterance_audio_buffer = utterance_audio_buffer[
-                                #         overlap_start:
-                                #     ]
+                                chunk_index += 1  # only increment after successful send
+
+                                # ────────────────────────────────────────────────
+                                # (Moved trimming logic above, before sending)
+                                # In this post-send block, only re-anchor timing if needed
+                                # ────────────────────────────────────────────────
+
+                                # Note: If duration_exceeded, trimming logic and anchor resets
+                                # must happen BEFORE sending as above. This post-send soft check
+                                # can remain as a warning or legacy, but buffer trim should
+                                # not duplicate—just issue warning or skip.
+                                if duration_exceeded:
+                                    log.warning(
+                                        "[speech] Max speech duration exceeded (%.1fs) — trimming segment buffer (legacy post-send warning, see above)",
+                                        config.max_speech_duration_sec,
+                                    )
+                                    # Optional strong fix: actually shrink the accumulator buffer
+                                    # (prevents memory explosion on very long speech)
+                                    current_segment.trim_audio(
+                                        config.max_speech_duration_sec * 0.6
+                                    )
 
                     else:
                         # Silence chunk
@@ -548,7 +604,7 @@ async def stream_microphone(ws) -> None:
                             and silence_start_time is not None
                             and (
                                 time.monotonic() - silence_start_time
-                                > config.max_silence_seconds
+                                > config.min_silence_duration_sec
                                 or (
                                     utterance_start_time is not None
                                     and time.monotonic() - utterance_start_time
@@ -559,25 +615,26 @@ async def stream_microphone(ws) -> None:
                             # ────────────────────────────────────────────────
                             # Final segment decision
                             # ────────────────────────────────────────────────
-                            duration = audio_buffer_duration(
-                                current_segment_buffer, config.sample_rate
-                            )
+                            assert current_segment is not None
+                            duration = current_segment.get_stats()["duration_sec"]
 
-                            if speech_duration_accumulated < config.min_speech_duration:
+                            if (
+                                speech_duration_accumulated
+                                < config.min_speech_duration_sec
+                            ):
                                 log.warning(
                                     "[speech] Final segment too short (%.3fs < %.3fs) — discarded",
                                     speech_duration_accumulated,
-                                    config.min_speech_duration,
+                                    config.min_speech_duration_sec,
                                 )
                                 # Reset without saving or sending final chunk
                                 segment_type = "non_speech"
                                 speech_start_time = None
                                 silence_start_time = None
                                 current_segment_num = None
-                                current_segment_buffer = None
+                                current_segment = None
                                 speech_chunks_in_segment = 0
                                 speech_prob_history = []
-                                utterance_audio_buffer = bytearray()
                                 chunk_index = 0
                                 speech_duration_accumulated = 0.0
                                 current_utterance_id = None
@@ -590,37 +647,41 @@ async def stream_microphone(ws) -> None:
                             )
 
                             # Send final chunk if anything remains
-                            if is_utterance_ongoing and len(utterance_audio_buffer) > 0:
+                            if is_utterance_ongoing and len(current_segment.buffer) > 0:
                                 buffer_segments = extract_and_display_buffered_segments(
-                                    current_segment_buffer,
+                                    current_segment.buffer,
                                     is_partial=False,
                                     chunk_duration=CHUNK_DURATION_SEC,
                                 )
 
+                                stats = current_segment.get_stats()
+
                                 await send_audio_chunk(
                                     send_queue,
-                                    # utterance_audio_buffer,
-                                    current_segment_buffer,
+                                    current_segment.buffer,
                                     # utterance_rms,
+                                    current_segment.start_time,
+                                    duration_sec=stats["duration_sec"],
                                     segment_num=current_segment_num,
-                                    avg_vad=(vad_confidence_sum / speech_chunk_count)
-                                    if speech_chunk_count > 0
+                                    avg_vad=stats["vad_sum"]
+                                    / stats["speech_chunk_count"]
+                                    if stats["speech_chunk_count"] > 0
                                     else 0.0,
                                     is_final=True,
                                     chunk_index=chunk_index,
-                                    speech_chunk_count=speech_chunk_count,
-                                    context_prompt=build_context_prompt(),
+                                    speech_chunk_count=stats["speech_chunk_count"],
+                                    # context_prompt=build_context_prompt(),
                                 )
                                 chunks_sent += 1
 
                             # Save ORIGINAL audio (matches what server received)
-                            original_bytes = bytes(current_segment_buffer)
+                            original_bytes = bytes(current_segment.buffer)
                             audio_int16 = np.frombuffer(original_bytes, dtype=np.int16)
 
                             # Save segment audio + metadata
                             if (
                                 current_segment_num is not None
-                                and current_segment_buffer is not None
+                                and current_segment is not None
                             ):
                                 segment_dir = os.path.join(
                                     SEGMENTS_DIR, f"segment_{current_segment_num:04d}"
@@ -628,12 +689,8 @@ async def stream_microphone(ws) -> None:
                                 os.makedirs(segment_dir, exist_ok=True)
 
                                 # Compute precise duration from audio length
-                                duration = audio_buffer_duration(
-                                    current_segment_buffer, config.sample_rate
-                                )
-                                num_samples = (
-                                    len(current_segment_buffer) // 2
-                                )  # int16 = 2 bytes per sample
+                                duration = stats["duration_sec"]
+                                num_samples = current_segment.duration_samples()
 
                                 # audio_float = audio_int16.astype(np.float32) / 32768.0
                                 # normalized_saved_audio = normalize_speech_loudness(
@@ -648,59 +705,52 @@ async def stream_microphone(ws) -> None:
                                     # normalized_saved_audio,  # already normalized ndarray
                                     audio_int16,
                                 )
-                                base_time = (
-                                    stream_start_time
-                                    or segment_start_wallclock[current_segment_num]
-                                )
+                                base_time = current_segment.start_time
 
-                                # Use relative seconds from stream start (fallback to current segment start time if stream_start_time isn't set)
+                                stats = current_segment.get_stats()
+
+                                # Use relative seconds from base_time
                                 metadata = {
                                     "segment_id": current_segment_num,
                                     "duration_sec": duration,
-                                    "num_chunks": speech_chunks_in_segment,
+                                    "num_chunks": stats["speech_chunk_count"],
                                     "num_samples": num_samples,
-                                    "start_sec": segment_start_wallclock[
-                                        current_segment_num
-                                    ]
-                                    - base_time,
+                                    "start_sec": current_segment.start_time - base_time,
                                     "end_sec": time.time() - base_time,
                                     "sample_rate": config.sample_rate,
                                     "channels": config.channels,
                                     "vad_confidence": {
                                         "first": first_vad_confidence,
                                         "last": last_vad_confidence,
-                                        "min": min_vad_confidence,
-                                        "max": max_vad_confidence,
-                                        "ave": (vad_confidence_sum / speech_chunk_count)
-                                        if speech_chunk_count > 0
+                                        "min": stats["vad_min"],
+                                        "max": stats["vad_max"],
+                                        "ave": stats["vad_sum"]
+                                        / stats["speech_chunk_count"]
+                                        if stats["speech_chunk_count"] > 0
                                         else 0.0,
                                     },
                                     "audio_energy": {
-                                        # ← CHANGED: explicitly convert numpy float32 → Python float
-                                        "rms_min": float(min_energy)
-                                        if min_energy != float("inf")
+                                        "rms_min": stats["energy_min"],
+                                        "rms_max": stats["energy_max"],
+                                        "rms_ave": stats["energy_sum"]
+                                        / stats["speech_chunk_count"]
+                                        if stats["speech_chunk_count"] > 0
                                         else 0.0,
-                                        "rms_max": float(max_energy),
-                                        "rms_ave": float(
-                                            (speech_energy_sum / speech_chunk_count)
-                                        )
-                                        if speech_chunk_count > 0
-                                        else 0.0,
-                                        "rms_std": float(
+                                        "rms_std": (
                                             np.sqrt(
                                                 (
-                                                    speech_energy_sum_squares
-                                                    / speech_chunk_count
+                                                    stats["energy_sum_squares"]
+                                                    / stats["speech_chunk_count"]
                                                 )
                                                 - (
-                                                    speech_energy_sum
-                                                    / speech_chunk_count
+                                                    stats["energy_sum"]
+                                                    / stats["speech_chunk_count"]
                                                 )
                                                 ** 2
                                             )
-                                        )
-                                        if speech_chunk_count > 0
-                                        else 0.0,
+                                            if stats["speech_chunk_count"] > 0
+                                            else 0.0
+                                        ),
                                     },
                                 }
 
@@ -741,10 +791,7 @@ async def stream_microphone(ws) -> None:
                                             all_speech_meta = json.load(f)
                                     except Exception:
                                         pass  # start fresh if corrupted
-                                relative_start = (
-                                    segment_start_wallclock[current_segment_num]
-                                    - base_time
-                                )
+                                relative_start = current_segment.start_time - base_time
                                 all_speech_meta.append(
                                     {
                                         "segment_id": current_segment_num,
@@ -768,7 +815,7 @@ async def stream_microphone(ws) -> None:
                                 _append_to_global_speech_probs_index(
                                     current_segment_num,
                                     duration,
-                                    segment_start_wallclock,
+                                    current_segment.start_time,
                                     base_time,
                                     probs_path,
                                     speech_prob_history,
@@ -790,7 +837,7 @@ async def stream_microphone(ws) -> None:
                             )
                             # Reset utterance state
                             current_utterance_id = None
-                            utterance_audio_buffer = bytearray()
+                            last_sent_byte_length = 0
                             chunk_index = 0
                             speech_duration_accumulated = 0.0
                             utterance_rms = None
@@ -799,16 +846,14 @@ async def stream_microphone(ws) -> None:
                             speech_start_time = None
                             silence_start_time = None
                             current_segment_num = None
-                            current_segment_buffer = None
+                            current_segment = None
                             speech_chunks_in_segment = 0  # reset counter
                             speech_prob_history = []  # clear after save
 
                     # Add every chunk (speech or short silence) to the local buffer while utterance is ongoing
-                    if (
-                        speech_start_time is not None
-                        and current_segment_buffer is not None
-                    ):
-                        current_segment_buffer.extend(chunk)
+                    if speech_start_time is not None and current_segment is not None:
+                        current_segment.append(chunk, speech_prob, rms)
+                        speech_chunks_in_segment += 1
 
                     if chunk_type == "speech":
                         avg_rtt = (
@@ -900,358 +945,12 @@ async def stream_microphone(ws) -> None:
                 # or just append to a global interrupted_probs.json
 
 
-# =============================
-# Subtitle SRT writing helpers
-# =============================
-
-
-def write_srt_block(
-    sequence: int,
-    start_sec: float,
-    duration_sec: float,
-    ja: str,
-    en: str,
-    file_path: str | os.PathLike,
-) -> None:
-    """Append one subtitle block to an SRT file."""
-    start_dt = datetime.datetime.fromtimestamp(start_sec)
-    end_dt = datetime.datetime.fromtimestamp(start_sec + duration_sec)
-
-    start_str = (
-        start_dt.strftime("%H:%M:%S") + f",{int(start_dt.microsecond / 1000):03d}"
-    )
-    end_str = end_dt.strftime("%H:%M:%S") + f",{int(end_dt.microsecond / 1000):03d}"
-
-    block = f"{sequence}\n{start_str} --> {end_str}\n{ja.strip()}\n{en.strip()}\n\n"
-
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    with open(file_path, "a", encoding="utf-8") as f:
-        f.write(block)
-
-    # log.info("[SRT] Appended block #%d to %s", sequence, os.path.basename(file_path))
-
-
-# =============================
-# Thin message receiver — receives WebSocket messages and dispatches to handler
-# =============================
-
-
-async def receive_messages(ws) -> None:
-    """Thin receiver: recv → parse → dispatch by type"""
-    async for msg in ws:
-        try:
-            data = json.loads(msg)
-            msg_type = data.get("type")
-
-            if msg_type == "final_subtitle":
-                await handle_final_subtitle(data)
-
-            elif msg_type == "speaker_update":
-                await handle_speaker_update(data)
-
-            elif msg_type == "emotion_classification_update":
-                await handle_emotion_classification_update(data)
-
-            elif msg_type == "partial_subtitle":
-                await handle_partial_subtitle(data)
-
-            else:
-                log.warning("[ws] Ignoring unknown message type: %s", msg_type)
-
-        except websockets.ConnectionClosed:
-            log.info("[receive] WebSocket connection closed cleanly")
-            break
-        except json.JSONDecodeError:
-            log.error("[receive] Invalid JSON received")
-        except Exception as e:
-            log.error("[receive] Error in receive loop: %s", e)
-            await asyncio.sleep(0.3)  # prevent tight loop on repeated errors
-
-
-# =============================
-# Main with reconnection logic
-# =============================
-
-
-async def main() -> None:
-    attempt = 0
-    while True:
-        try:
-            async with websockets.connect(
-                config.ws_url,
-                max_size=None,
-                compression=None,
-                ping_interval=30,
-                ping_timeout=30,
-                close_timeout=10,
-            ) as ws:
-                attempt = 0  # reset on success
-                log.info("Connected to %s", config.ws_url)
-                await asyncio.gather(
-                    stream_microphone(ws),
-                    receive_messages(ws),
-                    # handle_final_subtitle & handle_speaker_update are called from receive_messages
-                )
-                break  # normal exit
-
-        except (websockets.ConnectionClosedOK, websockets.ConnectionClosedError):
-            log.warning("Connection closed")
-        except OSError as e:
-            log.error("Network error: %s", e)
-        except Exception as e:
-            log.error("Unexpected error: %s", e)
-
-        attempt += 1
-        if attempt >= config.reconnect_attempts:
-            log.error("Max reconnection attempts reached. Exiting.")
-            break
-
-        delay = config.reconnect_delay * (2 ** (attempt - 1))  # exponential backoff
-        log.info(
-            "Reconnecting in %.1fs (attempt %d/%d)...",
-            delay,
-            attempt,
-            config.reconnect_attempts,
-        )
-        await asyncio.sleep(delay)
-
-    log.info("Client shutdown complete")
-
-
-async def handle_partial_subtitle(data: dict) -> None:
-    """Handle incremental/partial transcription updates from server."""
-    log.debug("[partial_subtitle] Received partial update")
-
-    utterance_id = data.get("utterance_id")
-    if utterance_id is None:
-        log.warning("[partial_subtitle] Missing utterance_id")
-        return
-
-    ja = data.get("transcription_ja", "").strip()
-    en = data.get("translation_en", "").strip()
-    if not (ja or en):
-        return
-
-    # Reuse most of the same logic as final, but mark as partial
-    segment_idx = data.get("segment_idx")
-    segment_num = data.get("segment_num")
-    segment_type = data.get("segment_type", "speech")
-    duration_sec = data.get("duration_sec", 0.0)
-    avg_vad_conf = data.get("avg_vad_confidence", 0.0)
-    rms = data.get("rms", 0.0)
-    trans_conf = data.get("transcription_confidence")
-    trans_quality = data.get("transcription_quality")
-    transl_conf = data.get("translation_confidence")
-    transl_quality = data.get("translation_quality")
-    server_meta = data.get("meta", {})
-
-    # For partials, we update the overlay in real-time (no SRT write yet)
-    start_time = segment_start_wallclock.get(segment_num, time.time())
-    relative_start = (
-        (start_time - (stream_start_time or start_time)) if stream_start_time else 0.0
-    )
-    relative_end = relative_start + duration_sec
-
-    # Show partial result (can be overwritten by next partial or final)
-    overlay.add_message(
-        message_id=utterance_id,
-        source_text=ja,
-        translated_text=en,
-        start_sec=relative_start,
-        end_sec=relative_end,
-        duration_sec=duration_sec,
-        segment_number=segment_num,
-        avg_vad_confidence=avg_vad_conf,
-        rms=rms,
-        rms_label=rms_to_loudness_label(rms),
-        transcription_confidence=trans_conf if trans_conf is not None else None,
-        transcription_quality=trans_quality,
-        translation_confidence=transl_conf if transl_conf is not None else None,
-        translation_quality=transl_quality,
-        is_partial=True,  # ← optional flag if your overlay supports it
-    )
-
-    log.info(
-        "[partial] utt %s | JA: %s",
-        utterance_id,
-        ja[:60] + "..." if len(ja) > 60 else ja,
-    )
-    if en:
-        log.debug("[partial] EN: %s", en[:60] + "..." if len(en) > 60 else en)
-
-
-async def handle_final_subtitle(data: dict) -> None:
-    log.info("[final_subtitle] Handling new final subtitle update...")
-    global srt_sequence, stream_start_time, latest_transcription_text
-
-    utterance_id = data.get("utterance_id")
-    if utterance_id is None:
-        log.warning("[final_subtitle] Missing utterance_id")
-        return
-
-    ja = data.get("transcription_ja", "").strip()
-    en = data.get("translation_en", "").strip()
-    if not (ja or en):
-        log.debug("[final_subtitle] Empty text received for utt %s", utterance_id)
-        return
-
-    latest_transcription_text = ja
-
-    # segment_num = utterance_id + 1
-    segment_idx = data["segment_idx"]
-    segment_num = data["segment_num"]
-    segment_type = data["segment_type"]
-
-    duration_sec = data.get("duration_sec", 0.0)
-    avg_vad_conf = data.get("avg_vad_confidence")
-    rms = data.get("rms")
-    trans_conf = data.get("transcription_confidence")
-    trans_quality = data.get("transcription_quality")
-    transl_conf = data.get("translation_confidence")
-    transl_quality = data.get("translation_quality")
-    server_meta = data.get("meta", {})
-
-    log.info("[final_subtitle] utt %s | JA: %s", utterance_id, ja[:80])
-    if en:
-        log.info("[final_subtitle] EN: %s", en[:80])
-    log.info(
-        "[quality] Transc: %.3f %s | Transl: %.3f %s",
-        trans_conf or 0.0,
-        trans_quality or "N/A",
-        transl_conf or 0.0,
-        transl_quality or "N/A",
-    )
-
-    start_time = segment_start_wallclock.get(segment_num)
-    if start_time is None:
-        log.warning("[timing] No start time found for segment_%04d", segment_num)
-        start_time = time.time() - duration_sec
-
-    if stream_start_time is None:
-        stream_start_time = start_time
-        relative_start = 0.0
-    else:
-        relative_start = start_time - stream_start_time
-    relative_end = relative_start + duration_sec
-
-    # Store partial data
-    pending_subtitles[utterance_id] = {
-        "ja": ja,
-        "en": en,
-        "duration_sec": duration_sec,
-        "start_wallclock": start_time,
-        "relative_start": relative_start,
-        "relative_end": relative_end,
-        "segment_idx": segment_idx,
-        "segment_num": segment_num,
-        "segment_type": segment_type,
-        "avg_vad_conf": avg_vad_conf,
-        "rms": rms,
-        "trans_conf": trans_conf,
-        "trans_quality": trans_quality,
-        "transl_conf": transl_conf,
-        "transl_quality": transl_quality,
-        "server_meta": server_meta,
-        "srt_written": False,
-    }
-
-    # Show text immediately (no speaker info yet)
-    await _update_display_and_files(utterance_id)
-
-    # Optional cleanup
-    if len(pending_subtitles) > MAX_PENDING:
-        oldest = min(pending_subtitles.keys())
-        del pending_subtitles[oldest]
-
-
-async def handle_speaker_update(data: dict) -> None:
-    log.info("[speaker_update] Handling new speaker update...")
-    utterance_id = data.get("utterance_id")
-    if utterance_id is None:
-        log.warning("[speaker_update] Missing utterance_id")
-        return
-
-    # segment_num = utterance_id + 1
-    segment_idx = data["segment_idx"]
-    segment_num = data["segment_num"]
-    segment_type = data["segment_type"]
-    segment_dir = os.path.join(OUTPUT_DIR, "segments", f"segment_{segment_num:04d}")
-
-    speaker_clusters = data.get("cluster_speakers")
-    speaker_is_same = data.get("is_same_speaker_as_prev")
-    speaker_similarity = data.get("similarity_prev")
-    speaker_meta = {
-        "segment_idx": segment_idx,
-        "segment_num": segment_num,
-        "segment_type": segment_type,
-        "is_same_speaker_as_prev": speaker_is_same,
-        "similarity_prev": speaker_similarity,
-    }
-
-    # if utterance_id in pending_subtitles:
-    #     pending_subtitles[utterance_id]["speaker_meta"] = speaker_meta
-    #     log.info("[speaker_update] Enriched utt %s", utterance_id)
-    #     await _update_display_and_files(utterance_id)
-    # else:
-    #     # Rare: speaker info arrived before text
-    #     pending_subtitles[utterance_id] = {"speaker_meta": speaker_meta}
-    #     log.debug("[speaker_update] Stored early speaker info for utt %s", utterance_id)
-
-    # Write per-segment speakers info
-    speaker_clusters_path = os.path.join(segment_dir, "speaker_cluster.json")
-    speaker_meta_path = os.path.join(segment_dir, "speaker_meta.json")
-    with open(speaker_clusters_path, "w", encoding="utf-8") as f:
-        json.dump(speaker_clusters, f, indent=2, ensure_ascii=False)
-    with open(speaker_meta_path, "w", encoding="utf-8") as f:
-        json.dump(speaker_meta, f, indent=2, ensure_ascii=False)
-
-
-async def handle_emotion_classification_update(data: dict) -> None:
-    log.info(
-        "[emotion_classification_update] Handling new emotion classification update..."
-    )
-    utterance_id = data.get("utterance_id")
-    if utterance_id is None:
-        log.warning("[emotion_classification_update] Missing utterance_id")
-        return
-
-    segment_idx = data["segment_idx"]
-    segment_num = data["segment_num"]
-    segment_type = data["segment_type"]
-    subdir = "segments" if segment_type == "speech" else "segments_non_speech"
-    segment_dir = os.path.join(OUTPUT_DIR, subdir, f"segment_{segment_num:04d}")
-    Path(segment_dir).mkdir(parents=True, exist_ok=True)
-
-    segment_type: Literal["speech", "non_speech"] = data["segment_type"]
-    emotion_classification_all = data.get("emotion_all")
-    emotion_top_label = data.get("emotion_top_label")
-    emotion_top_score = data.get("emotion_top_score")
-    emotion_top_label = data.get("emotion_top_label")
-    emotion_classification_meta = {
-        "segment_idx": segment_idx,
-        "segment_num": segment_num,
-        "segment_type": segment_type,
-        "emotion_top_label": emotion_top_label,
-        "emotion_top_score": emotion_top_score,
-    }
-
-    # Write per-segment emotion classification info
-    emotion_classification_all_path = os.path.join(
-        segment_dir, "emotion_classification_all.json"
-    )
-    emotion_classification_meta_path = os.path.join(
-        segment_dir, "emotion_classification_meta.json"
-    )
-    with open(emotion_classification_all_path, "w", encoding="utf-8") as f:
-        json.dump(emotion_classification_all, f, indent=2, ensure_ascii=False)
-    with open(emotion_classification_meta_path, "w", encoding="utf-8") as f:
-        json.dump(emotion_classification_meta, f, indent=2, ensure_ascii=False)
-
-
 async def send_audio_chunk(
     send_queue: asyncio.Queue,
     buffer: bytearray,
     # utterance_rms: float,
+    start_time: float,
+    duration_sec: float = 0.0,
     segment_num: int = 0,
     avg_vad: float = 0.0,
     is_final: bool = False,
@@ -1270,27 +969,18 @@ async def send_audio_chunk(
             log.warning("[norm] Empty buffer before normalization — skipping send")
             return
 
-        # audio_float = audio_int16.astype(np.float32) / 32768.0
+        # ─── Normalize to [-1, 1] BEFORE computing RMS ───────────────────────
+        audio_float = audio_int16.astype(np.float32) / 32768.0
 
-        # # Apply speech-probability-weighted loudness normalization
+        # Optional: you can still apply your speech-weighted normalization here later
         # normalized_float = normalize_speech_loudness(
-        #     audio_float,
-        #     sample_rate=config.sample_rate,
+        #     audio_float, sample_rate=config.sample_rate
         # )
+        # rms = compute_rms(normalized_float)
 
-        # # Back to int16
-        # normalized_int16 = np.clip(normalized_float * 32767.0, -32768, 32767).astype(
-        #     np.int16
-        # )
-        # Use stable utterance-level value (may be None → fallback)
-        # rms = (
-        #     utterance_rms
-        #     if utterance_rms is not None
-        #     else compute_rms(normalized_float)  # fallback for safety
-        # )
-        rms = compute_rms(audio_int16)
+        rms = compute_rms(audio_float)  # now correct scale ~[0.0, ~1.0]
 
-        # Use normalized PCM for transmission
+        # Use normalized PCM for transmission (but keep original int16 for now)
         pcm_to_send = audio_int16.tobytes()
 
     except Exception as e:
@@ -1310,6 +1000,8 @@ async def send_audio_chunk(
         # "utterance_id": str(uuid.uuid4()),  # Temporarily create new id
         "rms": rms,
         "avg_vad_confidence": avg_vad,
+        "start_time": start_time,
+        "duration_sec": duration_sec,
     }
 
     await send_queue.put(payload)
@@ -1326,16 +1018,6 @@ async def send_audio_chunk(
     )
 
 
-def build_context_prompt() -> str:
-    global latest_transcription_text
-    if not latest_transcription_text:
-        return ""
-    words = latest_transcription_text.strip().split()
-    if len(words) <= CONTEXT_PROMPT_MAX_WORDS:
-        return " ".join(words)
-    return " ".join(words[-CONTEXT_PROMPT_MAX_WORDS:])
-
-
 def start_new_utterance():
     global current_utterance_id, utterance_start_time, chunk_index
     current_utterance_id = str(uuid.uuid4())
@@ -1344,76 +1026,10 @@ def start_new_utterance():
     log.info("[utterance] Started new utterance %s", current_utterance_id)
 
 
-async def _update_display_and_files(utt_id: int) -> None:
-    if utt_id not in pending_subtitles:
-        return
-
-    entry = pending_subtitles[utt_id]
-
-    # Require text to proceed with display & SRT
-    if "ja" not in entry:
-        return
-
-    ja = entry["ja"]
-    en = entry["en"]
-    duration_sec = entry["duration_sec"]
-    relative_start = entry["relative_start"]
-    relative_end = entry["relative_end"]
-    segment_idx = entry["segment_idx"]
-    segment_num = entry["segment_num"]
-    segment_type = entry["segment_type"]
-    start_time = entry["start_wallclock"]
-
-    avg_vad_conf = entry["avg_vad_conf"]
-    rms = entry["rms"]
-
-    trans_conf = entry.get("trans_conf")
-    trans_quality = entry.get("trans_quality")
-    transl_conf = entry.get("transl_conf")
-    transl_quality = entry.get("transl_quality")
-
-    subdir = "segments" if segment_type == "speech" else "segments_non_speech"
-    segment_dir = os.path.join(OUTPUT_DIR, subdir, f"segment_{segment_num:04d}")
-    Path(segment_dir).mkdir(parents=True, exist_ok=True)
-
-    # ── Overlay ────────────────────────────────────────────────────────────────
-    overlay.add_message(
-        message_id=utt_id,
-        source_text=ja,
-        translated_text=en,
-        start_sec=relative_start,
-        end_sec=relative_end,
-        duration_sec=duration_sec,
-        segment_number=segment_num,
-        avg_vad_confidence=avg_vad_conf,
-        rms=rms,
-        rms_label=rms_to_loudness_label(rms),
-        transcription_confidence=trans_conf if trans_conf is not None else None,
-        transcription_quality=trans_quality,
-        translation_confidence=transl_conf if transl_conf is not None else None,
-        translation_quality=transl_quality,
-        # New speaker fields (overlay can ignore them if not ready)
-        # is_same_speaker_as_prev=is_same,
-        # speaker_similarity=similarity if similarity is not None else None,
-        # speaker_clusters=clusters,
-    )
-
-    # ── SRT (write only once) ─────────────────────────────────────────────────
-    per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
-    all_srt_path = os.path.join(OUTPUT_DIR, "all_subtitles.srt")
-
-    if not entry.get("srt_written", False):
-        global srt_sequence
-        write_srt_block(srt_sequence, start_time, duration_sec, ja, en, per_seg_srt)
-        write_srt_block(srt_sequence, start_time, duration_sec, ja, en, all_srt_path)
-        srt_sequence += 1
-        entry["srt_written"] = True
-
-
 def _append_to_global_speech_probs_index(
     segment_num: int,
     duration: float,
-    segment_start_wallclock: dict[int, float],
+    start_time: float,
     base_time: float,
     probs_path: str,
     speech_prob_history: list[float],
@@ -1427,7 +1043,7 @@ def _append_to_global_speech_probs_index(
         except Exception as e:
             log.warning("Could not load all_speech_probs.json: %s", e)
 
-    relative_start = segment_start_wallclock.get(segment_num, time.time()) - base_time
+    relative_start = start_time - base_time
 
     entry = {
         "segment_id": segment_num,
@@ -1513,16 +1129,69 @@ def _on_clear():
     os.makedirs(SEGMENTS_DIR, exist_ok=True)
 
 
+# =============================
+# Main with reconnection logic
+# =============================
+
+
+async def main(output_dir: str, overlay: LiveSubtitlesOverlay) -> None:
+    ws_client_handlers = WSClientLiveSubtitleHandlers(output_dir, overlay)
+
+    attempt = 0
+    while True:
+        try:
+            async with websockets.connect(
+                config.ws_url,
+                max_size=None,
+                compression=None,
+                ping_interval=30,
+                ping_timeout=30,
+                close_timeout=10,
+            ) as ws:
+                attempt = 0  # reset on success
+                log.info("Connected to %s", config.ws_url)
+                await asyncio.gather(
+                    stream_microphone(ws),
+                    ws_client_handlers.receive_messages(ws),
+                    # handle_final_subtitle & handle_speaker_update are called from receive_messages
+                )
+                break  # normal exit
+
+        except (websockets.ConnectionClosedOK, websockets.ConnectionClosedError):
+            log.warning("Connection closed")
+        except OSError as e:
+            log.error("Network error: %s", e)
+        except Exception as e:
+            log.error("Unexpected error: %s", e)
+
+        attempt += 1
+        if attempt >= config.reconnect_attempts:
+            log.error("Max reconnection attempts reached. Exiting.")
+            break
+
+        delay = config.reconnect_delay * (2 ** (attempt - 1))  # exponential backoff
+        log.info(
+            "Reconnecting in %.1fs (attempt %d/%d)...",
+            delay,
+            attempt,
+            config.reconnect_attempts,
+        )
+        await asyncio.sleep(delay)
+
+    log.info("Client shutdown complete")
+
+
 if __name__ == "__main__":
     app = QApplication([])  # Re-uses existing instance if any
     overlay = LiveSubtitlesOverlay.create(
         app=app,
         title="Live Japanese Subtitles",
         on_clear=_on_clear,
+        hide_source_text=True,
     )
 
     def recording_thread() -> None:
-        asyncio.run(main())
+        asyncio.run(main(OUTPUT_DIR, overlay))
 
     Thread(target=recording_thread, daemon=True).start()
     # Start Qt event loop – this keeps the overlay responsive and visible
