@@ -471,10 +471,20 @@ async def stream_microphone(ws) -> None:
                         if is_utterance_ongoing:
                             now = time.monotonic()
 
-                            should_send_chunk = (
-                                last_chunk_sent_time is None
-                                or now - last_chunk_sent_time >= CHUNK_DURATION_SEC
-                            )
+                            # ────────────────────────────────────────────────
+                            # Ensure first partial chunk is at least CHUNK_DURATION_SEC long
+                            # ────────────────────────────────────────────────
+
+                            if last_chunk_sent_time is None:
+                                # First partial send → require enough accumulated speech duration
+                                should_send_chunk = (
+                                    speech_duration_accumulated >= CHUNK_DURATION_SEC
+                                )
+                            else:
+                                # Subsequent partial sends → use time interval
+                                should_send_chunk = (
+                                    now - last_chunk_sent_time >= CHUNK_DURATION_SEC
+                                )
                             duration_exceeded = (
                                 current_duration_sec > config.max_speech_duration_sec
                             )
