@@ -1,47 +1,104 @@
-from typing import List
-
-from fast_bunkai import FastBunkai
-
-from typing import Union, Sequence
+import re
+from typing import Union, Sequence, List
 from pathlib import Path
+from fast_bunkai import FastBunkai
 
 
 def split_sentences_ja(text: str) -> List[str]:
     """
-    Split Japanese text into sentences using FastBunkai.
-    
-    FastBunkai provides excellent speed and accuracy for punctuated or emoji-rich text.
-    For casual/spoken-style text with spaces instead of periods (common in transcripts or chats),
-    we apply a lightweight preprocessing step: replace single spaces surrounded by Japanese characters
-    with a period (。) to guide the splitter toward natural clause boundaries.
-    
-    This keeps the implementation generic, reusable, and minimal—no heavy dependencies beyond fast_bunkai.
-    
-    Args:
-        text: The Japanese text to split.
-    
-    Returns:
-        A list of sentences as strings (stripped of whitespace).
-    
-    Example:
-        >>> text = "3人の先生から電話があった 近地なんか心当たりある?"
-        >>> split_sentences_ja(text)
-        ['3人の先生から電話があった', '近地なんか心当たりある?']
-        
-        >>> text = "羽田から✈️出発して、友だちと🍣食べました。最高！また行きたいな😂でも、予算は大丈夫かな…?"
-        >>> split_sentences_ja(text)
-        ['羽田から✈️出発して、友だちと🍣食べました。', '最高！', 'また行きたいな😂', 'でも、予算は大丈夫かな…?']
+    Split Japanese text into sentences.
+
+    Rules:
+    - Symbol clusters (emoji/music marks/etc.) at the beginning of a section
+      stay attached to the following text.
+    - Repeated symbol clusters mark new sections.
+    - Do NOT split symbol and text apart.
     """
+
     import re
-    
-    # Preprocess: treat isolated spaces (common in informal text) as potential sentence breaks
-    # Only replace spaces that are between Japanese chars (hiragana, katakana, kanji, some punctuation)
-    text = re.sub(r'([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F])[ ]+([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F])',
-                  r'\1。\2', text)
-    
+
+    if not text:
+        return []
+
+    # Unicode ranges
+    JA_RANGE = r"\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F"
+    SYMBOL_RANGE = (
+        r"\u2600-\u26FF"
+        r"\u2700-\u27BF"
+        r"\U0001F300-\U0001FAFF"
+    )
+
+    # 1️⃣ Split only when a symbol cluster appears AND is followed by Japanese text
+    #    This preserves symbol as prefix.
+    text = re.sub(
+        rf"([{SYMBOL_RANGE}]+)(?=[{JA_RANGE}])",
+        r"\n\1",
+        text,
+    )
+
+    # Remove accidental leading newline
+    text = text.lstrip("\n")
+
+    chunks = [c.strip() for c in text.split("\n") if c.strip()]
+
     splitter = FastBunkai()
-    sentences = list(splitter(text))
-    return [s.strip() for s in sentences if s.strip()]
+    sentences: List[str] = []
+
+    for chunk in chunks:
+        # If chunk starts with symbol cluster, keep as atomic sentence
+        if re.match(rf"^[{SYMBOL_RANGE}]+", chunk):
+            sentences.append(chunk)
+        else:
+            sentences.extend(s.strip() for s in splitter(chunk) if s.strip())
+
+    return sentences
+
+
+def split_symbols_ja(text: str) -> List[str]:
+    """
+    Split Japanese text into sentences, using symbol clusters (🎼 etc.) as section dividers.
+    - Symbol clusters are completely removed/ignored
+    - Text between symbols is treated as separate blocks
+    - Each block is sentence-split independently using FastBunkai
+    - Result: sentences stay grouped by their original sections (no unwanted merging)
+    """
+    if not text:
+        return []
+
+    # Unicode ranges
+    JA_RANGE = r"\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F"
+    SYMBOL_RANGE = (
+        r"\u2600-\u26FF"
+        r"\u2700-\u27BF"
+        r"\U0001F300-\U0001FAFF"
+    )
+
+    # Split on symbol clusters → get pure text blocks
+    blocks = re.split(rf"[{SYMBOL_RANGE}]+", text)
+
+    # Remove empty/blank blocks (leading/trailing symbols, consecutive symbols)
+    blocks = [block.strip() for block in blocks if block.strip()]
+
+    if not blocks:
+        return []
+
+    splitter = FastBunkai()
+    sentences: List[str] = []
+
+    # Process each block independently → preserves section boundaries
+    for block in blocks:
+        # Optional: normalize internal whitespace if needed
+        block = re.sub(r"\s+", " ", block).strip()
+        
+        if not block:
+            continue
+            
+        # Split this block into proper sentences
+        block_sentences = [s.strip() for s in splitter(block) if s.strip()]
+        sentences.extend(block_sentences)
+
+    return sentences
+
 
 # Supported audio extensions
 AUDIO_EXTENSIONS = {
@@ -78,3 +135,10 @@ def resolve_audio_paths(audio_inputs: AudioPathsInput, recursive: bool = False) 
 
     # Return sorted list of absolute path strings
     return sorted(str(p) for p in resolved_paths)
+
+
+if __name__ == "__main__":
+    ja_text = "🎼作戦を担うスゴーデエージェント黄昏れ00の顔を使い分ける彼の任務は家族を作ること父ロイドフォージャー精神科医正体スパイコードネーム黄昏れ母ヨルフォージャー市役所職員🎼正体殺しやコードネーム茨姫娘アーニャフォージャー正体た戦を担うスゴーデエージェント黄昏れ0の顔を使い分ける彼の任務は家族を作ること父ロイドフォージャー精神科医正体スパイコードネーム黄昏れ母ヨルフォージャー市役所職員🎼正体殺しやコードネーム茨姫娘アーニャフォージャー正体心を読むことができるエスパー"
+    ja_sents = split_symbols_ja(ja_text)
+    for i, s in enumerate(ja_sents, 1):
+        print(f"{i}. {s}")

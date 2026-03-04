@@ -280,7 +280,8 @@ async def process_utterance(
 
     segment_idx = data.get("segment_idx", 0)
     segment_type = data.get("segment_type", "speech")
-    client_duration = data.get("duration_sec")
+    duration_sec = data.get("duration_sec")
+    start_time = data.get("start_time") = data.get("start_time = data.get("start_time")")
     avg_vad_confidence = data.get("avg_vad_confidence", 0.0)
     normalized_rms = data.get("normalized_rms")
 
@@ -298,8 +299,6 @@ async def process_utterance(
         "------------"
     )
 
-    duration_sec = client_duration if client_duration is not None else state.get_duration_sec(sample_rate)
-
     payload = {
         "type": "final_subtitle" if is_final else "partial_subtitle",
         "utterance_id": utterance_id,
@@ -310,7 +309,8 @@ async def process_utterance(
         "normalized_rms": normalized_rms,
         "transcription_ja": meta["transcription"]["text_ja"],
         "translation_en": meta["translation"]["text_en"],
-        "duration_sec": round(duration_sec, 3),
+        "duration_sec": duration_sec,
+        "start_time": start_time,
         "transcription_confidence": meta["transcription"]["confidence"],
         "transcription_quality": meta["transcription"]["quality_label"],
         "translation_confidence": meta["translation"].get("confidence"),

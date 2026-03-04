@@ -1,8 +1,15 @@
-from typing import Any, Dict, List, Optional, Tuple, TypedDict
+import argparse
+from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
-from llama_cpp import Llama
+import numpy as np
+import numpy.typing as npt
+from llama_cpp import Llama, LogitsProcessorList
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
 
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\nsfw\Fiendish_LLAMA_3B.Q4_K_M.gguf"
+
 MODEL_SETTINGS = {
     "n_ctx": 2048,
     "n_gpu_layers": -1,
@@ -18,8 +25,9 @@ MODEL_SETTINGS = {
     "use_mmap": True,
     "verbose": False,
 }
+
 TRANSLATION_DEFAULTS = {
-    "max_tokens": 512,
+    "max_tokens": 768,
     "temperature": 0.5,
     "top_p": 0.95,
     "top_k": 25,
@@ -27,11 +35,10 @@ TRANSLATION_DEFAULTS = {
     "min_p": 0.0,
     "repeat_penalty": 1.12,
     "stop": ["\n\n", "<|eot_id|>", "<|end_of_text|>"],
-    # For confidence scores (uncomment if supported by your backend)
     # "logprobs": True,
     # "top_logprobs": 3
 }
-llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
+
 
 SYSTEM_PROMPT = """You are a professional Japanese to English subtitle translator.
 
@@ -51,34 +58,132 @@ No extra text, no numbering, no notes."""
 USER_PROMPT = """\
 Translate the following lines exactly in order. Output ONLY the English translations, one per line. No original text, no numbering, no extra commentary, no summary.
 {japanese_text}
+assistant:
 """
+
+
+class ReferenceExample(TypedDict):
+    ja: str
+    en: str
+
+
+DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = [
+    {
+        "ja": "やめて…そんなふうに見ないで。",
+        "en": "Stop... don't look at me like that.",
+    },
+    {
+        "ja": "お母さんお腹空いたお腹空いたお母さんなお腹空いたお腹すいたお母さんのおっぱい飲む",
+        "en": "Mommy I'm hungry I'm hungry mommy I'm hungry I'm so hungry I wanna drink mommy's boobs milk",
+    },
+]
+
+llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
+
+
+class BanFirstTokenProcessor:
+    """
+    Bans specified strings from being generated as the first token(s).
+    Uses llm.tokenizer.encode() to convert strings → token IDs.
+    """
+    def __init__(
+        self,
+        banned_strings: List[str],
+        tokenizer,                    # pass llm.tokenizer (the object)
+        ban_all_tokens: bool = False, # if True, bans every token in the strings
+    ):
+        self.tokenizer = tokenizer    # LlamaTokenizer instance
+        self.first_step = True
+        
+        banned_token_ids: Set[int] = set()
+        
+        for text in banned_strings:
+            if not text.strip():
+                continue
+                
+            # Correct call: use .encode()
+            tokens = self.tokenizer.encode(
+                text,
+                add_bos=False,       # no BOS needed for prefix banning
+                special=True
+            )
+            
+            if tokens:
+                if ban_all_tokens:
+                    banned_token_ids.update(tokens)
+                else:
+                    # Safer & usually sufficient: only ban possible *starting* tokens
+                    banned_token_ids.add(tokens[0])
+        
+        self.banned_token_ids = banned_token_ids
+        
+        # Debug print – very useful to see what you're actually banning
+        print("Banned first-token IDs:", sorted(self.banned_token_ids))
+        for s in banned_strings:
+            tks = self.tokenizer.encode(s, add_bos=False, special=True)
+            print(f"  '{s}' → tokens {tks}")
+
+    def __call__(
+        self,
+        input_ids: npt.NDArray[np.intc],
+        scores: npt.NDArray[np.single],
+    ) -> npt.NDArray[np.single]:
+        if self.first_step and self.banned_token_ids:
+            for tid in self.banned_token_ids:
+                if 0 <= tid < scores.shape[-1]:
+                    scores[tid] = -np.inf
+            self.first_step = False
+        return scores
+
+# The strings you most likely want to block
+banned_starts = [
+    "assistant",
+    # " assistant",  # ← very common (leading space)
+    "Assistant",
+    # " assistant:",
+    # "assistant:",
+]
+
+no_assistant_first = BanFirstTokenProcessor(
+    banned_strings=banned_starts,
+    tokenizer=llm.tokenizer(),  # ← pass your tokenizer here
+    ban_all_tokens=False,  # usually best — only block starting tokens
+)
 
 
 def _build_translation_messages(
     japanese_text: str,
     history: Optional[List[Dict[str, str]]] = None,
+    reference_examples: List[ReferenceExample] = DEFAULT_REFERENCE_EXAMPLES,
 ) -> List[Dict[str, str]]:
-    """Build full chat messages with optional previous user/assistant history
-    followed by current translation request (generic & reusable)."""
-    messages: List[Dict[str, str]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-    ]
+    messages: List[Dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    if reference_examples:
+        for example in reference_examples:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": USER_PROMPT.format(japanese_text=example["ja"].strip()),
+                }
+            )
+            messages.append({"role": "assistant", "content": example["en"].strip()})
+
     if history:
         messages.extend(history)
+
     messages.append(
         {
             "role": "user",
             "content": USER_PROMPT.format(japanese_text=japanese_text.strip()),
         }
     )
+
     return messages
 
 
 def _compute_translation_metrics(
     response: Any,
 ) -> Tuple[Optional[float], Optional[float], Optional[str]]:
-    """Generic logprob parser (used only when enable_scoring=True). Returns avg_logprob,
-    confidence [0-1], quality_label. Robust against missing keys."""
     try:
         choice = response["choices"][0]
         logprobs = choice.get("logprobs")
@@ -87,6 +192,7 @@ def _compute_translation_metrics(
         content = logprobs.get("content")
         if not isinstance(content, list) or not content:
             return None, None, None
+
         token_logprobs = [
             float(item["logprob"])
             for item in content
@@ -94,18 +200,21 @@ def _compute_translation_metrics(
         ]
         if not token_logprobs:
             return None, None, None
+
         avg_logprob = sum(token_logprobs) / len(token_logprobs)
         translation_logprob = round(avg_logprob, 4)
         confidence = max(0.0, min(1.0, (avg_logprob + 3.0) / 3.0))
         confidence = round(confidence, 4)
+
         if confidence >= 0.80:
             quality_label = "high"
         elif confidence >= 0.50:
             quality_label = "medium"
         else:
             quality_label = "low"
+
         return translation_logprob, confidence, quality_label
-    except (KeyError, TypeError, ZeroDivisionError):
+    except Exception:
         return None, None, None
 
 
@@ -120,37 +229,41 @@ def translate_japanese_to_english(
     ja_text: str,
     max_tokens: int = 768,
     enable_scoring: bool = False,
+    temperature: float = 0.5,
     history: Optional[List[Dict[str, str]]] = None,
 ) -> TranslationResult:
-    """Main entrypoint for live_subtitles_server_per_speech_llm.
-    Now returns TranslationResult to match opus-style translator."""
     if not ja_text or not ja_text.strip():
-        return {
-            "text": "",
-            "log_prob": None,
-            "confidence": None,
-            "quality": "N/A",
-        }
+        return {"text": "", "log_prob": None, "confidence": None, "quality": "N/A"}
 
-    # No sentence splitting — send the whole block as-is
     messages = _build_translation_messages(ja_text, history)
-    
+
     completion_params: Dict[str, Any] = {
         **TRANSLATION_DEFAULTS,
         "max_tokens": max_tokens,
+        "temperature": temperature,
         "stream": False,
     }
+
     if enable_scoring:
         completion_params["logprobs"] = True
         completion_params["top_logprobs"] = 1
-    response = llm.create_chat_completion(messages=messages, **completion_params)
+
+    response = llm.create_chat_completion(
+        messages=messages,
+        seed=3407,  # for reproducibility
+        logits_processor=LogitsProcessorList([no_assistant_first]),
+        **completion_params,
+    )
     en_text = response["choices"][0]["message"]["content"].strip()
+
     if enable_scoring:
         log_prob, confidence, quality = _compute_translation_metrics(response)
     else:
         log_prob = confidence = quality = None
+
     if quality is None:
         quality = "N/A"
+
     return {
         "text": en_text,
         "log_prob": log_prob,
@@ -160,12 +273,14 @@ def translate_japanese_to_english(
 
 
 if __name__ == "__main__":
-    from rich import box
-    from rich.console import Console
-    from rich.panel import Panel
-
-    console = Console()
-    japanese_sample = """
+    parser = argparse.ArgumentParser(
+        description="Japanese → English subtitle translator using llama.cpp"
+    )
+    parser.add_argument(
+        "text",
+        nargs="?",
+        type=str,
+        default="""
 恥ずかしい…見ないでください…
 んっ…そこ、弱いんです…
 はぁ…はぁ…気持ちいい…
@@ -173,77 +288,108 @@ if __name__ == "__main__":
 お願い…もっと激しくして…壊して…！
 あぁんっ！すごい…奥まで届いてる…♡
 出さないで…まだ中にいてて…
-""".strip()
-    enable_scoring = False
-    console.rule(
-        "Japanese → English Translation Demo (scoring ENABLED)", style="bold cyan"
+        """.strip(),
+        help="Japanese text to translate (multi-line ok)",
     )
-    console.print(
-        Panel(
-            japanese_sample,
-            title="[bold magenta]Japanese Input[/] (no history)",
-            border_style="magenta",
-            padding=(1, 2),
-            expand=False,
-            box=box.ROUNDED,
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=768,
+        help="Maximum number of tokens to generate",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.5,
+        help="Sampling temperature",
+    )
+    parser.add_argument(
+        "--scoring",
+        "--enable-scoring",
+        action="store_true",
+        default=False,
+        help="Enable logprobs and confidence scoring (slower)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=MODEL_PATH,
+        help="Path to the GGUF model file",
+    )
+    parser.add_argument(
+        "--no-rich",
+        action="store_true",
+        default=False,
+        help="Disable rich console formatting (plain output)",
+    )
+
+    args = parser.parse_args()
+
+    # -------------------------------------------------------------------------
+    # You can override MODEL_PATH here if you want to support --model
+    # MODEL_PATH = args.model   # ← uncomment if you want to use CLI model path
+    # llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)  # reload if needed
+    # -------------------------------------------------------------------------
+
+    if args.no_rich:
+        # Very simple plain output mode
+        result = translate_japanese_to_english(
+            ja_text=args.text,
+            max_tokens=args.max_tokens,
+            enable_scoring=args.scoring,
+            temperature=args.temperature,
+            history=None,
         )
-    )
-    console.print(f"[dim]Translating with enable_scoring={enable_scoring} …[/]")
-    result = translate_japanese_to_english(
-        ja_text=japanese_sample,
-        max_tokens=768,
-        enable_scoring=enable_scoring,
-        history=None,
-    )
-    console.print(
-        Panel(
-            f"{result['text']}\n\n[dim]Metrics:[/] logprob = {result['log_prob']} confidence = {result['confidence']} quality = {result['quality']}",
-            title="[bold green]Translation (scoring enabled)[/]",
-            border_style="green",
-            padding=(1, 2),
-            expand=False,
-            box=box.DOUBLE,
+        print("Japanese:")
+        print(args.text)
+        print("\nEnglish:")
+        print(result["text"])
+        if args.scoring:
+            print(f"\nlogprob   : {result['log_prob']}")
+            print(f"confidence : {result['confidence']}")
+            print(f"quality    : {result['quality']}")
+    else:
+        console = Console()
+        console.rule("Japanese → English Translation", style="bold cyan")
+
+        console.print(
+            Panel(
+                args.text,
+                title="[bold magenta]Japanese Input[/]",
+                border_style="magenta",
+                padding=(1, 2),
+                expand=False,
+                box=box.ROUNDED,
+            )
         )
-    )
-    history_example: List[Dict[str, str]] = [
-        {"role": "user", "content": "やめて…そんなふうに見ないで。"},
-        {
-            "role": "assistant",
-            "content": "Don't look at me like that... you're making me so wet already.",
-        },
-    ]
-    console.print("\n" * 2)
-    console.print(
-        Panel(
-            f"{japanese_sample}\n\n[dim]Previous context:[/]\n{history_example}",
-            title="[bold magenta]Japanese Input + dialogue history[/]",
-            border_style="magenta",
-            padding=(1, 2),
-            expand=False,
-            box=box.ROUNDED,
+
+        console.print(
+            f"[dim]Translating with temperature={args.temperature}  "
+            f"max_tokens={args.max_tokens}  scoring={args.scoring}[/]"
         )
-    )
-    console.print(
-        f"[dim]Translating with history + enable_scoring={enable_scoring} …[/]"
-    )
-    result2 = translate_japanese_to_english(
-        ja_text=japanese_sample,
-        max_tokens=768,
-        enable_scoring=enable_scoring,
-        history=history_example,
-    )
-    console.print(
-        Panel(
-            f"{result2['text']}\n\n[dim]Metrics:[/] logprob = {result2['log_prob']} confidence = {result2['confidence']} quality = {result2['quality']}",
-            title="[bold green]Translation (with history + scoring)[/]",
-            border_style="green",
-            padding=(1, 2),
-            expand=False,
-            box=box.DOUBLE,
+
+        result = translate_japanese_to_english(
+            ja_text=args.text,
+            max_tokens=args.max_tokens,
+            enable_scoring=args.scoring,
+            temperature=args.temperature,
+            history=None,
         )
-    )
-    console.print(
-        f"[dim]Length:[/] Japanese: {len(japanese_sample)} chars → English: {len(result2['text'])} chars",
-        style="grey50",
-    )
-    console.rule(style="cyan")
+
+        metrics = ""
+        if args.scoring:
+            metrics = (
+                f"\n\n[dim]Metrics:[/] logprob = {result['log_prob']}   "
+                f"confidence = {result['confidence']}   quality = {result['quality']}"
+            )
+
+        console.print(
+            Panel(
+                result["text"] + metrics,
+                title="[bold green]English Translation[/]",
+                border_style="green",
+                padding=(1, 2),
+                expand=False,
+                box=box.DOUBLE,
+            )
+        )

@@ -8,7 +8,7 @@ import scipy.io.wavfile as wavfile
 from faster_whisper import WhisperModel
 from faster_whisper.transcribe import Segment
 from logger import logger
-from rich import Console
+from rich.console import Console
 
 console = Console()
 

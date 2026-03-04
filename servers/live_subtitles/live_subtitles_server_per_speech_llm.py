@@ -118,7 +118,6 @@ def transcribe_and_translate(
     # Translation LLM settings
     translation_result = translate_japanese_to_english(
         ja_text,
-        max_tokens=512,
         enable_scoring=ENABLE_TRANSLATION_SCORING,
         history=history,
     )
@@ -311,13 +310,15 @@ async def process_utterance(
     )
 
     segment_idx = data.get("segment_idx", 0)
+    chunk_index = data.get("chunk_index", 0)
+    is_final = data.get("is_final", 0)
     segment_type = data.get("segment_type", "speech")
     avg_vad_confidence = data.get("avg_vad_confidence", 0.0)
     rms = data.get("rms")
-    client_duration = data.get("duration_sec")
+    duration_sec = data.get("duration_sec")
+    start_time = data.get("start_time")
 
     log_prefix = "FINAL" if is_final else "PARTIAL"
-    duration_sec = client_duration if client_duration is not None else state.get_duration_sec(sample_rate)
 
 
     logger.info(
@@ -338,14 +339,17 @@ async def process_utterance(
     payload = {
         "type": "final_subtitle" if is_final else "partial_subtitle",
         "utterance_id": utterance_id,
+        "is_final": is_final,
         "segment_idx": segment_idx,
         "segment_num": segment_num,
+        "chunk_index": chunk_index,
         "segment_type": segment_type,
         "avg_vad_confidence": avg_vad_confidence,
         "rms": rms,
         "transcription_ja": meta["transcription"]["text_ja"],
         "translation_en": meta["translation"]["text_en"],
-        "duration_sec": round(duration_sec, 3),
+        "duration_sec": duration_sec,
+        "start_time": start_time,
         "transcription_confidence": meta["transcription"]["confidence"],
         "transcription_quality": meta["transcription"]["quality_label"],
         "translation_confidence": meta["translation"].get("confidence"),
