@@ -171,7 +171,8 @@ def extract_and_display_buffered_segments(
                 f"{json.dumps([{'num': seg['num'], 'duration': seg['duration'], 'prob': seg['prob']} for seg in buffer_segments])}"
             )
             display_segments(buffer_segments, done=not is_partial)
-    except BufferError:
+    except (BufferError, IndexError) as e:
+        log.warning(f"Exception in extract_and_display_buffered_segments: {e}")
         return []
 
     return buffer_segments
