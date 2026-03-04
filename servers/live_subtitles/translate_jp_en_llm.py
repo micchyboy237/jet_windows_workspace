@@ -76,6 +76,10 @@ DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = [
         "ja": "お母さんお腹空いたお腹空いたお母さんなお腹空いたお腹すいたお母さんのおっぱい飲む",
         "en": "Mommy I'm hungry I'm hungry mommy I'm hungry I'm so hungry I wanna drink mommy's boobs milk",
     },
+    {
+        "ja": "うふうなことをしちゃったんですそうわかったおばさんそこまでおばさんのこと好きなんだったらおばさんしてあげるからその代わりお父さんと予習には内緒よ",
+        "en": "Hehe, I ended up doing something like that… I get it now. If you like auntie that much, then auntie will do it with you. But in return, you have to keep it a secret from daddy and your prep/study sessions, okay?",
+    },
 ]
 
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
