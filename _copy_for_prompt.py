@@ -85,7 +85,7 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_opus.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\instructions\standard.txt",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_pipeline.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     r"",
 ]
@@ -104,7 +104,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update the system and user prompts given the standard.txt as inspiration.
+Browse HF translation model usage examples for Mitsua/elan-mt-bt-ja-en. Then update translate_jp_en_pipeline with the same TranslationResult and write the translate_japanese_to_english with similar input args as translate_jp_en_llm. Include usage example.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
