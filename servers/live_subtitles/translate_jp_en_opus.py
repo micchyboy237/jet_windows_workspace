@@ -8,13 +8,12 @@ from typing import List, Optional, TypedDict
 
 from transformers import AutoTokenizer
 from translator_types import Translator
-
 from utils import split_sentences_ja
-
 
 # ────────────────────────────────────────────────
 # Types
 # ────────────────────────────────────────────────
+
 
 class TranslationResult(TypedDict):
     text: str
@@ -43,6 +42,7 @@ translator = Translator(
 # Confidence Helpers
 # ────────────────────────────────────────────────
 
+
 def translation_quality_label(log_prob: Optional[float]) -> str:
     """
     Quality label for translation confidence based on cumulative log-probability.
@@ -63,7 +63,7 @@ def translation_confidence_score(
     log_prob: Optional[float],
     num_tokens: Optional[int] = None,
     min_tokens: int = 1,
-    fallback: float = 0.0
+    fallback: float = 0.0,
 ) -> float:
     """
     Convert cumulative translation log-prob to normalized confidence score [0.0, 1.0].
@@ -82,10 +82,11 @@ def translation_confidence_score(
 # Main Translation Function
 # ────────────────────────────────────────────────
 
+
 def translate_japanese_to_english(
     text_ja: str,
     beam_size: int = 4,
-    max_decoding_length: int = 512,
+    max_tokens: int = 768,
     min_tokens_for_confidence: int = 3,
     enable_scoring: bool = False,
 ) -> TranslationResult:
@@ -113,7 +114,8 @@ def translate_japanese_to_english(
 
     batch_src_tokens = [
         tokenizer.convert_ids_to_tokens(tokenizer.encode(sent.strip()))
-        for sent in sentences_ja if sent.strip()
+        for sent in sentences_ja
+        if sent.strip()
     ]
 
     if not batch_src_tokens:
@@ -128,7 +130,7 @@ def translate_japanese_to_english(
         batch_src_tokens,
         return_scores=enable_scoring,
         beam_size=beam_size,
-        max_decoding_length=max_decoding_length,
+        max_decoding_length=max_tokens,
     )
 
     en_sentences: List[str] = []
@@ -142,8 +144,7 @@ def translate_japanese_to_english(
         hyp = result.hypotheses[0]
 
         en_sent = tokenizer.decode(
-            tokenizer.convert_tokens_to_ids(hyp),
-            skip_special_tokens=True
+            tokenizer.convert_tokens_to_ids(hyp), skip_special_tokens=True
         ).strip()
 
         if en_sent:
@@ -162,9 +163,7 @@ def translate_japanese_to_english(
     en_text = "\n".join(en_sentences).strip()
 
     quality_label = (
-        translation_quality_label(translation_logprob)
-        if enable_scoring
-        else "N/A"
+        translation_quality_label(translation_logprob) if enable_scoring else "N/A"
     )
 
     return {
@@ -180,26 +179,44 @@ def translate_japanese_to_english(
 # ────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    from rich.pretty import pprint
+    import argparse
+
     from rich.console import Console
+    from rich.pretty import pprint
+
+    default_jp_text = """
+恥ずかしい…見ないでください…
+んっ…そこ、弱いんです…
+はぁ…はぁ…気持ちいい…
+もう…ダメかも…頭おかしくなりそう…
+お願い…もっと激しくして…壊して…！
+あぁんっ！すごい…奥まで届いてる…♡
+出さないで…まだ中にいてて…
+"""
+
+    parser = argparse.ArgumentParser(
+        description="Japanese to English translation demo."
+    )
+    parser.add_argument(
+        "jp_text",
+        nargs="?",
+        default=default_jp_text,
+        help="Japanese text to translate (optional, defaults to sample text)",
+    )
+    args = parser.parse_args()
 
     console = Console()
 
-    examples = [
-        "本商品は30日経過後の返品・交換はお受けできませんのでご了承ください。",
-    ]
+    jp_text = args.jp_text
 
-    for i, jp_text in enumerate(examples, 1):
-        console.rule(f"Example {i}")
+    console.print("[dim]Japanese:[/dim]")
+    console.print(jp_text, style="italic cyan")
+    console.print()
 
-        console.print("[dim]Japanese:[/dim]")
-        console.print(jp_text, style="italic cyan")
-        console.print()
+    console.print("[bold green]English:[/bold green]")
+    result = translate_japanese_to_english(
+        jp_text,
+        enable_scoring=True,
+    )
 
-        console.print("[bold green]English:[/bold green]")
-        result = translate_japanese_to_english(
-            jp_text,
-            enable_scoring=True,
-        )
-
-        pprint(result, expand_all=True)
+    pprint(result, expand_all=True)

@@ -1,12 +1,8 @@
-import argparse
 from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
 import numpy as np
 import numpy.typing as npt
 from llama_cpp import Llama, LogitsProcessorList
-from rich import box
-from rich.console import Console
-from rich.panel import Panel
 
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\nsfw\Fiendish_LLAMA_3B.Q4_K_M.gguf"
 
@@ -40,23 +36,11 @@ TRANSLATION_DEFAULTS = {
 }
 
 
-SYSTEM_PROMPT = """You are a professional Japanese to English subtitle translator.
-
-Translate into fluent, natural English while preserving:
-- Original tone, emotional intensity, and character voice
-- Explicit sexual language, erotic terminology, and vulgar expressions exactly as intended
-- Moans, breath sounds, broken phrases, and stylistic punctuation
-
-Do NOT censor, sanitize, soften, euphemize, summarize, explain, or add commentary.
-Do NOT replace explicit terms with milder alternatives.
-Maintain the rawness and directness of the original dialogue.
-
-Output ONLY the translated English lines in the same order as provided.
-No extra text, no numbering, no notes."""
+SYSTEM_PROMPT = """You are an expert Japanese to English subtitle translator."""
 
 
 USER_PROMPT = """\
-Translate the following lines exactly in order. Output ONLY the English translations, one per line. No original text, no numbering, no extra commentary, no summary.
+Translate the following lines exactly in order. Output ONLY the English translation. No original text, no numbering, no extra commentary, no summary.
 {japanese_text}
 assistant:
 """
@@ -235,6 +219,7 @@ def translate_japanese_to_english(
     enable_scoring: bool = False,
     temperature: float = 0.5,
     history: Optional[List[Dict[str, str]]] = None,
+    **kwargs,
 ) -> TranslationResult:
     if not ja_text or not ja_text.strip():
         return {"text": "", "log_prob": None, "confidence": None, "quality": "N/A"}
@@ -277,6 +262,13 @@ def translate_japanese_to_english(
 
 
 if __name__ == "__main__":
+    import argparse
+    from rich import box
+    from rich.console import Console
+    from rich.panel import Panel
+
+    console = Console()
+
     parser = argparse.ArgumentParser(
         description="Japanese → English subtitle translator using llama.cpp"
     )
@@ -353,7 +345,6 @@ if __name__ == "__main__":
             print(f"confidence : {result['confidence']}")
             print(f"quality    : {result['quality']}")
     else:
-        console = Console()
         console.rule("Japanese → English Translation", style="bold cyan")
 
         console.print(

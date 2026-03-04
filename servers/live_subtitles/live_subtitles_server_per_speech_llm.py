@@ -111,7 +111,7 @@ def transcribe_and_translate(
     # Translation OPUS settings
     # translation_result = translate_japanese_to_english(
     #     ja_text,
-    #     max_decoding_length=512,
+    #     max_tokens=768,
     #     enable_scoring=ENABLE_TRANSLATION_SCORING,
     # )
 
