@@ -147,40 +147,32 @@ def extract_and_display_buffered_segments(
     is_partial: bool = False,
     chunk_duration: int = CHUNK_DURATION_SEC,
 ) -> list[dict]:  # ← better return type hint
-    if len(_audio_buffer) < 800:  # < 25 ms @ 16 kHz → almost certainly useless
-        log.debug(
-            "[vad-skip] Buffer too short (%d bytes) → skipping VAD", len(_audio_buffer)
+    try:
+        _audio_np = np.frombuffer(_audio_buffer, dtype=np.int16).copy()
+
+        buffer_segments, all_speech_probs = extract_speech_timestamps(
+            _audio_np,
+            min_silence_duration_sec=config.min_silence_duration_sec,
+            min_speech_duration_sec=config.min_speech_duration_sec,
+            max_speech_duration_sec=chunk_duration,
+            return_seconds=True,
+            time_resolution=3,
+            with_scores=True,
+            normalize_loudness=False,
+            include_non_speech=True,
+            double_check=True,
+            apply_energy_VAD=True,
         )
+
+        if len(buffer_segments):
+            prefix = "Partial" if is_partial else "Complete"
+            log.purple(
+                f"{prefix} segments ({len(buffer_segments)}):\n"
+                f"{json.dumps([{'num': seg['num'], 'duration': seg['duration'], 'prob': seg['prob']} for seg in buffer_segments])}"
+            )
+            display_segments(buffer_segments, done=not is_partial)
+    except BufferError:
         return []
-
-    _audio_np = np.frombuffer(_audio_buffer, dtype=np.int16).copy()
-
-    # Optional: also skip if energy is extremely low
-    if np.max(np.abs(_audio_np)) < 5:  # almost silent
-        log.debug("[vad-skip] Near-silent buffer → skipping VAD")
-        return []
-
-    buffer_segments, all_speech_probs = extract_speech_timestamps(
-        _audio_np,
-        min_silence_duration_sec=config.min_silence_duration_sec,
-        min_speech_duration_sec=config.min_speech_duration_sec,
-        max_speech_duration_sec=chunk_duration,
-        return_seconds=True,
-        time_resolution=3,
-        with_scores=True,
-        normalize_loudness=False,
-        include_non_speech=True,
-        double_check=True,
-        apply_energy_VAD=True,
-    )
-
-    if len(buffer_segments):
-        prefix = "Partial" if is_partial else "Complete"
-        log.purple(
-            f"{prefix} segments ({len(buffer_segments)}):\n"
-            f"{json.dumps([{'num': seg['num'], 'duration': seg['duration'], 'prob': seg['prob']} for seg in buffer_segments])}"
-        )
-        display_segments(buffer_segments, done=not is_partial)
 
     return buffer_segments
 
@@ -656,9 +648,28 @@ async def stream_microphone(ws) -> None:
 
                                 stats = current_segment.get_stats()
 
+                                # ─── Send only new data (same logic as partial) ───
+                                small_overlap_bytes = int(
+                                    SMALL_OVERLAP_SEC * config.sample_rate * 2
+                                )
+                                if last_sent_byte_length == 0:
+                                    to_send = current_segment.buffer
+                                else:
+                                    start_idx = last_sent_byte_length
+                                    if (
+                                        len(current_segment.buffer)
+                                        - last_sent_byte_length
+                                        < small_overlap_bytes * 2
+                                    ):
+                                        start_idx = max(
+                                            0,
+                                            last_sent_byte_length - small_overlap_bytes,
+                                        )
+                                    to_send = current_segment.buffer[start_idx:]
+
                                 await send_audio_chunk(
                                     send_queue,
-                                    current_segment.buffer,
+                                    to_send,
                                     # utterance_rms,
                                     current_segment.start_time,
                                     duration_sec=stats["duration_sec"],
