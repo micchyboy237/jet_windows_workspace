@@ -60,8 +60,8 @@ CHUNK_DURATION_SEC = 6.0
 CHUNK_OVERLAP_SEC = 0.0
 MIN_SILENCE_DURATION_SEC = 0.9
 MIN_SPEECH_DURATION_SEC = 0.25
-MAX_SPEECH_DURATION_SEC = 60.0
-MAX_SPEECH_OVERLAP_SEC = 10.0
+MAX_SPEECH_DURATION_SEC = 30.0
+# MAX_SPEECH_OVERLAP_SEC = 10.0
 CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
 
 SMALL_OVERLAP_SEC = 1.2
@@ -86,7 +86,7 @@ class Config:
     min_silence_duration_sec: float = MIN_SILENCE_DURATION_SEC  # JP clause pauses
     min_speech_duration_sec: float = MIN_SPEECH_DURATION_SEC
     max_speech_duration_sec: float = MAX_SPEECH_DURATION_SEC
-    overlap_samples: int = int(MAX_SPEECH_OVERLAP_SEC * SAMPLE_RATE)
+    # overlap_samples: int = int(MAX_SPEECH_OVERLAP_SEC * SAMPLE_RATE)
     vad_start_threshold: float = 0.5  # hysteresis start
     vad_end_threshold: float = 0.25  # hysteresis end
     pre_roll_seconds: float = 0.35  # capture mora onsets
