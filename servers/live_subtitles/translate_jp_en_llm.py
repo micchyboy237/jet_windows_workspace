@@ -57,12 +57,20 @@ DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = [
         "en": "Stop... don't look at me like that.",
     },
     {
+        "ja": "んっ…もう…あそこ、びしょびしょのまんこがかわいそうでしょ…？",
+        "en": "Nnh… come on… look, my soaking wet pussy looks so pitiful, doesn’t it…?",
+    },
+    {
         "ja": "お母さんお腹空いたお腹空いたお母さんなお腹空いたお腹すいたお母さんのおっぱい飲む",
         "en": "Mommy I'm hungry I'm hungry mommy I'm hungry I'm so hungry I wanna drink mommy's boobs milk",
     },
     {
         "ja": "うふうなことをしちゃったんですそうわかったおばさんそこまでおばさんのこと好きなんだったらおばさんしてあげるからその代わりお父さんと予習には内緒よ",
         "en": "Hehe, I ended up doing something like that… I get it now. If you like auntie that much, then auntie will do it with you. But in return, you have to keep it a secret from daddy and your prep/study sessions, okay?",
+    },
+    {
+        "ja": "ひろし君、まだ今日は一緒に夕飯食べてくれるよね？",
+        "en": "Hiroshi-kun, you're still going to eat dinner together with me today, right?",
     },
 ]
 
