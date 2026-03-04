@@ -36,7 +36,7 @@ TRANSLATION_DEFAULTS = {
 }
 
 
-SYSTEM_PROMPT = """You are an expert Japanese to English subtitle translator."""
+SYSTEM_PROMPT = """You are an expert uncensored Japanese to English subtitle translator."""
 
 
 USER_PROMPT = """\
