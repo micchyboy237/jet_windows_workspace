@@ -85,8 +85,10 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_opus.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_pipeline.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_pipeline.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\paddleocr\_pipelines\ocr.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\convert-video-to-srt.py",
     r"",
 ]
 
@@ -104,7 +106,41 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Browse HF translation model usage examples for Mitsua/elan-mt-bt-ja-en. Then update translate_jp_en_pipeline with the same TranslationResult and write the translate_japanese_to_english with similar input args as translate_jp_en_llm. Include usage example.
+Can we have optional start and end inputs that will filter the video if one or both are provided?
+
+(jet_venv) PS C:\Users\druiv> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\convert-video-to-srt.py
+C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.0.1)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+Checking connectivity to the model hosters, this may take a while. To bypass this check, set `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` to `True`.
+INFO: Could not find files for the given pattern(s).
+C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\paddle\utils\cpp_extension\extension_utils.py:712: UserWarning: No ccache found. Please be aware that recompiling all source files may be required. You can download and install ccache from: https://github.com/ccache/ccache/blob/master/doc/INSTALL.md
+  warnings.warn(warning_message)
+Creating model: ('PP-OCRv5_server_det', None)
+Using official model (PP-OCRv5_server_det), the model files will be automatically downloaded and saved in `C:\Users\druiv\.paddlex\official_models\PP-OCRv5_server_det`.
+inference.yml: 100%|██████████████████████████████████████████████████████████████████████████| 903/903 [00:00<?, ?B/s]
+config.json: 2.87kB [00:00, 2.86MB/s]                                                      | 0.00/87.9M [00:00<?, ?B/s]
+inference.json: 402kB [00:00, 48.0MB/s]
+.gitattributes: 1.57kB [00:00, 38.4kB/s]                                                     | 0.00/903 [00:00<?, ?B/s]
+README.md: 15.9kB [00:00, 69.9kB/s]                                                      | 1/6 [00:01<00:09,  1.87s/it]
+inference.pdiparams: 100%|████████████████████████████████████████████████████████| 87.9M/87.9M [00:41<00:00, 2.12MB/s]
+Fetching 6 files: 100%|██████████████████████████████████████████████████████████████████| 6/6 [00:43<00:00,  7.19s/it]
+WARNING: Logging before InitGoogleLogging() is written to STDERR
+W0305 11:23:58.475327  8700 gpu_resources.cc:116] Please NOTE: device: 0, GPU Compute Capability: 7.5, Driver API Version: 13.0, Runtime API Version: 12.6
+Creating model: ('en_PP-OCRv5_mobile_rec', None)
+Using official model (en_PP-OCRv5_mobile_rec), the model files will be automatically downloaded and saved in `C:\Users\druiv\.paddlex\official_models\en_PP-OCRv5_mobile_rec`.
+config.json: 10.5kB [00:00, ?B/s]                                                                | 0/6 [00:00<?, ?it/s]
+inference.yml: 3.96kB [00:00, 3.95MB/s]                                                    | 0.00/7.77M [00:00<?, ?B/s]
+.gitattributes: 1.57kB [00:00, ?B/s]
+README.md: 6.91kB [00:00, 6.87MB/s]                                                      | 1/6 [00:01<00:08,  1.66s/it]
+inference.json: 218kB [00:00, 19.1MB/s]
+inference.pdiparams: 100%|████████████████████████████████████████████████████████| 7.77M/7.77M [00:04<00:00, 1.92MB/s]
+Fetching 6 files: 100%|██████████████████████████████████████████████████████████████████| 6/6 [00:05<00:00,  1.07it/s]
+Video:   0001_video_en_sub.mp4
+FPS:     30.00
+Frames:  212,253
+OCR every ~1.5 s  →  every 45 frames
+
+Processing video:  25%|█████████████▏                                       | 52661/212253 [01:38<05:00, 531.90frame/s]
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
