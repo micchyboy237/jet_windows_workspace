@@ -106,7 +106,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze what caused this then show unified diff for fix.
+Analyze carefully what caused the wrong segment results
 
 Creating model: ('PP-OCRv5_server_det', None)
 Model files already exist. Using cached files. To redownload, please delete the directory manually: `C:\Users\druiv\.paddlex\official_models\PP-OCRv5_server_det`.

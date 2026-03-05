@@ -122,10 +122,8 @@ ocr = PaddleOCR(
     use_doc_orientation_classify=False,
     use_doc_unwarping=False,
     use_textline_orientation=False,
-    # Optional tuning examples (uncomment if needed):
-    # ocr_version="PP-OCRv5",
-    # det_db_box_thresh=0.4,
-    # det_db_thresh=0.3,
+    # Use SERVER model for more accurate English subtitle recognition
+    text_recognition_model_name="PP-OCRv5_server_rec",
 )
 
 # ────────────────────────────────────────────────
@@ -197,10 +195,13 @@ while cap.isOpened() and frame_num < end_frame:
     if (frame_num - start_frame) % ocr_interval_frames != 0:
         continue
 
-    # Crop bottom part (subtitles usually appear here)
+    # Crop only the bottom 12–18% of the frame (tighter subtitle region)
     h, w = frame.shape[:2]
-    crop_top = int(h * args.crop_bottom)
+    crop_top = int(h * 0.82)  # bottom 18%
     crop = frame[crop_top:, :, :]
+    # Optional preprocessing: grayscale + upscale
+    crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    crop = cv2.resize(crop, (crop.shape[1]*2, crop.shape[0]*2), interpolation=cv2.INTER_LINEAR)
 
     result = ocr.predict(crop)
 
