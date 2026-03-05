@@ -87,9 +87,9 @@ class Config:
     min_speech_duration_sec: float = MIN_SPEECH_DURATION_SEC
     max_speech_duration_sec: float = MAX_SPEECH_DURATION_SEC
     # overlap_samples: int = int(MAX_SPEECH_OVERLAP_SEC * SAMPLE_RATE)
-    vad_start_threshold: float = 0.75  # hysteresis start
-    vad_end_threshold: float = 0.35  # hysteresis end
-    pre_roll_seconds: float = 0.35  # capture mora onsets
+    vad_start_threshold: float = 0.60  # hysteresis start
+    vad_end_threshold: float = 0.30  # hysteresis end
+    pre_roll_seconds: float = 0.5  # capture mora onsets
     vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
