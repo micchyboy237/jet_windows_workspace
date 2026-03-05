@@ -6,6 +6,8 @@ Usage Examples:
     python extract-subtitles.py video.mp4 -o subs.srt --method ocr --interval 0.25 --crop-ratio 0
     # Extract specific soft subtitle track
     python extract-subtitles.py video.mkv -o subs.srt --method soft --subtitle-index 1
+    # Process only from 2:30 to 10:00
+    python extract-subtitles.py video.mp4 -o part.srt --start 150 --end 600
     # OCR with French language
     python extract-subtitles.py video.mp4 -o subs.srt --method ocr --lang fr
     # Show help
@@ -58,7 +60,11 @@ def has_subtitle_tracks(video_path: Union[str, Path]) -> bool:
 
 
 def extract_soft_subtitles(
-    video_path: Union[str, Path], output_srt: Union[str, Path], subtitle_index: int = 0
+    video_path: Union[str, Path],
+    output_srt: Union[str, Path],
+    subtitle_index: int = 0,
+    start: Optional[float] = None,
+    end: Optional[float] = None,
 ) -> None:
     video_path = str(Path(video_path).resolve())
     output_srt = str(Path(output_srt).resolve())
@@ -72,6 +78,17 @@ def extract_soft_subtitles(
         output_srt,
     ]
     try:
+        if start is not None:
+            cmd.extend(["-ss", str(start)])
+        if end is not None:
+            if start is not None:
+                cmd.extend(["-t", str(end - start)])
+            else:
+                cmd.extend(["-to", str(end)])
+    except NameError:
+        pass  # start/end not passed → full video
+
+    try:
         subprocess.check_call(cmd)
     except FileNotFoundError:
         raise RuntimeError("ffmpeg not found. Please install FFmpeg.")
@@ -79,15 +96,36 @@ def extract_soft_subtitles(
         raise RuntimeError(f"Failed to extract soft subtitles: {e}")
 
 
-def get_texts(result) -> str:
-    if not result or not result[0]:
+def get_texts(ocr_result) -> str:
+    if not ocr_result:
         return ""
-    # Filter high-confidence and sort by average y-coordinate
-    lines = [line for line in result[0] if line[1][1] > 0.5]
-    if not lines:
+
+    # Newer PaddleOCR/PaddleX format: list of one result object/dict
+    if isinstance(ocr_result, list) and len(ocr_result) > 0:
+        res = ocr_result[0]
+    else:
+        res = ocr_result
+
+    # Expect dict-like with 'rec_texts', 'rec_scores', 'rec_polys' / 'rec_boxes'
+    if not isinstance(res, dict):
         return ""
-    lines.sort(key=lambda x: sum(p[1] for p in x[0]) / 4)
-    return "\n".join(line[1][0] for line in lines)
+
+    rec_texts = res.get("rec_texts", [])
+    rec_scores = res.get("rec_scores", [])
+    rec_polys = res.get("rec_polys", res.get("rec_boxes", []))
+
+    if not rec_texts:
+        return ""
+
+    # Filter & sort by vertical position (average y of polygon/box)
+    filtered = []
+    for txt, score, poly in zip(rec_texts, rec_scores, rec_polys):
+        if score > 0.5:
+            avg_y = sum(p[1] for p in poly) / len(poly)
+            filtered.append((txt, avg_y))
+
+    filtered.sort(key=lambda x: x[1])
+    return "\n".join(txt for txt, _ in filtered)
 
 
 def extract_with_ocr(
@@ -96,6 +134,8 @@ def extract_with_ocr(
     interval: float = 0.5,
     crop_ratio: float = 0.33,
     lang: str = "en",
+    start: Optional[float] = None,
+    end: Optional[float] = None,
 ) -> None:
     video_path = Path(video_path).resolve()
     output_srt = Path(output_srt).resolve()
@@ -105,6 +145,18 @@ def extract_with_ocr(
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration_sec = total_frames / fps
+
+    effective_start = max(0.0, start) if start is not None else 0.0
+    effective_end   = min(duration_sec, end) if end is not None else duration_sec
+
+    if effective_start >= effective_end:
+        raise ValueError(
+            f"Invalid time range: start ({effective_start}s) >= end ({effective_end}s) "
+            f"(video duration: {duration_sec:.1f}s)"
+        )
+
+    effective_duration = effective_end - effective_start
+
     ocr = PaddleOCR(
         lang=lang,
         device="gpu",
@@ -112,16 +164,14 @@ def extract_with_ocr(
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
     )
+
     previous_text = ""
-    start_time: Optional[float] = None
+    start_time: Optional[float] = None  # type: ignore
     subtitle_index = 1
-    steps = int(duration_sec / interval) + 1
-    with (
-        open(output_srt, "w", encoding="utf-8") as f,
-        tqdm(total=steps, desc="OCR processing") as pbar,
-    ):
-        t = 0.0
-        while t < duration_sec:
+    steps = int(effective_duration / interval) + 1
+    with open(output_srt, "w", encoding="utf-8") as f, tqdm(total=steps, desc="OCR processing") as pbar:
+        t = effective_start
+        while t < effective_end:
             frame_idx = min(total_frames - 1, int(t * fps))
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
@@ -131,12 +181,15 @@ def extract_with_ocr(
             if crop_ratio > 0:
                 h = img.shape[0]
                 img = img[int(h * (1 - crop_ratio)) :, :]
+
             result = ocr.predict(img)
             current_text = get_texts(result)
+
             if current_text != previous_text:
                 if previous_text and start_time is not None:
+                    end_display = t
                     f.write(
-                        f"{subtitle_index}\n{seconds_to_srt_time(start_time)} --> {seconds_to_srt_time(t)}\n{previous_text}\n\n"
+                        f"{subtitle_index}\n{seconds_to_srt_time(start_time)} --> {seconds_to_srt_time(end_display)}\n{previous_text}\n\n"
                     )
                     subtitle_index += 1
                 start_time = t if current_text else None
@@ -145,7 +198,7 @@ def extract_with_ocr(
             pbar.update(1)
         if previous_text and start_time is not None:
             f.write(
-                f"{subtitle_index}\n{seconds_to_srt_time(start_time)} --> {seconds_to_srt_time(duration_sec)}\n{previous_text}\n\n"
+                f"{subtitle_index}\n{seconds_to_srt_time(start_time)} --> {seconds_to_srt_time(effective_end)}\n{previous_text}\n\n"
             )
     cap.release()
 
@@ -156,15 +209,22 @@ def extract_subtitles(
     method: str = "auto",
     interval: float = 0.5,
     crop_ratio: float = 0.33,
+    start: Optional[float] = None,
+    end: Optional[float] = None,
     lang: str = "en",
     subtitle_index: int = 0,
 ) -> None:
     if method == "auto":
         method = "soft" if has_subtitle_tracks(video_path) else "ocr"
     if method == "soft":
-        extract_soft_subtitles(video_path, output_srt, subtitle_index)
+        extract_soft_subtitles(
+            video_path, output_srt, subtitle_index,
+            start=start, end=end
+        )  # type: ignore  # mypy may complain about extra kwargs
     elif method == "ocr":
-        extract_with_ocr(video_path, output_srt, interval, crop_ratio, lang)
+        extract_with_ocr(
+            video_path, output_srt, interval, crop_ratio, lang, start, end
+        )
     else:
         raise ValueError(f"Invalid method: {method}")
 
@@ -202,7 +262,22 @@ if __name__ == "__main__":
         help="Bottom crop ratio for OCR focus (0 to disable, default: 0.33)",
     )
     parser.add_argument(
-        "--lang", type=str, default="en", help="Language code for OCR (default: en)"
+        "--lang",
+        type=str,
+        default="en",
+        help="Language code for OCR (default: en)"
+    )
+    parser.add_argument(
+        "--start",
+        type=float,
+        default=None,
+        help="Start time in seconds (optional, processes from beginning if omitted)"
+    )
+    parser.add_argument(
+        "--end",
+        type=float,
+        default=None,
+        help="End time in seconds (optional, processes to end if omitted)"
     )
     parser.add_argument(
         "--subtitle-index",
@@ -218,6 +293,8 @@ if __name__ == "__main__":
             args.method,
             interval=args.interval,
             crop_ratio=args.crop_ratio,
+            start=args.start,
+            end=args.end,
             lang=args.lang,
             subtitle_index=args.subtitle_index,
         )
