@@ -91,7 +91,8 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\convert-video-to-srt.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\scripts\generated\run_paddleocr_example\frame_067.00s_002010_res.json",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\scripts\run_paddleocr_example.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\extract-video-frames.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\extract-subtitles.py",
+    r"C:\Users\druiv\subs.srt",
     r"",
 ]
 
@@ -109,8 +110,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze optimal way to extract .srt subtitles given a video.
-Create new file with reusable code, __main__ with argparse and top triple quoted block for usage examples.
+Given the results, update extract-subtitles.py so that it only saves the subtitles text that is at the bottom middle of each frame.
+Also save a segments.json that contains speech objects segment_num, start, end, text. Update with complete typing.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

@@ -2,27 +2,28 @@
 Usage Examples:
     # Auto-detect method (soft if available, else OCR)
     python extract-subtitles.py video.mp4 --output subs.srt
-    # Force OCR with custom interval and no crop
-    python extract-subtitles.py video.mp4 -o subs.srt --method ocr --interval 0.25 --crop-ratio 0
-    # Extract specific soft subtitle track
-    python extract-subtitles.py video.mkv -o subs.srt --method soft --subtitle-index 1
-    # Process only from 2:30 to 10:00
-    python extract-subtitles.py video.mp4 -o part.srt --start 150 --end 600
-    # OCR with French language
-    python extract-subtitles.py video.mp4 -o subs.srt --method ocr --lang fr
+    # Save both .srt and segments.json into a custom directory
+    python extract-subtitles.py video.mp4 --output-dir my_results --method ocr
+    # Custom filename inside default generated dir
+    python extract-subtitles.py video.mp4 -o custom_name.srt
+    # Process only from 2:30 to 10:00, stricter bottom filtering
+    python extract-subtitles.py video.mp4 --start 150 --end 600 --bottom-threshold 0.70
     # Show help
     python extract-subtitles.py --help
 """
 
 import argparse
+import json
 import subprocess
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import cv2
 from paddleocr import PaddleOCR
 from rich import print
 from tqdm import tqdm
+
+DEFAULT_OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 
 
 def seconds_to_srt_time(sec: float) -> str:
@@ -67,7 +68,9 @@ def extract_soft_subtitles(
     end: Optional[float] = None,
 ) -> None:
     video_path = str(Path(video_path).resolve())
-    output_srt = str(Path(output_srt).resolve())
+    output_srt = Path(output_srt).resolve()
+    output_srt.parent.mkdir(parents=True, exist_ok=True)
+
     cmd = [
         "ffmpeg",
         "-y",
@@ -75,18 +78,16 @@ def extract_soft_subtitles(
         video_path,
         "-map",
         f"0:s:{subtitle_index}",
-        output_srt,
+        str(output_srt),
     ]
-    try:
+
+    if start is not None:
+        cmd.extend(["-ss", str(start)])
+    if end is not None:
         if start is not None:
-            cmd.extend(["-ss", str(start)])
-        if end is not None:
-            if start is not None:
-                cmd.extend(["-t", str(end - start)])
-            else:
-                cmd.extend(["-to", str(end)])
-    except NameError:
-        pass  # start/end not passed → full video
+            cmd.extend(["-t", str(end - start)])
+        else:
+            cmd.extend(["-to", str(end)])
 
     try:
         subprocess.check_call(cmd)
@@ -96,17 +97,21 @@ def extract_soft_subtitles(
         raise RuntimeError(f"Failed to extract soft subtitles: {e}")
 
 
-def get_texts(ocr_result) -> str:
+def get_bottom_middle_texts(
+    ocr_result: Any,
+    img_height: int,
+    img_width: int,
+    bottom_threshold: float = 0.65,
+    center_tolerance: float = 0.30,
+) -> str:
     if not ocr_result:
         return ""
 
-    # Newer PaddleOCR/PaddleX format: list of one result object/dict
     if isinstance(ocr_result, list) and len(ocr_result) > 0:
         res = ocr_result[0]
     else:
         res = ocr_result
 
-    # Expect dict-like with 'rec_texts', 'rec_scores', 'rec_polys' / 'rec_boxes'
     if not isinstance(res, dict):
         return ""
 
@@ -117,12 +122,20 @@ def get_texts(ocr_result) -> str:
     if not rec_texts:
         return ""
 
-    # Filter & sort by vertical position (average y of polygon/box)
     filtered = []
+    bottom_y_cutoff = img_height * bottom_threshold
+    left_limit = img_width * (0.5 - center_tolerance)
+    right_limit = img_width * (0.5 + center_tolerance)
+
     for txt, score, poly in zip(rec_texts, rec_scores, rec_polys):
         if score > 0.5:
             avg_y = sum(p[1] for p in poly) / len(poly)
-            filtered.append((txt, avg_y))
+            xs = [p[0] for p in poly]
+            min_x, max_x = min(xs), max(xs)
+            center_x = (min_x + max_x) / 2
+
+            if avg_y >= bottom_y_cutoff and left_limit <= center_x <= right_limit:
+                filtered.append((txt, avg_y))
 
     filtered.sort(key=lambda x: x[1])
     return "\n".join(txt for txt, _ in filtered)
@@ -136,18 +149,23 @@ def extract_with_ocr(
     lang: str = "en",
     start: Optional[float] = None,
     end: Optional[float] = None,
+    bottom_threshold: float = 0.65,
+    center_tolerance: float = 0.30,
 ) -> None:
     video_path = Path(video_path).resolve()
     output_srt = Path(output_srt).resolve()
+    output_srt.parent.mkdir(parents=True, exist_ok=True)
+
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
+
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration_sec = total_frames / fps
 
     effective_start = max(0.0, start) if start is not None else 0.0
-    effective_end   = min(duration_sec, end) if end is not None else duration_sec
+    effective_end = min(duration_sec, end) if end is not None else duration_sec
 
     if effective_start >= effective_end:
         raise ValueError(
@@ -166,10 +184,15 @@ def extract_with_ocr(
     )
 
     previous_text = ""
-    start_time: Optional[float] = None  # type: ignore
+    segments: List[Dict[str, Union[int, float, str]]] = []
+    start_time: Optional[float] = None
     subtitle_index = 1
     steps = int(effective_duration / interval) + 1
-    with open(output_srt, "w", encoding="utf-8") as f, tqdm(total=steps, desc="OCR processing") as pbar:
+
+    with (
+        open(output_srt, "w", encoding="utf-8") as f,
+        tqdm(total=steps, desc="OCR processing") as pbar,
+    ):
         t = effective_start
         while t < effective_end:
             frame_idx = min(total_frames - 1, int(t * fps))
@@ -177,29 +200,61 @@ def extract_with_ocr(
             ret, frame = cap.read()
             if not ret:
                 break
+
             img = frame
+            h, w = img.shape[:2]
             if crop_ratio > 0:
-                h = img.shape[0]
                 img = img[int(h * (1 - crop_ratio)) :, :]
+                h = img.shape[0]  # updated height after crop
 
             result = ocr.predict(img)
-            current_text = get_texts(result)
+            current_text = get_bottom_middle_texts(
+                result, h, w, bottom_threshold, center_tolerance
+            )
 
             if current_text != previous_text:
                 if previous_text and start_time is not None:
                     end_display = t
                     f.write(
-                        f"{subtitle_index}\n{seconds_to_srt_time(start_time)} --> {seconds_to_srt_time(end_display)}\n{previous_text}\n\n"
+                        f"{subtitle_index}\n"
+                        f"{seconds_to_srt_time(start_time)} --> {seconds_to_srt_time(end_display)}\n"
+                        f"{previous_text}\n\n"
+                    )
+                    segments.append(
+                        {
+                            "segment_num": subtitle_index,
+                            "start": start_time,
+                            "end": end_display,
+                            "text": previous_text,
+                        }
                     )
                     subtitle_index += 1
                 start_time = t if current_text else None
+
             previous_text = current_text
             t += interval
             pbar.update(1)
+
         if previous_text and start_time is not None:
             f.write(
-                f"{subtitle_index}\n{seconds_to_srt_time(start_time)} --> {seconds_to_srt_time(effective_end)}\n{previous_text}\n\n"
+                f"{subtitle_index}\n"
+                f"{seconds_to_srt_time(start_time)} --> {seconds_to_srt_time(effective_end)}\n"
+                f"{previous_text}\n\n"
             )
+            segments.append(
+                {
+                    "segment_num": subtitle_index,
+                    "start": start_time,
+                    "end": effective_end,
+                    "text": previous_text,
+                }
+            )
+
+    # Save segments.json in the same directory as .srt
+    json_path = output_srt.with_name("segments.json")
+    with open(json_path, "w", encoding="utf-8") as f_json:
+        json.dump(segments, f_json, ensure_ascii=False, indent=2)
+
     cap.release()
 
 
@@ -212,21 +267,49 @@ def extract_subtitles(
     start: Optional[float] = None,
     end: Optional[float] = None,
     lang: str = "en",
+    bottom_threshold: float = 0.65,
+    center_tolerance: float = 0.30,
     subtitle_index: int = 0,
 ) -> None:
     if method == "auto":
         method = "soft" if has_subtitle_tracks(video_path) else "ocr"
+
     if method == "soft":
         extract_soft_subtitles(
-            video_path, output_srt, subtitle_index,
-            start=start, end=end
-        )  # type: ignore  # mypy may complain about extra kwargs
+            video_path, output_srt, subtitle_index, start=start, end=end
+        )
     elif method == "ocr":
         extract_with_ocr(
-            video_path, output_srt, interval, crop_ratio, lang, start, end
+            video_path,
+            output_srt,
+            interval,
+            crop_ratio,
+            lang,
+            start,
+            end,
+            bottom_threshold,
+            center_tolerance,
         )
     else:
         raise ValueError(f"Invalid method: {method}")
+
+
+def resolve_output_path(
+    output_arg: Optional[str],
+    output_dir_arg: Optional[str],
+    default_filename: str = "subtitles.srt",
+) -> Path:
+    if output_arg is None:
+        output_arg = default_filename
+
+    output_path = Path(output_arg)
+
+    if output_dir_arg is not None and not output_path.is_absolute():
+        base_dir = Path(output_dir_arg).resolve()
+        base_dir.mkdir(parents=True, exist_ok=True)
+        output_path = base_dir / output_path.name
+
+    return output_path.resolve()
 
 
 if __name__ == "__main__":
@@ -239,8 +322,14 @@ if __name__ == "__main__":
         "-o",
         "--output",
         type=str,
-        default="subtitles.srt",
-        help="Path to the output .srt file (default: subtitles.srt)",
+        default=None,
+        help="Output .srt filename (default: subtitles.srt). If relative and --output-dir given, saved inside output-dir.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=str(DEFAULT_OUTPUT_DIR),
+        help=f"Base directory for output files (default: {DEFAULT_OUTPUT_DIR})",
     )
     parser.add_argument(
         "--method",
@@ -262,22 +351,25 @@ if __name__ == "__main__":
         help="Bottom crop ratio for OCR focus (0 to disable, default: 0.33)",
     )
     parser.add_argument(
-        "--lang",
-        type=str,
-        default="en",
-        help="Language code for OCR (default: en)"
+        "--lang", type=str, default="en", help="Language code for OCR (default: en)"
     )
     parser.add_argument(
-        "--start",
-        type=float,
-        default=None,
-        help="Start time in seconds (optional, processes from beginning if omitted)"
+        "--start", type=float, default=None, help="Start time in seconds (optional)"
     )
     parser.add_argument(
-        "--end",
+        "--end", type=float, default=None, help="End time in seconds (optional)"
+    )
+    parser.add_argument(
+        "--bottom-threshold",
         type=float,
-        default=None,
-        help="End time in seconds (optional, processes to end if omitted)"
+        default=0.65,
+        help="Y-threshold (0-1) below which text is considered bottom (default: 0.65)",
+    )
+    parser.add_argument(
+        "--center-tolerance",
+        type=float,
+        default=0.30,
+        help="Horizontal center tolerance (0-0.5); text center must be within ±tolerance from 0.5 (default: 0.30)",
     )
     parser.add_argument(
         "--subtitle-index",
@@ -285,20 +377,32 @@ if __name__ == "__main__":
         default=0,
         help="Subtitle track index for soft extraction (default: 0)",
     )
+
     args = parser.parse_args()
+
     try:
+        final_srt_path = resolve_output_path(args.output, args.output_dir)
+
         extract_subtitles(
             args.video,
-            args.output,
-            args.method,
+            final_srt_path,
+            method=args.method,
             interval=args.interval,
             crop_ratio=args.crop_ratio,
             start=args.start,
             end=args.end,
             lang=args.lang,
+            bottom_threshold=args.bottom_threshold,
+            center_tolerance=args.center_tolerance,
             subtitle_index=args.subtitle_index,
         )
-        print(f"[green]Subtitles extracted to {args.output}[/green]")
+
+        print(f"[green]Subtitles extracted to {final_srt_path}[/green]")
+
+        if args.method in ("auto", "ocr"):
+            segments_path = final_srt_path.with_name("segments.json")
+            print(f"[green]Segments saved to {segments_path}[/green]")
+
     except Exception as e:
         print(f"[red]Error: {str(e)}[/red]")
         exit(1)
