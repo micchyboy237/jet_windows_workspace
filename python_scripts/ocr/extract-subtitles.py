@@ -105,7 +105,11 @@ def extract_with_ocr(
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration_sec = total_frames / fps
-    ocr = PaddleOCR(use_angle_cls=False, lang=lang, show_log=False)
+    ocr = PaddleOCR(
+        lang=lang,
+        device="gpu",
+        use_textline_orientation=False,
+    )
     previous_text = ""
     start_time: Optional[float] = None
     subtitle_index = 1
