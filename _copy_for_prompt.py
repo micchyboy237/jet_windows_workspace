@@ -87,7 +87,7 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_opus.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_pipeline.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
-    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\paddleocr\_pipelines\ocr.py",
+    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\paddleocr\_pipelines\ocr.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\convert-video-to-srt.py",
     r"",
 ]
@@ -106,25 +106,24 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze carefully what caused the wrong segment results
+Fix
 
-Creating model: ('PP-OCRv5_server_det', None)
-Model files already exist. Using cached files. To redownload, please delete the directory manually: `C:\Users\druiv\.paddlex\official_models\PP-OCRv5_server_det`.
-WARNING: Logging before InitGoogleLogging() is written to STDERR
-W0305 11:38:09.153451 26088 gpu_resources.cc:116] Please NOTE: device: 0, GPU Compute Capability: 7.5, Driver API Version: 13.0, Runtime API Version: 12.6
-Creating model: ('en_PP-OCRv5_mobile_rec', None)
-Model files already exist. Using cached files. To redownload, please delete the directory manually: `C:\Users\druiv\.paddlex\official_models\en_PP-OCRv5_mobile_rec`.
-Video:   0001_video_en_sub.mp4
-FPS:     30.00
-Frames:  212,253
-OCR every ~1.5 s  →  every 45 frames
+Video:      0001_video_en_sub.mp4
+FPS:        30.00
+Duration:   7075.1 s
+Frames:     212,253
+Processing: 60.0 → 70.0 s (1,800 – 2,101 frames)
+OCR every ~1.5 s → every 45 frames
+Min text change len: 3
+Min segment duration: 0.2 s
 
-Processing video: 100%|██████████████████████████████████████████████████████████| 300/300 [00:01<00:00, 266.69frame/s]
+Processing video: 100%|██████████████████████████████████████████████████████████| 301/301 [00:01<00:00, 257.25frame/s]
 
 Saved 2 segments → C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\generated\convert-video-to-srt\ocr_segments.json
 
- 1 |   61.5 →   69.0 | n a o t o e e e e e e e i e e
- 2 |   69.0 →   70.0 | n a o t o e e e e e e e i e
+ 1 |    61.5 →    69.0 | n a o t o e e e e e e e i e e
+ 2 |    69.0 →    70.0 | n a o t o e e e e e e e i e
+ 2 |    69.0 →    70.0 | n a o t o e e e e e e e i e
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
