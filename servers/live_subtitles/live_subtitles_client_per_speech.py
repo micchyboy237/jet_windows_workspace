@@ -668,14 +668,6 @@ async def stream_microphone(ws) -> None:
 
                             # Send final chunk if anything remains
                             if is_utterance_ongoing and len(current_segment.buffer) > 0:
-                                buffer_segments = extract_and_display_buffered_segments(
-                                    current_segment.buffer,
-                                    is_partial=False,
-                                    chunk_duration=CHUNK_DURATION_SEC,
-                                )
-
-                                stats = current_segment.get_stats()
-
                                 # ─── Send only new data (same logic as partial) ───
                                 small_overlap_bytes = int(
                                     SMALL_OVERLAP_SEC * config.sample_rate * 2
@@ -694,6 +686,15 @@ async def stream_microphone(ws) -> None:
                                             last_sent_byte_length - small_overlap_bytes,
                                         )
                                     to_send = current_segment.buffer[start_idx:]
+
+                                buffer_segments = extract_and_display_buffered_segments(
+                                    # current_segment.buffer,
+                                    to_send,
+                                    is_partial=False,
+                                    chunk_duration=CHUNK_DURATION_SEC,
+                                )
+
+                                stats = current_segment.get_stats()
 
                                 await send_audio_chunk(
                                     send_queue,
