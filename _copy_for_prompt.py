@@ -88,7 +88,10 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_pipeline.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\paddleocr\_pipelines\ocr.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\convert-video-to-srt.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\convert-video-to-srt.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\scripts\generated\run_paddleocr_example\frame_067.00s_002010_res.json",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\scripts\run_paddleocr_example.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\extract-video-frames.py",
     r"",
 ]
 
@@ -106,24 +109,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix
-
-Video:      0001_video_en_sub.mp4
-FPS:        30.00
-Duration:   7075.1 s
-Frames:     212,253
-Processing: 60.0 → 70.0 s (1,800 – 2,101 frames)
-OCR every ~1.5 s → every 45 frames
-Min text change len: 3
-Min segment duration: 0.2 s
-
-Processing video: 100%|██████████████████████████████████████████████████████████| 301/301 [00:01<00:00, 257.25frame/s]
-
-Saved 2 segments → C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\ocr\generated\convert-video-to-srt\ocr_segments.json
-
- 1 |    61.5 →    69.0 | n a o t o e e e e e e e i e e
- 2 |    69.0 →    70.0 | n a o t o e e e e e e e i e
- 2 |    69.0 →    70.0 | n a o t o e e e e e e e i e
+Analyze optimal way to extract .srt subtitles given a video.
+Create new file with reusable code, __main__ with argparse and top triple quoted block for usage examples.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
