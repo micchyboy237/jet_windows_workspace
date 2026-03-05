@@ -20,6 +20,13 @@ OCR_EVERY_N_SECONDS = 1.5          # OCR interval
 MIN_TEXT_CHANGE_LEN = 3            # ignore very short noisy changes
 MIN_SEGMENT_DURATION = 0.8         # seconds
 
+# Optional video filtering
+# Example:
+START_SEC = 300   # start at 5 minutes
+END_SEC = 600     # stop at 10 minutes
+# START_SEC = None
+# END_SEC = None
+
 # ────────────────────────────────────────────────
 # Initialize
 # ────────────────────────────────────────────────
@@ -41,6 +48,14 @@ if not cap.isOpened():
 fps = cap.get(cv2.CAP_PROP_FPS)
 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+start_frame = 0 if START_SEC is None else int(START_SEC * fps)
+end_frame = total_frames if END_SEC is None else int(END_SEC * fps)
+
+start_frame = max(0, start_frame)
+end_frame = min(total_frames, end_frame)
+
+cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
 print(f"Video:   {Path(video_file).name}")
 print(f"FPS:     {fps:.2f}")
 print(f"Frames:  {total_frames:,d}")
@@ -55,13 +70,12 @@ prev_text = ""
 start_time = None
 segment_num = 1
 
-# We use total_frames for nice tqdm bar
-pbar = tqdm(total=total_frames, desc="Processing video", unit="frame")
+pbar = tqdm(total=(end_frame - start_frame), desc="Processing video", unit="frame")
 
-frame_num = 0
+frame_num = start_frame
 ocr_interval_frames = int(fps * OCR_EVERY_N_SECONDS)
 
-while cap.isOpened():
+while cap.isOpened() and frame_num < end_frame:
     ret, frame = cap.read()
     if not ret:
         break
