@@ -89,7 +89,7 @@ class Config:
     # overlap_samples: int = int(MAX_SPEECH_OVERLAP_SEC * SAMPLE_RATE)
     vad_start_threshold: float = 0.60  # hysteresis start
     vad_end_threshold: float = 0.30  # hysteresis end
-    pre_roll_seconds: float = 0.0  # capture mora onsets
+    pre_roll_seconds: float = 0.50  # capture mora onsets
     vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
@@ -303,9 +303,6 @@ async def stream_microphone(ws) -> None:
                         )
                         continue
 
-                    # NEW: always keep pre-roll audio
-                    pre_roll_buffer.append(chunk)
-
                     is_speech_ongoing = speech_start_time is not None
                     is_utterance_ongoing = current_utterance_id is not None
 
@@ -366,25 +363,6 @@ async def stream_microphone(ws) -> None:
                             "yes" if is_speech_ongoing else "no",
                         )
 
-                    if has_sound:
-                        # Always add to continuous buffer (audible speech or non_speech)
-                        chunk_time = time.monotonic()
-                        global _audio_buffer_is_dirty
-                        audio_buffer.append(
-                            (chunk_time, chunk, speech_prob, rms, chunk_type)
-                        )
-                        audio_total_samples += len(chunk) // 2  # int16
-                        _audio_buffer_is_dirty = True
-
-                    # Trim old data
-                    while (
-                        audio_total_samples / config.sample_rate
-                        > CONTINUOUS_AUDIO_MAX_SECONDS
-                    ):
-                        if audio_buffer:
-                            _, old_chunk, _, _, _ = audio_buffer.popleft()
-                            audio_total_samples -= len(old_chunk) // 2
-
                     # Write file every ~60 chunks
                     if total_chunks_processed % 60 == 0 and total_chunks_processed > 0:
                         _write_last_5min_wav()
@@ -432,12 +410,50 @@ async def stream_microphone(ws) -> None:
                                 + 1
                             )
 
+                            # Update pre_roll_buffer with the last config.pre_roll_seconds from audio_buffer chunks
+                            pre_roll_buffer.clear()
+                            pre_roll_chunks = int(
+                                config.pre_roll_seconds
+                                * config.sample_rate
+                                / VAD_CHUNK_SAMPLES
+                            )
+                            pre_roll_probs = []
+                            for _, pre_chunk, speech_prob, *_ in list(audio_buffer)[
+                                -pre_roll_chunks:
+                            ]:
+                                is_pre_roll_mid_score = (
+                                    config.vad_end_threshold
+                                    >= speech_prob
+                                    < config.vad_start_threshold
+                                )
+                                if is_pre_roll_mid_score:
+                                    pre_roll_buffer.append(pre_chunk)
+                                    pre_roll_probs.append(speech_prob)
+                                else:
+                                    break
+                            if pre_roll_buffer:
+                                avg_pre_prob = sum(pre_roll_probs) / len(pre_roll_probs)
+                                log.info(
+                                    "[pre_roll] Added %d pre-roll chunks (avg prob %.3f)",
+                                    len(pre_roll_buffer),
+                                    avg_pre_prob,
+                                )
+                                # Adjust start_time backwards by number of pre-roll chunks if pre_roll_buffer has length
+                                adjusted_start_time = speech_start_time - (
+                                    len(pre_roll_buffer)
+                                    * VAD_CHUNK_SAMPLES
+                                    / config.sample_rate
+                                )
+                            else:
+                                log.info("[pre_roll] No pre-roll chunks captured")
+                                adjusted_start_time = speech_start_time
+
                             current_segment = LiveSpeechSegmentAccumulator(
                                 sample_rate=config.sample_rate,
                                 pre_roll_buffer=pre_roll_buffer,
                                 max_pre_roll_duration_sec=config.pre_roll_seconds,
                                 # Consider also passing last_sent_byte_length if needed later
-                                start_time=speech_start_time,
+                                start_time=adjusted_start_time,
                             )
 
                             reset_speech()
@@ -636,6 +652,7 @@ async def stream_microphone(ws) -> None:
                                 silence_start_time = None
                                 current_segment_num = None
                                 current_segment = None
+                                pre_roll_buffer.clear()
                                 speech_chunks_in_segment = 0
                                 speech_prob_history = []
                                 chunk_index = 0
@@ -869,8 +886,28 @@ async def stream_microphone(ws) -> None:
                             silence_start_time = None
                             current_segment_num = None
                             current_segment = None
+                            pre_roll_buffer.clear()
                             speech_chunks_in_segment = 0  # reset counter
                             speech_prob_history = []  # clear after save
+
+                    if has_sound:
+                        # Always add to continuous buffer (audible speech or non_speech)
+                        chunk_time = time.monotonic()
+                        global _audio_buffer_is_dirty
+                        audio_buffer.append(
+                            (chunk_time, chunk, speech_prob, rms, chunk_type)
+                        )
+                        audio_total_samples += len(chunk) // 2  # int16
+                        _audio_buffer_is_dirty = True
+
+                    # Trim old data
+                    while (
+                        audio_total_samples / config.sample_rate
+                        > CONTINUOUS_AUDIO_MAX_SECONDS
+                    ):
+                        if audio_buffer:
+                            _, old_chunk, _, _, _ = audio_buffer.popleft()
+                            audio_total_samples -= len(old_chunk) // 2
 
                     # Add every chunk (speech or short silence) to the local buffer while utterance is ongoing
                     if speech_start_time is not None and current_segment is not None:
