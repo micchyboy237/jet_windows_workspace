@@ -1,11 +1,9 @@
 """
 Usage Examples:
     # Auto-detect method (soft if available, else OCR)
-    python extract-subtitles.py video.mp4 --output subs.srt
+    python extract-subtitles.py video.mp4
     # Save both .srt and segments.json into a custom directory
-    python extract-subtitles.py video.mp4 --output-dir my_results --method ocr
-    # Custom filename inside default generated dir
-    python extract-subtitles.py video.mp4 -o custom_name.srt
+    python extract-subtitles.py video.mp4 -o my_results --method ocr
     # Process only from 2:30 to 10:00, stricter bottom filtering
     python extract-subtitles.py video.mp4 --start 150 --end 600 --bottom-threshold 0.70
     # Show help
@@ -14,6 +12,7 @@ Usage Examples:
 
 import argparse
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -294,24 +293,6 @@ def extract_subtitles(
         raise ValueError(f"Invalid method: {method}")
 
 
-def resolve_output_path(
-    output_arg: Optional[str],
-    output_dir_arg: Optional[str],
-    default_filename: str = "subtitles.srt",
-) -> Path:
-    if output_arg is None:
-        output_arg = default_filename
-
-    output_path = Path(output_arg)
-
-    if output_dir_arg is not None and not output_path.is_absolute():
-        base_dir = Path(output_dir_arg).resolve()
-        base_dir.mkdir(parents=True, exist_ok=True)
-        output_path = base_dir / output_path.name
-
-    return output_path.resolve()
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Extract .srt subtitles from a video using soft track or OCR.",
@@ -320,12 +301,6 @@ if __name__ == "__main__":
     parser.add_argument("video", type=str, help="Path to the input video file")
     parser.add_argument(
         "-o",
-        "--output",
-        type=str,
-        default=None,
-        help="Output .srt filename (default: subtitles.srt). If relative and --output-dir given, saved inside output-dir.",
-    )
-    parser.add_argument(
         "--output-dir",
         type=str,
         default=str(DEFAULT_OUTPUT_DIR),
@@ -380,12 +355,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    try:
-        final_srt_path = resolve_output_path(args.output, args.output_dir)
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    shutil.rmtree(output_dir, ignore_errors=True)
 
+    srt_path = output_dir / "subtitles.srt"
+    segments_path = srt_path.with_name("segments.json")
+
+    try:
         extract_subtitles(
             args.video,
-            final_srt_path,
+            srt_path,
             method=args.method,
             interval=args.interval,
             crop_ratio=args.crop_ratio,
@@ -397,10 +376,9 @@ if __name__ == "__main__":
             subtitle_index=args.subtitle_index,
         )
 
-        print(f"[green]Subtitles extracted to {final_srt_path}[/green]")
+        print(f"[green]Subtitles extracted to {srt_path}[/green]")
 
         if args.method in ("auto", "ocr"):
-            segments_path = final_srt_path.with_name("segments.json")
             print(f"[green]Segments saved to {segments_path}[/green]")
 
     except Exception as e:
