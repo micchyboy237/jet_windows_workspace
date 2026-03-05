@@ -109,6 +109,8 @@ def extract_with_ocr(
         lang=lang,
         device="gpu",
         use_textline_orientation=False,
+        use_doc_orientation_classify=False,
+        use_doc_unwarping=False,
     )
     previous_text = ""
     start_time: Optional[float] = None
@@ -129,7 +131,7 @@ def extract_with_ocr(
             if crop_ratio > 0:
                 h = img.shape[0]
                 img = img[int(h * (1 - crop_ratio)) :, :]
-            result = ocr.ocr(img, cls=False)
+            result = ocr.predict(img)
             current_text = get_texts(result)
             if current_text != previous_text:
                 if previous_text and start_time is not None:
