@@ -20,11 +20,11 @@ import scipy.io.wavfile as wavfile  # Add this import at the top with other impo
 import sounddevice as sd
 import websockets
 from jet.audio.helpers.energy import compute_rms, rms_to_loudness_label
-from jet.audio.speech.speechbrain.speech_accumulator import LiveSpeechSegmentAccumulator
-from jet.audio.speech.speechbrain.speech_timestamps_extractor import (
+from jet.audio.speech.firered.speech_accumulator import LiveSpeechSegmentAccumulator
+from jet.audio.speech.firered.speech_timestamps_extractor import (
     extract_speech_timestamps,
 )
-from jet.audio.speech.speechbrain.vad import SpeechBrainVAD
+from jet.audio.speech.firered.vad import FireRedVAD
 from jet.audio.speech.utils import display_segments
 
 # from rich.logging import RichHandler
@@ -188,7 +188,7 @@ async def stream_microphone(ws) -> None:
     model_path = config.vad_model_path
     if model_path is None:
         log.info("[VAD] Initializing SpeechBrain VAD (vad-crdnn-libriparty)")
-    vad = SpeechBrainVAD()
+    vad = FireRedVAD()
 
     # Ensure globals are in a known state at function start
     global audio_total_samples, audio_buffer
