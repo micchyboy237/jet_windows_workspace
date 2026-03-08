@@ -544,7 +544,7 @@ async def stream_microphone(ws) -> None:
                                     #     config.max_speech_duration_sec // 2
                                     # )
                                     # Option A: trim old content (alternative approach)
-                                    # current_segment.trim_audio(config.max_speech_duration_sec * 0.6)
+                                    # current_segment.trim_audio(config.max_speech_duration_sec * 0.3)
 
                                     # Option B: send only new data (recommended for no duplicates)
                                     # Only send what hasn't been sent before in this segment
@@ -604,7 +604,7 @@ async def stream_microphone(ws) -> None:
                                     # Optional strong fix: actually shrink the accumulator buffer
                                     # (prevents memory explosion on very long speech)
                                     current_segment.trim_audio(
-                                        config.max_speech_duration_sec * 0.6
+                                        config.max_speech_duration_sec * 0.3
                                     )
 
                     else:
