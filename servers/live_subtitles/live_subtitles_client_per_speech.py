@@ -89,7 +89,9 @@ class Config:
     # overlap_samples: int = int(MAX_SPEECH_OVERLAP_SEC * SAMPLE_RATE)
     vad_start_threshold: float = 0.50  # hysteresis start
     vad_end_threshold: float = 0.50  # hysteresis end
-    pre_roll_seconds: float = 0.0  # capture mora onsets
+    pre_roll_seconds: float = (
+        MIN_SILENCE_DURATION_SEC + MIN_SILENCE_DURATION_SEC
+    )  # capture mora onsets
     vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
@@ -421,16 +423,8 @@ async def stream_microphone(ws) -> None:
                             for _, pre_chunk, speech_prob, *_ in list(audio_buffer)[
                                 -pre_roll_chunks:
                             ]:
-                                is_pre_roll_mid_score = (
-                                    config.vad_end_threshold
-                                    >= speech_prob
-                                    < config.vad_start_threshold
-                                )
-                                if is_pre_roll_mid_score:
-                                    pre_roll_buffer.append(pre_chunk)
-                                    pre_roll_probs.append(speech_prob)
-                                else:
-                                    break
+                                pre_roll_buffer.append(pre_chunk)
+                                pre_roll_probs.append(speech_prob)
                             if pre_roll_buffer:
                                 avg_pre_prob = sum(pre_roll_probs) / len(pre_roll_probs)
                                 log.info(
