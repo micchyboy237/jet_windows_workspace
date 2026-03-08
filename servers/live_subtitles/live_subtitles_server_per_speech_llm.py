@@ -316,6 +316,7 @@ async def process_utterance(
     avg_vad_confidence = data.get("avg_vad_confidence", 0.0)
     rms = data.get("rms")
     duration_sec = data.get("duration_sec")
+    overlap_sec = data["overlap_sec"]
     start_time = data.get("start_time")
 
     log_prefix = "FINAL" if is_final else "PARTIAL"
@@ -324,6 +325,7 @@ async def process_utterance(
     logger.info(
         f"[{state.client_id}] {log_prefix} utt {utterance_id}\n"
         f"duration: {duration_sec:.2f}\n"
+        f"overlap: {overlap_sec:.2f}\n"
         f"last ja:  {last_ja!r}\n"
         f"last en:  {last_en!r}\n"
         f"hotwords: {hotwords!r}\n"
@@ -349,6 +351,7 @@ async def process_utterance(
         "transcription_ja": meta["transcription"]["text_ja"],
         "translation_en": meta["translation"]["text_en"],
         "duration_sec": duration_sec,
+        "overlap_sec": overlap_sec,
         "start_time": start_time,
         "transcription_confidence": meta["transcription"]["confidence"],
         "transcription_quality": meta["transcription"]["quality_label"],

@@ -18,13 +18,25 @@ class WordSegment(TypedDict):
     end_ms: Optional[int]
     word: Optional[str]
 
+class TranscriptionMetadata(TypedDict, total=False):
+    client_id: str
+    segment_num: int
+    processing_duration_seconds: float
+    model: str
+    # You can add more optional / future fields here
+    # version: str
+    # hostname: str
+    # input_duration_seconds: float
+    # hotwords_used: bool | list[str]
+    # error: str                  # in case of partial failure
+
 class TranscriptionResult(TypedDict):
     text_ja: str
     confidence: float
     quality_label: str
     avg_logprob: Optional[float]
-    segments: list[dict[str, Any]]
-    metadata: dict[str, Any]
+    segments: list[WordSegment]
+    metadata: TranscriptionMetadata
 
 model = AutoModel(
     model="FunAudioLLM/SenseVoiceSmall",
@@ -166,3 +178,36 @@ def transcribe_japanese(
             pass
 
     return result
+
+
+# ────────────────────────────────────────────────
+# Quick Demo
+# ────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
+
+    from rich.console import Console
+    from rich.pretty import pprint
+
+    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+
+    parser = argparse.ArgumentParser(
+        description="Japanese ASR demo."
+    )
+    parser.add_argument(
+        "audio_path",
+        nargs="?",
+        default=audio_path,
+        help="Japanese audio to transcribe (optional, defaults to sample audio path)",
+    )
+    args = parser.parse_args()
+
+    console = Console()
+
+    console.print("[bold green]Japanese:[/bold green]")
+    result: TranscriptionResult = transcribe_japanese_llm_from_file(
+        args.audio_path,
+    )
+
+    pprint(result, expand_all=True)
