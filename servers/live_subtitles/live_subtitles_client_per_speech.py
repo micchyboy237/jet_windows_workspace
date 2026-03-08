@@ -472,10 +472,9 @@ async def stream_microphone(ws) -> None:
 
                             if last_sent_byte_length == 0:
                                 to_send = current_segment.buffer
+                                sent_overlap_sec = 0.0
                             else:
-                                # Most of the time: send only new audio
                                 start_idx = last_sent_byte_length
-                                # But add tiny prefix if chunk is very small (helps stability)
                                 if (
                                     len(current_segment.buffer) - last_sent_byte_length
                                     < small_overlap_bytes * 2
@@ -483,6 +482,9 @@ async def stream_microphone(ws) -> None:
                                     start_idx = max(
                                         0, last_sent_byte_length - small_overlap_bytes
                                     )
+                                sent_overlap_sec = (
+                                    last_sent_byte_length - start_idx
+                                ) / (config.sample_rate * 2)
                                 to_send = current_segment.buffer[start_idx:]
 
                             # Only send partial chunks once enough accumulated speech is available
@@ -534,6 +536,7 @@ async def stream_microphone(ws) -> None:
                                     to_send,
                                     current_segment.start_time,
                                     duration_sec=stats["duration_sec"],
+                                    overlap_sec=sent_overlap_sec,
                                     segment_num=current_segment_num,
                                     avg_vad=stats["vad_sum"]
                                     / stats["speech_chunk_count"]
@@ -1008,9 +1011,9 @@ async def stream_microphone(ws) -> None:
 async def send_audio_chunk(
     send_queue: asyncio.Queue,
     buffer: bytearray,
-    # utterance_rms: float,
     start_time: float,
     duration_sec: float = 0.0,
+    overlap_sec: float = 0.0,
     segment_num: int = 0,
     avg_vad: float = 0.0,
     is_final: bool = False,
@@ -1020,6 +1023,9 @@ async def send_audio_chunk(
 ) -> None:
     if len(buffer) == 0:
         return
+
+    # Optional: also compute how much was already sent before this chunk
+    previous_duration_sec = max(0.0, duration_sec - overlap_sec)
 
     # ─── Normalize before sending ────────────────────────────────────────
     try:
@@ -1062,6 +1068,8 @@ async def send_audio_chunk(
         "avg_vad_confidence": avg_vad,
         "start_time": start_time,
         "duration_sec": duration_sec,
+        "overlap_sec": overlap_sec,  # ← added
+        "previous_duration_sec": previous_duration_sec,  # optional
     }
 
     await send_queue.put(payload)

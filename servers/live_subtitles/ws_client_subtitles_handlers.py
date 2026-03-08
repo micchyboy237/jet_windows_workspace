@@ -9,6 +9,7 @@ from typing import Literal
 
 import websockets
 from jet.audio.helpers.energy import rms_to_loudness_label
+from jet.audio.speech.firered.speech_types import WordSegment
 
 # from rich.logging import RichHandler
 from jet.logger import logger as log
@@ -117,6 +118,7 @@ class WSClientLiveSubtitleHandlers:
         transl_conf = data.get("translation_confidence")
         transl_quality = data.get("translation_quality")
         server_meta = data.get("meta", {})
+        server_segments: list[WordSegment] = server_meta.get("segments", [])
 
         relative_start = 0.0
         relative_end = duration_sec
@@ -179,6 +181,7 @@ class WSClientLiveSubtitleHandlers:
         transl_conf = data.get("translation_confidence")
         transl_quality = data.get("translation_quality")
         server_meta = data.get("meta", {})
+        server_segments: list[WordSegment] = server_meta.get("segments", [])
 
         log.info("[final_subtitle] utt %s | JA: %s", utterance_id, ja[:80])
         if en:
