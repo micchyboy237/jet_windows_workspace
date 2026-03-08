@@ -1,4 +1,4 @@
-# Add-CudaToSystemPath.ps1
+# Add-System-Path.ps1
 # Run this script as Administrator
 
 $ErrorActionPreference = 'Stop'
