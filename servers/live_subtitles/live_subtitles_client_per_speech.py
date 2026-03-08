@@ -60,7 +60,7 @@ CHUNK_DURATION_SEC = 6.0
 CHUNK_OVERLAP_SEC = 0.0
 MIN_SILENCE_DURATION_SEC = 0.4
 MIN_SPEECH_DURATION_SEC = 0.5
-MAX_SPEECH_DURATION_SEC = 15.0
+MAX_SPEECH_DURATION_SEC = 30.0
 # MAX_SPEECH_OVERLAP_SEC = 10.0
 CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
 
@@ -562,12 +562,12 @@ async def stream_microphone(ws) -> None:
                                     )
                                     to_send = current_segment.buffer[-max_keep_bytes:]
 
-                                buffer_segments = extract_and_display_buffered_segments(
-                                    # current_segment.buffer,
-                                    to_send,
-                                    is_partial=True,
-                                    chunk_duration=CHUNK_DURATION_SEC,
-                                )
+                                # buffer_segments = extract_and_display_buffered_segments(
+                                #     # current_segment.buffer,
+                                #     to_send,
+                                #     is_partial=True,
+                                #     chunk_duration=CHUNK_DURATION_SEC,
+                                # )
 
                                 stats = current_segment.get_stats()
 
@@ -687,12 +687,12 @@ async def stream_microphone(ws) -> None:
                                         )
                                     to_send = current_segment.buffer[start_idx:]
 
-                                buffer_segments = extract_and_display_buffered_segments(
-                                    # current_segment.buffer,
-                                    to_send,
-                                    is_partial=False,
-                                    chunk_duration=CHUNK_DURATION_SEC,
-                                )
+                                # buffer_segments = extract_and_display_buffered_segments(
+                                #     # current_segment.buffer,
+                                #     to_send,
+                                #     is_partial=False,
+                                #     chunk_duration=CHUNK_DURATION_SEC,
+                                # )
 
                                 stats = current_segment.get_stats()
 
