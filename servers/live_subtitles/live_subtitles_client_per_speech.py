@@ -58,13 +58,13 @@ DTYPE = "int16"
 
 CHUNK_DURATION_SEC = 6.0
 CHUNK_OVERLAP_SEC = 0.0
-MIN_SILENCE_DURATION_SEC = 0.9
-MIN_SPEECH_DURATION_SEC = 0.25
-MAX_SPEECH_DURATION_SEC = 30.0
+MIN_SILENCE_DURATION_SEC = 0.4
+MIN_SPEECH_DURATION_SEC = 0.5
+MAX_SPEECH_DURATION_SEC = 15.0
 # MAX_SPEECH_OVERLAP_SEC = 10.0
 CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
 
-SMALL_OVERLAP_SEC = 1.2
+SMALL_OVERLAP_SEC = 0.0
 
 audio_total_samples: int = 0
 LAST_5MIN_WAV = os.path.join(OUTPUT_DIR, "last_5_mins.wav")
@@ -87,9 +87,9 @@ class Config:
     min_speech_duration_sec: float = MIN_SPEECH_DURATION_SEC
     max_speech_duration_sec: float = MAX_SPEECH_DURATION_SEC
     # overlap_samples: int = int(MAX_SPEECH_OVERLAP_SEC * SAMPLE_RATE)
-    vad_start_threshold: float = 0.60  # hysteresis start
-    vad_end_threshold: float = 0.30  # hysteresis end
-    pre_roll_seconds: float = 0.50  # capture mora onsets
+    vad_start_threshold: float = 0.50  # hysteresis start
+    vad_end_threshold: float = 0.50  # hysteresis end
+    pre_roll_seconds: float = 0.0  # capture mora onsets
     vad_model_path: str | None = None  # allow custom model if needed
     max_rtt_history: int = 10
     reconnect_attempts: int = 5
