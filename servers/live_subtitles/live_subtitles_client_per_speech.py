@@ -21,17 +21,14 @@ import sounddevice as sd
 import websockets
 from jet.audio.helpers.energy import compute_rms, rms_to_loudness_label
 from jet.audio.speech.firered.speech_accumulator import LiveSpeechSegmentAccumulator
-from jet.audio.speech.firered.speech_timestamps_extractor import (
-    extract_speech_timestamps,
-)
 from jet.audio.speech.firered.vad import FireRedVAD
-from jet.audio.speech.utils import display_segments
 
 # from rich.logging import RichHandler
 from jet.logger import logger as log
 from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
 from PyQt6.QtWidgets import QApplication
 from ws_client_subtitles_handlers import WSClientLiveSubtitleHandlers
+from ws_client_subtitles_utils import build_segment_metadata, get_timestamp_prefix
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__),
@@ -60,7 +57,7 @@ CHUNK_DURATION_SEC = 6.0
 CHUNK_OVERLAP_SEC = 0.0
 MIN_SILENCE_DURATION_SEC = 0.4
 MIN_SPEECH_DURATION_SEC = 0.5
-MAX_SPEECH_DURATION_SEC = 15.0
+MAX_SPEECH_DURATION_SEC = CHUNK_DURATION_SEC * 2
 # MAX_SPEECH_OVERLAP_SEC = 10.0
 CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
 
@@ -144,42 +141,6 @@ current_utterance_id: int | None = None
 last_sent_byte_length: int = 0
 
 
-def extract_and_display_buffered_segments(
-    _audio_buffer: bytearray,
-    is_partial: bool = False,
-    chunk_duration: int = CHUNK_DURATION_SEC,
-) -> list[dict]:  # ← better return type hint
-    try:
-        _audio_np = np.frombuffer(_audio_buffer, dtype=np.int16).copy()
-
-        buffer_segments, all_speech_probs = extract_speech_timestamps(
-            _audio_np,
-            min_silence_duration_sec=config.min_silence_duration_sec,
-            min_speech_duration_sec=config.min_speech_duration_sec,
-            max_speech_duration_sec=chunk_duration,
-            return_seconds=True,
-            time_resolution=3,
-            with_scores=True,
-            normalize_loudness=False,
-            include_non_speech=True,
-            double_check=True,
-            apply_energy_VAD=True,
-        )
-
-        if len(buffer_segments):
-            prefix = "Partial" if is_partial else "Complete"
-            log.purple(
-                f"{prefix} segments ({len(buffer_segments)}):\n"
-                f"{json.dumps([{'num': seg['num'], 'duration': seg['duration'], 'prob': seg['prob']} for seg in buffer_segments])}"
-            )
-            display_segments(buffer_segments, done=not is_partial)
-    except Exception as e:
-        log.warning(f"Exception in extract_and_display_buffered_segments: {e}")
-        return []
-
-    return buffer_segments
-
-
 # =============================
 # Audio capture + streaming (with segment & silence tracking)
 # =============================
@@ -210,6 +171,8 @@ async def stream_microphone(ws) -> None:
     min_vad_confidence: float = 1.0  # ← new: lowest confidence during speech
     vad_confidence_sum: float = 0.0  # ← new: for average calculation
     speech_chunk_count: int = 0  # ← new: number of speech chunks (for avg)
+
+    all_speech_meta = []
 
     # ← NEW: audio energy tracking
     speech_energy_sum: float = 0.0  # sum of RMS values for speech chunks
@@ -582,6 +545,58 @@ async def stream_microphone(ws) -> None:
                                     # context_prompt=build_context_prompt(),
                                 )
 
+                                # ─── NEW: Save partial audio after sending ───────────────────────
+                                partial_prefix = get_timestamp_prefix()
+                                utt_suffix = (
+                                    current_utterance_id[-6:]
+                                    if current_utterance_id
+                                    else "noID"
+                                )
+                                partial_fname = (
+                                    f"{partial_prefix}_{utt_suffix}_{chunk_index}.wav"
+                                )
+                                partial_wav_path = os.path.join(
+                                    SEGMENTS_DIR, partial_fname
+                                )
+
+                                # Save the sent chunk (to_send), not the whole buffer
+                                partial_audio_int16 = np.frombuffer(
+                                    to_send, dtype=np.int16
+                                ).copy()
+                                wavfile.write(
+                                    partial_wav_path,
+                                    config.sample_rate,
+                                    partial_audio_int16,
+                                )
+
+                                partial_audio_float = (
+                                    partial_audio_int16.astype(np.float32) / 32768.0
+                                )
+                                sent_rms = compute_rms(partial_audio_float)
+                                rms_label = rms_to_loudness_label(sent_rms)
+
+                                # Optional: lightweight metadata for partial
+                                partial_meta = build_segment_metadata(
+                                    filename=partial_fname,
+                                    utterance_id=current_utterance_id,
+                                    chunk_index=chunk_index,
+                                    is_partial=True,
+                                    duration_sec=len(to_send)
+                                    / (config.sample_rate * 2),
+                                    start_sec=current_segment.start_time,
+                                    sample_rate=config.sample_rate,
+                                    channels=config.channels,
+                                    sent_at=time.monotonic(),
+                                    rms_label=rms_label,
+                                    num_samples=len(to_send) // 2,
+                                )
+                                with open(
+                                    partial_wav_path.replace(".wav", ".json"),
+                                    "w",
+                                    encoding="utf-8",
+                                ) as f:
+                                    json.dump(partial_meta, f, indent=2)
+
                                 # IMPORTANT: update to current absolute end, not len(to_send)
                                 last_sent_byte_length = len(current_segment.buffer)
                                 last_chunk_sent_time = now
@@ -710,68 +725,71 @@ async def stream_microphone(ws) -> None:
 
                             # Save ORIGINAL audio (matches what server received)
                             original_bytes = bytes(current_segment.buffer)
-                            audio_int16 = np.frombuffer(original_bytes, dtype=np.int16)
+                            audio_int16 = np.frombuffer(
+                                original_bytes, dtype=np.int16
+                            ).copy()
 
                             # Save segment audio + metadata
                             if (
                                 current_segment_num is not None
                                 and current_segment is not None
                             ):
-                                segment_dir = os.path.join(
-                                    SEGMENTS_DIR, f"segment_{current_segment_num:04d}"
+                                # Flat structure with timestamp-based sortable filename
+                                prefix = get_timestamp_prefix()
+                                utt_suffix = (
+                                    current_utterance_id[-6:]
+                                    if current_utterance_id
+                                    else "noID"
                                 )
-                                os.makedirs(segment_dir, exist_ok=True)
+                                chunk_idx = chunk_index
+                                fname = f"{prefix}_{utt_suffix}_{chunk_idx}.wav"
+                                wav_path = os.path.join(SEGMENTS_DIR, fname)
 
-                                # Compute precise duration from audio length
-                                duration = stats["duration_sec"]
-                                num_samples = current_segment.duration_samples()
-
-                                # audio_float = audio_int16.astype(np.float32) / 32768.0
-                                # normalized_saved_audio = normalize_speech_loudness(
-                                #     audio_float,
-                                #     sample_rate=config.sample_rate,
-                                # )
-
-                                wav_path = os.path.join(segment_dir, "sound.wav")
                                 wavfile.write(
                                     wav_path,
                                     config.sample_rate,
-                                    # normalized_saved_audio,  # already normalized ndarray
                                     audio_int16,
                                 )
+
+                                duration = stats["duration_sec"]
+                                num_samples = current_segment.duration_samples()
                                 base_time = current_segment.start_time
 
                                 stats = current_segment.get_stats()
 
-                                # Use relative seconds from base_time
+                                # Centralized metadata building
                                 metadata = {
-                                    "segment_id": current_segment_num,
-                                    "duration_sec": duration,
-                                    "num_chunks": stats["speech_chunk_count"],
-                                    "num_samples": num_samples,
-                                    "start_sec": current_segment.start_time - base_time,
-                                    "end_sec": time.time() - base_time,
-                                    "sample_rate": config.sample_rate,
-                                    "channels": config.channels,
-                                    "vad_confidence": {
-                                        "first": first_vad_confidence,
-                                        "last": last_vad_confidence,
-                                        "min": stats["vad_min"],
-                                        "max": stats["vad_max"],
-                                        "ave": stats["vad_sum"]
-                                        / stats["speech_chunk_count"]
-                                        if stats["speech_chunk_count"] > 0
-                                        else 0.0,
-                                    },
-                                    "audio_energy": {
-                                        "rms_min": stats["energy_min"],
-                                        "rms_max": stats["energy_max"],
-                                        "rms_ave": stats["energy_sum"]
-                                        / stats["speech_chunk_count"]
-                                        if stats["speech_chunk_count"] > 0
-                                        else 0.0,
-                                        "rms_std": (
-                                            np.sqrt(
+                                    **build_segment_metadata(
+                                        filename=fname,
+                                        utterance_id=current_utterance_id,
+                                        chunk_index=chunk_idx,
+                                        is_partial=False,
+                                        duration_sec=duration,
+                                        start_sec=current_segment.start_time,
+                                        sample_rate=config.sample_rate,
+                                        channels=config.channels,
+                                        vad_stats={
+                                            "first": stats.get(
+                                                "vad_first", first_vad_confidence
+                                            ),
+                                            "last": stats.get(
+                                                "vad_last", last_vad_confidence
+                                            ),
+                                            "min": stats["vad_min"],
+                                            "max": stats["vad_max"],
+                                            "avg": stats["vad_sum"]
+                                            / stats["speech_chunk_count"]
+                                            if stats["speech_chunk_count"] > 0
+                                            else 0.0,
+                                        },
+                                        energy_stats={
+                                            "rms_min": stats["energy_min"],
+                                            "rms_max": stats["energy_max"],
+                                            "rms_ave": stats["energy_sum"]
+                                            / stats["speech_chunk_count"]
+                                            if stats["speech_chunk_count"] > 0
+                                            else 0.0,
+                                            "rms_std": np.sqrt(
                                                 (
                                                     stats["energy_sum_squares"]
                                                     / stats["speech_chunk_count"]
@@ -783,59 +801,64 @@ async def stream_microphone(ws) -> None:
                                                 ** 2
                                             )
                                             if stats["speech_chunk_count"] > 0
-                                            else 0.0
-                                        ),
-                                    },
-                                }
-
-                                # Define and write speech_probs.json **first**
-                                probs_path = os.path.join(
-                                    segment_dir, "speech_probs.json"
-                                )
-                                with open(probs_path, "w", encoding="utf-8") as f:
-                                    json.dump(
-                                        {
-                                            "segment_id": current_segment_num,
-                                            "vad_threshold": config.vad_start_threshold,
-                                            "chunk_count": len(speech_prob_history),
-                                            "probs": list(speech_prob_history),
+                                            else 0.0,
                                         },
-                                        f,
-                                        indent=2,
-                                        ensure_ascii=False,
+                                        sent_at=time.monotonic(),
+                                        num_samples=num_samples,
                                     )
+                                }
+                                metadata["num_chunks"] = stats["speech_chunk_count"]
+                                metadata["end_sec"] = (
+                                    time.monotonic()
+                                )  # add end time separately
 
-                                # Now we can safely reference probs_path in metadata
-                                metadata["speech_probs_path"] = str(probs_path)
-                                metadata["speech_prob_count"] = len(speech_prob_history)
-
-                                speech_meta_path = os.path.join(
-                                    segment_dir, "speech_meta.json"
+                                # Save metadata alongside .wav
+                                meta_path = os.path.join(
+                                    SEGMENTS_DIR, fname.replace(".wav", ".json")
                                 )
-                                with open(speech_meta_path, "w", encoding="utf-8") as f:
+                                with open(meta_path, "w", encoding="utf-8") as f:
                                     json.dump(metadata, f, indent=2, ensure_ascii=False)
 
-                                # Append to central all_speech_meta.json
-                                all_speech_meta = []
-                                if os.path.exists(ALL_SPEECH_META_PATH):
+                                # Update all_speech_meta.json
+                                with open(
+                                    ALL_SPEECH_META_PATH, "w", encoding="utf-8"
+                                ) as f:
+                                    json.dump(
+                                        all_speech_meta, f, indent=2, ensure_ascii=False
+                                    )
+
+                                # Optional: Append to global all_speech_probs index
+                                _append_to_global_speech_probs_index(
+                                    fname,
+                                    duration,
+                                    current_segment.start_time,
+                                    base_time,
+                                    meta_path,
+                                    speech_prob_history,
+                                )
+
+                                # Load existing file only here (when we actually have something to append)
+                                if not all_speech_meta and os.path.exists(
+                                    ALL_SPEECH_META_PATH
+                                ):
                                     try:
                                         with open(
                                             ALL_SPEECH_META_PATH, encoding="utf-8"
                                         ) as f:
                                             all_speech_meta = json.load(f)
                                     except Exception:
-                                        pass  # start fresh if corrupted
+                                        all_speech_meta = []  # corrupted → start fresh
+
                                 relative_start = current_segment.start_time - base_time
                                 all_speech_meta.append(
                                     {
-                                        "segment_id": current_segment_num,
+                                        "filename": fname,
                                         **metadata,
                                         "start_sec": relative_start,
                                         "end_sec": relative_start + duration,
                                         "duration_sec": duration,
-                                        "segment_dir": f"segment_{current_segment_num:04d}",
                                         "wav_path": str(wav_path),
-                                        "meta_path": str(speech_meta_path),
+                                        "meta_path": str(meta_path),
                                     }
                                 )
                                 with open(
@@ -844,23 +867,6 @@ async def stream_microphone(ws) -> None:
                                     json.dump(
                                         all_speech_meta, f, indent=2, ensure_ascii=False
                                     )
-
-                                # NEW: Append to global all_speech_probs index
-                                _append_to_global_speech_probs_index(
-                                    current_segment_num,
-                                    duration,
-                                    current_segment.start_time,
-                                    base_time,
-                                    probs_path,
-                                    speech_prob_history,
-                                )
-
-                            # ── Compute average VAD confidence right here ────────────────────────────────
-                            avg_vad = (
-                                round(vad_confidence_sum / speech_chunk_count, 4)
-                                if speech_chunk_count > 0
-                                else 0.0
-                            )
 
                             # Already sent via chunk — no need to re-send full here
                             # But we still log
@@ -1081,14 +1087,14 @@ def start_new_utterance():
 
 
 def _append_to_global_speech_probs_index(
-    segment_num: int,
+    filename: str,
     duration: float,
     start_time: float,
     base_time: float,
-    probs_path: str,
+    meta_path: str,
     speech_prob_history: list[float],
 ) -> None:
-    """Append segment info to the global all_speech_probs.json index."""
+    """Append audio file info to the global all_speech_probs.json index."""
     all_probs_index: list[dict] = []
     if os.path.exists(ALL_SPEECH_PROBS_INDEX_PATH):
         try:
@@ -1100,13 +1106,12 @@ def _append_to_global_speech_probs_index(
     relative_start = start_time - base_time
 
     entry = {
-        "segment_id": segment_num,
+        "filename": filename,
         "start_sec": relative_start,
         "end_sec": relative_start + duration,
         "duration_sec": duration,
-        "prob_count": len(speech_prob_history),  # ← fix: use actual count
-        "probs_path": str(probs_path),
-        "segment_dir": f"segment_{segment_num:04d}",
+        "prob_count": len(speech_prob_history),
+        "meta_path": str(meta_path),
     }
 
     all_probs_index.append(entry)
