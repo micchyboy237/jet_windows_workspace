@@ -222,7 +222,7 @@ async def process_utterance(
                     bytes(state.audio_buffer),
                     None,  # prev_pcm — extend state.prev_buffer if needed later
                     sample_rate,
-                    int(utterance_id),  # or use separate utterance counter
+                    utterance_id,  # or use separate utterance counter
                     segment_idx,
                     segment_num,
                 )

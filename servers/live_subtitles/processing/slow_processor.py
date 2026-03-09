@@ -41,7 +41,7 @@ def process_slow(
     curr_pcm: bytes,
     prev_pcm: Optional[bytes],
     sample_rate: int,
-    utterance_idx: int,
+    utterance_id: str,
     segment_idx: int,
     segment_num: int,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -89,7 +89,7 @@ def process_slow(
 
         logger.info(
             "[slow] utt %d | speaker same=%s | emotion=%s (%.2f)",
-            utterance_idx,
+            utterance_id,
             is_same_speaker,
             top_label or "N/A",
             top_score or 0.0
@@ -98,7 +98,7 @@ def process_slow(
         return speaker_result, emotion_result
 
     except Exception as e:
-        logger.exception(f"[slow] processing failed for utterance {utterance_idx}")
+        logger.exception(f"[slow] processing failed for utterance {utterance_id}")
         return (
             {"is_same_speaker_as_prev": None, "similarity_prev": None, "cluster_speakers": None},
             {"emotion_top_label": None, "emotion_top_score": None, "emotion_all": []}
