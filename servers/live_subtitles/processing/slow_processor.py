@@ -1,12 +1,10 @@
-import logging
-import json
 from typing import Optional, Tuple, Dict, Any, List
 import numpy as np
 
 from segment_speaker_labeler import SegmentSpeakerLabeler
 # from segment_emotion_classifier import SegmentEmotionClassifier
 
-logger = logging.getLogger(__name__)
+from logger import logger
 
 # Global loaded models
 logger.info("Loading speaker diarization model...")

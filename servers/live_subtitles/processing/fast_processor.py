@@ -1,7 +1,6 @@
 """
 Fast path: LLM-based Japanese transcription (SenseVoiceSmall) + English translation (llama.cpp)
 """
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -10,7 +9,7 @@ from transcribe_jp_llm import transcribe_japanese, TranscriptionResult
 from translate_jp_en_llm import translate_japanese_to_english
 from ws_server_subtitles_utils import enforce_out_dir_duration_limit, save_temp_wav
 
-logger = logging.getLogger(__name__)
+from logger import logger
 
 
 def process_fast_llm(

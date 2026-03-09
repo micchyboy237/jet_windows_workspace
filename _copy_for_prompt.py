@@ -55,20 +55,20 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\README.md",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\processing",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_handlers.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\start_server.ps1",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\processing",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_handlers.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\start_server.ps1",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\README.md",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\utils",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin/stream_vad.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\utils",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin/stream_vad.py",
     r"",
 ]
 
@@ -86,42 +86,204 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-How to resolve
+Analyze the root cause of this issue
 
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD> python -m fireredvad.bin.stream_vad --model_dir "C:/Users/druiv/.cache/pretrained_models/FireRedVAD/Stream-VAD" --use_gpu 0 --smooth_window_size 5 --speech_threshold 0.3 --pad_start_frame 5 --min_speech_frame 8 --max_speech_frame 2000 --min_silence_frame 20 --chunk_max_frame 30000 --wav_path "C:/Users/druiv/Desktop/Jet_Files/Mac_M1_Files/recording_spyx_3_speakers.wav" --output "C:\Users\druiv\.cache\output\fireredvad\stream_vad\stream_vad.txt" --write_textgrid 1 --save_segment_dir "C:\Users\druiv\.cache\output\fireredvad\stream_vad\segments"
-2026-03-09 22:23:07,021 (stream_vad:175) INFO: Namespace(wav_path='C:/Users/druiv/Desktop/Jet_Files/Mac_M1_Files/recording_spyx_3_speakers.wav', wav_paths=None, wav_scp=None, wav_dir=None, output='C:\\Users\\druiv\\.cache\\output\\fireredvad\\stream_vad\\stream_vad.txt', write_textgrid=1, save_segment_dir='C:\\Users\\druiv\\.cache\\output\\fireredvad\\stream_vad\\segments', model_dir='C:/Users/druiv/.cache/pretrained_models/FireRedVAD/Stream-VAD', stream_vad_mode='all', stream_chunk_frame=10, use_gpu=0, smooth_window_size=5, speech_threshold=0.3, pad_start_frame=5, min_speech_frame=8, max_speech_frame=2000, min_silence_frame=20, chunk_max_frame=30000)
-2026-03-09 22:23:07,021 (stream_vad:49) INFO: Start Stream VAD...
-
-2026-03-09 22:23:07,021 (io:33) INFO: #wavs=1
-2026-03-09 22:23:07,022 (stream_vad:65) INFO: FireRedStreamVadConfig(use_gpu=0, smooth_window_size=5, speech_threshold=0.3, pad_start_frame=5, min_speech_frame=8, max_speech_frame=2000, min_silence_frame=20, chunk_max_frame=30000)
-2026-03-09 22:23:07,049 (param:16) INFO: #param of DetectModel <class 'fireredvad.core.detect_model.DetectModel'> is 567937 = 2.2 MB (float32)
-2026-03-09 22:23:07,049 (stream_vad:69) INFO:
-2026-03-09 22:23:07,049 (stream_vad:70) INFO: >>> 0 Processing C:/Users/druiv/Desktop/Jet_Files/Mac_M1_Files/recording_spyx_3_speakers.wav
-2026-03-09 22:23:07,049 (stream_vad:154) INFO: Stream VAD Mode: full
+OSError: exception: access violation reading 0x0000000000000000
+[03/10/26 04:59:22] INFO     [2258645f] Processing chunk 4 for utt 7e42ddb6-54b5-4509-9b47-c84df937ccf9 (partial)
+[2258645f] Processing chunk 4 for utt 7e42ddb6-54b5-4509-9b47-c84df937ccf9 (partial)
+rtf_avg: 0.003: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  9.72it/s]
+rtf_avg: 0.023: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00,  3.25it/s]
+rtf_avg: 0.021, time_speech:  29.984, time_escape: 0.619: 100%|██████████████████████████| 1/1 [00:00<00:00,  1.61it/s]
+[03/10/26 04:59:23] ERROR    [2258645f] Message handler error: exception: access violation reading 0x0000000000000000
+                             ╭─────────────────────────── Traceback (most recent call last) ───────────────────────────╮
+                             │ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server │
+                             │ _subtitles_handlers.py:72 in handler                                                    │
+                             │                                                                                         │
+                             │    69 │   │   │   │   msg_type = data.get("type")                                       │
+                             │    70 │   │   │   │                                                                     │
+                             │    71 │   │   │   │   if msg_type in ("speech_chunk", "complete_utterance"):            │
+                             │ ❱  72 │   │   │   │   │   await handle_speech_message(websocket, state, data)           │
+                             │    73 │   │   │   │   elif msg_type == "speaker_diarization":                           │
+                             │    74 │   │   │   │   │   await handle_speaker_diarization(websocket, state, data)      │
+                             │    75 │   │   │   │   elif msg_type == "emotion_classification":                        │
+                             │                                                                                         │
+                             │ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server │
+                             │ _subtitles_handlers.py:128 in handle_speech_message                                     │
+                             │                                                                                         │
+                             │   125 │   │   f"{'(final)' if is_final else '(partial)'}"                               │
+                             │   126 │   )                                                                             │
+                             │   127 │                                                                                 │
+                             │ ❱ 128 │   await process_utterance(                                                      │
+                             │   129 │   │   websocket,                                                                │
+                             │   130 │   │   state,                                                                    │
+                             │   131 │   │   sr,                                                                       │
+                             │                                                                                         │
+                             │ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server │
+                             │ _subtitles_handlers.py:265 in process_utterance                                         │
+                             │                                                                                         │
+                             │   262 │   loop = asyncio.get_running_loop()                                             │
+                             │   263 │                                                                                 │
+                             │   264 │   # ── Fast path: transcription + translation ───────────────────────────────   │
+                             │ ❱ 265 │   fast_result = await loop.run_in_executor(                                     │
+                             │   266 │   │   executor_fast,                                                            │
+                             │   267 │   │   process_fast_llm,                                                         │
+                             │   268 │   │   audio_bytes,                                                              │
+                             │                                                                                         │
+                             │ C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\concurrent\futures\thread.py:59 in │
+                             │ run                                                                                     │
+                             │                                                                                         │
+                             │    56 │   │   │   return                                                                │
+                             │    57 │   │                                                                             │
+                             │    58 │   │   try:                                                                      │
+                             │ ❱  59 │   │   │   result = self.fn(*self.args, **self.kwargs)                           │
+                             │    60 │   │   except BaseException as exc:                                              │
+                             │    61 │   │   │   self.future.set_exception(exc)                                        │
+                             │    62 │   │   │   # Break a reference cycle with the exception 'exc'                    │
+                             │                                                                                         │
+                             │ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\processin │
+                             │ g\fast_processor.py:60 in process_fast_llm                                              │
+                             │                                                                                         │
+                             │    57 │   ja_text = trans_result.get("text_ja", "").strip()                             │
+                             │    58 │                                                                                 │
+                             │    59 │   # 2. Translation (llama.cpp)                                                  │
+                             │ ❱  60 │   translation_result = translate_japanese_to_english(                           │
+                             │    61 │   │   ja_text=ja_text,                                                          │
+                             │    62 │   │   enable_scoring=False,  # set True when you want logprobs (slower)         │
+                             │    63 │   │   history=None,          # can pass conversation history later              │
+                             │                                                                                         │
+                             │ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate │
+                             │ _jp_en_llm.py:240 in translate_japanese_to_english                                      │
+                             │                                                                                         │
+                             │   237 │   │   completion_params["logprobs"] = True                                      │
+                             │   238 │   │   completion_params["top_logprobs"] = 1                                     │
+                             │   239 │                                                                                 │
+                             │ ❱ 240 │   response = llm.create_chat_completion(                                        │
+                             │   241 │   │   messages=messages,                                                        │
+                             │   242 │   │   seed=3407,  # for reproducibility                                         │
+                             │   243 │   │   logits_processor=LogitsProcessorList([no_assistant_first]),               │
+                             │                                                                                         │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py:2003   │
+                             │ in create_chat_completion                                                               │
+                             │                                                                                         │
+                             │   2000 │   │   │   or self._chat_handlers.get(self.chat_format)                         │
+                             │   2001 │   │   │   or llama_chat_format.get_chat_completion_handler(self.chat_format)   │
+                             │   2002 │   │   )                                                                        │
+                             │ ❱ 2003 │   │   return handler(                                                          │
+                             │   2004 │   │   │   llama=self,                                                          │
+                             │   2005 │   │   │   messages=messages,                                                   │
+                             │   2006 │   │   │   functions=functions,                                                 │
+                             │                                                                                         │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama_chat_form │
+                             │ at.py:669 in chat_completion_handler                                                    │
+                             │                                                                                         │
+                             │    666 │   │   │   │   │   llama_grammar.JSON_GBNF, verbose=llama.verbose               │
+                             │    667 │   │   │   │   )                                                                │
+                             │    668 │   │                                                                            │
+                             │ ❱  669 │   │   completion_or_chunks = llama.create_completion(                          │
+                             │    670 │   │   │   prompt=prompt,                                                       │
+                             │    671 │   │   │   temperature=temperature,                                             │
+                             │    672 │   │   │   top_p=top_p,                                                         │
+                             │                                                                                         │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py:1837   │
+                             │ in create_completion                                                                    │
+                             │                                                                                         │
+                             │   1834 │   │   if stream:                                                               │
+                             │   1835 │   │   │   chunks: Iterator[CreateCompletionStreamResponse] = completion_or_chu │
+                             │   1836 │   │   │   return chunks                                                        │
+                             │ ❱ 1837 │   │   completion: Completion = next(completion_or_chunks)  # type: ignore      │
+                             │   1838 │   │   return completion                                                        │
+                             │   1839 │                                                                                │
+                             │   1840 │   def __call__(                                                                │
+                             │                                                                                         │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py:1322   │
+                             │ in _create_completion                                                                   │
+                             │                                                                                         │
+                             │   1319 │   │                                                                            │
+                             │   1320 │   │   finish_reason = "length"                                                 │
+                             │   1321 │   │   multibyte_fix = 0                                                        │
+                             │ ❱ 1322 │   │   for token in self.generate(                                              │
+                             │   1323 │   │   │   prompt_tokens,                                                       │
+                             │   1324 │   │   │   top_k=top_k,                                                         │
+                             │   1325 │   │   │   top_p=top_p,                                                         │
+                             │                                                                                         │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py:914 in │
+                             │ generate                                                                                │
+                             │                                                                                         │
+                             │    911 │   │                                                                            │
+                             │    912 │   │   # Eval and sample                                                        │
+                             │    913 │   │   while True:                                                              │
+                             │ ❱  914 │   │   │   self.eval(tokens)                                                    │
+                             │    915 │   │   │   while sample_idx < self.n_tokens:                                    │
+                             │    916 │   │   │   │   token = self.sample(                                             │
+                             │    917 │   │   │   │   │   top_k=top_k,                                                 │
+                             │                                                                                         │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py:648 in │
+                             │ eval                                                                                    │
+                             │                                                                                         │
+                             │    645 │   │   │   self._batch.set_batch(                                               │
+                             │    646 │   │   │   │   batch=batch, n_past=n_past, logits_all=self._logits_all          │
+                             │    647 │   │   │   )                                                                    │
+                             │ ❱  648 │   │   │   self._ctx.decode(self._batch)                                        │
+                             │    649 │   │   │   # Save tokens                                                        │
+                             │    650 │   │   │   self.input_ids[n_past : n_past + n_tokens] = batch                   │
+                             │    651 │   │   │   # Save logits                                                        │
+                             │                                                                                         │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\_internals.py:3 │
+                             │ 22 in decode                                                                            │
+                             │                                                                                         │
+                             │   319 │   # TODO: llama_save_session_file                                               │
+                             │   320 │                                                                                 │
+                             │   321 │   def decode(self, batch: LlamaBatch):                                          │
+                             │ ❱ 322 │   │   return_code = llama_cpp.llama_decode(                                     │
+                             │   323 │   │   │   self.ctx,                                                             │
+                             │   324 │   │   │   batch.batch,                                                          │
+                             │   325 │   │   )                                                                         │
+                             ╰─────────────────────────────────────────────────────────────────────────────────────────╯
+                             OSError: exception: access violation reading 0x0000000000000000
+[2258645f] Message handler error: exception: access violation reading 0x0000000000000000
 Traceback (most recent call last):
-  File "<frozen runpy>", line 198, in _run_module_as_main
-  File "<frozen runpy>", line 88, in _run_code
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin\stream_vad.py", line 176, in <module>
-    main(args)
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin\stream_vad.py", line 73, in main
-    results, timestamps, dur = vad_full(wav_path, stream_vad, args)
-                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\utils\io.py", line 101, in wrapper
-    r = func(*args, **kwargs)
-        ^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin\stream_vad.py", line 155, in vad_full
-    frame_results, result = stream_vad.detect_full(wav_path)
-                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\stream_vad.py", line 109, in detect_full
-    feats, dur = self.audio_feat.extract(audio)
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\audio_feat.py", line 33, in extract
-    fbank = self.fbank((sample_rate, wav_np))
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\audio_feat.py", line 93, in __call__
-    assert len(wav_np.shape) == 1
-           ^^^^^^^^^^^^^^^^^^^^^^
-AssertionError
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_handlers.py", line 72, in handler
+    await handle_speech_message(websocket, state, data)
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_handlers.py", line 128, in handle_speech_message
+    await process_utterance(
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_handlers.py", line 265, in process_utterance
+    fast_result = await loop.run_in_executor(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\processing\fast_processor.py", line 60, in process_fast_llm
+    translation_result = translate_japanese_to_english(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py", line 240, in translate_japanese_to_english
+    response = llm.create_chat_completion(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 2003, in create_chat_completion
+    return handler(
+           ^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama_chat_format.py", line 669, in chat_completion_handler
+    completion_or_chunks = llama.create_completion(
+                           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 1837, in create_completion
+    completion: Completion = next(completion_or_chunks)  # type: ignore
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 1322, in _create_completion
+    for token in self.generate(
+                 ^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 914, in generate
+    self.eval(tokens)
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 648, in eval
+    self._ctx.decode(self._batch)
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\_internals.py", line 322, in decode
+    return_code = llama_cpp.llama_decode(
+                  ^^^^^^^^^^^^^^^^^^^^^^^
+OSError: exception: access violation reading 0x0000000000000000
+[03/10/26 04:59:24] INFO     [2258645f] Processing chunk 5 for utt 7e42ddb6-54b5-4509-9b47-c84df937ccf9 (final)
+[2258645f] Processing chunk 5 for utt 7e42ddb6-54b5-4509-9b47-c84df937ccf9 (final)
+rtf_avg: 0.003: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  8.05it/s]
+rtf_avg: 0.025: 100%|████████████████████████████████████████████████████████████████████| 3/3 [00:00<00:00,  3.73it/s]
+rtf_avg: 0.022, time_speech:  36.000, time_escape: 0.808: 100%|██████████████████████████| 1/1 [00:00<00:00,  1.23it/s]
+C:\Users\druiv\AppData\Local\Temp\pip-install-ptx8joy4\llama-cpp-python_ddecc1a71fa24729894a3f5b1d1a4bf6\vendor\llama.cpp\src\llama-context.cpp:1130: GGML_ASSERT(n_outputs_prev + n_outputs <= n_outputs_all) failed
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

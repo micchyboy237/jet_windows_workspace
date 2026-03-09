@@ -14,7 +14,7 @@ from rich.logging import RichHandler
 # Centralized logger import (assume logger.py in project root)
 from logger import logger
 
-executor_fast = ThreadPoolExecutor(max_workers=2, thread_name_prefix="FastProc")
+executor_fast = ThreadPoolExecutor(max_workers=1, thread_name_prefix="FastProc")
 executor_slow = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SlowProc")
 
 # Set permanent storage at module level (before handlers are imported)
