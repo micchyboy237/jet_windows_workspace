@@ -8,7 +8,7 @@ import base64
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Literal
 
 from logger import logger  # assuming centralized logger
 
@@ -99,6 +99,7 @@ async def handler(websocket):
                         sr,
                         utterance_id,
                         segment_num,
+                        data["segment_type"],
                         context_prompt,
                         state.last_ja,
                         state.last_en,
@@ -132,6 +133,7 @@ async def process_utterance(
     sample_rate: int,
     utterance_id: str,
     segment_num: int,
+    segment_type: Literal["speech", "non-speech"],
     context_prompt: Optional[str],
     last_ja: Optional[str],
     last_en: Optional[str],
@@ -144,6 +146,18 @@ async def process_utterance(
         logger.warning(f"[{state.client_id}] Utterance {utterance_id} too short — ignoring")
         return
     
+    audio_bytes = bytes(state.audio_buffer)
+
+    if not audio_bytes or audio_bytes == b'\x00' * len(audio_bytes):
+        logger.warning(
+            f"[{state.client_id}] Utterance {utterance_id} is empty or pure silence "
+            f"({len(audio_bytes)} bytes) — skipping processing"
+        )
+        if is_final:
+            state.reset_utterance()
+        return
+
+    
     from live_subtitles_server import executor_fast, executor_slow, DEFAULT_OUT_DIR
 
     loop = asyncio.get_running_loop()
@@ -152,7 +166,7 @@ async def process_utterance(
     fast_result = await loop.run_in_executor(
         executor_fast,
         process_fast_llm,
-        bytes(state.audio_buffer),
+        audio_bytes,
         sample_rate,
         state.client_id,
         segment_num,
@@ -239,6 +253,9 @@ async def process_utterance(
                 "utterance_id": utterance_id,
                 "segment_idx": segment_idx,
                 "segment_num": segment_num,
+                "segment_type": "speech",
+                "chunk_index": chunk_index,
+                "is_final": is_final,
                 **speaker_res
             }, ensure_ascii=False))
 
@@ -248,6 +265,9 @@ async def process_utterance(
                 "utterance_id": utterance_id,
                 "segment_idx": segment_idx,
                 "segment_num": segment_num,
+                "segment_type": "speech",
+                "chunk_index": chunk_index,
+                "is_final": is_final,
                 **emotion_res
             }, ensure_ascii=False))
 

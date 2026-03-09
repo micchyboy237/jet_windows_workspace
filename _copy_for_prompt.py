@@ -77,8 +77,11 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Implement prev_pcm for process_slow.
-Show unified diff.
+Client can now send the ff message types:
+speaker_diarization - payload curr_pcm and prev_pcm
+emotion_classification - payload with pcm
+
+Refactor handler to separate sub handler functions, called based on msg_type
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
