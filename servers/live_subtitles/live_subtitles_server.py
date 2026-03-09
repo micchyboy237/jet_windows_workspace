@@ -17,7 +17,18 @@ from logger import logger
 executor_fast = ThreadPoolExecutor(max_workers=2, thread_name_prefix="FastProc")
 executor_slow = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SlowProc")
 
+# Set permanent storage at module level (before handlers are imported)
 DEFAULT_OUT_DIR: Path | None = None
+out_dir_str = os.getenv("UTTERANCE_OUT_DIR")
+if out_dir_str:
+    out_dir_path = Path(out_dir_str).resolve()
+    shutil.rmtree(out_dir_path, ignore_errors=True)
+    out_dir_path.mkdir(parents=True, exist_ok=True)
+    DEFAULT_OUT_DIR = out_dir_path
+    logger.info(f"Permanent utterance storage enabled: {DEFAULT_OUT_DIR}")
+else:
+    DEFAULT_OUT_DIR = None
+    logger.info("Using temporary files (set UTTERANCE_OUT_DIR for permanent storage)")
 
 from processing.fast_processor import process_fast_llm
 from processing.slow_processor import process_slow
@@ -37,17 +48,6 @@ async def main():
         await server.serve_forever()
 
 if __name__ == "__main__":
-    out_dir_str = os.getenv("UTTERANCE_OUT_DIR")
-    if out_dir_str:
-        out_dir_path = Path(out_dir_str).resolve()
-        shutil.rmtree(out_dir_path, ignore_errors=True)        # clean on start (common in dev)
-        out_dir_path.mkdir(parents=True, exist_ok=True)
-        DEFAULT_OUT_DIR = out_dir_path
-        logger.info(f"Permanent utterance storage enabled: {DEFAULT_OUT_DIR}")
-    else:
-        DEFAULT_OUT_DIR = None
-        logger.info("Using temporary files (set UTTERANCE_OUT_DIR for permanent storage)")
-
     try:
         logger.info("Live subtitles server (LLM mode) starting...")
         asyncio.run(main())

@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 
 from transcribe_jp_llm import transcribe_japanese, TranscriptionResult
 from translate_jp_en_llm import translate_japanese_to_english
+from ws_server_subtitles_utils import enforce_out_dir_duration_limit, save_temp_wav
 
 logger = logging.getLogger(__name__)
 
@@ -32,22 +33,27 @@ def process_fast_llm(
     """
     processing_started_at = datetime.now(timezone.utc)
 
-    # Prepare temporary file if persistent storage enabled
-    temp_path: Optional[Path] = None
     if out_dir:
-        ts = processing_started_at.strftime("%Y%m%d_%H%M%S")
-        temp_path = out_dir / f"utterance_{client_id}_{segment_num:04d}_{ts}.wav"
+        temp_path = save_temp_wav(
+            audio_bytes=audio_bytes,
+            out_dir=out_dir,
+            client_id=client_id,
+            segment_num=segment_num,
+        )
 
     # 1. Transcription (SenseVoiceSmall / FunASR)
     trans_result: TranscriptionResult = transcribe_japanese(
         audio_bytes=audio_bytes,
         sample_rate=sample_rate,
-        save_temp_wav=temp_path,
         client_id=client_id,
         segment_num=segment_num,
         # hotwords=hotwords,          # ← pass when implemented
         # context_prompt=context_prompt,
     )
+
+    # enforce rolling retention for stored utterances
+    if out_dir:
+        enforce_out_dir_duration_limit(out_dir)
 
     ja_text = trans_result.get("text_ja", "").strip()
 
