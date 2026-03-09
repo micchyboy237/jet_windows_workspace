@@ -1079,7 +1079,7 @@ async def send_audio_chunk(
         "type": "complete_utterance" if is_final else "speech_chunk",
         "sample_rate": config.sample_rate,
         "pcm": base64.b64encode(pcm_to_send).decode("ascii"),
-        "chunk_index": chunk_index or 0,
+        "chunk_index": chunk_index,
         "is_final": is_final,
         "context_prompt": context_prompt,
         "segment_num": segment_num,
