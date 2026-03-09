@@ -506,19 +506,98 @@ class SegmentSpeakerLabeler:
 
 if __name__ == "__main__":
     import json
-    from utils import resolve_audio_paths
+    from pathlib import Path
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.progress import track
+    from rich import print as rprint   # rich's styled print
 
-    audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server_spyxfamily_intro"
-    segment_paths = resolve_audio_paths(audio_dir)
+    console = Console()
 
-    same_speaker_segments = [segment_paths[1], segment_paths[2]]
+    # ── Configuration ────────────────────────────────────────────────────────
+    audio_dir = Path(
+        r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles"
+        r"\generated\live_subtitles_server_spyxfamily_intro"
+    )
 
-    labeler = SegmentSpeakerLabeler()
+    # You might want to move resolve_audio_paths to this file or import properly
+    from utils import resolve_audio_paths   # assuming this exists
 
-    cluster_results = labeler.cluster_segments(same_speaker_segments)
-    similarity = labeler.similarity(same_speaker_segments[0], same_speaker_segments[1])
-    same_speaker = labeler.is_same_speaker(same_speaker_segments[0], same_speaker_segments[1])
+    console.rule("Speaker Labeler Demo", style="bold cyan")
 
-    print(f"Clusters:\n{json.dumps(cluster_results, indent=2, ensure_ascii=False)}")
-    print(f"Similarity: {similarity:.4f}")
-    print(f"Same speaker: {same_speaker}")
+    with console.status("[bold green]Collecting audio files...", spinner="dots") as status:
+        segment_paths = resolve_audio_paths(audio_dir)
+        status.update(f"[green]Found [bold]{len(segment_paths)}[/bold] audio segments")
+
+    if len(segment_paths) < 2:
+        console.print("[red bold]Not enough audio files to compare.[/red]")
+        raise SystemExit(1)
+
+    # Pick two files that you believe might be the same speaker (for demo)
+    test_files = [segment_paths[1], segment_paths[2]]
+
+    console.print("\n[bold]Testing files:[/]")
+    for i, p in enumerate(test_files, 1):
+        console.print(f"  • [cyan]{i}.[/cyan] [white]{Path(p).name}[/]")
+
+    # ── Create labeler with rich-friendly verbosity ──────────────────────────
+    labeler = SegmentSpeakerLabeler(
+        verbose=True,           # we'll let rich handle most output anyway
+        # You can add other params here, e.g.:
+        # distance_threshold=0.68,
+        # assignment_threshold=0.65,
+        # clustering_strategy="agglomerative",
+    )
+
+    console.print("\n[bold yellow]Running similarity & clustering...[/]")
+
+    # ── Similarity ───────────────────────────────────────────────────────────
+    with console.status("[magenta]Computing direct cosine similarity...", spinner="bouncingBall"):
+        similarity = labeler.similarity(test_files[0], test_files[1])
+
+    # ── is_same_speaker ──────────────────────────────────────────────────────
+    with console.status("[magenta]Checking is_same_speaker...", spinner="bouncingBall"):
+        same_speaker = labeler.is_same_speaker(test_files[0], test_files[1])
+
+    # ── Full clustering ──────────────────────────────────────────────────────
+    with console.status("[bold blue]Extracting embeddings & clustering...", spinner="arc"):
+        cluster_results = labeler.cluster_segments(test_files)
+
+    # ── Results Table ────────────────────────────────────────────────────────
+    table = Table(title="Clustering Results", show_header=True, header_style="bold magenta")
+    table.add_column("File", style="cyan", no_wrap=True)
+    table.add_column("Speaker", justify="center")
+    table.add_column("Centroid Sim", justify="right")
+    table.add_column("NN Sim", justify="right")
+
+    for res in cluster_results:
+        cent_sim = f"{res['centroid_cosine_similarity']:.3f}" if not np.isnan(res['centroid_cosine_similarity']) else "—"
+        nn_sim   = f"{res['nearest_neighbor_cosine_similarity']:.3f}" if not np.isnan(res['nearest_neighbor_cosine_similarity']) else "—"
+
+        table.add_row(
+            Path(res["path"]).name,
+            f"[bold]{res['speaker_label']}[/]",
+            cent_sim,
+            nn_sim
+        )
+
+    console.print("\n")
+    console.print(table)
+
+    # ── Summary Panel ────────────────────────────────────────────────────────
+    verdict_color = "green" if same_speaker else "red"
+    verdict_text  = "YES — same speaker" if same_speaker else "NO — different speakers"
+
+    summary = Panel(
+        f"[bold]Cosine similarity:[/]  {similarity:.4f}\n"
+        f"[bold]Same speaker:[/]       [{verdict_color}]{verdict_text}[/]\n"
+        f"[dim]Threshold used:[/]      ~0.68–0.70 (depending on config)",
+        title="Final Verdict",
+        border_style=verdict_color,
+        padding=(1, 2),
+        expand=False
+    )
+
+    console.print(summary)
+    console.print("\n[dim]Done.[/]")
