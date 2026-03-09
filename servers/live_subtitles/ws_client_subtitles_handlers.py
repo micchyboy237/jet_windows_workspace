@@ -236,7 +236,7 @@ class WSClientLiveSubtitleHandlers:
             segments_root=os.path.join(self.output_dir, "segments"),
             utterance_id=data.get("utterance_id"),
             chunk_index=data.get("chunk_index", 0),
-            create_if_missing=True,
+            create_if_missing=False,
         )
 
         speaker_clusters = data.get("cluster_speakers", [])
@@ -273,7 +273,7 @@ class WSClientLiveSubtitleHandlers:
             segments_root=segments_root,
             utterance_id=data.get("utterance_id"),
             chunk_index=data.get("chunk_index", 0),
-            create_if_missing=True,
+            create_if_missing=False,
         )
 
         emotion_classification_all = data.get("emotion_all")
@@ -328,7 +328,7 @@ class WSClientLiveSubtitleHandlers:
             segments_root=segments_root,
             utterance_id=str(utt_id) if utt_id else None,
             chunk_index=entry.get("chunk_index", 0),
-            create_if_missing=True,
+            create_if_missing=False,
         )
 
         self.overlay.add_message(
