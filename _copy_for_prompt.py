@@ -55,14 +55,20 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\README.md",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\processing",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_handlers.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\start_server.ps1",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\processing",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_handlers.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\start_server.ps1",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\README.md",
+    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core",
+    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\utils",
+    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin/stream_vad.py",
     r"",
 ]
 
@@ -80,9 +86,42 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Check why its not saving anything after running . C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\start_server.ps1
+How to resolve
 
-Show unified diff
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD> python -m fireredvad.bin.stream_vad --model_dir "C:/Users/druiv/.cache/pretrained_models/FireRedVAD/Stream-VAD" --use_gpu 0 --smooth_window_size 5 --speech_threshold 0.3 --pad_start_frame 5 --min_speech_frame 8 --max_speech_frame 2000 --min_silence_frame 20 --chunk_max_frame 30000 --wav_path "C:/Users/druiv/Desktop/Jet_Files/Mac_M1_Files/recording_spyx_3_speakers.wav" --output "C:\Users\druiv\.cache\output\fireredvad\stream_vad\stream_vad.txt" --write_textgrid 1 --save_segment_dir "C:\Users\druiv\.cache\output\fireredvad\stream_vad\segments"
+2026-03-09 22:23:07,021 (stream_vad:175) INFO: Namespace(wav_path='C:/Users/druiv/Desktop/Jet_Files/Mac_M1_Files/recording_spyx_3_speakers.wav', wav_paths=None, wav_scp=None, wav_dir=None, output='C:\\Users\\druiv\\.cache\\output\\fireredvad\\stream_vad\\stream_vad.txt', write_textgrid=1, save_segment_dir='C:\\Users\\druiv\\.cache\\output\\fireredvad\\stream_vad\\segments', model_dir='C:/Users/druiv/.cache/pretrained_models/FireRedVAD/Stream-VAD', stream_vad_mode='all', stream_chunk_frame=10, use_gpu=0, smooth_window_size=5, speech_threshold=0.3, pad_start_frame=5, min_speech_frame=8, max_speech_frame=2000, min_silence_frame=20, chunk_max_frame=30000)
+2026-03-09 22:23:07,021 (stream_vad:49) INFO: Start Stream VAD...
+
+2026-03-09 22:23:07,021 (io:33) INFO: #wavs=1
+2026-03-09 22:23:07,022 (stream_vad:65) INFO: FireRedStreamVadConfig(use_gpu=0, smooth_window_size=5, speech_threshold=0.3, pad_start_frame=5, min_speech_frame=8, max_speech_frame=2000, min_silence_frame=20, chunk_max_frame=30000)
+2026-03-09 22:23:07,049 (param:16) INFO: #param of DetectModel <class 'fireredvad.core.detect_model.DetectModel'> is 567937 = 2.2 MB (float32)
+2026-03-09 22:23:07,049 (stream_vad:69) INFO:
+2026-03-09 22:23:07,049 (stream_vad:70) INFO: >>> 0 Processing C:/Users/druiv/Desktop/Jet_Files/Mac_M1_Files/recording_spyx_3_speakers.wav
+2026-03-09 22:23:07,049 (stream_vad:154) INFO: Stream VAD Mode: full
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin\stream_vad.py", line 176, in <module>
+    main(args)
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin\stream_vad.py", line 73, in main
+    results, timestamps, dur = vad_full(wav_path, stream_vad, args)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\utils\io.py", line 101, in wrapper
+    r = func(*args, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin\stream_vad.py", line 155, in vad_full
+    frame_results, result = stream_vad.detect_full(wav_path)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\stream_vad.py", line 109, in detect_full
+    feats, dur = self.audio_feat.extract(audio)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\audio_feat.py", line 33, in extract
+    fbank = self.fbank((sample_rate, wav_np))
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\audio_feat.py", line 93, in __call__
+    assert len(wav_np.shape) == 1
+           ^^^^^^^^^^^^^^^^^^^^^^
+AssertionError
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
