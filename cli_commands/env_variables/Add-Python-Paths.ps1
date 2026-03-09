@@ -18,6 +18,7 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 # Most common locations as of 2025–2026
 # ────────────────────────────────────────────────
 $pathsToAdd = @(
+    "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin"
     # Python 3.13 (example – change version number as needed)
     # "C:\Python313",
     # "C:\Python313\Scripts",

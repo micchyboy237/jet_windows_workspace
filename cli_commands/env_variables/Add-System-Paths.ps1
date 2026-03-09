@@ -11,9 +11,10 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 $pathsToAdd = @(
-    "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin",
-    "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\libnvvp",
-    "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\extras\CUPTI\lib64"
+    "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin"
+    # "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin",
+    # "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\libnvvp",
+    # "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\extras\CUPTI\lib64"
     # Uncomment if you really need it (rarely required for runtime):
     # "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\include"
     # "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64"

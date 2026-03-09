@@ -51,9 +51,16 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
 
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\README.md",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\README.md",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\processing",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_handlers.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server_per_speech_llm.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_llm.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     r"",
 ]
 
@@ -71,7 +78,13 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Summarize how to setup and install for windows using local git repo.
+The latest code logic is live_subtitles_server_per_speech_llm.
+
+Please update live_subtitles_server.py, ws_server_subtitles_handlers.py and processing/ files accordingly based on live_subtitles_server_per_speech_llm.
+
+Please still use processing fast and slow processor files. Where the slow processor will still implement the speaker diarization and emotion classification logic.
+
+Show unified diff.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
