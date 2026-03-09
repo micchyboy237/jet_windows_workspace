@@ -28,7 +28,7 @@ from jet.logger import logger as log
 from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
 from PyQt6.QtWidgets import QApplication
 from ws_client_subtitles_handlers import WSClientLiveSubtitleHandlers
-from ws_client_subtitles_utils import build_segment_metadata, get_timestamp_prefix
+from ws_client_subtitles_utils import build_segment_metadata, find_segments_subdir
 
 OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__),
@@ -207,6 +207,8 @@ async def stream_microphone(ws) -> None:
     total_chunks_processed = 0
     speech_start_time = None
     segment_type: Literal["speech", "non_speech"] = "non_speech"
+
+    fname = "sound.wav"
 
     global last_sent_byte_length
 
@@ -487,6 +489,15 @@ async def stream_microphone(ws) -> None:
                                 ) / (config.sample_rate * 2)
                                 to_send = current_segment.buffer[start_idx:]
 
+                            # ──────────────── NEW: per-segment subdirectory ────────────────
+                            seg_subdir = find_segments_subdir(
+                                segments_root=SEGMENTS_DIR,
+                                utterance_id=current_utterance_id,
+                                chunk_index=chunk_index,
+                                create_if_missing=True,
+                            )
+                            # ────────────────────────────────────────────────────────────────
+
                             # Only send partial chunks once enough accumulated speech is available
                             if should_send_chunk or duration_exceeded:
                                 # if (
@@ -549,18 +560,8 @@ async def stream_microphone(ws) -> None:
                                 )
 
                                 # ─── NEW: Save partial audio after sending ───────────────────────
-                                partial_prefix = get_timestamp_prefix()
-                                utt_suffix = (
-                                    current_utterance_id[-6:]
-                                    if current_utterance_id
-                                    else "noID"
-                                )
-                                partial_fname = (
-                                    f"{partial_prefix}_{utt_suffix}_{chunk_index}.wav"
-                                )
-                                partial_wav_path = os.path.join(
-                                    SEGMENTS_DIR, partial_fname
-                                )
+                                # Use new subdir for partial saves
+                                partial_wav_path = os.path.join(seg_subdir, fname)
 
                                 # Save the sent chunk (to_send), not the whole buffer
                                 partial_audio_int16 = np.frombuffer(
@@ -578,9 +579,9 @@ async def stream_microphone(ws) -> None:
                                 sent_rms = compute_rms(partial_audio_float)
                                 rms_label = rms_to_loudness_label(sent_rms)
 
-                                # Optional: lightweight metadata for partial
+                                # Save metadata.json in the same subdir as partial_wav_path (sound.wav)
                                 partial_meta = build_segment_metadata(
-                                    filename=partial_fname,
+                                    filename=fname,  # relative inside subdir
                                     utterance_id=current_utterance_id,
                                     chunk_index=chunk_index,
                                     is_partial=True,
@@ -593,11 +594,9 @@ async def stream_microphone(ws) -> None:
                                     rms_label=rms_label,
                                     num_samples=len(to_send) // 2,
                                 )
-                                with open(
-                                    partial_wav_path.replace(".wav", ".json"),
-                                    "w",
-                                    encoding="utf-8",
-                                ) as f:
+                                # Save as metadata.json, not <chunk>.json
+                                meta_path = os.path.join(seg_subdir, "metadata.json")
+                                with open(meta_path, "w", encoding="utf-8") as f:
                                     json.dump(partial_meta, f, indent=2)
 
                                 # IMPORTANT: update to current absolute end, not len(to_send)
@@ -737,16 +736,15 @@ async def stream_microphone(ws) -> None:
                                 current_segment_num is not None
                                 and current_segment is not None
                             ):
-                                # Flat structure with timestamp-based sortable filename
-                                prefix = get_timestamp_prefix()
-                                utt_suffix = (
-                                    current_utterance_id[-6:]
-                                    if current_utterance_id
-                                    else "noID"
+                                # ──────────────── NEW: final also uses same subdir format ───────
+                                seg_subdir = find_segments_subdir(
+                                    segments_root=SEGMENTS_DIR,
+                                    utterance_id=current_utterance_id,
+                                    chunk_index=chunk_index,
+                                    create_if_missing=True,
                                 )
-                                chunk_idx = chunk_index
-                                fname = f"{prefix}_{utt_suffix}_{chunk_idx}.wav"
-                                wav_path = os.path.join(SEGMENTS_DIR, fname)
+
+                                wav_path = os.path.join(seg_subdir, fname)
 
                                 wavfile.write(
                                     wav_path,
@@ -765,7 +763,7 @@ async def stream_microphone(ws) -> None:
                                     **build_segment_metadata(
                                         filename=fname,
                                         utterance_id=current_utterance_id,
-                                        chunk_index=chunk_idx,
+                                        chunk_index=chunk_index,
                                         is_partial=False,
                                         duration_sec=duration,
                                         start_sec=current_segment.start_time,
@@ -815,10 +813,8 @@ async def stream_microphone(ws) -> None:
                                     time.monotonic()
                                 )  # add end time separately
 
-                                # Save metadata alongside .wav
-                                meta_path = os.path.join(
-                                    SEGMENTS_DIR, fname.replace(".wav", ".json")
-                                )
+                                # Save metadata.json into segment subdirectory
+                                meta_path = os.path.join(seg_subdir, "metadata.json")
                                 with open(meta_path, "w", encoding="utf-8") as f:
                                     json.dump(metadata, f, indent=2, ensure_ascii=False)
 
@@ -1015,6 +1011,7 @@ async def send_audio_chunk(
     duration_sec: float = 0.0,
     overlap_sec: float = 0.0,
     segment_num: int = 0,
+    segment_type: Literal["speech", "non-speech"] = "speech",
     avg_vad: float = 0.0,
     is_final: bool = False,
     chunk_index: int = 0,
@@ -1062,6 +1059,7 @@ async def send_audio_chunk(
         "is_final": is_final,
         "context_prompt": context_prompt,
         "segment_num": segment_num,
+        "segment_type": segment_type,
         "utterance_id": current_utterance_id,
         # "utterance_id": str(uuid.uuid4()),  # Temporarily create new id
         "rms": rms,

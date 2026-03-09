@@ -1,11 +1,9 @@
-# live_subtitles_client_with_overlay.py
+# ws_client_subtitles_handlers.py
 
 import asyncio
 import datetime
 import json
 import os
-from pathlib import Path
-from typing import Literal
 
 import websockets
 from jet.audio.helpers.energy import rms_to_loudness_label
@@ -14,6 +12,7 @@ from jet.audio.speech.firered.speech_types import WordSegment
 # from rich.logging import RichHandler
 from jet.logger import logger as log
 from jet.overlays.live_subtitles_overlay import LiveSubtitlesOverlay
+from ws_client_subtitles_utils import find_segments_subdir
 
 # Global SRT sequence counter (1-based)
 srt_sequence = 1
@@ -231,23 +230,24 @@ class WSClientLiveSubtitleHandlers:
         segment_idx = data["segment_idx"]
         segment_num = data["segment_num"]
         segment_type = data["segment_type"]
-        segment_dir = os.path.join(
-            self.output_dir, "segments", f"segment_{segment_num:04d}"
+
+        # Use shared segment directory finding logic for consistency
+        segment_dir = find_segments_subdir(
+            segments_root=os.path.join(self.output_dir, "segments"),
+            utterance_id=data.get("utterance_id"),
+            chunk_index=data.get("chunk_index", 0),
+            create_if_missing=True,
         )
 
-        speaker_clusters = data.get("cluster_speakers")
-        speaker_is_same = data.get("is_same_speaker_as_prev")
-        speaker_similarity = data.get("similarity_prev")
+        speaker_clusters = data.get("cluster_speakers", [])
         speaker_meta = {
             "segment_idx": segment_idx,
             "segment_num": segment_num,
             "segment_type": segment_type,
-            "is_same_speaker_as_prev": speaker_is_same,
-            "similarity_prev": speaker_similarity,
+            "is_same_as_prev": data.get("is_same_speaker_as_prev"),
+            "similarity_prev": data.get("similarity_prev"),
         }
-
-        # Write per-segment speakers info
-        speaker_clusters_path = os.path.join(segment_dir, "speaker_cluster.json")
+        speaker_clusters_path = os.path.join(segment_dir, "speaker.json")
         speaker_meta_path = os.path.join(segment_dir, "speaker_meta.json")
         with open(speaker_clusters_path, "w", encoding="utf-8") as f:
             json.dump(speaker_clusters, f, indent=2, ensure_ascii=False)
@@ -266,17 +266,19 @@ class WSClientLiveSubtitleHandlers:
         segment_idx = data["segment_idx"]
         segment_num = data["segment_num"]
         segment_type = data["segment_type"]
-        subdir = "segments" if segment_type == "speech" else "segments_non_speech"
-        segment_dir = os.path.join(
-            self.output_dir, subdir, f"segment_{segment_num:04d}"
-        )
-        Path(segment_dir).mkdir(parents=True, exist_ok=True)
+        base_dir = "segments" if segment_type == "speech" else "segments_non_speech"
+        segments_root = os.path.join(self.output_dir, base_dir)
 
-        segment_type: Literal["speech", "non_speech"] = data["segment_type"]
+        segment_dir = find_segments_subdir(
+            segments_root=segments_root,
+            utterance_id=data.get("utterance_id"),
+            chunk_index=data.get("chunk_index", 0),
+            create_if_missing=True,
+        )
+
         emotion_classification_all = data.get("emotion_all")
         emotion_top_label = data.get("emotion_top_label")
         emotion_top_score = data.get("emotion_top_score")
-        emotion_top_label = data.get("emotion_top_label")
         emotion_classification_meta = {
             "segment_idx": segment_idx,
             "segment_num": segment_num,
@@ -285,19 +287,16 @@ class WSClientLiveSubtitleHandlers:
             "emotion_top_score": emotion_top_score,
         }
 
-        # Write per-segment emotion classification info
-        emotion_classification_all_path = os.path.join(
-            segment_dir, "emotion_classification_all.json"
-        )
+        emotion_classification_all_path = os.path.join(segment_dir, "emotion.json")
         emotion_classification_meta_path = os.path.join(
-            segment_dir, "emotion_classification_meta.json"
+            segment_dir, "emotion_meta.json"
         )
         with open(emotion_classification_all_path, "w", encoding="utf-8") as f:
             json.dump(emotion_classification_all, f, indent=2, ensure_ascii=False)
         with open(emotion_classification_meta_path, "w", encoding="utf-8") as f:
             json.dump(emotion_classification_meta, f, indent=2, ensure_ascii=False)
 
-    async def _update_display_and_files(self, utt_id: int, entry: dict) -> None:
+    async def _update_display_and_files(self, utt_id: str | int, entry: dict) -> None:
         # Require text to proceed with display & SRT
         if "ja" not in entry:
             return
@@ -323,12 +322,15 @@ class WSClientLiveSubtitleHandlers:
         transl_quality = entry.get("transl_quality")
 
         subdir = "segments" if segment_type == "speech" else "segments_non_speech"
-        segment_dir = os.path.join(
-            self.output_dir, subdir, f"segment_{segment_num:04d}"
-        )
-        Path(segment_dir).mkdir(parents=True, exist_ok=True)
+        segments_root = os.path.join(self.output_dir, subdir)
 
-        # ── Overlay ────────────────────────────────────────────────────────────────
+        segment_dir = find_segments_subdir(
+            segments_root=segments_root,
+            utterance_id=str(utt_id) if utt_id else None,
+            chunk_index=entry.get("chunk_index", 0),
+            create_if_missing=True,
+        )
+
         self.overlay.add_message(
             message_id=f"{utt_id}_chunk{chunk_index}",
             source_text=ja,
@@ -346,13 +348,8 @@ class WSClientLiveSubtitleHandlers:
             transcription_quality=trans_quality,
             translation_confidence=transl_conf if transl_conf is not None else None,
             translation_quality=transl_quality,
-            # New speaker fields (overlay can ignore them if not ready)
-            # is_same_speaker_as_prev=is_same,
-            # speaker_similarity=similarity if similarity is not None else None,
-            # speaker_clusters=clusters,
         )
 
-        # ── SRT (write only once) ─────────────────────────────────────────────────
         per_seg_srt = os.path.join(segment_dir, "subtitles.srt")
         all_srt_path = os.path.join(self.output_dir, "all_subtitles.srt")
 
