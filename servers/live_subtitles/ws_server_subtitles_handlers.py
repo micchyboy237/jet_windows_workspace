@@ -1,3 +1,5 @@
+# ws_server_subtitles_handlers.py
+
 """
 Modern WebSocket handler for live Japanese subtitles server.
 Receives speech chunks / complete utterances → buffers per utterance → triggers fast & slow processing.
@@ -67,51 +69,11 @@ async def handler(websocket):
                 msg_type = data.get("type")
 
                 if msg_type in ("speech_chunk", "complete_utterance"):
-                    pcm_b64 = data.get("pcm")
-                    if not pcm_b64:
-                        logger.warning(f"[{client_id}] Missing pcm")
-                        continue
-
-                    pcm_bytes = base64.b64decode(pcm_b64)
-                    sr = data.get("sample_rate", 16000)
-                    utterance_id = data.get("utterance_id")
-                    segment_num = data.get("segment_num", 0)
-                    chunk_index = data.get("chunk_index", 0)
-                    is_final = data.get("is_final", False)
-                    rms = data.get("rms")
-                    context_prompt = data.get("context_prompt")
-
-                    if utterance_id != state.current_utterance_id:
-                        state.current_utterance_id = utterance_id
-                        state.reset_utterance()
-                        state.utterance_start = datetime.now(timezone.utc)
-
-                    state.append_chunk(pcm_bytes, sr)
-                    state.last_context_prompt = context_prompt
-
-                    logger.info(
-                        f"[{client_id}] Processing chunk {chunk_index} for utt {utterance_id} {'(final)' if is_final else '(partial)'}"
-                    )
-
-                    await process_utterance(
-                        websocket,
-                        state,
-                        sr,
-                        utterance_id,
-                        segment_num,
-                        data["segment_type"],
-                        context_prompt,
-                        state.last_ja,
-                        state.last_en,
-                        data,
-                        rms,
-                        is_final=is_final,
-                    )
-
-                    if is_final:
-                        logger.info(f"[{client_id}] Final chunk received for utt {utterance_id}")
-                        state.reset_utterance()
-
+                    await handle_speech_message(websocket, state, data)
+                elif msg_type == "speaker_diarization":
+                    await handle_speaker_diarization(websocket, state, data)
+                elif msg_type == "emotion_classification":
+                    await handle_emotion_classification(websocket, state, data)
                 else:
                     logger.warning(f"[{client_id}] Unknown message type: {msg_type}")
 
@@ -125,6 +87,143 @@ async def handler(websocket):
     finally:
         connected_states.pop(websocket, None)
         logger.info(f"[{client_id}] Disconnected")
+
+async def handle_speech_message(
+    websocket: WebSocketServerProtocol,
+    state: ConnectionState,
+    data: dict
+) -> None:
+    """Handle speech_chunk / complete_utterance messages."""
+
+    client_id = state.client_id
+
+    pcm_b64 = data.get("pcm")
+    if not pcm_b64:
+        logger.warning(f"[{client_id}] Missing pcm")
+        return
+
+    pcm_bytes = base64.b64decode(pcm_b64)
+
+    sr = data.get("sample_rate", 16000)
+    utterance_id = data.get("utterance_id")
+    segment_num = data.get("segment_num", 0)
+    chunk_index = data.get("chunk_index", 0)
+    is_final = data.get("is_final", False)
+    rms = data.get("rms")
+    context_prompt = data.get("context_prompt")
+
+    if utterance_id != state.current_utterance_id:
+        state.current_utterance_id = utterance_id
+        state.reset_utterance()
+        state.utterance_start = datetime.now(timezone.utc)
+
+    state.append_chunk(pcm_bytes, sr)
+    state.last_context_prompt = context_prompt
+
+    logger.info(
+        f"[{client_id}] Processing chunk {chunk_index} for utt {utterance_id} "
+        f"{'(final)' if is_final else '(partial)'}"
+    )
+
+    await process_utterance(
+        websocket,
+        state,
+        sr,
+        utterance_id,
+        segment_num,
+        data["segment_type"],
+        context_prompt,
+        state.last_ja,
+        state.last_en,
+        data,
+        rms,
+        is_final=is_final,
+    )
+
+    if is_final:
+        logger.info(f"[{client_id}] Final chunk received for utt {utterance_id}")
+        state.reset_utterance()
+
+
+async def handle_speaker_diarization(
+    websocket: WebSocketServerProtocol,
+    state: ConnectionState,
+    data: dict
+) -> None:
+    """Handle standalone speaker diarization request."""
+
+    client_id = state.client_id
+
+    curr_pcm_b64 = data.get("curr_pcm")
+    prev_pcm_b64 = data.get("prev_pcm")
+    sample_rate = data.get("sample_rate", 16000)
+
+    if not curr_pcm_b64:
+        logger.warning(f"[{client_id}] speaker_diarization missing curr_pcm")
+        return
+
+    curr_pcm = base64.b64decode(curr_pcm_b64)
+    prev_pcm = base64.b64decode(prev_pcm_b64) if prev_pcm_b64 else None
+
+    from live_subtitles_server import executor_slow
+
+    loop = asyncio.get_running_loop()
+
+    speaker_res, _ = await loop.run_in_executor(
+        executor_slow,
+        process_slow,
+        curr_pcm,
+        prev_pcm,
+        sample_rate,
+        data.get("utterance_id", "external"),
+        data.get("segment_idx", 0),
+        data.get("segment_num", 0),
+    )
+
+    await websocket.send(json.dumps({
+        "type": "speaker_update",
+        **speaker_res
+    }, ensure_ascii=False))
+
+
+async def handle_emotion_classification(
+    websocket: WebSocketServerProtocol,
+    state: ConnectionState,
+    data: dict
+) -> None:
+    """Handle standalone emotion classification request."""
+
+    client_id = state.client_id
+
+    pcm_b64 = data.get("pcm")
+    sample_rate = data.get("sample_rate", 16000)
+
+    if not pcm_b64:
+        logger.warning(f"[{client_id}] emotion_classification missing pcm")
+        return
+
+    pcm = base64.b64decode(pcm_b64)
+
+    from live_subtitles_server import executor_slow
+
+    loop = asyncio.get_running_loop()
+
+    _, emotion_res = await loop.run_in_executor(
+        executor_slow,
+        process_slow,
+        pcm,
+        None,
+        sample_rate,
+        data.get("utterance_id", "external"),
+        data.get("segment_idx", 0),
+        data.get("segment_num", 0),
+    )
+
+    await websocket.send(json.dumps({
+        "type": "emotion_classification_update",
+        **emotion_res
+    }, ensure_ascii=False))
+
 
 
 async def process_utterance(

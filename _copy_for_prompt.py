@@ -85,7 +85,6 @@ Refactor handler to separate sub handler functions, called based on msg_type
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
-Dont execute code lines
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """

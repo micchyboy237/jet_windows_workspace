@@ -88,12 +88,12 @@ def process_slow(
         try:
             clusters = speaker_labeler.cluster_segments([prev_wave, curr_wave])
             if len(clusters) == 2:
-                clusters = [str(c) for c in clusters]  # ensure serializable
+                # No need to str() here — clusters should already be list[dict]
                 sim = speaker_labeler.similarity(curr_wave, prev_wave)
                 is_same = speaker_labeler.is_same_speaker(curr_wave, prev_wave)
                 logger.info(
                     "%s | speaker → same=%s | sim=%.3f | clusters=%s",
-                    utt_short, is_same, sim or -1, clusters
+                    utt_short, is_same, sim or -1, clusters   # ← safe, will use repr() only for logging
                 )
             else:
                 logger.warning("%s | unexpected cluster count: %d", utt_short, len(clusters))
@@ -103,7 +103,7 @@ def process_slow(
     speaker_result.update({
         "is_same_speaker_as_prev": is_same,
         "similarity_prev": round(float(sim), 3) if sim is not None else None,
-        "cluster_speakers": clusters,
+        "cluster_speakers": clusters,   # ← now a list of dicts, perfect for JSON
     })
 
     # # ── Emotion classification ─────────────────────────────────────────
