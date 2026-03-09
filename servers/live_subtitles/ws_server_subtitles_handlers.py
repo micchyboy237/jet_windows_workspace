@@ -27,6 +27,7 @@ class ConnectionState:
         self.current_utterance_id: Optional[str] = None
         self.audio_buffer: bytearray = bytearray()
         self.chunk_count: int = 0
+        self.prev_utterance_pcm: Optional[bytes] = None           # ← NEW
         self.last_context_prompt: Optional[str] = None
         self.last_ja: Optional[str] = None
         self.last_en: Optional[str] = None
@@ -36,6 +37,7 @@ class ConnectionState:
     def reset_utterance(self) -> None:
         self.audio_buffer = bytearray()
         self.chunk_count = 0
+        # Note: we KEEP prev_utterance_pcm across utterances
 
     def append_chunk(self, pcm_bytes: bytes, sample_rate: int) -> None:
         self.audio_buffer.extend(pcm_bytes)
@@ -204,6 +206,7 @@ async def process_utterance(
         "translation_quality": meta["translation"].get("quality", "N/A"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "meta": meta,
+        # consider adding: "has_prev_pcm": state.prev_utterance_pcm is not None
     }
 
     state.last_ja = ja
@@ -213,41 +216,44 @@ async def process_utterance(
     logger.debug(f"[{state.client_id}] Sent {payload['type']} for utt {utterance_id}")
 
     # ── Slow path (only on final utterances) ─────────────────────────────────
-    if is_final:
-        async def run_slow_processing() -> None:
-            try:
-                speaker_res, emotion_res = await loop.run_in_executor(
-                    executor_slow,
-                    process_slow,
-                    bytes(state.audio_buffer),
-                    None,  # prev_pcm — extend state.prev_buffer if needed later
-                    sample_rate,
-                    utterance_id,  # or use separate utterance counter
-                    segment_idx,
-                    segment_num,
-                )
+    async def run_slow_processing() -> None:
+        try:
+            prev_pcm_to_use = state.prev_utterance_pcm
+            # After using it → update for next utterance
+            state.prev_utterance_pcm = bytes(state.audio_buffer)
 
-                # Send speaker update
-                await websocket.send(json.dumps({
-                    "type": "speaker_update",
-                    "utterance_id": utterance_id,
-                    "segment_idx": segment_idx,
-                    "segment_num": segment_num,
-                    **speaker_res
-                }, ensure_ascii=False))
+            speaker_res, emotion_res = await loop.run_in_executor(
+                executor_slow,
+                process_slow,
+                bytes(state.audio_buffer),
+                prev_pcm_to_use,     # ← now using previous utterance if available
+                sample_rate,
+                utterance_id,
+                segment_idx,
+                segment_num,
+            )
 
-                # Send emotion update
-                await websocket.send(json.dumps({
-                    "type": "emotion_classification_update",
-                    "utterance_id": utterance_id,
-                    "segment_idx": segment_idx,
-                    "segment_num": segment_num,
-                    **emotion_res
-                }, ensure_ascii=False))
+            # Send speaker update
+            await websocket.send(json.dumps({
+                "type": "speaker_update",
+                "utterance_id": utterance_id,
+                "segment_idx": segment_idx,
+                "segment_num": segment_num,
+                **speaker_res
+            }, ensure_ascii=False))
 
-                logger.info(f"[{state.client_id}] Slow results sent for utt {utterance_id}")
+            # Send emotion update
+            await websocket.send(json.dumps({
+                "type": "emotion_classification_update",
+                "utterance_id": utterance_id,
+                "segment_idx": segment_idx,
+                "segment_num": segment_num,
+                **emotion_res
+            }, ensure_ascii=False))
 
-            except Exception as e:
-                logger.exception(f"[{state.client_id}] Slow processing failed for utt {utterance_id}")
+            logger.info(f"[{state.client_id}] Slow results sent for utt {utterance_id}")
 
-        asyncio.create_task(run_slow_processing())
+        except Exception as e:
+            logger.exception(f"[{state.client_id}] Slow processing failed for utt {utterance_id}")
+
+    asyncio.create_task(run_slow_processing())
