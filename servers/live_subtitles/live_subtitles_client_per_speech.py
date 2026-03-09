@@ -55,7 +55,7 @@ DTYPE = "int16"
 
 CHUNK_DURATION_SEC = 6.0
 CHUNK_OVERLAP_SEC = 0.0
-MIN_SILENCE_DURATION_SEC = 0.4
+MIN_SILENCE_DURATION_SEC = 0.65  # increased to stop VAD jitter false-ends
 MIN_SPEECH_DURATION_SEC = 0.5
 MAX_SPEECH_DURATION_SEC = CHUNK_DURATION_SEC * 2
 # MAX_SPEECH_OVERLAP_SEC = 10.0
@@ -205,6 +205,45 @@ async def stream_microphone(ws) -> None:
     chunks_detected = 0
     total_chunks_processed = 0
     speech_start_time = None
+
+    # All per-segment stats that must be reset on every new utterance
+    max_vad_confidence: float = 0.0
+    last_vad_confidence: float = 0.0
+    min_vad_confidence: float = 1.0
+    vad_confidence_sum: float = 0.0
+    speech_chunk_count: int = 0
+    speech_chunks_in_segment: int = 0
+    speech_energy_sum: float = 0.0
+    speech_energy_sum_squares: float = 0.0
+    max_energy: float = 0.0
+    min_energy: float = float("inf")
+    speech_duration_accumulated: float = 0.0
+    speech_prob_history: list[float] = []
+
+    def _reset_speech_segment_stats():
+        """Reset EVERY per-segment counter/timer when speech actually begins.
+        This single call eliminates the stale-value bug that caused the 0.03s loop."""
+        nonlocal silence_start_time
+        nonlocal max_vad_confidence, last_vad_confidence, min_vad_confidence
+        nonlocal vad_confidence_sum, speech_chunk_count, speech_chunks_in_segment
+        nonlocal speech_energy_sum, speech_energy_sum_squares
+        nonlocal max_energy, min_energy, speech_duration_accumulated
+        nonlocal speech_prob_history
+
+        silence_start_time = None
+        max_vad_confidence = 0.0
+        last_vad_confidence = 0.0
+        min_vad_confidence = 1.0
+        vad_confidence_sum = 0.0
+        speech_chunk_count = 0
+        speech_chunks_in_segment = 0
+        speech_energy_sum = 0.0
+        speech_energy_sum_squares = 0.0
+        max_energy = 0.0
+        min_energy = float("inf")
+        speech_duration_accumulated = 0.0
+        speech_prob_history = []
+
     segment_type: Literal["speech", "non_speech"] = "non_speech"
 
     fname = "sound.wav"
@@ -364,6 +403,7 @@ async def stream_microphone(ws) -> None:
                         if not is_speech_ongoing:
                             segment_type = "speech"
                             speech_start_time = time.monotonic()
+                            _reset_speech_segment_stats()
                             # Start new segment
                             current_segment_num = (
                                 len(
@@ -472,7 +512,7 @@ async def stream_microphone(ws) -> None:
                             )
 
                             if last_sent_byte_length == 0:
-                                to_send = current_segment.buffer
+                                to_send = bytes(current_segment.buffer)
                                 sent_overlap_sec = 0.0
                             else:
                                 # ensure pointer never exceeds buffer after trims
@@ -496,7 +536,7 @@ async def stream_microphone(ws) -> None:
                                 sent_overlap_sec = (
                                     last_sent_byte_length - start_idx
                                 ) / (config.sample_rate * 2)
-                                to_send = current_segment.buffer[start_idx:]
+                                to_send = bytes(current_segment.buffer[start_idx:])
 
                             # ──────────────── NEW: per-segment subdirectory ────────────────
                             seg_subdir = find_segments_subdir(
@@ -539,7 +579,9 @@ async def stream_microphone(ws) -> None:
                                         * config.sample_rate
                                         * 2
                                     )
-                                    to_send = current_segment.buffer[-max_keep_bytes:]
+                                    to_send = bytes(
+                                        current_segment.buffer[-max_keep_bytes:]
+                                    )
 
                                 # buffer_segments = extract_and_display_buffered_segments(
                                 #     # current_segment.buffer,
@@ -555,7 +597,8 @@ async def stream_microphone(ws) -> None:
                                     # current_segment.buffer,
                                     to_send,
                                     current_segment.start_time,
-                                    duration_sec=stats["duration_sec"],
+                                    duration_sec=len(to_send)
+                                    / (config.sample_rate * 2),
                                     overlap_sec=sent_overlap_sec,
                                     segment_num=current_segment_num,
                                     avg_vad=stats["vad_sum"]
@@ -661,13 +704,11 @@ async def stream_microphone(ws) -> None:
                             assert current_segment is not None
                             duration = current_segment.get_stats()["duration_sec"]
 
-                            if (
-                                speech_duration_accumulated
-                                < config.min_speech_duration_sec
-                            ):
+                            # === CRITICAL: use REAL buffer duration (not stale accumulated) ===
+                            if duration < config.min_speech_duration_sec:
                                 log.warning(
                                     "[speech] Final segment too short (%.3fs < %.3fs) — discarded",
-                                    speech_duration_accumulated,
+                                    duration,
                                     config.min_speech_duration_sec,
                                 )
                                 # Reset without saving or sending final chunk
@@ -697,7 +738,7 @@ async def stream_microphone(ws) -> None:
                                     SMALL_OVERLAP_SEC * config.sample_rate * 2
                                 )
                                 if last_sent_byte_length == 0:
-                                    to_send = current_segment.buffer
+                                    to_send = bytes(current_segment.buffer)
                                 else:
                                     if last_sent_byte_length > len(
                                         current_segment.buffer
@@ -720,7 +761,7 @@ async def stream_microphone(ws) -> None:
                                             0,
                                             last_sent_byte_length - small_overlap_bytes,
                                         )
-                                    to_send = current_segment.buffer[start_idx:]
+                                    to_send = bytes(current_segment.buffer[start_idx:])
 
                                 # buffer_segments = extract_and_display_buffered_segments(
                                 #     # current_segment.buffer,
@@ -736,7 +777,8 @@ async def stream_microphone(ws) -> None:
                                     to_send,
                                     # utterance_rms,
                                     current_segment.start_time,
-                                    duration_sec=stats["duration_sec"],
+                                    duration_sec=len(to_send)
+                                    / (config.sample_rate * 2),
                                     segment_num=current_segment_num,
                                     avg_vad=stats["vad_sum"]
                                     / stats["speech_chunk_count"]
