@@ -193,7 +193,6 @@ async def stream_microphone(ws) -> None:
     utterance_start_time = None
     speech_duration_accumulated = 0.0
 
-    global chunk_index
     chunk_index = 0
 
     # NEW: decouple websocket sending from audio processing
@@ -417,8 +416,8 @@ async def stream_microphone(ws) -> None:
 
                             reset_speech()
 
-                        elif not has_sound:
-                            reset_speech()
+                        # elif not has_sound:
+                        #     reset_speech()
 
                         # Accumulate for average
                         vad_confidence_sum += speech_prob
@@ -568,6 +567,8 @@ async def stream_microphone(ws) -> None:
                                     speech_chunk_count=stats["speech_chunk_count"],
                                     # context_prompt=build_context_prompt(),
                                 )
+                                # Moved after send (both partial & final)
+                                chunk_index += 1
 
                                 # ─── NEW: Save partial audio after sending ───────────────────────
                                 # Use new subdir for partial saves
@@ -612,7 +613,6 @@ async def stream_microphone(ws) -> None:
                                 # IMPORTANT: update to current absolute end, not len(to_send)
                                 last_sent_byte_length = len(current_segment.buffer)
                                 last_chunk_sent_time = now
-                                chunk_index += 1  # only increment after successful send
 
                                 # ────────────────────────────────────────────────
                                 # (Moved trimming logic above, before sending)
@@ -747,6 +747,8 @@ async def stream_microphone(ws) -> None:
                                     speech_chunk_count=stats["speech_chunk_count"],
                                     # context_prompt=build_context_prompt(),
                                 )
+                                # Moved after send (both partial & final)
+                                chunk_index += 1
                                 chunks_sent += 1
 
                             # Save ORIGINAL audio (matches what server received)
