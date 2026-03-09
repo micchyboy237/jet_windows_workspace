@@ -125,6 +125,7 @@ class WSClientLiveSubtitleHandlers:
         # Show partial result (can be overwritten by next partial or final)
         self.overlay.add_message(
             message_id=f"{utterance_id}_chunk{chunk_index}",
+            utterance_id=utterance_id,
             source_text=ja,
             translated_text=en,
             start_sec=relative_start,
@@ -333,6 +334,7 @@ class WSClientLiveSubtitleHandlers:
 
         self.overlay.add_message(
             message_id=f"{utt_id}_chunk{chunk_index}",
+            utterance_id=utt_id,
             source_text=ja,
             translated_text=en,
             start_sec=relative_start,

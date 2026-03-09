@@ -476,7 +476,16 @@ async def stream_microphone(ws) -> None:
                                 to_send = current_segment.buffer
                                 sent_overlap_sec = 0.0
                             else:
+                                # ensure pointer never exceeds buffer after trims
+                                if last_sent_byte_length > len(current_segment.buffer):
+                                    last_sent_byte_length = len(current_segment.buffer)
+
                                 start_idx = last_sent_byte_length
+
+                                # if no new data was appended skip sending
+                                if start_idx >= len(current_segment.buffer):
+                                    continue
+
                                 if (
                                     len(current_segment.buffer) - last_sent_byte_length
                                     < small_overlap_bytes * 2
@@ -484,6 +493,7 @@ async def stream_microphone(ws) -> None:
                                     start_idx = max(
                                         0, last_sent_byte_length - small_overlap_bytes
                                     )
+
                                 sent_overlap_sec = (
                                     last_sent_byte_length - start_idx
                                 ) / (config.sample_rate * 2)
@@ -621,8 +631,11 @@ async def stream_microphone(ws) -> None:
                                     # Optional strong fix: actually shrink the accumulator buffer
                                     # (prevents memory explosion on very long speech)
                                     current_segment.trim_audio(
-                                        config.max_speech_duration_sec * 0.3
+                                        config.max_speech_duration_sec * 0.5
                                     )
+
+                                    # trimming invalidates previous byte pointer
+                                    last_sent_byte_length = 0
 
                     else:
                         # Silence chunk
@@ -686,7 +699,18 @@ async def stream_microphone(ws) -> None:
                                 if last_sent_byte_length == 0:
                                     to_send = current_segment.buffer
                                 else:
+                                    if last_sent_byte_length > len(
+                                        current_segment.buffer
+                                    ):
+                                        last_sent_byte_length = len(
+                                            current_segment.buffer
+                                        )
+
                                     start_idx = last_sent_byte_length
+
+                                    if start_idx >= len(current_segment.buffer):
+                                        continue
+
                                     if (
                                         len(current_segment.buffer)
                                         - last_sent_byte_length
@@ -929,14 +953,12 @@ async def stream_microphone(ws) -> None:
                             energy_info = (
                                 f" | rms: avg={avg_rms:.4f} ±{rms_std:.4f} "
                                 f"[min={min_energy:.4f} max={max_energy:.4f}]"
-                                f" | utterance dur: {(time.monotonic() - utterance_start_time):.1f}s"
+                                f" | utterance dur: {current_segment.get_duration_sec():.1f}s"
                             )
 
                         log.orange(
                             "[speech] dur=%.2fs | %d chunks | speech=%.3f | rms=%.4f - %s",
-                            time.monotonic() - speech_start_time
-                            if speech_start_time
-                            else 0.0,
+                            current_segment.get_duration_sec(),
                             speech_chunk_count,
                             speech_prob,
                             rms,
