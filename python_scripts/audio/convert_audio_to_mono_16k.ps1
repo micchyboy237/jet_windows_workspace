@@ -1,0 +1,1 @@
+ffmpeg -i "C:/Users/druiv/Desktop/Jet_Files/Mac_M1_Files/recording_spyx_1_speaker.wav" -ar 16000 -ac 1 -acodec pcm_s16le -f wav "C:/Users/druiv/Desktop/Jet_Files/Mac_M1_Files/recording_spyx_1_speaker_mono_16k.wav"

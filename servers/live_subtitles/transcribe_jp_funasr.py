@@ -57,10 +57,10 @@ def _transcribe_file(
         input=str(audio_path),
         cache={},
         language="ja",
-        use_itn=False,
+        use_itn=True,
         batch_size=32, 
         output_timestamp=True,
-        merge_vad=True,
+        merge_vad=False,
         merge_length_s=15,
         # use_itn=True,
         # hotwords=hotwords,
@@ -186,9 +186,16 @@ def transcribe_japanese(
 
 if __name__ == "__main__":
     import argparse
+    import json
+    import shutil
+    from pathlib import Path
 
     from rich.console import Console
     from rich.pretty import pprint
+
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
 
@@ -211,3 +218,9 @@ if __name__ == "__main__":
     )
 
     pprint(result, expand_all=True)
+
+    result_json_path = OUTPUT_DIR / "transcription_result.json"
+    with open(result_json_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    console.print(f"[bold green]Saved JSON result to:[/bold green] {result_json_path}")

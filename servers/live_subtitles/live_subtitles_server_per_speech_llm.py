@@ -15,7 +15,7 @@ from typing import Optional
 
 from nlp import extract_japanese_nouns
 from hotword_manager import HotwordManager
-from transcribe_jp_llm import transcribe_japanese, TranscriptionResult
+from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
 from translate_jp_en_llm import translate_japanese_to_english
 # from translate_jp_en_opus import translate_japanese_to_english
 from logger import logger

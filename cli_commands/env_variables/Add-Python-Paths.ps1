@@ -1,3 +1,7 @@
 # Add-Python-Paths.ps1
 
-[Environment]::SetEnvironmentVariable("PYTHONPATH", "C:\my\global\modules", "User")
+$path_to_add="C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedASR2S"
+
+[Environment]::SetEnvironmentVariable("PYTHONPATH", $path_to_add, "User")
+
+$env:PYTHONPATH -split ';'
