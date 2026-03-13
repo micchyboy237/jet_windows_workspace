@@ -57,7 +57,7 @@ def _transcribe_file(
         input=str(audio_path),
         cache={},
         language="ja",
-        use_itn=True,
+        use_itn=False,
         batch_size=32, 
         output_timestamp=True,
         merge_vad=True,
