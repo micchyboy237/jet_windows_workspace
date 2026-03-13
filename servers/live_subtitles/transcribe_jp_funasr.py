@@ -60,7 +60,7 @@ def _transcribe_file(
         use_itn=True,
         batch_size=32, 
         output_timestamp=True,
-        merge_vad=False,
+        merge_vad=True,
         merge_length_s=15,
         # use_itn=True,
         # hotwords=hotwords,
