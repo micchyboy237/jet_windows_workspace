@@ -1,24 +1,68 @@
-# live_subtitles_server2.py
-# Run with: python live_subtitles_server2.py
-
+# servers\live_subtitles\live_subtitles_server2.py
 import asyncio
 import json
-
 import websockets
-
-
-# Placeholder — replace with real ASR (FasterWhisper / WhisperX / etc.)
-def fake_transcribe(audio_bytes: bytes, sample_rate: int = 16000) -> str:
-    sec = len(audio_bytes) / (sample_rate * 4)  # float32 = 4 bytes
-    return f"これはテスト音声です ({sec:.1f}秒) [fake]"
-
-
-# Placeholder translation
-def fake_translate_ja_to_en(text: str) -> str:
-    return f"[EN] This is test audio ({text.split('(')[1] if '(' in text else '??'})"
-
+from concurrent.futures import ThreadPoolExecutor
+from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
+from translate_jp_en_llm import translate_japanese_to_english, TranslationResult
 
 connected_clients = set()
+
+# Adjust max_workers depending on your CPU cores + GPU contention
+# SenseVoiceSmall + small LLM usually do well with 2–6 workers
+executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_worker")
+
+def blocking_process_audio(
+    audio_bytes: bytes,
+    header: dict
+) -> dict:
+    """
+    Runs in thread pool — contains the blocking CPU/GPU heavy work
+    """
+    uuid_ = header.get("uuid")
+    if not uuid_:
+        return {"error": "missing uuid", "success": False}
+
+    sample_rate = header.get("sample_rate", 16000)
+
+    try:
+        trans_result: TranscriptionResult = transcribe_japanese(
+            audio_bytes=audio_bytes,
+            sample_rate=sample_rate,
+        )
+        ja_text = trans_result.get("text_ja", "").strip()
+        print(f" JA: {ja_text if ja_text else '[empty transcription]'}")
+
+        if ja_text:
+            trans_en: TranslationResult = translate_japanese_to_english(
+                ja_text=ja_text,
+                enable_scoring=False,
+                history=None,
+            )
+            en_text = trans_en["text"].strip()
+            quality = trans_en.get("quality", "N/A")
+        else:
+            en_text = ""
+            quality = "N/A"
+
+        print(f" EN: {en_text if en_text else '[empty translation]'}")
+
+        return {
+            "uuid": uuid_,
+            "transcription_ja": ja_text,
+            "translation_en": en_text,
+            "success": bool(ja_text or en_text),
+            "quality": quality,
+        }
+
+    except Exception as e:
+        print(f"[WORKER] Processing error for {uuid_[:8]}… : {type(e).__name__}: {e}")
+        return {
+            "uuid": uuid_,
+            "error": str(e),
+            "success": False,
+            "quality": "N/A"
+        }
 
 
 async def process_audio(websocket):
@@ -28,7 +72,7 @@ async def process_audio(websocket):
     try:
         async for message in websocket:
             if not isinstance(message, bytes):
-                await websocket.send(json.dumps({"error": "binary message required"}))
+                await websocket.send(json.dumps({"error": "binary message required"}).encode())
                 continue
 
             parts = message.split(b"\x00", 1)
@@ -37,33 +81,38 @@ async def process_audio(websocket):
 
             try:
                 header = json.loads(parts[0].decode("utf-8"))
-                audio = parts[1]
-
-                uuid_ = header.get("uuid")
-                if not uuid_:
-                    continue
-
-                ja = fake_transcribe(audio, header.get("sample_rate", 16000))
-                en = fake_translate_ja_to_en(ja)
-
-                response_header = {
-                    "uuid": uuid_,
-                    "transcription_ja": ja,
-                    "translation_en": en,
-                    "success": True,
-                }
-                # Echo header only (no need to send audio back)
-                await websocket.send(json.dumps(response_header).encode("utf-8"))
-
-                print(f"[SERVER] Processed {uuid_[:8]}… → {ja[:40]}…")
-
+                audio_bytes = parts[1]
             except json.JSONDecodeError:
                 print("[SERVER] Invalid JSON header")
+                await websocket.send(json.dumps({"error": "invalid json header"}).encode())
+                continue
+
+            # Offload heavy work to thread pool
+            future = asyncio.get_running_loop().run_in_executor(
+                executor,
+                blocking_process_audio,
+                audio_bytes,
+                header
+            )
+
+            # While transcription/translation runs in background,
+            # websocket can continue receiving new messages
+            try:
+                response = await future
+                await websocket.send(json.dumps(response).encode("utf-8"))
+                uuid_ = header.get("uuid", "???")
+                ja_preview = response.get("transcription_ja", "")[:50]
+                print(f"[SERVER] Processed {uuid_[:8]}… → {ja_preview}…")
             except Exception as e:
-                print(f"[SERVER] Processing error: {e}")
+                print(f"[SERVER] Error sending response: {e}")
+                await websocket.send(
+                    json.dumps({"error": str(e), "success": False}).encode()
+                )
 
     except websockets.ConnectionClosed:
         pass
+    except Exception as e:
+        print(f"[SERVER] Unexpected websocket error: {e}")
     finally:
         connected_clients.discard(websocket)
         print(f"[SERVER] Client disconnected — total {len(connected_clients)}")
@@ -76,10 +125,17 @@ async def main():
         port=8765,
         ping_interval=20,
         ping_timeout=60,
+        max_size=2**23,
     ) as server:
         print("[SERVER] Listening on ws://0.0.0.0:8765")
         await server.serve_forever()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n[SERVER] Shutting down…")
+    finally:
+        executor.shutdown(wait=True)
+        print("[SERVER] ThreadPoolExecutor shut down")
