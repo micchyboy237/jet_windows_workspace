@@ -208,6 +208,7 @@ if __name__ == "__main__":
     )
 
     pprint(result, expand_all=True)
+    print(f"\nJA:\n{result["text_ja"]}")
 
     result_json_path = OUTPUT_DIR / "transcription_result.json"
     with open(result_json_path, "w", encoding="utf-8") as f:
