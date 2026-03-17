@@ -19,8 +19,6 @@ class WordSegment(TypedDict):
     word: Optional[str]
 
 class TranscriptionMetadata(TypedDict, total=False):
-    client_id: str
-    segment_num: int
     processing_duration_seconds: float
     model: str
     # You can add more optional / future fields here
@@ -73,8 +71,6 @@ def transcribe_japanese_llm_from_file(
     *,
     hotwords: str | list[str] | None = None,
     context_prompt: str | None = None,
-    client_id: str = "unknown",
-    segment_num: int = 0,
 ) -> TranscriptionResult:
     started = datetime.now(timezone.utc)
     effective_hotwords = hotwords or []
@@ -115,8 +111,6 @@ def transcribe_japanese_llm_from_file(
 
     duration = (datetime.now(timezone.utc) - started).total_seconds()
     metadata = {
-        "client_id": client_id,
-        "segment_num": segment_num,
         "processing_duration_seconds": round(duration, 3),
         "model": "SenseVoiceSmall",
     }
@@ -137,9 +131,7 @@ def transcribe_japanese(
     *,
     hotwords: str | list[str] | None = None,
     context_prompt: str | None = None,
-    client_id: str = "unknown",
     save_temp_wav: Path | None = None,       # ← now actually used
-    segment_num: int = 0,
 ) -> TranscriptionResult:
     """
     Transcribe raw PCM int16 bytes.
@@ -166,8 +158,6 @@ def transcribe_japanese(
         audio_path,
         hotwords=hotwords,
         context_prompt=context_prompt,
-        client_id=client_id,
-        segment_num=segment_num,
     )
 
     # Clean up temporary file if we created one
@@ -186,9 +176,16 @@ def transcribe_japanese(
 
 if __name__ == "__main__":
     import argparse
+    import json
+    import shutil
+    from pathlib import Path
 
     from rich.console import Console
     from rich.pretty import pprint
+
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
 
@@ -211,3 +208,9 @@ if __name__ == "__main__":
     )
 
     pprint(result, expand_all=True)
+
+    result_json_path = OUTPUT_DIR / "transcription_result.json"
+    with open(result_json_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    console.print(f"[bold green]Saved JSON result to:[/bold green] {result_json_path}")
