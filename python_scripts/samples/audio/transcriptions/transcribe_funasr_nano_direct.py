@@ -3,7 +3,7 @@ from custom_model_fun_asr_nano import FunASRNano
 
 def main():
     model_dir = "FunAudioLLM/Fun-ASR-Nano-2512"
-    m, kwargs = FunASRNano.from_pretrained(model=model_dir, device="cuda:0")
+    m, kwargs = FunASRNano.from_pretrained(model=model_dir, device="cuda:0", hub="ms")
     m.eval()
 
     wav_path = f"{kwargs['model_path']}/example/zh.mp3"
