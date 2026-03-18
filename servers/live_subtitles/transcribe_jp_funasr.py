@@ -20,12 +20,14 @@ class WordSegment(TypedDict):
     word: Optional[str]
 
 class TranscriptionMetadata(TypedDict, total=False):
-    processing_duration_seconds: float
+    processing_duration_s: float
     model: str
+    input_duration_s: Optional[float]
+    transcribed_duration_s: Optional[float]     
+    transcribed_duration_pctg: Optional[float]  # ← (0–100)
     # You can add more optional / future fields here
     # version: str
     # hostname: str
-    # input_duration_seconds: float
     # hotwords_used: bool | list[str]
     # error: str                  # in case of partial failure
 
@@ -47,6 +49,29 @@ model = AutoModel(
     # trust_remote_code=True,
 )
 
+def calculate_transcribed_duration_percentage(
+    segments: list[WordSegment], total_audio_duration_seconds: float
+) -> float:
+    """
+    Returns the percentage of the total audio that is covered by transcribed word segments.
+    Example: 87.45 means 87.45 % of the audio contains actual speech.
+    """
+    if total_audio_duration_seconds <= 0:
+        return 0.0
+
+    total_transcribed_ms = sum(
+        seg.get("duration_ms") or 0 for seg in segments
+    )
+    total_transcribed_s = total_transcribed_ms / 1000.0
+
+    percentage = (total_transcribed_s / total_audio_duration_seconds) * 100
+    return percentage
+
+def get_audio_duration_seconds(audio_path: Path) -> float:
+    """Returns duration in seconds from a WAV file (works with the mono int16 files we create)."""
+    sample_rate, data = wavfile.read(str(audio_path))
+    return len(data) / sample_rate
+
 def _transcribe_file(
     audio_path: Path,
     *,
@@ -66,6 +91,15 @@ def _transcribe_file(
     return results
 
 
+def get_coverage_quality_label(pct: float) -> str:
+    if pct >= 92.0: return "excellent (very clean)"
+    if pct >= 82.0: return "good"
+    if pct >= 65.0: return "fair (some noise/BGM)"
+    if pct >= 40.0: return "sparse speech"
+    if pct >= 15.0: return "very sparse"
+    return "almost no speech"
+
+
 def transcribe_japanese_llm_from_file(
     audio_path: Path,
     *,
@@ -83,7 +117,14 @@ def transcribe_japanese_llm_from_file(
             quality_label="N/A",
             avg_logprob=None,
             segments=[],
-            metadata={},
+            metadata={
+                "processing_duration_s": round(
+                    (datetime.now(timezone.utc) - started).total_seconds(), 3
+                ),
+                "model": "SenseVoiceSmall",
+                "input_duration_s": 0.0,
+                "transcribed_duration_pctg": 0.0,
+            },
         )
 
     first = raw_results[0]
@@ -114,16 +155,30 @@ def transcribe_japanese_llm_from_file(
             }
         )
 
+    # Compute durations
+    input_duration = get_audio_duration_seconds(audio_path)
+    transcribed_percentage = calculate_transcribed_duration_percentage(
+        segments, input_duration
+    )
+    transcribed_duration_s = (transcribed_percentage / 100) * input_duration
+
+    coverage_label = get_coverage_quality_label(transcribed_percentage)
+
     duration = (datetime.now(timezone.utc) - started).total_seconds()
-    metadata = {
-        "processing_duration_seconds": round(duration, 3),
+
+    metadata: TranscriptionMetadata = {
         "model": "SenseVoiceSmall",
+        "processing_duration_s": round(duration, 3),
+        "input_duration_s": round(input_duration, 3),
+        "transcribed_duration_s": round(transcribed_duration_s, 3),
+        "transcribed_duration_pctg": round(transcribed_percentage, 2),
+        "coverage_label": coverage_label,
     }
 
     return {
         "text_ja": ja_text,
         "confidence": None,
-        "quality_label": "N/A",
+        "quality_label": None,
         "avg_logprob": None,
         "segments": segments,
         "metadata": metadata,

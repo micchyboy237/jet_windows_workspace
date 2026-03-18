@@ -55,15 +55,17 @@ def blocking_process_audio(
                 sample_rate=sample_rate,
             )
             full_word_segments = full_trans_result["segments"]
+            full_metadata = full_trans_result["metadata"]
             print(f"FIRST 3 JA SEGMENTS\n{full_word_segments[:3]!r}")
             print(f"LAST 3 JA SEGMENTS\n{full_word_segments[-3:]!r}")
             full_word_segments_text = "".join([s["word"] for s in full_word_segments])
-            ja_text_with_context = full_trans_result.get("text_ja", "").strip()
+            ja_text_with_context = full_trans_result["text_ja"].strip()
             print(f"TOTAL JA SEGMENTS: {len(full_word_segments)}")
             print(f"FULL JA WORDS\n{full_word_segments_text}")
             ja_sents = split_sentences_ja(ja_text_with_context)
             ja_sents_str = "\n".join(ja_sents).strip()
             print(f"FULL JA (sents={len(ja_sents)})\n{ja_sents_str}")
+            print(f"FULL METADATA\n{full_metadata!r}")
 
             # full_trans_en: TranslationResult = translate_japanese_to_english(
             #     ja_text=ja_sents_str,
@@ -77,8 +79,10 @@ def blocking_process_audio(
             audio_bytes=audio_bytes,
             sample_rate=sample_rate,
         )
+        metadata = trans_result["metadata"]
         ja_text = trans_result.get("text_ja", "").strip()
         print(f"JA: {ja_text if ja_text else '[empty transcription]'}")
+        print(f"METADATA\n{metadata!r}")
 
         if ja_text:
             trans_en: TranslationResult = translate_japanese_to_english(
