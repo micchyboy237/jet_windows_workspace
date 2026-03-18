@@ -47,15 +47,23 @@ def blocking_process_audio(
             )
             ja_text_with_context = full_trans_result.get("text_ja", "").strip()
             ja_sents = split_sentences_ja(ja_text_with_context)
-            print(f" FULL JA: {ja_text_with_context if ja_text_with_context else '[empty transcription]'}")
-            print(f" JA SENTS ({len(ja_sents)}):\n{"\n".join([f"{num}: {s}" for num, s in enumerate(ja_sents, start=1)])}")
+            ja_sents_str = "\n".join(ja_sents).strip()
+            print(f"FULL JA (sents={len(ja_sents)})\n{ja_sents_str if ja_sents_str else '[empty transcription]'}")
+
+            full_trans_en: TranslationResult = translate_japanese_to_english(
+                ja_text=ja_sents_str,
+                enable_scoring=False,
+                history=None,
+            )
+            en_text_with_context = full_trans_en["text"].strip()
+            print(f"FULL EN:\n{en_text_with_context if en_text_with_context else '[empty translation]'}")
         
         trans_result: TranscriptionResult = transcribe_japanese(
             audio_bytes=audio_bytes,
             sample_rate=sample_rate,
         )
         ja_text = trans_result.get("text_ja", "").strip()
-        print(f" JA: {ja_text if ja_text else '[empty transcription]'}")
+        print(f"JA: {ja_text if ja_text else '[empty transcription]'}")
 
         if ja_text:
             trans_en: TranslationResult = translate_japanese_to_english(
@@ -69,7 +77,7 @@ def blocking_process_audio(
             en_text = ""
             quality = "N/A"
 
-        print(f" EN: {en_text if en_text else '[empty translation]'}")
+        print(f"EN: {en_text if en_text else '[empty translation]'}")
 
         return {
             "uuid": uuid_,
