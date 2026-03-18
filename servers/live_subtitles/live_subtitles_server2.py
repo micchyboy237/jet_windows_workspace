@@ -46,6 +46,7 @@ def blocking_process_audio(
                 sample_rate=sample_rate,
             )
             ja_text_with_context = full_trans_result.get("text_ja", "").strip()
+            print(f"RAW JA\n{ja_text_with_context if ja_text_with_context else '[empty transcription]'}")
             ja_sents = split_sentences_ja(ja_text_with_context)
             ja_sents_str = "\n".join(ja_sents).strip()
             print(f"FULL JA (sents={len(ja_sents)})\n{ja_sents_str if ja_sents_str else '[empty transcription]'}")
