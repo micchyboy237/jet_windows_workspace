@@ -91,28 +91,11 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze how context buffer increases size way more than max_duration_sec
+- Save the last n segment results under LAST_N_SEGMENTS_DIR / segments_{header["started_at"] formatted as "%Y%m%d_%H%M%S"}. header["started_at"] is iso format.
+- Save segment specific info and results on each subdir such as header.json, metadata.json, sound.wav, transcription.json, translation.json, subtitles.srt and other info I have missed or helpful insights.
+- Save an updating context buffer data under LIVE_AUDIO_CONTEXT_DIR. Save a metadata.json, full sound.wav, full transcription.json and other info I have missed or helpful insights.
 
-Current logs:
-
-
-Context duration: 855.14s
-Audio duration: 2.88s
-FIRST 3 JA SEGMENTS
-[{'index': 0, 'start_ms': 0, 'end_ms': 150, 'duration_ms': 150, 'word': 'た'}, {'index': 1, 'start_ms': 150, 'end_ms': 270, 'duration_ms': 120, 'word': 'め'}, {'index': 2, 'start_ms': 270, 'end_ms': 570, 'duration_ms': 300, 'word': '、'}]
-LAST 3 JA SEGMENTS
-[{'index': 782, 'start_ms': 770910, 'end_ms': 771030, 'duration_ms': 120, 'word': 'い'}, {'index': 783, 'start_ms': 771090, 'end_ms': 771210, 'duration_ms': 120, 'word': 'い'}, {'index': 784, 'start_ms': 771210, 'end_ms': 771270, 'duration_ms': 60, 'word': '。'}]
-TOTAL JA SEGMENTS: 785
-FULL JA (sents=16)
-
-Context duration: 859.99s
-Audio duration: 3.17s
-FIRST 3 JA SEGMENTS
-[{'index': 0, 'start_ms': 0, 'end_ms': 150, 'duration_ms': 150, 'word': 'た'}, {'index': 1, 'start_ms': 150, 'end_ms': 270, 'duration_ms': 120, 'word': 'め'}, {'index': 2, 'start_ms': 270, 'end_ms': 570, 'duration_ms': 300, 'word': '、'}]
-LAST 3 JA SEGMENTS
-[{'index': 780, 'start_ms': 770910, 'end_ms': 771030, 'duration_ms': 120, 'word': 'い'}, {'index': 781, 'start_ms': 771090, 'end_ms': 771210, 'duration_ms': 120, 'word': 'い'}, {'index': 782, 'start_ms': 771210, 'end_ms': 771270, 'duration_ms': 60, 'word': '。'}]
-TOTAL JA SEGMENTS: 783
-FULL JA (sents=17)
+Show unified diff.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

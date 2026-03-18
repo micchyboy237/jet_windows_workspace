@@ -1,7 +1,10 @@
 # servers\live_subtitles\live_subtitles_server2.py
+
 import asyncio
 import json
 import numpy as np
+from datetime import datetime
+import scipy.io.wavfile as wavfile
 import websockets
 from concurrent.futures import ThreadPoolExecutor
 from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
@@ -11,6 +14,45 @@ from translate_jp_en_llm import translate_japanese_to_english, TranslationResult
 from audio_context_buffer import AudioContextBuffer
 from audio_search import search_audio
 from utils import split_sentences_ja
+
+import shutil
+from pathlib import Path
+
+OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+
+N_SEGMENT_RESULTS = 10
+LAST_N_SEGMENTS_DIR = OUTPUT_DIR / f"last_{N_SEGMENT_RESULTS}_segments"
+LAST_N_SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
+
+LIVE_AUDIO_CONTEXT_DIR = OUTPUT_DIR / "audio_context"
+LIVE_AUDIO_CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _save_subtitles_srt(segments: list, srt_path: Path) -> None:
+    """Generate simple SRT from word segments (one line per segment)."""
+    if not segments:
+        srt_path.write_text(
+            "1\n00:00:00,000 --> 00:00:01,000\n[No transcription]\n\n",
+            encoding="utf-8",
+        )
+        return
+
+    def _ms_to_srt_time(ms):
+        ms = ms or 0
+        hours = ms // 3_600_000
+        minutes = (ms % 3_600_000) // 60_000
+        seconds = (ms % 60_000) // 1_000
+        millis = ms % 1_000
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
+    with open(srt_path, "w", encoding="utf-8") as f:
+        for i, seg in enumerate(segments, 1):
+            start_str = _ms_to_srt_time(seg.get("start_ms"))
+            end_str = _ms_to_srt_time(seg.get("end_ms"))
+            word = seg.get("word") or "[no speech]"
+            f.write(f"{i}\n{start_str} --> {end_str}\n{word}\n\n")
+
 
 connected_clients = set()
 
@@ -29,10 +71,11 @@ def blocking_process_audio(
     """
     uuid_ = header.get("uuid")
     if not uuid_:
+        # early return before any saving
         return {"error": "missing uuid", "success": False}
 
     sample_rate = header.get("sample_rate", 16000)
-   
+    full_trans_result = None
     context_audio = context_buffer.get_context_audio()
     if context_audio.size == 0:
         context_audio_bytes = b""
@@ -49,8 +92,8 @@ def blocking_process_audio(
                 audio_np,
             )
             print(f"Context duration: {context_buffer.get_total_duration():.2f}s")
-            print(f"Audio duration: {header["duration_sec"]:.2f}s")
-            full_trans_result: TranscriptionResult = transcribe_japanese(
+            print(f"Audio duration: {header['duration_sec']:.2f}s")
+            full_trans_result = transcribe_japanese(
                 audio_bytes=context_audio_bytes,
                 sample_rate=sample_rate,
             )
@@ -67,7 +110,7 @@ def blocking_process_audio(
             print(f"FULL JA (sents={len(full_ja_sents)})\n{full_ja_sents_str}")
             print(f"FULL METADATA\n{full_metadata!r}")
 
-            # full_trans_en: TranslationResult = translate_japanese_to_english(
+            # full_trans_en = translate_japanese_to_english(
             #     ja_text=full_ja_sents_str,
             #     enable_scoring=False,
             #     history=None,
@@ -75,7 +118,7 @@ def blocking_process_audio(
             # en_text_with_context = full_trans_en["text"].strip()
             # print(f"FULL EN:\n{en_text_with_context if en_text_with_context else '[empty translation]'}")
         
-        trans_result: TranscriptionResult = transcribe_japanese(
+        trans_result = transcribe_japanese(
             audio_bytes=audio_bytes,
             sample_rate=sample_rate,
         )
@@ -90,7 +133,7 @@ def blocking_process_audio(
             print("JA: [empty transcription]")
 
         if ja_sents_str:
-            trans_en: TranslationResult = translate_japanese_to_english(
+            trans_en = translate_japanese_to_english(
                 ja_text=ja_sents_str,
                 # enable_scoring=False,
                 # history=None,
@@ -100,6 +143,106 @@ def blocking_process_audio(
             en_text = ""
 
         print(f"EN: {en_text if en_text else '[empty translation]'}")
+
+        # === SAVE LAST-N SEGMENT RESULTS (per incoming chunk) ===
+        try:
+            started_at_iso = header.get("started_at")
+            if started_at_iso and isinstance(started_at_iso, str):
+                iso_str = started_at_iso.replace("Z", "+00:00") if started_at_iso.endswith("Z") else started_at_iso
+                try:
+                    dt = datetime.fromisoformat(iso_str)
+                    ts_str = dt.strftime("%Y%m%d_%H%M%S")
+                except Exception:
+                    ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            else:
+                ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            segment_dir = LAST_N_SEGMENTS_DIR / f"segments_{ts_str}"
+            segment_dir.mkdir(parents=True, exist_ok=True)
+
+            # header.json
+            with open(segment_dir / "header.json", "w", encoding="utf-8") as f:
+                json.dump(header, f, ensure_ascii=False, indent=2)
+
+            # sound.wav (raw incoming chunk)
+            audio_np_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+            wavfile.write(str(segment_dir / "sound.wav"), sample_rate, audio_np_int16)
+
+            # transcription.json (full TranscriptionResult for this segment)
+            with open(segment_dir / "transcription.json", "w", encoding="utf-8") as f:
+                json.dump(trans_result, f, ensure_ascii=False, indent=2)
+
+            # translation.json
+            translation_data = {"text": en_text}
+            with open(segment_dir / "translation.json", "w", encoding="utf-8") as f:
+                json.dump(translation_data, f, ensure_ascii=False, indent=2)
+
+            # metadata.json (combined helpful info)
+            metadata_out = {
+                "transcription": trans_result.get("metadata", {}),
+                "uuid": uuid_,
+                "duration_sec": header.get("duration_sec"),
+                "started_at": header.get("started_at"),
+                "transcribed_at": datetime.now().isoformat(),
+            }
+            with open(segment_dir / "metadata.json", "w", encoding="utf-8") as f:
+                json.dump(metadata_out, f, ensure_ascii=False, indent=2)
+
+            # subtitles.srt (timed Japanese subtitles from segments)
+            _save_subtitles_srt(trans_result.get("segments", []), segment_dir / "subtitles.srt")
+
+            print(f"[SAVE SEGMENT] Saved to {segment_dir}")
+
+            # keep only last N segment dirs (by name sort = chronological)
+            subdirs = sorted(
+                [d for d in LAST_N_SEGMENTS_DIR.iterdir() if d.is_dir() and d.name.startswith("segments_")],
+                key=lambda d: d.name,
+            )
+            if len(subdirs) > N_SEGMENT_RESULTS:
+                for old in subdirs[:-N_SEGMENT_RESULTS]:
+                    shutil.rmtree(old, ignore_errors=True)
+                    print(f"[CLEAN] Removed old segment: {old.name}")
+        except Exception as save_err:
+            print(f"[SAVE SEGMENT] Non-fatal error: {save_err}")
+
+        # === SAVE UPDATING LIVE AUDIO CONTEXT BUFFER DATA ===
+        try:
+            context_dir = LIVE_AUDIO_CONTEXT_DIR
+            # full sound.wav (current buffer contents, int16 PCM)
+            if context_audio.size > 0:
+                wavfile.write(
+                    str(context_dir / "full_sound.wav"),
+                    context_buffer.sample_rate,
+                    context_audio,
+                )
+            else:
+                (context_dir / "full_sound.wav").write_bytes(b"")
+
+            # metadata.json (buffer stats + helpful insights)
+            context_metadata = {
+                "total_duration_sec": round(context_buffer.get_total_duration(), 3),
+                "num_chunks": len(context_buffer.segments),
+                "max_duration_sec": context_buffer.max_duration_sec,
+                "sample_rate": context_buffer.sample_rate,
+                "last_updated": datetime.now().isoformat(),
+                "context_includes_current_segment": True,
+            }
+            with open(context_dir / "metadata.json", "w", encoding="utf-8") as f:
+                json.dump(context_metadata, f, ensure_ascii=False, indent=2)
+
+            # full transcription.json (transcription of the entire context buffer)
+            if full_trans_result is not None:
+                with open(context_dir / "full_transcription.json", "w", encoding="utf-8") as f:
+                    json.dump(full_trans_result, f, ensure_ascii=False, indent=2)
+            else:
+                (context_dir / "full_transcription.json").write_text(
+                    '{"text_ja": "", "segments": [], "metadata": {}}',
+                    encoding="utf-8",
+                )
+
+            print(f"[SAVE CONTEXT] Updated live buffer data in {context_dir}")
+        except Exception as ctx_err:
+            print(f"[SAVE CONTEXT] Non-fatal error: {ctx_err}")
 
         return {
             "uuid": uuid_,
@@ -164,6 +307,7 @@ async def process_audio(websocket):
             except Exception as e:
                 print(f"[SERVER] Error sending response: {e}")
                 await websocket.send(
+                    # error response (no saving happened)
                     json.dumps({"error": str(e), "success": False}).encode()
                 )
 
