@@ -43,7 +43,7 @@ def translate_j2e(text: str, max_tokens=600, temperature=0.25):
 <|im_start|>user
 Translate the following Japanese text to English:
 
-{jp_text}<|im_end|>
+{text}<|im_end|>
 <|im_start|>assistant
 English translation:"""
 

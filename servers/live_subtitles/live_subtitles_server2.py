@@ -5,8 +5,9 @@ import numpy as np
 import websockets
 from concurrent.futures import ThreadPoolExecutor
 from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
-# from transcribe_jp_funasr_nano import transcribe_japanese, TranscriptionResult
 from translate_jp_en_llm import translate_japanese_to_english, TranslationResult
+# from transcribe_jp_funasr_nano import transcribe_japanese, TranscriptionResult
+# from translate_jp_en_sarashin import translate_japanese_to_english, TranslationResult
 from audio_context_buffer import AudioContextBuffer
 from utils import split_sentences_ja
 
@@ -69,14 +70,12 @@ def blocking_process_audio(
         if ja_text:
             trans_en: TranslationResult = translate_japanese_to_english(
                 ja_text=ja_text,
-                enable_scoring=False,
-                history=None,
+                # enable_scoring=False,
+                # history=None,
             )
             en_text = trans_en["text"].strip()
-            quality = trans_en.get("quality", "N/A")
         else:
             en_text = ""
-            quality = "N/A"
 
         print(f"EN: {en_text if en_text else '[empty translation]'}")
 
@@ -85,7 +84,6 @@ def blocking_process_audio(
             "transcription_ja": ja_text,
             "translation_en": en_text,
             "success": bool(ja_text or en_text),
-            "quality": quality,
         }
 
     except Exception as e:
@@ -94,7 +92,6 @@ def blocking_process_audio(
             "uuid": uuid_,
             "error": str(e),
             "success": False,
-            "quality": "N/A"
         }
 
 
