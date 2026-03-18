@@ -556,7 +556,7 @@ if __name__ == "__main__":
 
     # Default values
     DEFAULT_AUDIO = Path(
-        r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+        r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
     )
     DEFAULT_OUTPUT = Path(__file__).parent / "generated" / Path(__file__).stem
 
