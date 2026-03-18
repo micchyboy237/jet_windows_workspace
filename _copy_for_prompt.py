@@ -69,8 +69,8 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\utils.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\context",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\context",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_audio_context_buffer.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\utils.py",
@@ -91,8 +91,28 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix why ja_text_with_context is always the same as ja_text.
-Show unified diff.
+Analyze how context buffer increases size way more than max_duration_sec
+
+Current logs:
+
+
+Context duration: 855.14s
+Audio duration: 2.88s
+FIRST 3 JA SEGMENTS
+[{'index': 0, 'start_ms': 0, 'end_ms': 150, 'duration_ms': 150, 'word': 'た'}, {'index': 1, 'start_ms': 150, 'end_ms': 270, 'duration_ms': 120, 'word': 'め'}, {'index': 2, 'start_ms': 270, 'end_ms': 570, 'duration_ms': 300, 'word': '、'}]
+LAST 3 JA SEGMENTS
+[{'index': 782, 'start_ms': 770910, 'end_ms': 771030, 'duration_ms': 120, 'word': 'い'}, {'index': 783, 'start_ms': 771090, 'end_ms': 771210, 'duration_ms': 120, 'word': 'い'}, {'index': 784, 'start_ms': 771210, 'end_ms': 771270, 'duration_ms': 60, 'word': '。'}]
+TOTAL JA SEGMENTS: 785
+FULL JA (sents=16)
+
+Context duration: 859.99s
+Audio duration: 3.17s
+FIRST 3 JA SEGMENTS
+[{'index': 0, 'start_ms': 0, 'end_ms': 150, 'duration_ms': 150, 'word': 'た'}, {'index': 1, 'start_ms': 150, 'end_ms': 270, 'duration_ms': 120, 'word': 'め'}, {'index': 2, 'start_ms': 270, 'end_ms': 570, 'duration_ms': 300, 'word': '、'}]
+LAST 3 JA SEGMENTS
+[{'index': 780, 'start_ms': 770910, 'end_ms': 771030, 'duration_ms': 120, 'word': 'い'}, {'index': 781, 'start_ms': 771090, 'end_ms': 771210, 'duration_ms': 120, 'word': 'い'}, {'index': 782, 'start_ms': 771210, 'end_ms': 771270, 'duration_ms': 60, 'word': '。'}]
+TOTAL JA SEGMENTS: 783
+FULL JA (sents=17)
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
