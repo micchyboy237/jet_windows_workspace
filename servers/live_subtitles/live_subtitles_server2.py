@@ -9,6 +9,7 @@ from translate_jp_en_llm import translate_japanese_to_english, TranslationResult
 # from transcribe_jp_funasr_nano import transcribe_japanese, TranscriptionResult
 # from translate_jp_en_sarashin import translate_japanese_to_english, TranslationResult
 from audio_context_buffer import AudioContextBuffer
+from audio_search import search_audio
 from utils import split_sentences_ja
 
 connected_clients = set()
@@ -42,15 +43,27 @@ def blocking_process_audio(
         if len(context_audio_bytes) == 0:
             print("[empty context]")
         else:
+            audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
+            search_audio(
+                context_audio,
+                audio_np,
+            )
+            print(f"Context duration: {context_buffer.get_total_duration():.2f}s")
+            print(f"Audio duration: {header["duration_sec"]:.2f}s")
             full_trans_result: TranscriptionResult = transcribe_japanese(
                 audio_bytes=context_audio_bytes,
                 sample_rate=sample_rate,
             )
+            full_word_segments = full_trans_result["segments"]
+            print(f"FIRST 3 JA SEGMENTS\n{full_word_segments[:3]!r}")
+            print(f"LAST 3 JA SEGMENTS\n{full_word_segments[-3:]!r}")
+            full_word_segments_text = "".join([s["word"] for s in full_word_segments])
             ja_text_with_context = full_trans_result.get("text_ja", "").strip()
-            print(f"RAW JA\n{ja_text_with_context if ja_text_with_context else '[empty transcription]'}")
+            print(f"TOTAL JA SEGMENTS: {len(full_word_segments)}")
+            print(f"FULL JA WORDS\n{full_word_segments_text}")
             ja_sents = split_sentences_ja(ja_text_with_context)
             ja_sents_str = "\n".join(ja_sents).strip()
-            print(f"FULL JA (sents={len(ja_sents)})\n{ja_sents_str if ja_sents_str else '[empty transcription]'}")
+            print(f"FULL JA (sents={len(ja_sents)})\n{ja_sents_str}")
 
             # full_trans_en: TranslationResult = translate_japanese_to_english(
             #     ja_text=ja_sents_str,

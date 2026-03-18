@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Union, Sequence, Generator, Tuple
 from pathlib import Path
 
+import io
 import os
 import numpy as np
 import numpy.typing as npt
@@ -64,10 +65,10 @@ def load_audio(
     audio: AudioInput,
     sr: int = 16_000,
     mono: bool = True,
-) -> np.ndarray:
+) -> tuple[np.ndarray, int]:
     """
     Robust audio loader for ASR pipelines with correct datatype, normalization, layout, and resampling.
-    
+
     Handles:
       - File paths
       - In-memory WAV bytes
@@ -82,7 +83,7 @@ def load_audio(
         Shape (samples,), float32, [-1.0, 1.0], exactly `sr` Hz
     """
     # ─────── FIX 1: In-memory arrays/tensors have unknown original sr ───────
-    import io
+
     current_sr: int | None
     if isinstance(audio, (str, os.PathLike)):
         y, current_sr = librosa.load(audio, sr=None, mono=False)
@@ -91,7 +92,7 @@ def load_audio(
     elif isinstance(audio, np.ndarray):
         y = audio.astype(np.float32, copy=False)
         current_sr = None
-    elif HAS_TORCH and isinstance(audio, torch.Tensor):
+    elif isinstance(audio, torch.Tensor):
         y = audio.float().cpu().numpy()
         current_sr = None
     else:
@@ -100,7 +101,8 @@ def load_audio(
     # ─────── FIX 2: Correct normalization (NumPy, not torch) ───────
     if np.issubdtype(y.dtype, np.integer):
         y = y / (2 ** (np.iinfo(y.dtype).bits - 1))
-    elif np.abs(y).max() > 1.0 + 1e-6:
+
+    if len(y) > 0 and np.abs(y).max() > 1.0 + 1e-6:
         y = y / np.abs(y).max()
 
     # ─────── FIX 3: Always make (channels, time) layout ───────
@@ -116,11 +118,13 @@ def load_audio(
     if mono and y.shape[0] > 1:
         y = np.mean(y, axis=0, keepdims=True)
 
+    sr = current_sr or sr
+
     # ─────── FIX 4: ALWAYS resample if current_sr is None or wrong ───────
     if current_sr != sr:
-        y = librosa.resample(y, orig_sr=current_sr or sr, target_sr=sr)
+        y = librosa.resample(y, orig_sr=sr, target_sr=sr)
 
-    return y.squeeze()
+    return y.squeeze(), sr
 
 def resample_audio(
     audio: npt.NDArray[np.float32],

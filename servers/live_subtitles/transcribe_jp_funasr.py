@@ -16,6 +16,7 @@ class WordSegment(TypedDict):
     index: int
     start_ms: Optional[int]
     end_ms: Optional[int]
+    duration_ms: Optional[int]
     word: Optional[str]
 
 class TranscriptionMetadata(TypedDict, total=False):
@@ -95,14 +96,20 @@ def transcribe_japanese_llm_from_file(
     for idx, ts in enumerate(timestamps):
         start_ms = None
         end_ms = None
+        duration_ms = None
+
         if isinstance(ts, (list, tuple)) and len(ts) >= 2:
             start_ms = ts[0]
             end_ms = ts[1]
+            if start_ms is not None and end_ms is not None:
+                duration_ms = end_ms - start_ms
+
         segments.append(
             {
                 "index": idx,
                 "start_ms": start_ms,
                 "end_ms": end_ms,
+                "duration_ms": duration_ms,
                 "word": words[idx] if idx < len(words) else None,
             }
         )
