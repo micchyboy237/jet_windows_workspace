@@ -50,13 +50,13 @@ def blocking_process_audio(
             ja_sents_str = "\n".join(ja_sents).strip()
             print(f"FULL JA (sents={len(ja_sents)})\n{ja_sents_str if ja_sents_str else '[empty transcription]'}")
 
-            full_trans_en: TranslationResult = translate_japanese_to_english(
-                ja_text=ja_sents_str,
-                enable_scoring=False,
-                history=None,
-            )
-            en_text_with_context = full_trans_en["text"].strip()
-            print(f"FULL EN:\n{en_text_with_context if en_text_with_context else '[empty translation]'}")
+            # full_trans_en: TranslationResult = translate_japanese_to_english(
+            #     ja_text=ja_sents_str,
+            #     enable_scoring=False,
+            #     history=None,
+            # )
+            # en_text_with_context = full_trans_en["text"].strip()
+            # print(f"FULL EN:\n{en_text_with_context if en_text_with_context else '[empty translation]'}")
         
         trans_result: TranscriptionResult = transcribe_japanese(
             audio_bytes=audio_bytes,
