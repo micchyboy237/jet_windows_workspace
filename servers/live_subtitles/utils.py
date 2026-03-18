@@ -138,7 +138,48 @@ def resolve_audio_paths(audio_inputs: AudioPathsInput, recursive: bool = False) 
 
 
 if __name__ == "__main__":
-    ja_text = "🎼作戦を担うスゴーデエージェント黄昏れ00の顔を使い分ける彼の任務は家族を作ること父ロイドフォージャー精神科医正体スパイコードネーム黄昏れ母ヨルフォージャー市役所職員🎼正体殺しやコードネーム茨姫娘アーニャフォージャー正体た戦を担うスゴーデエージェント黄昏れ0の顔を使い分ける彼の任務は家族を作ること父ロイドフォージャー精神科医正体スパイコードネーム黄昏れ母ヨルフォージャー市役所職員🎼正体殺しやコードネーム茨姫娘アーニャフォージャー正体心を読むことができるエスパー"
-    ja_sents = split_symbols_ja(ja_text)
-    for i, s in enumerate(ja_sents, 1):
-        print(f"{i}. {s}")
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Split Japanese text into sentences using different strategies."
+    )
+
+    parser.add_argument(
+        "ja_text",
+        nargs="?",
+        default=(
+            "🎼作戦を担うスゴーデエージェント黄昏れ00の顔を使い分ける彼の任務は家族を作ること"
+            "父ロイドフォージャー精神科医正体スパイコードネーム黄昏れ母ヨルフォージャー市役所職員"
+            "🎼正体殺しやコードネーム茨姫娘アーニャフォージャー正体た戦を担うスゴーデエージェント黄昏れ0の顔を使い分ける"
+            "彼の任務は家族を作ること父ロイドフォージャー精神科医正体スパイコードネーム黄昏れ"
+            "母ヨルフォージャー市役所職員🎼正体殺しやコードネーム茨姫娘アーニャフォージャー正体心を読むことができるエスパー"
+        ),
+        help="Japanese text to split into sentences (if omitted, uses built-in example)",
+    )
+
+    parser.add_argument(
+        "-m", "--mode",
+        choices=["sentences", "symbols"],
+        default="sentences",
+        help="Splitting mode: 'sentences' = split_sentences_ja (default), 'symbols' = split_symbols_ja"
+    )
+
+    args = parser.parse_args()
+
+    # Select splitter function
+    if args.mode == "symbols":
+        splitter_func = split_symbols_ja
+        mode_name = "split_symbols_ja"
+    else:
+        splitter_func = split_sentences_ja
+        mode_name = "split_sentences_ja (default)"
+
+    print(f"Using mode: {mode_name}\n")
+
+    sentences = splitter_func(args.ja_text)
+
+    if not sentences:
+        print("No sentences extracted.")
+    else:
+        for i, sent in enumerate(sentences, 1):
+            print(f"{i:2d}. {sent}")

@@ -65,8 +65,14 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\utils.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_audio_context_buffer.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\utils.py",
     r"",
 ]
 
@@ -84,7 +90,89 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update live_subtitles_server2 to use a ThreadPoolExecutor so that new messages can be handled in parallel.
+Explain root cause of issue for context buffer and ja sentences based on below logs. Then show unified diff for the fix. Only update live_subtitles_server2 or audio_context_buffer for the fix.
+
+[SERVER] Listening on ws://0.0.0.0:8765
+connection open
+[SERVER] Client connected — total 1
+[empty context]
+rtf_avg: 0.018: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 10.42it/s]
+rtf_avg: 0.055: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  3.48it/s]
+rtf_avg: 0.057, time_speech:  5.184, time_escape: 0.293: 100%|███████████████████████████| 1/1 [00:00<00:00,  3.41it/s]
+ JA: 🎼世界 各国 が 水面下で 熾烈な 情報 戦 を 繰り広げる 時代。
+ EN: 🎼The time when countries around the world engage in fierce information wars submerged beneath the surface.
+[SERVER] Processed 2de12e05… → 🎼世界 各国 が 水面下で 熾烈な 情報 戦 を 繰り広げる 時代。…
+rtf_avg: 0.009: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 10.14it/s]
+  0%|                                                                                            | 0/1 [00:00<?, ?it/s]decoding, utt: tmpg37femar, empty speech
+  0%|                                                                                            | 0/1 [00:00<?, ?it/s]
+ FULL JA: [empty transcription]
+ JA SENTS (0):[]
+rtf_avg: 0.006: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 20.76it/s]
+rtf_avg: 0.025: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 11.47it/s]
+rtf_avg: 0.023, time_speech:  7.776, time_escape: 0.177: 100%|███████████████████████████| 1/1 [00:00<00:00,  5.57it/s]
+ JA: 🎼睨み 合う 2 つの 国、東の オスタニア、西 の ウェスタリス。戦争を企てるオスタ。
+ EN: 🎼The eyes that meet in the land of Ostan and Vestris, East and West. The Ostan who plots war.
+[SERVER] Processed 584dede7… → 🎼睨み 合う 2 つの 国、東の オスタニア、西 の ウェスタリス。戦争を企てるオスタ。…
+rtf_avg: 0.006: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  6.72it/s]
+rtf_avg: 0.134: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 11.10it/s]
+rtf_avg: 0.004, time_speech:  26.572, time_escape: 0.093: 100%|██████████████████████████| 1/1 [00:00<00:00, 10.41it/s]
+ FULL JA: 。
+ JA SENTS (1):['\n1: 。']
+rtf_avg: 0.007: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 19.31it/s]
+rtf_avg: 0.031: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  5.13it/s]
+rtf_avg: 0.029, time_speech:  6.912, time_escape: 0.198: 100%|███████████████████████████| 1/1 [00:00<00:00,  5.00it/s]
+ JA: 🎼や 政府 要人 の 動向 を 探る べく、ウェスタリス は オペレーション ストリックス を 発動。
+ EN: 🎼As Westalis, in order to investigate the trends of prominent government figures, she activates operation strix.
+[SERVER] Processed 02b32c88… → 🎼や 政府 要人 の 動向 を 探る べく、ウェスタリス は オペレーション ストリックス を 発動…
+rtf_avg: 0.006: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  4.09it/s]
+rtf_avg: 0.087: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 17.23it/s]
+rtf_avg: 0.003, time_speech:  40.844, time_escape: 0.121: 100%|██████████████████████████| 1/1 [00:00<00:00,  8.12it/s]
+ FULL JA: 。。
+ JA SENTS (1):['\n1: 。。']
+rtf_avg: 0.006: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 34.69it/s]
+rtf_avg: 0.047: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  4.91it/s]
+rtf_avg: 0.048, time_speech:  4.320, time_escape: 0.207: 100%|███████████████████████████| 1/1 [00:00<00:00,  4.79it/s]
+ JA: 🎼線を担うスゴーデエージェント黄昏れ、百の顔を使いは。
+ EN: A serpent born of the fading blue, uses 100 faces.
+[SERVER] Processed cd7040b8… → 🎼線を担うスゴーデエージェント黄昏れ、百の顔を使いは。…
+rtf_avg: 0.006: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  3.21it/s]
+rtf_avg: 0.058: 100%|████████████████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 25.04it/s]
+rtf_avg: 0.002, time_speech:  49.980, time_escape: 0.124: 100%|██████████████████████████| 1/1 [00:00<00:00,  7.88it/s]
+ FULL JA: 。。。
+ JA SENTS (1):['\n1: 。。。']
+rtf_avg: 0.006: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 36.47it/s]
+rtf_avg: 0.033: 100%|████████████████████████████████████████████████████████████████████| 2/2 [00:00<00:00, 14.89it/s]
+rtf_avg: 0.032, time_speech:  4.320, time_escape: 0.138: 100%|███████████████████████████| 1/1 [00:00<00:00,  7.15it/s]
+ JA: 🎼てる彼の任務は？家族 を 作る こと。
+ EN: His duty is to make me...
+[SERVER] Processed a6beb7af… → 🎼てる彼の任務は？家族 を 作る こと。…
+rtf_avg: 0.007: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  2.44it/s]
+rtf_avg: 0.082: 100%|████████████████████████████████████████████████████████████████████| 4/4 [00:00<00:00, 17.94it/s]
+rtf_avg: 0.004, time_speech:  59.000, time_escape: 0.227: 100%|██████████████████████████| 1/1 [00:00<00:00,  4.33it/s]
+ FULL JA: 。。そ。。
+ JA SENTS (2):['\n1: 。。', '\n2: そ。。']
+rtf_avg: 0.008: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 26.86it/s]
+rtf_avg: 0.039: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  6.34it/s]
+rtf_avg: 0.037, time_speech:  4.320, time_escape: 0.162: 100%|███████████████████████████| 1/1 [00:00<00:00,  6.18it/s]
+ JA: 🎼父ロイドフージ精神科医翔た。
+ EN: Dr. Lloyd Fudge, psychiatrist flew in.
+[SERVER] Processed 1e793869… → 🎼父ロイドフージ精神科医翔た。…
+rtf_avg: 0.058: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  2.14it/s]
+rtf_avg: 0.076: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:00<00:00, 18.99it/s]
+rtf_avg: 0.004, time_speech:  68.020, time_escape: 0.267: 100%|██████████████████████████| 1/1 [00:00<00:00,  3.67it/s]
+ FULL JA: 。う。。。。
+ JA SENTS (2):['\n1: 。', '\n2: う。。。。']
+rtf_avg: 0.007: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 18.10it/s]
+rtf_avg: 0.037: 100%|████████████████████████████████████████████████████████████████████| 3/3 [00:00<00:00, 11.68it/s]
+rtf_avg: 0.033, time_speech:  7.776, time_escape: 0.260: 100%|███████████████████████████| 1/1 [00:00<00:00,  3.82it/s]
+ JA: 🎼スパイコードネームた昏れ。母、ヨルフォージャー市役所職員。しょう？
+ EN: 🎼 Spy code name: Yoforge, mom, city council official. Shoyo?
+[SERVER] Processed 8b0ef01d… → 🎼スパイコードネームた昏れ。母、ヨルフォージャー市役所職員。しょう？…
+rtf_avg: 0.037: 100%|████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  2.08it/s]
+rtf_avg: 0.062: 100%|████████████████████████████████████████████████████████████████████| 5/5 [00:00<00:00, 23.23it/s]
+rtf_avg: 0.003, time_speech:  72.932, time_escape: 0.218: 100%|██████████████████████████| 1/1 [00:00<00:00,  4.48it/s]
+ FULL JA: あ。。。。。
+ JA SENTS (1):['\n1: あ。。。。。']
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

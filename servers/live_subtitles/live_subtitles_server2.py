@@ -1,17 +1,22 @@
 # servers\live_subtitles\live_subtitles_server2.py
 import asyncio
 import json
+import numpy as np
 import websockets
 from concurrent.futures import ThreadPoolExecutor
 from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
 # from transcribe_jp_funasr_nano import transcribe_japanese, TranscriptionResult
 from translate_jp_en_llm import translate_japanese_to_english, TranslationResult
+from audio_context_buffer import AudioContextBuffer
+from utils import split_sentences_ja
 
 connected_clients = set()
 
 # Adjust max_workers depending on your CPU cores + GPU contention
 # SenseVoiceSmall + small LLM usually do well with 2–6 workers
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_worker")
+
+context_buffer = AudioContextBuffer(max_duration_sec=30.0, sample_rate=16000)
 
 def blocking_process_audio(
     audio_bytes: bytes,
@@ -25,8 +30,26 @@ def blocking_process_audio(
         return {"error": "missing uuid", "success": False}
 
     sample_rate = header.get("sample_rate", 16000)
+   
+    context_audio = context_buffer.get_context_audio()
+    if context_audio.size == 0:
+        context_audio_bytes = b""
+    else:
+        context_audio_bytes = context_audio.tobytes()
 
     try:
+        if len(context_audio_bytes) == 0:
+            print("[empty context]")
+        else:
+            full_trans_result: TranscriptionResult = transcribe_japanese(
+                audio_bytes=context_audio_bytes,
+                sample_rate=sample_rate,
+            )
+            ja_text_with_context = full_trans_result.get("text_ja", "").strip()
+            ja_sents = split_sentences_ja(ja_text_with_context)
+            print(f" FULL JA: {ja_text_with_context if ja_text_with_context else '[empty transcription]'}")
+            print(f" JA SENTS ({len(ja_sents)}):\n{"\n".join([f"{num}: {s}" for num, s in enumerate(ja_sents, start=1)])}")
+        
         trans_result: TranscriptionResult = transcribe_japanese(
             audio_bytes=audio_bytes,
             sample_rate=sample_rate,
@@ -88,6 +111,11 @@ async def process_audio(websocket):
                 await websocket.send(json.dumps({"error": "invalid json header"}).encode())
                 continue
 
+            # Convert raw bytes → numpy float32 array (assuming 16-bit PCM)
+            audio_np = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            # Now safe to add to context buffer
+            context_buffer.add_audio_segment(header["start_sec"], audio_np)
+
             # Offload heavy work to thread pool
             future = asyncio.get_running_loop().run_in_executor(
                 executor,
@@ -100,6 +128,7 @@ async def process_audio(websocket):
             # websocket can continue receiving new messages
             try:
                 response = await future
+
                 await websocket.send(json.dumps(response).encode("utf-8"))
                 uuid_ = header.get("uuid", "???")
                 ja_preview = response.get("transcription_ja", "")[:50]

@@ -58,10 +58,9 @@ def _transcribe_file(
         use_itn=True,
         batch_size=32, 
         output_timestamp=True,
+        hotwords=hotwords,
         merge_vad=False,
-        merge_length_s=15,
-        # use_itn=True,
-        # hotwords=hotwords,
+        # merge_length_s=15,
     )
     return results
 
@@ -73,9 +72,8 @@ def transcribe_japanese_llm_from_file(
     context_prompt: str | None = None,
 ) -> TranscriptionResult:
     started = datetime.now(timezone.utc)
-    effective_hotwords = hotwords or []
 
-    raw_results = _transcribe_file(audio_path, hotwords=effective_hotwords)
+    raw_results = _transcribe_file(audio_path, hotwords=hotwords)
 
     if not raw_results:
         return TranscriptionResult(
