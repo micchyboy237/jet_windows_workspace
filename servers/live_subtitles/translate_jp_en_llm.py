@@ -51,7 +51,32 @@ class ReferenceExample(TypedDict):
     en: str
 
 
-DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = []
+DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = [
+    # Erotic / sensual (1st-person) — NO number
+    {"ja": "恥ずかしい…見ないでください…", "en": "It's so embarrassing... Please don't look..."},
+    {"ja": "お願い…もっと激しくして…壊して…！", "en": "Please... do it harder... Break me...!"},
+
+    # Erotic with count (numeric)
+    {"ja": "んっ…もう3回イッちゃった…", "en": "Nngh... I've already come 3 times..."},
+
+    # Cute / playful with age (numeric)
+    {"ja": "きゃっ！もう18歳なのに、まだ子供扱い～♡", "en": "Kyaa! I'm already 18 but you're still treating me like a kid~♡"},
+
+    # Angry / tsundere with repetition (numeric)
+    {"ja": "ばか！3回も言ったでしょ！", "en": "Idiot! I already said it 3 times!"},
+
+    # Sad / emotional with duration (numeric)
+    {"ja": "…ごめんね。あと1年で会えなくなるかも…", "en": "...I'm sorry. In just 1 year we might not be able to meet anymore..."},
+
+    # Neutral conversation with date (numeric)
+    {"ja": "2024年3月15日に会いましょう。", "en": "Let's meet on March 15, 2024."},
+
+    # Neutral narrative / third-person with measurement (numeric)
+    {"ja": "彼女は5メートル先に静かに立っていた。", "en": "She was quietly standing 5 meters ahead."},
+
+    # Playful / teasing with count (numeric)
+    {"ja": "ふふっ、10回目だよ？もう忘れちゃったの？", "en": "Hehe, this is the 10th time, you know? Did you already forget?"},
+]
 
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
 

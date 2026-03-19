@@ -91,11 +91,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-- Save the last n segment results under LAST_N_SEGMENTS_DIR / segments_{header["started_at"] formatted as "%Y%m%d_%H%M%S"}. header["started_at"] is iso format.
-- Save segment specific info and results on each subdir such as header.json, metadata.json, sound.wav, transcription.json, translation.json, subtitles.srt and other info I have missed or helpful insights.
-- Save an updating context buffer data under LIVE_AUDIO_CONTEXT_DIR. Save a metadata.json, full sound.wav, full transcription.json and other info I have missed or helpful insights.
-
-Show unified diff.
+Update
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
