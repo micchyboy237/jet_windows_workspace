@@ -7,49 +7,9 @@ from fast_bunkai import FastBunkai
 def split_sentences_ja(text: str) -> List[str]:
     """
     Split Japanese text into sentences.
-
-    Rules:
-    - Symbol clusters (emoji/music marks/etc.) at the beginning of a section
-      stay attached to the following text.
-    - Repeated symbol clusters mark new sections.
-    - Do NOT split symbol and text apart.
     """
-
-    import re
-
-    if not text:
-        return []
-
-    # Unicode ranges
-    JA_RANGE = r"\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F"
-    SYMBOL_RANGE = (
-        r"\u2600-\u26FF"
-        r"\u2700-\u27BF"
-        r"\U0001F300-\U0001FAFF"
-    )
-
-    # 1️⃣ Split only when a symbol cluster appears AND is followed by Japanese text
-    #    This preserves symbol as prefix.
-    text = re.sub(
-        rf"([{SYMBOL_RANGE}]+)(?=[{JA_RANGE}])",
-        r"\n\1",
-        text,
-    )
-
-    # Remove accidental leading newline
-    text = text.lstrip("\n")
-
-    chunks = [c.strip() for c in text.split("\n") if c.strip()]
-
     splitter = FastBunkai()
-    sentences: List[str] = []
-
-    for chunk in chunks:
-        # If chunk starts with symbol cluster, keep as atomic sentence
-        if re.match(rf"^[{SYMBOL_RANGE}]+", chunk):
-            sentences.append(chunk)
-        else:
-            sentences.extend(s.strip() for s in splitter(chunk) if s.strip())
+    sentences = list(splitter(text))
 
     return sentences
 
