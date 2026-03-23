@@ -33,6 +33,7 @@ AUDIO_EXTENSIONS = {
 
 AudioPathsInput = Union[str, Path, Sequence[Union[str, Path]]]
 
+
 def resolve_audio_paths(audio_inputs: AudioPathsInput, recursive: bool = False) -> list[str]:
     """
     Resolve single file, list, or directory into a sorted list of absolute audio file paths as strings.
@@ -61,51 +62,95 @@ def resolve_audio_paths(audio_inputs: AudioPathsInput, recursive: bool = False) 
     # Return sorted list of absolute path strings
     return sorted(str(p) for p in resolved_paths)
 
+
 def load_audio(
     audio: AudioInput,
     sr: int = 16_000,
     mono: bool = True,
 ) -> tuple[np.ndarray, int]:
     """
-    Robust audio loader for ASR pipelines with correct datatype, normalization, layout, and resampling.
+    Robust audio loader for ASR pipelines.
 
     Handles:
       - File paths
-      - In-memory WAV bytes
-      - NumPy arrays (any shape/layout/dtype/sr)
+      - In-memory audio bytes (container OR raw PCM)
+      - NumPy arrays
       - Torch tensors
-      - Automatically normalizes to [-1.0, 1.0] float32
-      - Always resamples to target_sr
-      - Correctly converts stereo → mono regardless of channel position
-    Returns
-    -------
-    np.ndarray
-        Shape (samples,), float32, [-1.0, 1.0], exactly `sr` Hz
-    """
-    # ─────── FIX 1: In-memory arrays/tensors have unknown original sr ───────
 
-    current_sr: int | None
+    Returns:
+        (audio: np.ndarray [samples], sr: int)
+    """
+
+    def _decode_raw_pcm(
+        data: bytes,
+        expected_sr: int,
+        channels: int = 1,
+        dtype: npt.DTypeLike = np.int16,
+    ) -> tuple[np.ndarray, int]:
+        """Decode raw PCM bytes into numpy array."""
+        itemsize = np.dtype(dtype).itemsize
+
+        if len(data) % (channels * itemsize) != 0:
+            raise ValueError(
+                f"Invalid raw PCM buffer: {len(data)} bytes not divisible by "
+                f"(channels={channels} × itemsize={itemsize})"
+            )
+
+        arr = np.frombuffer(data, dtype=dtype)
+
+        if channels > 1:
+            arr = arr.reshape(-1, channels).mean(axis=1)
+
+        # Normalize if integer
+        if np.issubdtype(arr.dtype, np.integer):
+            arr = arr.astype(np.float32) / np.iinfo(arr.dtype).max
+        else:
+            arr = arr.astype(np.float32)
+
+        return arr, expected_sr
+
+    current_sr: int | None = None
+
+    # ─────── Input handling ───────
     if isinstance(audio, (str, os.PathLike)):
         y, current_sr = librosa.load(audio, sr=None, mono=False)
+
     elif isinstance(audio, bytes):
-        y, current_sr = librosa.load(io.BytesIO(audio), sr=None, mono=False)
+        y = None
+
+        # Attempt container decode (wav, flac, etc.)
+        try:
+            y, current_sr = librosa.load(io.BytesIO(audio), sr=None, mono=False)
+        except Exception:
+            # Fallback → raw PCM
+            y, current_sr = _decode_raw_pcm(
+                data=audio,
+                expected_sr=sr,
+                channels=1,
+                dtype=np.int16,  # safest default for most streaming sources
+            )
+
     elif isinstance(audio, np.ndarray):
         y = audio.astype(np.float32, copy=False)
         current_sr = None
-    elif isinstance(audio, torch.Tensor):
-        y = audio.float().cpu().numpy()
+
+    elif HAS_TORCH and isinstance(audio, torch.Tensor):
+        y = audio.detach().float().cpu().numpy()
         current_sr = None
+
     else:
         raise TypeError(f"Unsupported audio input type: {type(audio)}")
 
-    # ─────── FIX 2: Correct normalization (NumPy, not torch) ───────
+    # ─────── Normalize (safety) ───────
     if np.issubdtype(y.dtype, np.integer):
-        y = y / (2 ** (np.iinfo(y.dtype).bits - 1))
+        y = y.astype(np.float32) / np.iinfo(y.dtype).max
 
-    if len(y) > 0 and np.abs(y).max() > 1.0 + 1e-6:
-        y = y / np.abs(y).max()
+    if y.size > 0:
+        max_val = np.abs(y).max()
+        if max_val > 1.0 + 1e-6:
+            y = y / max_val
 
-    # ─────── FIX 3: Always make (channels, time) layout ───────
+    # ─────── Ensure (channels, time) ───────
     if y.ndim == 1:
         y = y[None, :]
     elif y.ndim == 2:
@@ -114,17 +159,20 @@ def load_audio(
     else:
         raise ValueError(f"Audio must be 1D or 2D, got shape {y.shape}")
 
-    # Mono conversion
+    # ─────── Mono conversion ───────
     if mono and y.shape[0] > 1:
         y = np.mean(y, axis=0, keepdims=True)
 
-    sr = current_sr or sr
+    # ─────── Sample rate handling ───────
+    effective_sr = current_sr or sr
 
-    # ─────── FIX 4: ALWAYS resample if current_sr is None or wrong ───────
-    if current_sr != sr:
-        y = librosa.resample(y, orig_sr=sr, target_sr=sr)
+    # ─────── Resample if needed ───────
+    if effective_sr != sr:
+        y = librosa.resample(y, orig_sr=effective_sr, target_sr=sr)
+        effective_sr = sr
 
-    return y.squeeze(), sr
+    return y.squeeze().astype(np.float32), effective_sr
+
 
 def resample_audio(
     audio: npt.NDArray[np.float32],

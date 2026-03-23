@@ -1,5 +1,13 @@
+import time
+import uuid
 import json
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Dict, Any, Union, Iterator, List, Tuple, Optional
+from threading import Lock
+
+from rich import print
+from rich.console import Console
+from rich.live import Live
+from rich.text import Text
 
 from llama_cpp import Llama
 from llama_cpp.llama_types import (
@@ -7,17 +15,11 @@ from llama_cpp.llama_types import (
     CreateChatCompletionResponse,
     CreateChatCompletionStreamResponse,
 )
-from rich import print
-from rich.console import Console
-from rich.live import Live
-from rich.text import Text
 
 console = Console()
 
 # ── Model configuration ──────────────────────────────────────────────
-MODEL_PATH = (
-    r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-lfm2-1.2b.Q5_K_M.gguf"
-)
+MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
 
 MODEL_SETTINGS = {
     "n_ctx": 2048,
@@ -48,20 +50,14 @@ TRANSLATION_DEFAULTS = {
 }
 
 SYSTEM_PROMPT = """
-You are a professional, natural-sounding Japanese-to-English translator.
-Translate accurately while making the English sound fluent, idiomatic, and emotionally true to the original.
-Preserve shyness, neediness, breathiness, vulgarity level, and intimacy.
-Use natural contractions, ellipses (...), occasional ~ or ♡ when it fits the cute/pleading tone.
+You are a professional, natural-sounding Japanese-to-English translator. Translate accurately while making the English sound fluent and idiomatic as if written by a native English speaker.
 """.strip()
-
-FEW_SHOT_EXAMPLES = []
 
 # ────────────────────────────────────────────────
 # Lazy + thread-safe model loading
 # ────────────────────────────────────────────────
 console.print("[bold yellow]Loading translator model...[/bold yellow]")
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
-
 
 # ────────────────────────────────────────────────
 # Main translation interface
@@ -75,31 +71,48 @@ def translate_japanese_to_english(
 ) -> Union[CreateChatCompletionResponse, Iterator[CreateChatCompletionStreamResponse]]:
     """
     High-level Japanese → natural English translation using chat format.
-    Now includes few-shot examples for much better tone & naturalness in intimate/erotic contexts.
+
+    Uses llama_cpp's create_chat_completion under the hood.
+
+    Args:
+        ja_text: Japanese text to translate
+        temperature: Controls randomness (0.0 = deterministic, ~0.6-0.8 natural)
+        top_p: Nucleus sampling
+        min_p: Minimum probability sampling (very helpful on smaller models)
+        repeat_penalty: Penalizes repetitions
+        max_tokens: Maximum output length
+        stream: Whether to return a streaming iterator
+        stop: Optional stop strings
+
+    Returns:
+        Full response object or stream iterator depending on `stream` flag
+
+    Recommended usage:
+        # Blocking
+        result = translate_japanese_to_english("こんにちは！", stream=False)
+        print(result["choices"][0]["message"]["content"])
+
+        # Streaming (beautiful console)
+        for chunk in translate_japanese_to_english("こんにちは！", stream=True):
+            delta = chunk["choices"][0]["delta"].get("content", "")
+            print(delta, end="", flush=True)
     """
-    llm.reset()
-
-    # Build messages: system + few-shot + real query
     messages: List[ChatCompletionRequestMessage] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT,
+        },
+        {"role": "user", "content": ja_text.strip()},
     ]
-
-    # Insert few-shot examples
-    messages.extend(FEW_SHOT_EXAMPLES)
-
-    # Add the actual user input last
-    messages.append({"role": "user", "content": ja_text.strip()})
 
     params: Dict[str, Any] = {
         "messages": messages,
         "stream": stream,
         **TRANSLATION_DEFAULTS,
-        **generation_params,
+        **generation_params
     }
 
     response = llm.create_chat_completion(**params)
-
-    # For non-streaming usage, extract content (your original code returned a custom dict)
     en_text = response["choices"][0]["message"]["content"].strip()
 
     return {
@@ -110,13 +123,14 @@ def translate_japanese_to_english(
     }
 
 
-def translate_text(
-    text: str, logprobs: Optional[int] = None, **generation_params
-) -> dict:
+def translate_text(text: str, logprobs: Optional[int] = None, **generation_params) -> dict:
     """Translate with beautiful real-time streaming display using rich"""
     full_text = ""
 
-    _generation_params: Dict[str, Any] = {**TRANSLATION_DEFAULTS, **generation_params}
+    _generation_params: Dict[str, Any] = {
+        **TRANSLATION_DEFAULTS,
+        **generation_params
+    }
 
     if logprobs:
         _generation_params["logprobs"] = True
@@ -132,7 +146,7 @@ def translate_text(
     try:
         role: str = None
         finish_reason: str = None
-
+    
         with Live(auto_refresh=False) as live:
             for chunk in stream:
                 if "choices" not in chunk or not chunk["choices"]:
@@ -142,10 +156,7 @@ def translate_text(
                 delta = choice.get("delta", {})
                 logprobs = choice["logprobs"] or {}
                 logprobs_content = logprobs.get("content", [])
-                logprobs_tokens = [
-                    (l["token"], l["logprob"], l["top_logprobs"])
-                    for l in logprobs_content
-                ]
+                logprobs_tokens = [(l["token"], l["logprob"], l["top_logprobs"]) for l in logprobs_content]
 
                 if "role" in delta:
                     role = delta["role"]
@@ -180,7 +191,6 @@ if __name__ == "__main__":
     import json
     import shutil
     from pathlib import Path
-
     from rich import box
     from rich.console import Console
     from rich.panel import Panel

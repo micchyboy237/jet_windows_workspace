@@ -42,8 +42,8 @@ class TranscriptionResult(TypedDict):
 model = AutoModel(
     model="FunAudioLLM/SenseVoiceSmall",
     disable_update=True,
-    vad_model="fsmn-vad",
-    vad_kwargs={"max_single_segment_time": 30000},
+    # vad_model="fsmn-vad",
+    # vad_kwargs={"max_single_segment_time": 30000},
     device="cuda:0",
     hub="hf",
     # trust_remote_code=True,

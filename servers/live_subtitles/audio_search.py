@@ -417,14 +417,13 @@ console = Console()
 
 def search_audio(audio1, audio2, **kwargs):
     try:
-        console.rule("Loading audio files")
         long_signal, sr_long = load_audio(audio1)
         short_signal, sr_short = load_audio(audio2)
 
         if sr_long != sr_short:
             console.print(
-                f"[red]Warning:[/red] Sample rates differ "
-                f"({sr_long} Hz vs {sr_short} Hz). Using {sr_long} Hz for timing."
+                f"[red]Warning:[/red] Sample rates differ"
+                # f"\n({sr_long} Hz vs {sr_short} Hz). Using {sr_long} Hz for timing."
             )
 
         sample_rate = sr_long
@@ -434,8 +433,8 @@ def search_audio(audio1, audio2, **kwargs):
         total_short_sec = len(short_signal) / sample_rate
 
         console.print("\n[bold cyan]Audio Files:[/bold cyan]")
-        console.print(f"  Long audio (A)   :  [bold]{total_long_sec:8.2f}s[/bold]   {audio1.name if hasattr(audio1, 'name') else audio1}")
-        console.print(f"  Short clip  (B)  :  [bold]{total_short_sec:8.2f}s[/bold]   {audio2.name if hasattr(audio2, 'name') else audio2}")
+        console.print(f"  Long audio (A)   :  [bold]{total_long_sec:8.2f}s[/bold]")
+        console.print(f"  Short clip  (B)  :  [bold]{total_short_sec:8.2f}s[/bold]")
         console.print()
 
         console.rule("Searching for partial matches")

@@ -48,6 +48,10 @@ TRANSLATION_DEFAULTS = {
     "max_tokens": 512,
 }
 
+SYSTEM_PROMPT = """
+You are a professional, natural-sounding Japanese-to-English translator. Translate accurately while making the English sound fluent and idiomatic as if written by a native English speaker.
+""".strip()
+
 # ────────────────────────────────────────────────
 # Lazy + thread-safe model loading
 # ────────────────────────────────────────────────
@@ -71,7 +75,9 @@ def get_llm() -> Llama:
 # Main translation interface
 # ────────────────────────────────────────────────
 def translate_japanese_to_english(
-    text: str,
+    ja_text: str,
+    enable_scoring: bool = False,
+    history: Optional[List[Dict[str, str]]] = None,
     stream: bool = False,
     **generation_params,
 ) -> Union[CreateChatCompletionResponse, Iterator[CreateChatCompletionStreamResponse]]:
@@ -81,7 +87,7 @@ def translate_japanese_to_english(
     Uses llama_cpp's create_chat_completion under the hood.
 
     Args:
-        text: Japanese text to translate
+        ja_text: Japanese text to translate
         temperature: Controls randomness (0.0 = deterministic, ~0.6-0.8 natural)
         top_p: Nucleus sampling
         min_p: Minimum probability sampling (very helpful on smaller models)
@@ -106,13 +112,9 @@ def translate_japanese_to_english(
     messages: List[ChatCompletionRequestMessage] = [
         {
             "role": "system",
-            "content": (
-                "You are a professional, natural-sounding Japanese-to-English translator. "
-                "Translate accurately while making the English sound fluent and idiomatic "
-                "as if written by a native English speaker."
-            ),
+            "content": SYSTEM_PROMPT,
         },
-        {"role": "user", "content": text.strip()},
+        {"role": "user", "content": ja_text.strip()},
     ]
 
     params: Dict[str, Any] = {
@@ -123,7 +125,15 @@ def translate_japanese_to_english(
     }
 
     llm = get_llm()
-    return llm.create_chat_completion(**params)
+    response = llm.create_chat_completion(**params)
+    en_text = response["choices"][0]["message"]["content"].strip()
+
+    return {
+        "text": en_text,
+        "log_prob": None,
+        "confidence": None,
+        "quality": None,
+    }
 
 
 def translate_text(text: str, logprobs: Optional[int] = None, **generation_params) -> dict:
@@ -190,45 +200,143 @@ def translate_text(text: str, logprobs: Optional[int] = None, **generation_param
     }
 
 
-# ────────────────────────────────────────────────
-# Quick demo
-# ────────────────────────────────────────────────
 if __name__ == "__main__":
-    logprobs = None
-    # logprobs = 5
-    examples = [
-        """
-世界各国が水面下で熾烈な情報戦を繰り広げる時代 にらみ合う2つの国 東のオスタニア、西のウェスタリス
-戦争を企てるオスタニア政府要人の動向 戦争を企てるオスタニア政府要人の動向を探るべく
-ウェスタリスはオペレーションストリクスを発動 作戦を担うスゴーデエージェントたそがれ 100の顔を使い分ける彼の任務は
-家族の顔を使い分ける彼の任務は 家族を作ること 父ロイドフォージャー 精神科医 正体、コードネームたそがれ
-母ヨルフォージャー 母、夜フォージャー、市役所職員、正体、殺し屋、コードネーム、イバラ姫、娘。
-娘、アーニャフォージャー、正体、心を読むことができるエスパー。
-正体、心を読むことができるエスパー、犬、ボンドフォージャー、正体、未来を予知できる超能力権、物狩りのため、疑似家族を作り
-、互いに正体を隠した。 二次家族を作り互いに正体を隠した彼らのミッションは続く
-""",
-    ]
+    import argparse
+    import json
+    import shutil
+    from pathlib import Path
+    from rich import box
+    from rich.console import Console
+    from rich.panel import Panel
 
-    for i, jp_text in enumerate(examples, 1):
-        console.rule(f"Example {i}")
-        console.print("[dim]Japanese:[/dim]")
-        console.print(jp_text, style="italic cyan")
-        console.print()
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-        console.print("[bold green]English (streaming):[/bold green]")
-        result = translate_text(jp_text, logprobs=logprobs)
-        full_text = result.pop("text")
-        all_logprobs = result.pop("logprobs")
+    console = Console()
 
-        from rich.pretty import pprint
+    parser = argparse.ArgumentParser(
+        description="Japanese → English subtitle translator using llama.cpp"
+    )
+    parser.add_argument(
+        "text",
+        nargs="?",
+        type=str,
+        default="""
+恥ずかしい…見ないでください…
+んっ…そこ、弱いんです…
+はぁ…はぁ…気持ちいい…
+もう…ダメかも…頭おかしくなりそう…
+お願い…もっと激しくして…壊して…！
+あぁんっ！すごい…奥まで届いてる…♡
+出さないで…まだ中にいてて…
+        """.strip(),
+        help="Japanese text to translate (multi-line ok)",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=TRANSLATION_DEFAULTS["max_tokens"],
+        help="Maximum number of tokens to generate",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=TRANSLATION_DEFAULTS["temperature"],
+        help="Sampling temperature",
+    )
+    parser.add_argument(
+        "--scoring",
+        "--enable-scoring",
+        action="store_true",
+        default=False,
+        help="Enable logprobs and confidence scoring (slower)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=MODEL_PATH,
+        help="Path to the GGUF model file",
+    )
+    parser.add_argument(
+        "--no-rich",
+        action="store_true",
+        default=False,
+        help="Disable rich console formatting (plain output)",
+    )
 
-        print(f"\n[bold cyan]Logprobs {i}:[/bold cyan]")
-        pprint(all_logprobs)
+    args = parser.parse_args()
 
-        print(f"\n[bold cyan]Meta {i}:[/bold cyan]")
-        pprint(result, expand_all=True)
+    # -------------------------------------------------------------------------
+    # You can override MODEL_PATH here if you want to support --model
+    # MODEL_PATH = args.model   # ← uncomment if you want to use CLI model path
+    # llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)  # reload if needed
+    # -------------------------------------------------------------------------
 
-        print(f"\n[bold cyan]Translation {i}:[/bold cyan]")
-        pprint(full_text, expand_all=True)
+    if args.no_rich:
+        # Very simple plain output mode
+        result = translate_japanese_to_english(
+            ja_text=args.text,
+            max_tokens=args.max_tokens,
+            enable_scoring=args.scoring,
+            temperature=args.temperature,
+            history=None,
+        )
+        print("Japanese:")
+        print(args.text)
+        print("\nEnglish:")
+        print(result["text"])
+        if args.scoring:
+            print(f"\nlogprob   : {result['log_prob']}")
+            print(f"confidence : {result['confidence']}")
+            print(f"quality    : {result['quality']}")
+    else:
+        console.rule("Japanese → English Translation", style="bold cyan")
 
-    print()
+        console.print(
+            Panel(
+                args.text,
+                title="[bold magenta]Japanese Input[/]",
+                border_style="magenta",
+                padding=(1, 2),
+                expand=False,
+                box=box.ROUNDED,
+            )
+        )
+
+        console.print(
+            f"[dim]Translating with temperature={args.temperature}  "
+            f"max_tokens={args.max_tokens}  scoring={args.scoring}[/]"
+        )
+
+        result = translate_japanese_to_english(
+            ja_text=args.text,
+            max_tokens=args.max_tokens,
+            enable_scoring=args.scoring,
+            temperature=args.temperature,
+            history=None,
+        )
+
+        metrics = ""
+        if args.scoring:
+            metrics = (
+                f"\n\n[dim]Metrics:[/] logprob = {result['log_prob']}   "
+                f"confidence = {result['confidence']}   quality = {result['quality']}"
+            )
+
+        console.print(
+            Panel(
+                result["text"] + metrics,
+                title="[bold green]English Translation[/]",
+                border_style="green",
+                padding=(1, 2),
+                expand=False,
+                box=box.DOUBLE,
+            )
+        )
+
+    result_json_path = OUTPUT_DIR / "translation_result.json"
+    with open(result_json_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    console.print(f"[bold green]Saved JSON result to:[/bold green] {result_json_path}")

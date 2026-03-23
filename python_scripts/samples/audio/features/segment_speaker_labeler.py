@@ -5,8 +5,12 @@ import contextlib
 import io
 import os
 from pathlib import Path
-from typing import List, Literal, TypedDict, Union
+from typing import List, Literal, Tuple, TypedDict, Union
 
+import json
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torchaudio
@@ -15,10 +19,14 @@ from pyannote.audio.pipelines.clustering import AgglomerativeClustering as Pyann
 from pyannote.audio.pipelines.clustering import KMeansClustering as PyannoteKMeansClustering
 from tqdm import tqdm
 
+from vad_firered import extract_speech_segments, SpeechSegment, generate_plot, frames_from_seconds
+
 AudioInput = Union[np.ndarray, bytes, bytearray, io.BytesIO, str, Path]
 
 
 class SegmentResult(TypedDict):
+    start_sec: float
+    end_sec: float
     path: str
     parent_dir: str
     speaker_label: int
@@ -369,54 +377,95 @@ class SegmentSpeakerLabeler:
 
         return True
 
+    def prepare_speech_segments(
+        self,
+        audio: AudioInput,
+        min_duration_sec: float = 0.4,
+    ) -> List[Tuple[SpeechSegment, np.ndarray]]:
+        """
+        Use FireRedVAD to split input audio into speech segments.
+        Filters out very short segments that are usually useless for speaker ID.
+        """
+        segments_with_meta, _ = extract_speech_segments(audio=audio)
+
+        # Filter very short / useless segments
+        filtered = [
+            (meta, waveform)
+            for meta, waveform in segments_with_meta
+            if meta["duration_sec"] >= min_duration_sec
+        ]
+
+        if self.verbose and len(filtered) < len(segments_with_meta):
+            print(f"Filtered out {len(segments_with_meta)-len(filtered)} too-short segments")
+
+        return filtered
+
     def cluster_segments(
         self,
         segments: AudioInput | List[AudioInput],
+        use_vad: bool = True,
+        min_segment_duration_sec: float = 0.45,
     ) -> List[SegmentResult]:
         """
-        Cluster speaker embeddings from provided audio segments.
-
-        Parameters
-        ----------
-        segments : AudioInput | List[AudioInput]
-            Single audio item or list of items. Each item can be:
-            • np.ndarray     → mono float32 waveform @ 16 kHz
-            • bytes          → raw encoded audio bytes
-            • io.BytesIO     → buffer with encoded audio
-            • str / Path     → path to audio file
-        ...
+        Main entry point — now supports two modes:
+          1. use_vad=True  → run VAD first, then cluster short speech segments
+          2. use_vad=False → old behavior (treat each input as one segment)
         """
         if not segments:
-            raise ValueError("No segment(s) provided to cluster_segments.")
+            raise ValueError("No segment(s) provided.")
 
-        # Normalize to list
-        segment_list: List[AudioInput] = (
-            [segments] if not isinstance(segments, list) else segments
-        )
+        if use_vad:
+            # ──────────────── VAD mode ────────────────
+            if isinstance(segments, list) and len(segments) > 1:
+                raise ValueError(
+                    "When use_vad=True, only one long audio file/buffer is supported."
+                )
+            if self.verbose:
+                print("Running Voice Activity Detection → extracting speech segments...")
+            speech_segments = self.prepare_speech_segments(
+                audio=segments,
+                min_duration_sec=min_segment_duration_sec,
+            )
+            if not speech_segments:
+                print("[yellow]No usable speech segments after VAD filtering.[/yellow]")
+                return []
+            # Prepare list of waveforms + remember metadata
+            waveforms = [wav for _, wav in speech_segments]
+            metadata_list = [meta for meta, _ in speech_segments]
+            segment_list_for_embedding = waveforms   # np.ndarray waveforms
+        else:
+            # ──────────────── Legacy / manual segments mode ────────────────
+            segment_list_for_embedding: List[AudioInput] = (
+                [segments] if not isinstance(segments, list) else segments
+            )
+            metadata_list = [None] * len(segment_list_for_embedding)
 
-        if not segment_list:
-            raise ValueError("Empty segment list provided.")
+        # ────────────────────────────────────────────────
+        #          Extract embeddings (common part)
+        # ────────────────────────────────────────────────
 
-        # ── Decide which path to take ───────────────────────────────────────
+        # Remember source file path for display when using VAD
+        source_file_path = str(Path(segments).resolve()) if isinstance(segments, (str, Path)) else "[memory]"
+
+        if self.verbose:
+            print(f"Extracting embeddings from {len(segment_list_for_embedding)} segment(s)...")
+
+        embeddings = self._extract_embeddings(segment_list_for_embedding)
+
         has_references = bool(self.reference_centroids or self.reference_embeddings_by_speaker)
-
-        embeddings = self._extract_embeddings(segment_list)
 
         if self.use_references and has_references:
             if self.verbose:
-                print(f"Found {len(segment_list)} segment(s). Assigning using provided references...")
+                print(f"Found {len(segment_list_for_embedding)} segment(s). Assigning using provided references...")
             labels = self._assign_to_references(embeddings)
-            # No majority-size remapping in reference mode (labels come from references)
             unique_labels = np.unique(labels)
             if self.verbose:
                 print(f"Assignment complete → {len(unique_labels)} speakers detected (including possible new).")
         else:
             if self.use_references and not has_references and self.verbose:
                 print("Warning: use_references=True but no references provided → falling back to unsupervised clustering")
-
             if self.verbose:
-                print(f"Found {len(segment_list)} segment(s). Clustering embeddings...")
-
+                print(f"Found {len(segment_list_for_embedding)} segment(s). Clustering embeddings...")
             # Reuse per-instance clusterer to avoid repeated object construction
             if self.clustering_strategy == "agglomerative":
                 labels = self._clusterer.cluster(
@@ -440,11 +489,9 @@ class SegmentSpeakerLabeler:
             labels = np.array([old_label_to_priority[l] for l in labels])
             unique_labels = np.unique(labels)
 
-        # ── The rest stays almost the same ──
-        # Compute centroids (needed for output even in reference mode)
+        # ─── compute cluster centroids & similarities ───
         cluster_centroids: dict[int, np.ndarray] = {}
         cluster_sizes: dict[int, int] = {}
-
         for l in np.unique(labels):
             idx = labels == l
             size = int(np.sum(idx))
@@ -455,7 +502,6 @@ class SegmentSpeakerLabeler:
             centroid /= np.linalg.norm(centroid) + 1e-12
             cluster_centroids[int(l)] = centroid
 
-        # nearest neighbor sim (same logic)
         nearest_neighbor_sim = np.zeros(len(embeddings), dtype=np.float32)
         for label in np.unique(labels):
             idx = np.where(labels == label)[0]
@@ -467,90 +513,290 @@ class SegmentSpeakerLabeler:
             nearest_neighbor_sim[idx] = nn_sim
 
         results: List[SegmentResult] = []
-
-        # For result output, try to infer path even for generic segments
-        for i, (item, label) in enumerate(zip(segment_list, labels)):
-            # Attempt to extract a path, if possible, else empty string
-            if isinstance(item, (str, Path)):
-                path_obj = Path(item)
-                path_str = str(path_obj)
-                parent_dir = path_obj.parent.name
-            else:
-                # Not a real file path
-                path_str = ""
+        for i, (item, label) in enumerate(zip(segment_list_for_embedding, labels)):
+            # ── Populate path for table display ──
+            if use_vad:
+                path_str = source_file_path
                 parent_dir = ""
+            else:
+                if isinstance(item, (str, Path)):
+                    path_obj = Path(item)
+                    path_str = str(path_obj)
+                    parent_dir = path_obj.parent.name
+                else:
+                    path_str = ""
+                    parent_dir = ""
+
+            # VAD mode: we have timing information
+            if use_vad and metadata_list[i] is not None:
+                meta = metadata_list[i]
+                start_sec = meta["start_sec"]
+                end_sec   = meta["end_sec"]
+            else:
+                start_sec = None
+                end_sec   = None
 
             cluster_size = cluster_sizes.get(int(label), 0)
             if cluster_size <= 1:
                 centroid_sim = np.nan
             else:
-                centroid_sim = float(
-                    np.dot(embeddings[i], cluster_centroids[int(label)])
-                )
+                centroid_sim = float(np.dot(embeddings[i], cluster_centroids[int(label)]))
 
-            results.append(
-                {
-                    "path": path_str,
-                    "parent_dir": parent_dir,
-                    "speaker_label": int(label),
-                    "centroid_cosine_similarity": centroid_sim,
-                    "nearest_neighbor_cosine_similarity": float(nearest_neighbor_sim[i]),
-                }
-            )
+            result_dict = {
+                "start_sec": start_sec,
+                "end_sec": end_sec,
+                "path": path_str,              # now contains filename when using VAD
+                "parent_dir": parent_dir,
+                "speaker_label": int(label),
+                "centroid_cosine_similarity": centroid_sim,
+                "nearest_neighbor_cosine_similarity": float(nearest_neighbor_sim[i]),
+            }
+
+            results.append(result_dict)
 
         if self.verbose:
             print(f"Processing complete → {len(np.unique(labels))} speakers detected.")
         return results
 
+    def save_segments(
+        self,
+        audio: AudioInput,
+        results: List[SegmentResult],
+        output_base_dir: Path,
+    ) -> List[dict]:
+        """
+        Save VAD segments + speaker labels with FULL parity to vad_firered:
+        Includes:
+        - sound.wav
+        - meta.json (with speaker info)
+        - speech_probs.json
+        - speech_probs.png
+        - all_speech_segments.json
+        - all_speech_segments.png (timeline plot)
+        """
+        output_base_dir.mkdir(parents=True, exist_ok=True)
+        segments_dir = output_base_dir / "segments"
+        segments_dir.mkdir(exist_ok=True)
+
+        # 🔥 Reuse VAD outputs (critical improvement)
+        segments_with_meta, full_probs = extract_speech_segments(audio=audio)
+
+        if not segments_with_meta:
+            return []
+
+        saved_metadata: List[dict] = []
+
+        for (meta, audio_np), res in zip(segments_with_meta, results):
+            idx = meta["segment_index"]
+
+            seg_dir = segments_dir / f"segment_{idx:03d}"
+            seg_dir.mkdir(exist_ok=True)
+
+            wav_path = seg_dir / "sound.wav"
+            audio_tensor = torch.from_numpy(audio_np).unsqueeze(0)
+
+            torchaudio.save(
+                str(wav_path),
+                audio_tensor,
+                16000,
+                encoding="PCM_S",
+                bits_per_sample=16,
+            )
+
+            # 🔥 enrich original meta instead of recreating
+            enriched_meta = {
+                **meta,
+                "output_path": str(wav_path.relative_to(output_base_dir)),
+                "speaker_label": res["speaker_label"],
+                "centroid_cosine_similarity": res["centroid_cosine_similarity"],
+                "nearest_neighbor_cosine_similarity": res["nearest_neighbor_cosine_similarity"],
+            }
+
+            with open(seg_dir / "meta.json", "w", encoding="utf-8") as f:
+                json.dump(enriched_meta, f, indent=2, ensure_ascii=False)
+
+            # ── speech_probs (same as vad_firered) ─────────────────────
+            num_frames = meta["probs_info"].get("num_frames", 0)
+
+            if num_frames > 0:
+                start_frame = frames_from_seconds(meta["start_sec"])
+                end_frame = frames_from_seconds(meta["end_sec"])
+
+                if (
+                    full_probs is not None
+                    and start_frame < len(full_probs)
+                    and end_frame <= len(full_probs)
+                ):
+                    segment_probs = full_probs[start_frame:end_frame]
+                    is_dummy = False
+                else:
+                    t = np.linspace(0, 1, num_frames)
+                    base = 0.12 + 0.76 / (1 + np.exp(-14 * (t - 0.48)))
+                    noise = np.random.normal(0, 0.035, num_frames)
+                    segment_probs = np.clip(base + noise, 0.03, 0.99)
+                    is_dummy = True
+
+                with open(seg_dir / "speech_probs.json", "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "probs": segment_probs.tolist(),
+                            "frame_shift_sec": 0.010,
+                            "start_frame_global": start_frame,
+                            "summary": meta["probs_info"],
+                            "is_dummy": is_dummy,
+                        },
+                        f,
+                        indent=2,
+                    )
+
+                plot_path = seg_dir / "speech_probs.png"
+                generate_plot(
+                    probs=segment_probs,
+                    segment_idx=idx,
+                    duration_sec=meta["duration_sec"],
+                    output_path=plot_path,
+                    is_dummy=is_dummy,
+                )
+
+            saved_metadata.append(enriched_meta)
+
+        # Save combined JSON
+        all_json_path = output_base_dir / "all_speech_segments.json"
+        with open(all_json_path, "w", encoding="utf-8") as f:
+            json.dump(saved_metadata, f, indent=2, ensure_ascii=False)
+
+        # Generate timeline plot
+        if saved_metadata:
+            fig, ax = plt.subplots(figsize=(10, 2.5), dpi=140)
+
+            for meta in saved_metadata:
+                start = meta["start_sec"]
+                end = meta["end_sec"]
+                speaker = meta["speaker_label"]
+
+                ax.barh(
+                    y=speaker,
+                    width=(end - start),
+                    left=start,
+                    height=0.6,
+                )
+
+            ax.set_xlabel("Time (seconds)")
+            ax.set_ylabel("Speaker")
+            ax.set_title("Speech Segments by Speaker")
+            ax.grid(True, linestyle="--", alpha=0.3)
+
+            plot_path = output_base_dir / "all_speech_segments.png"
+            plt.tight_layout()
+            plt.savefig(plot_path, dpi=140)
+            plt.close(fig)
+
+        return saved_metadata
 
 
 if __name__ == "__main__":
+    import argparse
     import json
+    import shutil
     from pathlib import Path
     from rich.console import Console
     from rich.table import Table
-    from rich.panel import Panel
-    from rich.progress import track
-    from rich import print as rprint   # rich's styled print
-    from utils import resolve_audio_paths   # assuming this exists
+    import numpy as np
+
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 
     console = Console()
+    default_audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
 
-    # ── Configuration ────────────────────────────────────────────────────────
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2_backup\audio_context\full_sound.wav"
+    parser = argparse.ArgumentParser(description="Cluster short speech segments and assign speaker labels.")
+    parser.add_argument(
+        "audio_path",
+        nargs="?",
+        default=default_audio_path,
+        help="Path to audio file or directory (default: %(default)s)",
+    )
+    parser.add_argument("--no-vad", action="store_true", help="Disable VAD → treat input as single segment (old behavior)")
+    parser.add_argument("--min-seg-sec", type=float, default=0.45, help="Minimum speech segment length after VAD")
+    args = parser.parse_args()
 
-    # You might want to move resolve_audio_paths to this file or import properly
+    audio_path = args.audio_path
+    use_vad = not args.no_vad
 
     console.rule("Speaker Labeler Demo", style="bold cyan")
+    labeler = SegmentSpeakerLabeler(verbose=True)
 
-    labeler = SegmentSpeakerLabeler(
-        verbose=True,           # we'll let rich handle most output anyway
-        # You can add other params here, e.g.:
-        # distance_threshold=0.68,
-        # assignment_threshold=0.65,
-        # clustering_strategy="agglomerative",
-    )
-
-    # ── Full clustering ──────────────────────────────────────────────────────
     with console.status("[bold blue]Extracting embeddings & clustering...", spinner="arc"):
-        cluster_results = labeler.cluster_segments(audio_path)
+        cluster_results = labeler.cluster_segments(
+            audio_path,
+            use_vad=use_vad,
+            min_segment_duration_sec=args.min_seg_sec,
+        )
 
-    # ── Results Table ────────────────────────────────────────────────────────
+    # Save segments with speaker labels (only works with VAD)
+    # Save segments (creates segment_XXX/sound.wav files)
+    if use_vad and cluster_results:
+        console.print("\n[bold cyan]Saving segments with speaker labels...[/bold cyan]")
+
+        saved_metadata = labeler.save_segments(
+            audio=audio_path,
+            results=cluster_results,
+            output_base_dir=OUTPUT_DIR,
+        )
+    else:
+        saved_metadata = []
+
+    # ── Results Table ────────────────────────────────────────────────────────────────
     table = Table(title="Clustering Results", show_header=True, header_style="bold magenta")
-    table.add_column("File", style="cyan", no_wrap=True)
-    table.add_column("Speaker", justify="center")
-    table.add_column("Centroid Sim", justify="right")
-    table.add_column("NN Sim", justify="right")
 
-    for res in cluster_results:
-        cent_sim = f"{res['centroid_cosine_similarity']:.3f}" if not np.isnan(res['centroid_cosine_similarity']) else "—"
-        nn_sim   = f"{res['nearest_neighbor_cosine_similarity']:.3f}" if not np.isnan(res['nearest_neighbor_cosine_similarity']) else "—"
+    table.add_column("Start–End (s)",   justify="right")
+    table.add_column("Speaker",         justify="center")
+    table.add_column("Centroid Sim",    justify="right")
+    table.add_column("NN Sim",          justify="right")
+    table.add_column("Segment WAV",     style="cyan", no_wrap=True)
+
+    # We prefer using the actual saved path when available
+    segment_dirs_by_index = {
+        meta["segment_index"]: OUTPUT_DIR / "segments" / f"segment_{meta['segment_index']:03d}" / "sound.wav"
+        for meta in saved_metadata
+    }
+
+    for i, res in enumerate(cluster_results):
+        if res.get("start_sec") is not None:
+            time_str = f"{res['start_sec']:5.1f} – {res['end_sec']:5.1f}"
+        else:
+            time_str = "—"
+
+        cent_sim = (
+            f"{res['centroid_cosine_similarity']:.3f}"
+            if not np.isnan(res['centroid_cosine_similarity'])
+            else "—"
+        )
+        nn_sim = (
+            f"{res['nearest_neighbor_cosine_similarity']:.3f}"
+            if not np.isnan(res['nearest_neighbor_cosine_similarity'])
+            else "—"
+        )
+
+        wav_link = "[dim]—[/dim]"
+
+        if use_vad and i < len(saved_metadata):
+            meta = saved_metadata[i]
+            seg_idx = meta["segment_index"]  # ✅ correct (1-based)
+
+            wav_path = OUTPUT_DIR / "segments" / f"segment_{seg_idx:03d}" / "sound.wav"
+
+            if wav_path.exists():
+                uri = wav_path.as_uri()
+                display = f"segment_{seg_idx:03d}/sound.wav"
+                wav_link = f"[link={uri}]{display}[/link]"
 
         table.add_row(
-            Path(res["path"]).name,
+            time_str,
             f"[bold]{res['speaker_label']}[/]",
             cent_sim,
-            nn_sim
+            nn_sim,
+            wav_link,
         )
 
     console.print("\n")
