@@ -10,8 +10,12 @@ console = Console(theme=Theme({
     "success": "green bold",
     "warning": "yellow",
     "error": "red bold",
+
+    # value styles
+    "value": "white bold",
+    "time": "magenta bold",     # great for durations
+    "number": "bright_white",
     "uuid": "bright_blue",
-    "timing": "dim white",
 }))
 
 import numpy as np
@@ -105,8 +109,13 @@ def blocking_process_audio(  # ← unchanged signature
         audio_bytes,
     )
 
-    # print(f"Context duration: {context_buffer.get_total_duration():.2f}s")
-    # print(f"Audio duration: {header['duration_sec']:.2f}s")
+    console.print(
+        f"[info]Context duration:[/info] [time]{context_buffer.get_total_duration():.2f}s[/time]"
+    )
+    console.print(
+        f"[info]Audio duration:[/info] [time]{header['duration_sec']:.2f}s[/time]"
+    )
+
     full_trans_result = transcribe_japanese(
         audio_bytes=full_audio_bytes,
         sample_rate=sample_rate,
@@ -220,8 +229,6 @@ def blocking_process_audio(  # ← unchanged signature
         console.print(f"[white]{en_text}[/white]")
     else:
         console.print("[dim italic]No new translation[/dim italic]")
-
-    console.rule(style="dim")
 
     # === SAVE LAST-N SEGMENT RESULTS (per incoming chunk) ===
     started_at_iso = header.get("started_at")
@@ -386,6 +393,8 @@ async def process_audio(websocket):
 
             uuid_ = header.get("uuid", "???")
 
+            console.rule(style="dim")
+
             console.print(f"[info]Processing[/info] [uuid]{uuid_[:8]}…[/uuid]")
 
             # While transcription/translation runs in background,
@@ -397,6 +406,8 @@ async def process_audio(websocket):
                 console.print(f"[success]Processed[/success] [uuid]{uuid_[:8]}…[/uuid]")
             else:
                 console.print(f"[warning]Processed empty audio[/warning] [uuid]{uuid_[:8]}…[/uuid]")
+
+            console.rule(style="dim")
 
     except websockets.ConnectionClosed:
         pass
