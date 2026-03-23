@@ -138,9 +138,9 @@ def blocking_process_audio(  # ← unchanged signature
 
             prev = prev_ja_sents[i]
 
-            # Compare cleaned
-            curr_clean = curr.rstrip()
-            prev_clean = prev.rstrip()
+            # Compare without final punctuation
+            curr_clean = curr.rstrip('。！？、…・「」『』').rstrip()
+            prev_clean = prev.rstrip('。！？、…・「」『』').rstrip()
 
             if curr_clean == prev_clean:
                 start_index += 1
