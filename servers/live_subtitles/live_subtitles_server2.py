@@ -20,7 +20,7 @@ import scipy.io.wavfile as wavfile
 import websockets
 from concurrent.futures import ThreadPoolExecutor
 from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
-from translate_jp_en_llm import translate_japanese_to_english
+from translate_jp_en_fiendish import translate_japanese_to_english
 # from transcribe_jp_funasr_nano import transcribe_japanese, TranscriptionResult
 # from translate_jp_en_sarashin import translate_japanese_to_english
 from audio_context_buffer import AudioContextBuffer
@@ -128,34 +128,38 @@ def blocking_process_audio(  # ← unchanged signature
     if last_meta:
         prev_full_en_text = last_meta.get("full_en_text", "")
 
-        # --- WORD-BASED DIFF ---
-        prev_word_segments = last_meta.get("full_word_segments", [])
-
-        prev_words = [w.get("word") or "" for w in prev_word_segments]
-        curr_words = [w.get("word") or "" for w in full_word_segments]
-
-        # Find longest common prefix
+        prev_ja_text = last_meta["full_ja_text"]
+        prev_ja_sents = split_sentences_ja(prev_ja_text)
+        # Find the index where new sentences begin (i.e. not in prev_ja_sents)
         start_index = 0
-        for pw, cw in zip(prev_words, curr_words):
-            if pw == cw:
+        for i, curr in enumerate(full_ja_sents):
+            if i >= len(prev_ja_sents):
+                break
+
+            prev = prev_ja_sents[i]
+
+            # Compare cleaned
+            curr_clean = curr.rstrip()
+            prev_clean = prev.rstrip()
+
+            if curr_clean == prev_clean:
                 start_index += 1
             else:
                 break
 
-        new_words = curr_words[start_index:]
+        old_sents = prev_ja_sents[:start_index]
+        new_sents = full_ja_sents[start_index:]
+        # Length statistics
+        console.print(
+            f"[info]Diff Sentence Lengths:[/info]   "
+            f"old sentences = [cyan]{len(old_sents):2d}[/cyan]  "
+            f"new sentences = [cyan]{len(new_sents):2d}[/cyan]  "
+            f"Δ = [bright_blue]{len(new_sents) - len(old_sents):+2d}[/bright_blue]"
+        )
 
-        # Build new JA text from words
-        ja_text = "".join(new_words).strip()
-
-        # Optional: sentence formatting for readability
-        if ja_text:
-            ja_sents = split_sentences_ja(ja_text)
-            ja_sents_str = "\n".join(ja_sents).strip()
-            ja_text = ja_sents_str
-        else:
-            ja_sents = []
-            ja_sents_str = ""
-
+        ja_sents = new_sents
+        ja_sents_str = "\n".join(ja_sents).strip()
+        ja_text = ja_sents_str
         if ja_text:
             trans_en = translate_japanese_to_english(
                 ja_text=ja_text,
@@ -166,6 +170,7 @@ def blocking_process_audio(  # ← unchanged signature
         else:
             en_text = ""
 
+        # ✅ Reconstruct full_en_text to keep context consistent
         if prev_full_en_text:
             full_en_text = (prev_full_en_text + "\n" + en_text).strip() if en_text else prev_full_en_text
         else:
@@ -179,14 +184,21 @@ def blocking_process_audio(  # ← unchanged signature
         )
         full_en_text = full_trans_en["text"].strip()
 
-        ja_sents = full_ja_sents
+        old_sents = []
+        new_sents = full_ja_sents
+
+        ja_sents = new_sents
         ja_sents_str = full_ja_sents_str
         ja_text = full_ja_text
         en_text = full_en_text
 
     # ── Rich styled output ────────────────────────────────────────
+    if old_sents:
+        old_ja_text = "\n".join(old_sents).strip()
+        console.print(f"[info]Old JA ({len(old_sents)} sent):[/info]")
+        console.print(f"[bright_white]{old_ja_text}[/bright_white]")
     if ja_text.strip():
-        console.print(f"[info]New JA ({len(ja_sents)} sent):[/info]")
+        console.print(f"[info]New JA ({len(new_sents)} sent):[/info]")
         console.print(f"[bright_white]{ja_text}[/bright_white]")
     else:
         console.print("[dim]No new Japanese text[/dim]")
@@ -265,13 +277,14 @@ def blocking_process_audio(  # ← unchanged signature
         "end_sec": header["end_sec"],
         "duration_sec": header["duration_sec"],
         "started_at": header["started_at"],
-        "full_word_segments": full_word_segments,
+        "old_sents": old_sents,
+        "new_sents": new_sents,
         "full_ja_text": full_ja_text,
         "full_en_text": full_en_text,
         "ja_text": ja_text,
         "en_text": en_text,
     })
-        
+
     full_audio_dir = LIVE_AUDIO_BUFFER_DIR
     # full sound.wav (current buffer contents, int16 PCM)
     if full_audio_int16.size > 0:
@@ -312,9 +325,6 @@ def blocking_process_audio(  # ← unchanged signature
         }, f, ensure_ascii=False, indent=2)
     with open(full_audio_dir / "full_ja_sents.json", "w", encoding="utf-8") as f:
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
-
-    if header["forced"]:
-        context_buffer.reset()
 
     return {
         "uuid": uuid_,

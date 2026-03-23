@@ -20,10 +20,10 @@ class WordSegment(TypedDict):
     word: Optional[str]
 
 class TranscriptionMetadata(TypedDict, total=False):
-    processing_duration_s: float
+    processing_duration_sec: float
     model: str
-    input_duration_s: Optional[float]
-    transcribed_duration_s: Optional[float]     
+    audio_duration_sec: Optional[float]
+    transcribed_duration_sec: Optional[float]     
     transcribed_duration_pctg: Optional[float]  # ← (0–100)
     # You can add more optional / future fields here
     # version: str
@@ -118,11 +118,11 @@ def transcribe_japanese_llm_from_file(
             avg_logprob=None,
             segments=[],
             metadata={
-                "processing_duration_s": round(
+                "processing_duration_sec": round(
                     (datetime.now(timezone.utc) - started).total_seconds(), 3
                 ),
                 "model": "SenseVoiceSmall",
-                "input_duration_s": 0.0,
+                "audio_duration_sec": 0.0,
                 "transcribed_duration_pctg": 0.0,
             },
         )
@@ -160,7 +160,7 @@ def transcribe_japanese_llm_from_file(
     transcribed_percentage = calculate_transcribed_duration_percentage(
         segments, input_duration
     )
-    transcribed_duration_s = (transcribed_percentage / 100) * input_duration
+    transcribed_duration_sec = (transcribed_percentage / 100) * input_duration
 
     coverage_label = get_coverage_quality_label(transcribed_percentage)
 
@@ -168,9 +168,9 @@ def transcribe_japanese_llm_from_file(
 
     metadata: TranscriptionMetadata = {
         "model": "SenseVoiceSmall",
-        "processing_duration_s": round(duration, 3),
-        "input_duration_s": round(input_duration, 3),
-        "transcribed_duration_s": round(transcribed_duration_s, 3),
+        "processing_duration_sec": round(duration, 3),
+        "audio_duration_sec": round(input_duration, 3),
+        "transcribed_duration_sec": round(transcribed_duration_sec, 3),
         "transcribed_duration_pctg": round(transcribed_percentage, 2),
         "coverage_label": coverage_label,
     }

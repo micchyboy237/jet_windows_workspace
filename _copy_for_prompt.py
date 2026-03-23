@@ -74,7 +74,7 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\utils.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered.py",
@@ -96,9 +96,15 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update the so that it bases of new words instead of new sentences when audio context buffer has segments.
-Analyze step by step first.
-Show unified diff.
+Update this part so that it checks without the ending punctuation if exists. Show unified diff.
+
+        # Find the index where new sentences begin (i.e. not in prev_ja_sents)
+        start_index = 0
+        for i, sent in enumerate(full_ja_sents):
+            if i < len(prev_ja_sents) and sent == prev_ja_sents[i]:
+                start_index += 1
+            else:
+                break
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

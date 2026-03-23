@@ -4,14 +4,42 @@ from pathlib import Path
 from fast_bunkai import FastBunkai
 
 
-def split_sentences_ja(text: str) -> List[str]:
-    """
-    Split Japanese text into sentences.
-    """
-    splitter = FastBunkai()
-    sentences = list(splitter(text))
+def split_sentences_ja(
+    text: str,
+    punctuations: str = "、…・",
+) -> List[str]:
+    if not text.strip():
+        return []
 
-    return sentences
+    splitter = FastBunkai()
+    chunks = list(splitter(text))  # First pass: respect 。！？ properly
+
+    if not punctuations:
+        return [s.strip() for s in chunks if s.strip()]
+
+    # Pattern: split *after* each extra punctuation, keeping it with the left side
+    extra_punc_escaped = re.escape(punctuations)
+    pattern = f"(?<=[{extra_punc_escaped}])\\s*(?![{extra_punc_escaped}])"
+
+    result = []
+
+    for chunk in chunks:
+        # If no extra punctuations in this chunk → keep as-is
+        if not re.search(f"[{extra_punc_escaped}]", chunk):
+            cleaned = chunk.strip()
+            if cleaned:
+                result.append(cleaned)
+            continue
+
+        # Split after extra punctuation (lookbehind ensures punctuation stays left)
+        pieces = re.split(pattern, chunk)
+
+        for piece in pieces:
+            cleaned = piece.strip()
+            if cleaned:
+                result.append(cleaned)
+
+    return result
 
 
 def split_symbols_ja(text: str) -> List[str]:
