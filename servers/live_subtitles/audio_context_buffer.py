@@ -91,7 +91,7 @@ class AudioContextBuffer:
         """Returns current buffered duration (will always be ≤ max_duration_sec)."""
         return self.total_samples / self.sample_rate
 
-    def get_latest_segment(self) -> tuple[np.ndarray, SegmentMeta] | tuple[None, None]:
+    def get_last_segment(self) -> tuple[np.ndarray, SegmentMeta] | tuple[None, None]:
         """Return the most recently added audio segment and its metadata.
         
         Returns:
@@ -101,6 +101,34 @@ class AudioContextBuffer:
         if not self.segments:
             return None, None
         return self.segments[-1]   # most recent is at the right end
+
+    def get_last_sentence(self) -> tuple[Optional[str], Optional[str], Optional[int]]:
+        """Return the most recent sentence with its utterance ID and sentence index.
+
+        Returns:
+            tuple:
+                sentence (Optional[str])
+                utt_id (Optional[str])
+                sent_idx (Optional[int])
+        """
+        if not self.segments:
+            return None, None, None
+
+        # iterate backwards (most recent first)
+        for _, meta in reversed(self.segments):
+            new_sents = meta.get("new_sents")
+            if not new_sents:
+                continue
+
+            # iterate backwards within sentences to ensure non-empty
+            for idx in range(len(new_sents) - 1, -1, -1):
+                sent = new_sents[idx]
+                if sent:
+                    sent = sent.strip()
+                    if sent:
+                        return sent, meta.get("uuid"), idx
+
+        return None, None, None
 
     def get_list_metadata(self) -> List[SegmentMeta]:
         """Return list of metadata for all buffered segments.

@@ -129,14 +129,15 @@ def blocking_process_audio(  # ← unchanged signature
     full_ja_text = full_word_segments_text
 
     full_ja_sents = split_sentences_ja(full_ja_text)
-    full_ja_sents_str = "\n".join(full_ja_sents).strip()
+    full_ja_sents_str = "".join(full_ja_sents).strip()
     full_ja_text = full_ja_sents_str
 
-    _, last_meta = context_buffer.get_latest_segment()
 
-    if last_meta:
+    if context_buffer.segments:
+        _, last_meta = context_buffer.get_last_segment()
         prev_full_en_text = last_meta.get("full_en_text", "")
 
+        last_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
         prev_ja_text = last_meta["full_ja_text"]
         prev_ja_sents = split_sentences_ja(prev_ja_text)
         # Find the index where new sentences begin (i.e. not in prev_ja_sents)
@@ -148,10 +149,11 @@ def blocking_process_audio(  # ← unchanged signature
             prev = prev_ja_sents[i]
 
             # Compare without final punctuation
+            last_sentence_clean = last_sentence.rstrip('。！？、…・「」『』').rstrip()
             curr_clean = curr.rstrip('。！？、…・「」『』').rstrip()
             prev_clean = prev.rstrip('。！？、…・「」『』').rstrip()
 
-            if curr_clean == prev_clean:
+            if curr_clean == prev_clean or (last_sentence_clean and last_sentence_clean in curr_clean):
                 start_index += 1
             else:
                 break
@@ -161,13 +163,14 @@ def blocking_process_audio(  # ← unchanged signature
         # Length statistics
         console.print(
             f"[info]Diff Sentence Lengths:[/info]   "
+            f"start index = [cyan]{start_index}[/cyan]  "
             f"old sentences = [cyan]{len(old_sents):2d}[/cyan]  "
             f"new sentences = [cyan]{len(new_sents):2d}[/cyan]  "
             f"Δ = [bright_blue]{len(new_sents) - len(old_sents):+2d}[/bright_blue]"
         )
 
         ja_sents = new_sents
-        ja_sents_str = "\n".join(ja_sents).strip()
+        ja_sents_str = "".join(ja_sents).strip()
         ja_text = ja_sents_str
         if ja_text:
             trans_en = translate_japanese_to_english(
@@ -215,7 +218,7 @@ def blocking_process_audio(  # ← unchanged signature
 
     # ── Rich styled output ────────────────────────────────────────
     if old_sents:
-        old_ja_text = "\n".join(old_sents).strip()
+        old_ja_text = "".join(old_sents).strip()
         console.print(f"[info]Old JA ({len(old_sents)} sent):[/info]")
         console.print(f"[bright_white]{old_ja_text}[/bright_white]")
     if ja_text.strip():
