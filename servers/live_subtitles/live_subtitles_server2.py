@@ -215,14 +215,18 @@ def blocking_process_audio(  # ← unchanged signature
             }
 
         old_sents = []
+        last_sentence = None
 
     # ── Rich styled output ────────────────────────────────────────
+    if last_sentence:
+        console.print(f"[success]Last Sentence (utt_id={last_utt_id[-6:]} | sent_idx={last_sent_idx}):[/success]")
+        console.print(f"[bright_white]{last_sentence}[/bright_white]")
     if old_sents:
         old_ja_text = "".join(old_sents).strip()
-        console.print(f"[info]Old JA ({len(old_sents)} sent):[/info]")
+        console.print(f"[success]Old JA ({len(old_sents)} sent):[/success]")
         console.print(f"[bright_white]{old_ja_text}[/bright_white]")
     if ja_text.strip():
-        console.print(f"[info]New JA ({len(new_sents)} sent):[/info]")
+        console.print(f"[success]New JA ({len(new_sents)} sent):[/success]")
         console.print(f"[bright_white]{ja_text}[/bright_white]")
     else:
         console.print("[dim]No new Japanese text[/dim]")
@@ -398,7 +402,7 @@ async def process_audio(websocket):
 
             console.rule(style="dim")
 
-            console.print(f"[info]Processing[/info] [uuid]{uuid_[:8]}…[/uuid]")
+            console.print(f"[info]Processing[/info] [uuid]{uuid_[-6:]}…[/uuid]")
 
             # While transcription/translation runs in background,
             # websocket can continue receiving new messages
@@ -406,9 +410,9 @@ async def process_audio(websocket):
 
             if response["success"]:
                 await websocket.send(json.dumps(response).encode("utf-8"))
-                console.print(f"[success]Processed[/success] [uuid]{uuid_[:8]}…[/uuid]")
+                console.print(f"[success]Processed[/success] [uuid]{uuid_[-6:]}…[/uuid]")
             else:
-                console.print(f"[warning]Processed empty audio[/warning] [uuid]{uuid_[:8]}…[/uuid]")
+                console.print(f"[warning]Processed empty audio[/warning] [uuid]{uuid_[-6:]}…[/uuid]")
 
             console.rule(style="dim")
 
