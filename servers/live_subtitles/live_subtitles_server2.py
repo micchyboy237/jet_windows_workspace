@@ -326,6 +326,10 @@ def blocking_process_audio(  # ← unchanged signature
     with open(full_audio_dir / "full_ja_sents.json", "w", encoding="utf-8") as f:
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
 
+    # Reset if vad reason is min silence
+    if not header["forced"]:
+        context_buffer.reset()
+
     return {
         "uuid": uuid_,
         "transcription_ja": ja_text,
