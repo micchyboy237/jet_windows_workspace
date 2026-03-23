@@ -271,7 +271,7 @@ def blocking_process_audio(  # ← unchanged signature
         "ja_text": ja_text,
         "en_text": en_text,
     })
-
+        
     full_audio_dir = LIVE_AUDIO_BUFFER_DIR
     # full sound.wav (current buffer contents, int16 PCM)
     if full_audio_int16.size > 0:
@@ -312,6 +312,9 @@ def blocking_process_audio(  # ← unchanged signature
         }, f, ensure_ascii=False, indent=2)
     with open(full_audio_dir / "full_ja_sents.json", "w", encoding="utf-8") as f:
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
+
+    if header["forced"]:
+        context_buffer.reset()
 
     return {
         "uuid": uuid_,
