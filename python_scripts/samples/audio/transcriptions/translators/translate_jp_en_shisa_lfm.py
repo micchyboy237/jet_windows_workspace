@@ -227,10 +227,10 @@ class TranslationResult(TypedDict):
 
 def translate_japanese_to_english(
     ja_text: str,
-    max_tokens: int = 768,
     enable_scoring: bool = False,
-    temperature: float = 0.5,
     history: Optional[List[Dict[str, str]]] = None,
+    temperature: float = TRANSLATION_DEFAULTS["temperature"],
+    max_tokens: int = TRANSLATION_DEFAULTS["max_tokens"],
     **kwargs,
 ) -> TranslationResult:
     if not ja_text or not ja_text.strip():
