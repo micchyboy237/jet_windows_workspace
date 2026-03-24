@@ -142,6 +142,9 @@ def blocking_process_audio(  # ← unchanged signature
         prev_ja_sents = split_sentences_ja(prev_ja_text)
         # Find the index where new sentences begin (i.e. not in prev_ja_sents)
         start_index = 0
+        last_sentence_pos = -1
+        last_sentence_clean = last_sentence.rstrip('。！？、…・「」『』').rstrip()
+
         for i, curr in enumerate(full_ja_sents):
             if i >= len(prev_ja_sents):
                 break
@@ -149,7 +152,6 @@ def blocking_process_audio(  # ← unchanged signature
             prev = prev_ja_sents[i]
 
             # Compare without final punctuation
-            last_sentence_clean = last_sentence.rstrip('。！？、…・「」『』').rstrip()
             curr_clean = curr.rstrip('。！？、…・「」『』').rstrip()
             prev_clean = prev.rstrip('。！？、…・「」『』').rstrip()
 
@@ -158,35 +160,75 @@ def blocking_process_audio(  # ← unchanged signature
             else:
                 break
 
-        old_sents = prev_ja_sents[:start_index]
-        new_sents = full_ja_sents[start_index:]
-        # Length statistics
-        console.print(
-            f"[info]Diff Sentence Lengths:[/info]   "
-            f"start index = [cyan]{start_index}[/cyan]  "
-            f"old sentences = [cyan]{len(old_sents):2d}[/cyan]  "
-            f"new sentences = [cyan]{len(new_sents):2d}[/cyan]  "
-            f"Δ = [bright_blue]{len(new_sents) - len(old_sents):+2d}[/bright_blue]"
-        )
+        if last_sentence_clean in full_ja_text:
+            last_sentence_pos = full_ja_text.find(last_sentence_clean)
 
-        ja_sents = new_sents
-        ja_sents_str = "".join(ja_sents).strip()
-        ja_text = ja_sents_str
-        if ja_text:
-            trans_en = translate_japanese_to_english(
-                ja_text=ja_text,
-                enable_scoring=False,
-                history=None,
+        if last_sentence_pos != -1:
+            # Show the last known sentence + what comes after it (new continuation)
+            new_text_start = last_sentence_pos + len(last_sentence_clean)
+            old_text = full_ja_text[:new_text_start].strip()
+            new_text = full_ja_text[new_text_start:].strip()
+
+            old_sents = split_sentences_ja(old_text)
+            new_sents = split_sentences_ja(new_text)
+
+            # Length statistics
+            console.print(
+                f"[info]Diff Sentence Lengths (Last Sentence):[/info]   "
+                f"old sentences = [cyan]{len(old_sents):2d}[/cyan]  "
+                f"new sentences = [cyan]{len(new_sents):2d}[/cyan]  "
+                f"Δ = [bright_blue]{len(new_sents) - len(old_sents):+2d}[/bright_blue]"
             )
-            en_text = trans_en["text"].strip()
-        else:
-            en_text = ""
 
-        # ✅ Reconstruct full_en_text to keep context consistent
-        if prev_full_en_text:
-            full_en_text = (prev_full_en_text + "\n" + en_text).strip() if en_text else prev_full_en_text
+            ja_sents = new_sents
+            ja_sents_str = "".join(ja_sents).strip()
+            ja_text = ja_sents_str
+            if ja_text:
+                trans_en = translate_japanese_to_english(
+                    ja_text=ja_text,
+                    enable_scoring=False,
+                    history=None,
+                )
+                en_text = trans_en["text"].strip()
+            else:
+                en_text = ""
+
+            # ✅ Reconstruct full_en_text to keep context consistent
+            if prev_full_en_text:
+                full_en_text = (prev_full_en_text + "\n" + en_text).strip() if en_text else prev_full_en_text
+            else:
+                full_en_text = en_text
+
         else:
-            full_en_text = en_text
+            old_sents = prev_ja_sents[:start_index]
+            new_sents = full_ja_sents[start_index:]
+            # Length statistics
+            console.print(
+                f"[info]Diff Sentence Lengths:[/info]   "
+                f"start index = [cyan]{start_index}[/cyan]  "
+                f"old sentences = [cyan]{len(old_sents):2d}[/cyan]  "
+                f"new sentences = [cyan]{len(new_sents):2d}[/cyan]  "
+                f"Δ = [bright_blue]{len(new_sents) - len(old_sents):+2d}[/bright_blue]"
+            )
+
+            ja_sents = new_sents
+            ja_sents_str = "".join(ja_sents).strip()
+            ja_text = ja_sents_str
+            if ja_text:
+                trans_en = translate_japanese_to_english(
+                    ja_text=ja_text,
+                    enable_scoring=False,
+                    history=None,
+                )
+                en_text = trans_en["text"].strip()
+            else:
+                en_text = ""
+
+            # ✅ Reconstruct full_en_text to keep context consistent
+            if prev_full_en_text:
+                full_en_text = (prev_full_en_text + "\n" + en_text).strip() if en_text else prev_full_en_text
+            else:
+                full_en_text = en_text
 
     else:
         ja_sents = full_ja_sents
@@ -216,11 +258,16 @@ def blocking_process_audio(  # ← unchanged signature
 
         old_sents = []
         last_sentence = None
+        last_sentence_pos = -1
 
     # ── Rich styled output ────────────────────────────────────────
     if last_sentence:
         console.print(f"[success]Last Sentence (utt_id={last_utt_id[-6:]} | sent_idx={last_sent_idx}):[/success]")
         console.print(f"[bright_white]{last_sentence}[/bright_white]")
+    if last_sentence_pos != -1:
+        console.print(f"[success]New Text (pos={last_sentence_pos} | start={new_text_start}):[/success]")
+        console.print(f"[bright_white]{new_text}[/bright_white]")
+
     if old_sents:
         old_ja_text = "".join(old_sents).strip()
         console.print(f"[success]Old JA ({len(old_sents)} sent):[/success]")
@@ -434,7 +481,6 @@ async def main():
         ping_timeout=60,
         max_size=2**23,
     ) as server:
-        print("[SERVER] Listening on ws://0.0.0.0:8765")
         console.print("[success bold]Server listening on[/success bold] [bright_cyan]ws://0.0.0.0:8765[/bright_cyan]")
         await server.serve_forever()
 
