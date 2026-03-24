@@ -1,76 +1,191 @@
 from __future__ import annotations
-import nagisa
+
+import re
 import tempfile
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
+
 import numpy as np
 import scipy.io.wavfile as wavfile
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
+from sentence_utils import SYMBOL_RANGE, split_sentences_ja
 
 TimestampPair = Tuple[int, int]
 
+
 class WordSegment(TypedDict):
     index: int
-    start_ms: Optional[int]
-    end_ms: Optional[int]
-    duration_ms: Optional[int]
-    word: Optional[str]
+    start_sec: float
+    end_sec: float
+    duration_sec: float
+    word: str
+
+
+class PhraseSegment(TypedDict):
+    index: int
+    start_sec: float
+    end_sec: float
+    duration_sec: float
+    phrase: str
+    word_segments: List[WordSegment]
+
 
 class TranscriptionMetadata(TypedDict, total=False):
     processing_duration_sec: float
     model: str
-    audio_duration_sec: Optional[float]
-    transcribed_duration_sec: Optional[float]     
-    transcribed_duration_pctg: Optional[float]  # ← (0–100)
-    # You can add more optional / future fields here
-    # version: str
-    # hostname: str
-    # hotwords_used: bool | list[str]
-    # error: str                  # in case of partial failure
+    audio_duration_sec: float
+    transcribed_duration_sec: float
+    transcribed_duration_pctg: float
+
 
 class TranscriptionResult(TypedDict):
     text_ja: str
     confidence: float
     quality_label: str
     avg_logprob: Optional[float]
-    segments: list[WordSegment]
+    word_segments: list[WordSegment]
+    phrase_segments: list[PhraseSegment]
     metadata: TranscriptionMetadata
+
 
 model = AutoModel(
     model="FunAudioLLM/SenseVoiceSmall",
     disable_update=True,
-    # vad_model="fsmn-vad",
-    # vad_kwargs={"max_single_segment_time": 30000},
     device="cuda:0",
     hub="hf",
-    # trust_remote_code=True,
 )
+
+
+# =========================
+# NORMALIZATION HELPERS
+# =========================
+
+SYMBOL_PATTERN = re.compile(rf"[{SYMBOL_RANGE}]+")
+
+
+def _normalize_phrase(text: str) -> str:
+    """
+    Normalize phrase text for alignment:
+    - remove spaces
+    - remove symbols (emoji, etc.)
+    """
+    text = re.sub(r"\s+", "", text)
+    text = SYMBOL_PATTERN.sub("", text)
+    return text
+
+
+def _normalize_word(text: str) -> str:
+    """
+    Normalize ASR word token.
+    """
+    return re.sub(r"\s+", "", text or "")
+
+
+# =========================
+# ALIGNMENT CORE
+# =========================
+
+
+def _build_phrase_segments(
+    phrases: List[str],
+    segments: List[WordSegment],
+) -> List[PhraseSegment]:
+    """
+    Align phrases to word segments using sequential matching.
+    Handles:
+    - character-level ASR tokens
+    - missing symbols in ASR
+    """
+    phrase_segments: List[PhraseSegment] = []
+
+    seg_idx = 0
+    total_segments = len(segments)
+
+    for p_idx, phrase in enumerate(phrases):
+        cleaned_phrase = phrase.strip()
+        if not cleaned_phrase:
+            continue
+
+        normalized_phrase = _normalize_phrase(cleaned_phrase)
+        phrase_len = len(normalized_phrase)
+
+        if phrase_len == 0:
+            continue
+
+        collected: List[WordSegment] = []
+        matched_chars = ""
+
+        while seg_idx < total_segments and len(matched_chars) < phrase_len:
+            seg = segments[seg_idx]
+            word = seg.get("word") or ""
+
+            normalized_word = _normalize_word(word)
+
+            matched_chars += normalized_word
+            collected.append(seg)
+
+            seg_idx += 1
+
+        # Trim overflow (important!)
+        if len(matched_chars) > phrase_len:
+            overflow = len(matched_chars) - phrase_len
+
+            while overflow > 0 and collected:
+                last = collected[-1]
+                last_word = _normalize_word(last.get("word") or "")
+
+                if len(last_word) <= overflow:
+                    overflow -= len(last_word)
+                    collected.pop()
+                else:
+                    break
+
+        if collected:
+            start_sec = collected[0]["start_sec"]
+            end_sec = collected[-1]["end_sec"]
+
+            duration_sec = (
+                (end_sec - start_sec)
+                if start_sec is not None and end_sec is not None
+                else 0.0
+            )
+
+            phrase_segments.append(
+                {
+                    "index": p_idx,
+                    "start_sec": start_sec,
+                    "end_sec": end_sec,
+                    "duration_sec": round(duration_sec, 3),
+                    "phrase": cleaned_phrase,
+                    "word_segments": collected,
+                }
+            )
+
+    return phrase_segments
+
+
+# =========================
+# EXISTING FUNCTIONS (UNCHANGED)
+# =========================
+
 
 def calculate_transcribed_duration_percentage(
     segments: list[WordSegment], total_audio_duration_seconds: float
 ) -> float:
-    """
-    Returns the percentage of the total audio that is covered by transcribed word segments.
-    Example: 87.45 means 87.45 % of the audio contains actual speech.
-    """
     if total_audio_duration_seconds <= 0:
         return 0.0
 
-    total_transcribed_ms = sum(
-        seg.get("duration_ms") or 0 for seg in segments
-    )
-    total_transcribed_s = total_transcribed_ms / 1000.0
-
-    percentage = (total_transcribed_s / total_audio_duration_seconds) * 100
+    total_transcribed_sec = sum(seg.get("duration_sec") or 0.0 for seg in segments)
+    percentage = (total_transcribed_sec / total_audio_duration_seconds) * 100
     return percentage
 
+
 def get_audio_duration_seconds(audio_path: Path) -> float:
-    """Returns duration in seconds from a WAV file (works with the mono int16 files we create)."""
     sample_rate, data = wavfile.read(str(audio_path))
     return len(data) / sample_rate
+
 
 def _transcribe_file(
     audio_path: Path,
@@ -82,22 +197,31 @@ def _transcribe_file(
         cache={},
         language="ja",
         use_itn=True,
-        batch_size=32, 
+        batch_size=32,
         output_timestamp=True,
         hotwords=hotwords,
         merge_vad=False,
-        # merge_length_s=15,
     )
     return results
 
 
 def get_coverage_quality_label(pct: float) -> str:
-    if pct >= 92.0: return "excellent (very clean)"
-    if pct >= 82.0: return "good"
-    if pct >= 65.0: return "fair (some noise/BGM)"
-    if pct >= 40.0: return "sparse speech"
-    if pct >= 15.0: return "very sparse"
+    if pct >= 92.0:
+        return "excellent (very clean)"
+    if pct >= 82.0:
+        return "good"
+    if pct >= 65.0:
+        return "fair (some noise/BGM)"
+    if pct >= 40.0:
+        return "sparse speech"
+    if pct >= 15.0:
+        return "very sparse"
     return "almost no speech"
+
+
+# =========================
+# MAIN PIPELINE (UPDATED)
+# =========================
 
 
 def transcribe_japanese_llm_from_file(
@@ -107,7 +231,6 @@ def transcribe_japanese_llm_from_file(
     context_prompt: str | None = None,
 ) -> TranscriptionResult:
     started = datetime.now(timezone.utc)
-
     raw_results = _transcribe_file(audio_path, hotwords=hotwords)
 
     if not raw_results:
@@ -116,71 +239,70 @@ def transcribe_japanese_llm_from_file(
             confidence=None,
             quality_label="N/A",
             avg_logprob=None,
-            segments=[],
-            metadata={
-                "processing_duration_sec": round(
-                    (datetime.now(timezone.utc) - started).total_seconds(), 3
-                ),
-                "model": "SenseVoiceSmall",
-                "audio_duration_sec": 0.0,
-                "transcribed_duration_pctg": 0.0,
-            },
+            word_segments=[],
+            phrase_segments=[],
+            metadata={},
         )
 
     first = raw_results[0]
     ja_text = rich_transcription_postprocess(first["text"])
 
-    segments = []
+    segments: list[WordSegment] = []
     timestamps = first.get("timestamp", [])
     words = first.get("words", [])
 
     for idx, ts in enumerate(timestamps):
-        start_ms = None
-        end_ms = None
-        duration_ms = None
+        start_sec = end_sec = duration_sec = None
 
         if isinstance(ts, (list, tuple)) and len(ts) >= 2:
-            start_ms = ts[0]
-            end_ms = ts[1]
-            if start_ms is not None and end_ms is not None:
-                duration_ms = end_ms - start_ms
+            start_ms, end_ms = ts[0], ts[1]
+
+            if start_ms is not None:
+                start_sec = start_ms / 1000.0
+            if end_ms is not None:
+                end_sec = end_ms / 1000.0
+            if start_sec is not None and end_sec is not None:
+                duration_sec = end_sec - start_sec
 
         segments.append(
             {
                 "index": idx,
-                "start_ms": start_ms,
-                "end_ms": end_ms,
-                "duration_ms": duration_ms,
+                "start_sec": start_sec,
+                "end_sec": end_sec,
+                "duration_sec": round(duration_sec, 3),
                 "word": words[idx] if idx < len(words) else None,
             }
         )
 
-    # Compute durations
-    input_duration = get_audio_duration_seconds(audio_path)
+    audio_duration = get_audio_duration_seconds(audio_path)
     transcribed_percentage = calculate_transcribed_duration_percentage(
-        segments, input_duration
+        segments, audio_duration
     )
-    transcribed_duration_sec = (transcribed_percentage / 100) * input_duration
-
-    coverage_label = get_coverage_quality_label(transcribed_percentage)
-
-    duration = (datetime.now(timezone.utc) - started).total_seconds()
+    transcribed_duration_sec = (transcribed_percentage / 100) * audio_duration
 
     metadata: TranscriptionMetadata = {
         "model": "SenseVoiceSmall",
-        "processing_duration_sec": round(duration, 3),
-        "audio_duration_sec": round(input_duration, 3),
+        "processing_duration_sec": round(
+            (datetime.now(timezone.utc) - started).total_seconds(), 3
+        ),
+        "audio_duration_sec": round(audio_duration, 3),
         "transcribed_duration_sec": round(transcribed_duration_sec, 3),
         "transcribed_duration_pctg": round(transcribed_percentage, 2),
-        "coverage_label": coverage_label,
     }
+
+    phrase_segments: list[PhraseSegment] = []
+
+    if segments and ja_text.strip():
+        phrases = split_sentences_ja(ja_text)
+        phrase_segments = _build_phrase_segments(phrases, segments)
 
     return {
         "text_ja": ja_text,
         "confidence": None,
         "quality_label": None,
         "avg_logprob": None,
-        "segments": segments,
+        "word_segments": segments,
+        "phrase_segments": phrase_segments,
         "metadata": metadata,
     }
 
@@ -191,48 +313,33 @@ def transcribe_japanese(
     *,
     hotwords: str | list[str] | None = None,
     context_prompt: str | None = None,
-    save_temp_wav: Path | None = None,       # ← now actually used
+    save_temp_wav: Path | None = None,
 ) -> TranscriptionResult:
     """
     Transcribe raw PCM int16 bytes.
     Designed for live server usage.
     """
     processing_started = datetime.now(timezone.utc)
-
     if save_temp_wav:
         audio_path = save_temp_wav
         audio_path.parent.mkdir(parents=True, exist_ok=True)
     else:
-        with tempfile.NamedTemporaryFile(
-            suffix=".wav",
-            delete=False,
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             audio_path = Path(tmp.name)
-
-    # Write audio
     arr = np.frombuffer(audio_bytes, dtype=np.int16)
     wavfile.write(str(audio_path), sample_rate, arr)
-
-    # Transcribe
     result = transcribe_japanese_llm_from_file(
         audio_path,
         hotwords=hotwords,
         context_prompt=context_prompt,
     )
-
-    # Clean up temporary file if we created one
     if not save_temp_wav:
         try:
             audio_path.unlink(missing_ok=True)
         except Exception:
             pass
-
     return result
 
-
-# ────────────────────────────────────────────────
-# Quick Demo
-# ────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import argparse
@@ -242,36 +349,115 @@ if __name__ == "__main__":
 
     from rich.console import Console
     from rich.pretty import pprint
+    from scipy.io import wavfile
 
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\start_15s_recording_1_speaker.wav"
-
-    parser = argparse.ArgumentParser(
-        description="Japanese ASR demo."
-    )
+    # Argument parsing
+    default_audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\start_15s_recording_1_speaker.wav"
+    parser = argparse.ArgumentParser(description="Japanese ASR demo.")
     parser.add_argument(
         "audio_path",
         nargs="?",
-        default=audio_path,
+        default=default_audio_path,
         help="Japanese audio to transcribe (optional, defaults to sample audio path)",
     )
     args = parser.parse_args()
 
-    console = Console()
+    audio_path = Path(args.audio_path)  # now a Path for the per-phrase audio extraction
 
+    console = Console()
     console.print("[bold green]Japanese:[/bold green]")
     result: TranscriptionResult = transcribe_japanese_llm_from_file(
-        args.audio_path,
+        audio_path,
     )
 
+    ja_text = result.pop("text_ja")
+    word_segments = result.pop("word_segments")
+    phrase_segments = result.pop("phrase_segments")
+    metadata = result.pop("metadata")
+
     pprint(result, expand_all=True)
-    print(f"\nJA:\n{result["text_ja"]}")
+    print(f"\nJA:\n{ja_text}")
 
-    result_json_path = OUTPUT_DIR / "transcription_result.json"
-    with open(result_json_path, "w", encoding="utf-8") as f:
+    scores_json_path = OUTPUT_DIR / "scores.json"
+    with open(scores_json_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
+    console.print(
+        f"[bold green]Saved scores to:[/bold green] [link=file://{scores_json_path.resolve()}]{scores_json_path}[/link]"
+    )
 
-    console.print(f"[bold green]Saved JSON result to:[/bold green] {result_json_path}")
+    ja_text_path = OUTPUT_DIR / "ja_text.md"
+    with open(ja_text_path, "w", encoding="utf-8") as f:
+        f.write(ja_text)
+    console.print(
+        f"[bold green]Saved ja_text to:[/bold green] [link=file://{ja_text_path.resolve()}]{ja_text_path}[/link]"
+    )
+
+    word_segments_path = OUTPUT_DIR / "word_segments.json"
+    with open(word_segments_path, "w", encoding="utf-8") as f:
+        json.dump(word_segments, f, ensure_ascii=False, indent=2)
+    console.print(
+        f"[bold green]Saved word_segments to:[/bold green] [link=file://{word_segments_path.resolve()}]{word_segments_path}[/link]"
+    )
+
+    phrase_segments_path = OUTPUT_DIR / "phrase_segments.json"
+    with open(phrase_segments_path, "w", encoding="utf-8") as f:
+        json.dump(phrase_segments, f, ensure_ascii=False, indent=2)
+    console.print(
+        f"[bold green]Saved phrase_segments to:[/bold green] [link=file://{phrase_segments_path.resolve()}]{phrase_segments_path}[/link]"
+    )
+
+    metadata_path = OUTPUT_DIR / "metadata.json"
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    console.print(
+        f"[bold green]Saved metadata to:[/bold green] [link=file://{metadata_path.resolve()}]{metadata_path}[/link]"
+    )
+
+    # === NEW: per-phrase sub-directories with meta.json + sound.wav ===
+    phrases_dir = OUTPUT_DIR / "phrases"
+    phrases_dir.mkdir(parents=True, exist_ok=True)
+    console.print(
+        f"[bold green]Created phrases directory:[/bold green] [link=file://{phrases_dir.resolve()}]{phrases_dir}[/link]"
+    )
+
+    # Read full audio once for slicing
+    sample_rate, full_audio_data = wavfile.read(str(audio_path))
+
+    for phrase in phrase_segments:
+        phrase_num = phrase["index"]
+        phrase_dir = phrases_dir / f"phrase_{phrase_num}"
+        phrase_dir.mkdir(parents=True, exist_ok=True)
+
+        # meta.json = full PhraseSegment dict
+        meta_path = phrase_dir / "meta.json"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(phrase, f, ensure_ascii=False, indent=2)
+        console.print(
+            f"[bold green]Saved meta.json to:[/bold green] [link=file://{meta_path.resolve()}]{meta_path}[/link]"
+        )
+
+        # sound.wav = timestamp-sliced audio clip
+        start_sec = phrase.get("start_sec")
+        end_sec = phrase.get("end_sec")
+        if start_sec is not None and end_sec is not None:
+            start_sample = int(start_sec * sample_rate)
+            end_sample = int(end_sec * sample_rate)
+            sliced_data = full_audio_data[start_sample:end_sample]
+
+            sound_path = phrase_dir / "sound.wav"
+            wavfile.write(str(sound_path), sample_rate, sliced_data)
+            console.print(
+                f"[bold green]Saved sound.wav to:[/bold green] [link=file://{sound_path.resolve()}]{sound_path}[/link]"
+            )
+        else:
+            console.print(
+                f"[yellow]Skipping sound.wav for phrase_{phrase_num} (no timestamps)[/yellow]"
+            )
+
+    console.print(
+        "[bold green]✅ Per-phrase audio + meta export complete![/bold green]"
+    )

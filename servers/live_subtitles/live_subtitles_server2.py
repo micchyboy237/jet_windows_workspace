@@ -30,7 +30,7 @@ from translate_jp_en_llm import translate_japanese_to_english
 # from translate_jp_en_sarashin import translate_japanese_to_english
 from audio_context_buffer import AudioContextBuffer
 from audio_search import search_audio
-from utils import split_sentences_ja
+from sentence_utils import split_sentences_ja
 from sentence_matcher_ja import fuzzy_shortest_best_match
 
 import shutil
@@ -131,7 +131,8 @@ def blocking_process_audio(
         sample_rate=sample_rate,
     )
     full_trans_result = full_trans_result.copy()
-    full_word_segments = full_trans_result.pop("segments")
+    full_word_segments = full_trans_result.pop("word_segments")
+    full_phrase_segments = full_trans_result.pop("phrase_segments")
     full_metadata = full_trans_result.pop("metadata")
     full_word_segments_text = "".join(s["word"] for s in full_word_segments)
     full_ja_text = full_word_segments_text
@@ -351,8 +352,17 @@ def blocking_process_audio(
         json.dump(full_metadata, f, ensure_ascii=False, indent=2)
     with open(full_audio_dir / "full_word_segments.json", "w", encoding="utf-8") as f:
         json.dump({
+            "level": "word",
+            "count": len(full_word_segments),
             "text": full_word_segments_text,
-            "words": full_word_segments
+            "segments": full_word_segments
+        }, f, ensure_ascii=False, indent=2)
+    with open(full_audio_dir / "full_phrase_segments.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "level": "phrase",
+            "count": len(full_phrase_segments),
+            "phrases": [p["phrase"] for p in full_phrase_segments],
+            "segments": full_phrase_segments
         }, f, ensure_ascii=False, indent=2)
     with open(full_audio_dir / "full_ja_sents.json", "w", encoding="utf-8") as f:
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)

@@ -16,7 +16,7 @@ from faster_whisper import WhisperModel
 from faster_whisper.transcribe import Segment
 
 # from translators.translate_llm import translate_text
-from utils import split_sentences_ja
+from sentence_utils import split_sentences_ja
 from audio_utils import AudioInput, split_audio
 
 console = Console()

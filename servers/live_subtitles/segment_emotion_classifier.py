@@ -147,7 +147,7 @@ class SegmentEmotionClassifier:
 
 if __name__ == "__main__":
     import json
-    from utils import resolve_audio_paths
+    from audio_utils import resolve_audio_paths
 
     audio_dir = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server_spyxfamily_intro"
     segment_paths = resolve_audio_paths(audio_dir)

@@ -23,7 +23,7 @@ from transformers import AutoTokenizer
 import os
 
 from translator_types import Translator  # adjust import if needed
-from utils import split_sentences_ja
+from sentence_utils import split_sentences_ja
 import threading
 
 from transcribe_jp import get_japanese_asr, transcribe_with_japanese_asr

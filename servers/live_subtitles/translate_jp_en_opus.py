@@ -8,7 +8,7 @@ from typing import List, Optional, TypedDict
 
 from transformers import AutoTokenizer
 from translator_types import Translator
-from utils import split_sentences_ja
+from sentence_utils import split_sentences_ja
 
 # ────────────────────────────────────────────────
 # Types

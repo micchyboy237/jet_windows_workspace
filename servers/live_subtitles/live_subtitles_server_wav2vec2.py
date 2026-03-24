@@ -21,7 +21,7 @@ from rich.logging import RichHandler
 from transformers import AutoTokenizer
 
 from translator_types import Translator  # adjust import if needed
-from utils import split_sentences_ja
+from sentence_utils import split_sentences_ja
 import threading
 
 TRANSLATOR_MODEL_PATH = r"C:\Users\druiv\.cache\hf_ctranslate2_models\opus-ja-en-ct2"

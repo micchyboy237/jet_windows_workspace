@@ -3,6 +3,14 @@ from typing import Union, Sequence, List
 from pathlib import Path
 from fast_bunkai import FastBunkai
 
+# Unicode ranges
+JA_RANGE = r"\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F"
+SYMBOL_RANGE = (
+    r"\u2600-\u26FF"
+    r"\u2700-\u27BF"
+    r"\U0001F300-\U0001FAFF"
+)
+
 
 def split_sentences_ja(
     text: str,
@@ -53,14 +61,6 @@ def split_symbols_ja(text: str) -> List[str]:
     if not text:
         return []
 
-    # Unicode ranges
-    JA_RANGE = r"\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F"
-    SYMBOL_RANGE = (
-        r"\u2600-\u26FF"
-        r"\u2700-\u27BF"
-        r"\U0001F300-\U0001FAFF"
-    )
-
     # Split on symbol clusters → get pure text blocks
     blocks = re.split(rf"[{SYMBOL_RANGE}]+", text)
 
@@ -86,43 +86,6 @@ def split_symbols_ja(text: str) -> List[str]:
         sentences.extend(block_sentences)
 
     return sentences
-
-
-# Supported audio extensions
-AUDIO_EXTENSIONS = {
-    ".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac", ".wma",
-    ".webm", ".mp4", ".mkv", ".avi"
-}
-
-AudioPathsInput = Union[str, Path, Sequence[Union[str, Path]]]
-
-def resolve_audio_paths(audio_inputs: AudioPathsInput, recursive: bool = False) -> list[str]:
-    """
-    Resolve single file, list, or directory into a sorted list of absolute audio file paths as strings.
-    """
-    inputs = [audio_inputs] if isinstance(audio_inputs, (str, Path)) else audio_inputs
-    resolved_paths: list[Path] = []
-
-    for item in inputs:
-        path = Path(item)
-
-        if path.is_dir():
-            pattern = "**/*" if recursive else "*"
-            for p in path.glob(pattern):
-                if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS:
-                    resolved_paths.append(p.resolve())
-        elif path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS:
-            resolved_paths.append(path.resolve())
-        elif path.exists():
-            print(f"Skipping non-audio file: {path}")
-        else:
-            print(f"Path not found: {path}")
-
-    if not resolved_paths:
-        raise ValueError("No valid audio files found from provided inputs.")
-
-    # Return sorted list of absolute path strings
-    return sorted(str(p) for p in resolved_paths)
 
 
 if __name__ == "__main__":

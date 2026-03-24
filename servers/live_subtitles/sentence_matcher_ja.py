@@ -19,7 +19,7 @@ class FuzzyMatchResult(TypedDict):
 def fuzzy_shortest_best_match(
     query: str,
     texts: str | List[str],
-    score_cutoff: int = 80,
+    score_cutoff: int = 75,
     max_extra_chars: int = 20,
 ) -> FuzzyMatchResult:
     """
@@ -30,7 +30,7 @@ def fuzzy_shortest_best_match(
     Args:
         query: The string to search for.
         texts: A single string or list of strings to search within.
-        score_cutoff: Minimum acceptable score (default: 80).
+        score_cutoff: Minimum acceptable score (default: 75).
         max_extra_chars: Maximum extra characters allowed in the match window.
 
     Returns:
@@ -131,7 +131,7 @@ def main() -> None:
         "-c",
         "--score-cutoff",
         type=int,
-        default=80,
+        default=75,
         help="Minimum score to accept (0-100)",
     )
     parser.add_argument(
@@ -162,7 +162,7 @@ def main() -> None:
     print(f"Slice : [{result['start']}:{result['end']}]")
     print(f"Length: {result['end'] - result['start']}")
     print(
-        f"From  : {result.get('text', '')[:80]}{'...' if len(result.get('text', '')) > 80 else ''}"
+        f"From  : {result.get('text', '')[:50]}{'...' if len(result.get('text', '')) > 50 else ''}"
     )
 
     if result["score"] >= args.score_cutoff:
