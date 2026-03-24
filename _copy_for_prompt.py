@@ -96,8 +96,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Please analyze the implementation for prev_vad_reason and silence detection if correct.
-Implement fixes if any.
+If Fuzzy match too weak, how to only translate the new text instead of the full text with context?
+Show unified diff.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

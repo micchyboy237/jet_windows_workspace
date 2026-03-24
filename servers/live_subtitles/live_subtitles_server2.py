@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import difflib
 from rich.console import Console
 from rich.theme import Theme
 
@@ -141,47 +142,49 @@ def blocking_process_audio(
     # === Decision logic (exactly as before; now sees the *post-reset* buffer state) ===
     if context_buffer.segments:
         _, last_meta = context_buffer.get_last_segment()
+        prev_full_ja_text = last_meta.get("full_ja_text", "")
         prev_full_en_text = last_meta.get("full_en_text", "")
         last_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
-        prev_ja_text = last_meta["full_ja_text"]
+
         match_result = fuzzy_shortest_best_match(
             query=last_sentence or "",
             texts=full_ja_text,
             score_cutoff=75,
             max_extra_chars=30,
         )
-        last_sentence_pos = match_result["start"]
-        last_sentence_clean = match_result["match"].strip()
-        if match_result["score"] >= 75 and last_sentence_pos != -1:
+
+        if match_result["score"] >= 75 and match_result["start"] != -1:
             new_text_start = match_result["end"]
-            old_text = full_ja_text[:new_text_start].strip()
             new_text = full_ja_text[new_text_start:].strip()
-            new_clean = new_text.rstrip('.。！？、…・「」『』').rstrip()
-            if not new_clean:
-                return {
-                    "uuid": uuid_,
-                    "transcription_ja": "",
-                    "translation_en": "",
-                    "success": False,
-                }
-            old_sents = split_sentences_ja(old_text)
-            new_sents = split_sentences_ja(new_text)
             console.print(f"[info]Fuzzy match used (score={match_result['score']:.1f})[/info]")
-            console.print(
-                f"[info]Diff Sentence Lengths (Fuzzy):[/info] "
-                f"old = [cyan]{len(old_sents):2d}[/cyan] new = [cyan]{len(new_sents):2d}[/cyan] "
-                f"Δ = [bright_blue]{len(new_sents) - len(old_sents):+2d}[/bright_blue]"
-            )
         else:
-            console.print(f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}). Using full new text.[/warning]")
-            old_sents = []
-            new_sents = full_ja_sents
-            new_text = full_ja_text
-            last_sentence_pos = -1
-            last_sentence_clean = None
-        ja_sents = new_sents
-        ja_sents_str = "".join(ja_sents).strip()
-        ja_text = ja_sents_str
+            console.print(
+                f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}). "
+                f"Translating ONLY the new chunk instead of full context.[/warning]"
+            )
+            new_text = full_ja_text.strip()  # ← ONLY current incremental text
+
+        # Always translate only the incremental new text
+        new_sents = split_sentences_ja(new_text)
+        ja_text = "".join(new_sents).strip()
+
+        # === SHOW UNIFIED DIFF (exactly what you asked for) ===
+        if prev_full_ja_text and full_ja_text != prev_full_ja_text:
+            console.print("[info]Unified diff (previous full JA → current full JA):[/info]")
+            import difflib
+            diff = difflib.unified_diff(
+                prev_full_ja_text.splitlines(keepends=True),
+                full_ja_text.splitlines(keepends=True),
+                fromfile="prev_full_ja",
+                tofile="curr_full_ja",
+                lineterm="",
+            )
+            console.print("".join(diff).strip() or "[dim]No change in text[/dim]")
+
+        last_sentence_pos = match_result["start"] if match_result["score"] >= 75 else -1
+        last_sentence_clean = match_result["match"].strip() if match_result["score"] >= 75 else None
+        old_sents = []  # no longer needed for translation
+
         if ja_text:
             trans_en = translate_japanese_to_english(
                 ja_text=ja_text,
