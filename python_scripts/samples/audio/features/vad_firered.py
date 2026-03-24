@@ -114,7 +114,14 @@ def extract_speech_segments(
     audio: AudioInput,
     vad: Optional[FireRedVad] = None,
     vad_model_dir: str = MODEL_DIR,
-    vad_config: Optional[FireRedVadConfig] = None,
+    smooth_window_size: int = 5,
+    speech_threshold: float = 0.3,
+    min_speech_frame: int = 20,
+    max_speech_frame: int = 800,
+    min_silence_frame: int = 20,
+    merge_silence_frame: int = 50,
+    extend_speech_frame: int = 0,
+    chunk_max_frame: int = 30000,
 ) -> Tuple[List[Tuple[SpeechSegment, np.ndarray]], Optional[np.ndarray]]:
     try:
         if isinstance(audio, (str, Path)):
@@ -139,8 +146,18 @@ def extract_speech_segments(
 
         if vad is None:
             with console.status("[bold cyan]Loading FireRedVAD…", spinner="dots"):
+                vad_config = FireRedVadConfig(
+                    smooth_window_size=smooth_window_size,
+                    speech_threshold=speech_threshold,
+                    min_speech_frame=min_speech_frame,
+                    max_speech_frame=max_speech_frame,
+                    min_silence_frame=min_silence_frame,
+                    merge_silence_frame=merge_silence_frame,
+                    extend_speech_frame=extend_speech_frame,
+                    chunk_max_frame=chunk_max_frame,
+                )
                 vad = FireRedVad.from_pretrained(
-                    vad_model_dir, vad_config or FireRedVadConfig()
+                    vad_model_dir, vad_config
                 )
 
         console.rule("Voice Activity Detection")
