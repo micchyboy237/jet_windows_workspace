@@ -110,6 +110,9 @@ def blocking_process_audio(  # ← unchanged signature
     )
 
     console.print(
+        f"[info]VAD Reason:[/info] [value]{header["vad_reason"]}s[/value]"
+    )
+    console.print(
         f"[info]Context duration:[/info] [time]{context_buffer.get_total_duration():.2f}s[/time]"
     )
     console.print(
@@ -132,6 +135,12 @@ def blocking_process_audio(  # ← unchanged signature
     full_ja_sents_str = "".join(full_ja_sents).strip()
     full_ja_text = full_ja_sents_str
 
+    if context_buffer.segments:
+        _, last_meta = context_buffer.get_last_segment()
+        prev_vad_reason = last_meta["vad_reason"]
+        if prev_vad_reason == "silence":
+            context_buffer.reset()
+            console.print(f"[info]Silence detected - Reset context done[/info]")
 
     if context_buffer.segments:
         _, last_meta = context_buffer.get_last_segment()
@@ -408,10 +417,6 @@ def blocking_process_audio(  # ← unchanged signature
         }, f, ensure_ascii=False, indent=2)
     with open(full_audio_dir / "full_ja_sents.json", "w", encoding="utf-8") as f:
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
-
-    # Reset if vad reason is min silence
-    if not header["forced"]:
-        context_buffer.reset()
 
     return {
         "uuid": uuid_,
