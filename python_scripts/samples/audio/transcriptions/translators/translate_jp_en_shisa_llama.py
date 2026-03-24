@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
 import numpy as np
 import numpy.typing as npt
-from llama_cpp import Llama, LogitsProcessorList
+from llama_cpp import Llama, LogitsProcessorList, ChatCompletionRequestMessage
 
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
 
@@ -23,7 +23,7 @@ MODEL_SETTINGS = {
 }
 
 TRANSLATION_DEFAULTS = {
-    "max_tokens": 1024,
+    "max_tokens": 1500,
     "temperature": 0.35,
     "top_p": 0.90,
     "top_k": 40,
@@ -36,10 +36,9 @@ TRANSLATION_DEFAULTS = {
 }
 
 
-SYSTEM_PROMPT = """You are an expert Japanese-to-English translator for anime-style erotic dialogue and subtitles.
-
-Translate faithfully and naturally. Preserve tone, emotion, pauses (...), moans/gasp sounds (ahh, nngh, hah, etc.), symbols (♡) and original speaker perspective.
-Output ONLY the pure English translation — nothing else."""
+SYSTEM_PROMPT = """
+You are a professional, natural-sounding Japanese-to-English translator. Translate accurately while making the English sound fluent and idiomatic as if written by a native English speaker.
+"""
 
 USER_PROMPT = """Translate the following Japanese text to natural English:
 
@@ -52,30 +51,26 @@ class ReferenceExample(TypedDict):
 
 
 DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = [
-    # Erotic / sensual (1st-person) — NO number
-    {"ja": "恥ずかしい…見ないでください…", "en": "It's so embarrassing... Please don't look..."},
-    {"ja": "お願い…もっと激しくして…壊して…！", "en": "Please... do it harder... Break me...!"},
-
-    # Erotic with count (numeric)
-    {"ja": "んっ…もう3回イッちゃった…", "en": "Nngh... I've already come 3 times..."},
-
-    # Cute / playful with age (numeric)
-    {"ja": "きゃっ！もう18歳なのに、まだ子供扱い～♡", "en": "Kyaa! I'm already 18 but you're still treating me like a kid~♡"},
-
-    # Angry / tsundere with repetition (numeric)
-    {"ja": "ばか！3回も言ったでしょ！", "en": "Idiot! I already said it 3 times!"},
-
-    # Sad / emotional with duration (numeric)
-    {"ja": "…ごめんね。あと1年で会えなくなるかも…", "en": "...I'm sorry. In just 1 year we might not be able to meet anymore..."},
-
-    # Neutral conversation with date (numeric)
-    {"ja": "2024年3月15日に会いましょう。", "en": "Let's meet on March 15, 2024."},
-
-    # Neutral narrative / third-person with measurement (numeric)
-    {"ja": "彼女は5メートル先に静かに立っていた。", "en": "She was quietly standing 5 meters ahead."},
-
-    # Playful / teasing with count (numeric)
-    {"ja": "ふふっ、10回目だよ？もう忘れちゃったの？", "en": "Hehe, this is the 10th time, you know? Did you already forget?"},
+    {
+        "ja": "今日はとても暑いですね。",
+        "en": "It's really hot today."
+    },
+    {
+        "ja": "すみません、ちょっとお聞きしたいことがあるのですが。",
+        "en": "Excuse me, I have a quick question."
+    },
+    {
+        "ja": "彼は何も言わずに部屋を出ていった。",
+        "en": "He left the room without saying a word."
+    },
+    {
+        "ja": "そんなことになるなんて思ってもみなかった。",
+        "en": "I never imagined it would turn out like this."
+    },
+    {
+        "ja": "もし時間があれば、一緒にコーヒーでもどうですか？",
+        "en": "If you have time, would you like to grab a coffee together?"
+    },
 ]
 
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
@@ -153,10 +148,10 @@ no_assistant_first = BanFirstTokenProcessor(
 
 def _build_translation_messages(
     japanese_text: str,
-    history: Optional[List[Dict[str, str]]] = None,
+    history: Optional[List[ChatCompletionRequestMessage]] = None,
     reference_examples: List[ReferenceExample] = DEFAULT_REFERENCE_EXAMPLES,
-) -> List[Dict[str, str]]:
-    messages: List[Dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+) -> List[ChatCompletionRequestMessage]:
+    messages: List[ChatCompletionRequestMessage] = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     if reference_examples:
         for example in reference_examples:
@@ -228,7 +223,7 @@ class TranslationResult(TypedDict):
 def translate_japanese_to_english(
     ja_text: str,
     enable_scoring: bool = False,
-    history: Optional[List[Dict[str, str]]] = None,
+    history: Optional[List[ChatCompletionRequestMessage]] = None,
     temperature: float = TRANSLATION_DEFAULTS["temperature"],
     max_tokens: int = TRANSLATION_DEFAULTS["max_tokens"],
     **kwargs,
