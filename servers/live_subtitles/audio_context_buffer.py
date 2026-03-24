@@ -19,7 +19,8 @@ class SegmentMeta(TypedDict):
     end_time_sec: float
     duration_sec: float
     started_at: str
-    full_word_segments: list[WordSegment]
+    matched_pos: int
+    matched_sent: str
     old_sents: list[str]
     new_sents: list[str]
     full_ja_text: str
