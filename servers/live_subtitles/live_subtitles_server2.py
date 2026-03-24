@@ -77,7 +77,7 @@ connected_clients = set()
 # SenseVoiceSmall + small LLM usually do well with 2–6 workers
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_worker")
 
-context_buffer = AudioContextBuffer(max_duration_sec=60.0, sample_rate=16000)
+context_buffer = AudioContextBuffer(max_duration_sec=30.0, sample_rate=16000)
 
 prev_vad_reason = None
 
