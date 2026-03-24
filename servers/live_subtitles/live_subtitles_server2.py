@@ -159,10 +159,30 @@ def blocking_process_audio(
             console.print(f"[info]Fuzzy match used (score={match_result['score']:.1f})[/info]")
         else:
             console.print(
-                f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}). "
-                f"Translating ONLY the new chunk instead of full context.[/warning]"
+                f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}).[/warning]"
             )
-            new_text = full_ja_text.strip()  # ← ONLY current incremental text
+            # console.print(
+            #     f"[warning]Translating ONLY the new chunk instead of full context.[/warning]"
+            # )
+            # new_text = full_ja_text.strip()  # ← ONLY current incremental text
+            console.print(
+                f"[warning]End process.[/warning]"
+            )
+            return {
+                "uuid": uuid_,
+                "transcription_ja": "",
+                "translation_en": "",
+                "success": False,
+            }
+
+        new_clean = new_text.rstrip('.。！？、…・「」『』').rstrip()
+        if not new_clean:
+            return {
+                "uuid": uuid_,
+                "transcription_ja": "",
+                "translation_en": "",
+                "success": False,
+            }
 
         # Always translate only the incremental new text
         new_sents = split_sentences_ja(new_text)
