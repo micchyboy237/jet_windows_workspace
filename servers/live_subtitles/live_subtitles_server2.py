@@ -110,7 +110,7 @@ def blocking_process_audio(  # ← unchanged signature
     )
 
     console.print(
-        f"[info]VAD Reason:[/info] [value]{header["vad_reason"]}s[/value]"
+        f"[info]VAD Reason:[/info] [value]{header["vad_reason"]}[/value]"
     )
     console.print(
         f"[info]Context duration:[/info] [time]{context_buffer.get_total_duration():.2f}s[/time]"
