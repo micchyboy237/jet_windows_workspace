@@ -169,6 +169,16 @@ def blocking_process_audio(  # ← unchanged signature
             old_text = full_ja_text[:new_text_start].strip()
             new_text = full_ja_text[new_text_start:].strip()
 
+            new_clean = new_text.rstrip('。！？、…・「」『』').rstrip()
+
+            if not new_clean:
+                return {
+                    "uuid": uuid_,
+                    "transcription_ja": "",
+                    "translation_en": "",
+                    "success": False,
+                }
+
             old_sents = split_sentences_ja(old_text)
             new_sents = split_sentences_ja(new_text)
 
