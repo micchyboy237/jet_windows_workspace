@@ -6,8 +6,9 @@ model_name = "shisa-ai/shisa-v2.1c-lfm2-350m-sft3-tlonly"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    torch_dtype=torch.bfloat16,   # bfloat16 recommended; use float16 on older GPUs or float32 on CPU
-    device_map="auto",            # automatically uses GPU if available
+    torch_dtype=torch.bfloat16,      # or torch.float16 / "auto"
+    device_map="auto",
+    trust_remote_code=True,          # ← This is the key line for LFM2
 )
 
 # Example prompt for Japanese → English translation
