@@ -57,7 +57,8 @@ CHUNK_DURATION_SEC = 6.0
 CHUNK_OVERLAP_SEC = 0.0
 MIN_SILENCE_DURATION_SEC = 0.65  # increased to stop VAD jitter false-ends
 MIN_SPEECH_DURATION_SEC = 0.5
-MAX_SPEECH_DURATION_SEC = CHUNK_DURATION_SEC * 2
+# MAX_SPEECH_DURATION_SEC = 15.0
+MAX_SPEECH_DURATION_SEC = CHUNK_DURATION_SEC
 # MAX_SPEECH_OVERLAP_SEC = 10.0
 CONTEXT_PROMPT_MAX_WORDS = 40  # max tokens for context prompt to send to server
 
@@ -388,6 +389,7 @@ async def stream_microphone(ws) -> None:
                             current_segment_num,
                         )
                         start_new_utterance()  # ← crucial: start tracking utterance here
+                        _reset_speech_segment_stats()
 
                     if chunk_type == "speech":
                         chunks_detected += 1
@@ -492,7 +494,8 @@ async def stream_microphone(ws) -> None:
                             if last_chunk_sent_time is None:
                                 # First partial send → require enough accumulated speech duration
                                 should_send_chunk = (
-                                    speech_duration_accumulated >= CHUNK_DURATION_SEC
+                                    current_segment.get_duration_sec()
+                                    >= CHUNK_DURATION_SEC
                                 )
                             else:
                                 # Subsequent partial sends → use time interval
@@ -565,23 +568,22 @@ async def stream_microphone(ws) -> None:
                                         current_duration_sec,
                                         config.max_speech_duration_sec,
                                     )
+                                    # Option A: trim old content (alternative approach)
                                     # current_segment.trim_audio(
                                     #     config.max_speech_duration_sec // 2
                                     # )
-                                    # Option A: trim old content (alternative approach)
-                                    # current_segment.trim_audio(config.max_speech_duration_sec * 0.3)
 
                                     # Option B: send only new data (recommended for no duplicates)
                                     # Only send what hasn't been sent before in this segment
                                     # For hard trim: keep only recent part (already sliced above, but enforce)
-                                    max_keep_bytes = int(
-                                        config.max_speech_duration_sec
-                                        * config.sample_rate
-                                        * 2
-                                    )
-                                    to_send = bytes(
-                                        current_segment.buffer[-max_keep_bytes:]
-                                    )
+                                    # max_keep_bytes = int(
+                                    #     config.max_speech_duration_sec
+                                    #     * config.sample_rate
+                                    #     * 2
+                                    # )
+                                    # to_send = bytes(
+                                    #     current_segment.buffer[-max_keep_bytes:]
+                                    # )
 
                                 # buffer_segments = extract_and_display_buffered_segments(
                                 #     # current_segment.buffer,
@@ -594,8 +596,8 @@ async def stream_microphone(ws) -> None:
 
                                 await send_audio_chunk(
                                     send_queue,
-                                    # current_segment.buffer,
-                                    to_send,
+                                    current_segment.buffer,
+                                    # to_send,
                                     current_segment.start_time,
                                     duration_sec=len(to_send)
                                     / (config.sample_rate * 2),
@@ -610,8 +612,6 @@ async def stream_microphone(ws) -> None:
                                     speech_chunk_count=stats["speech_chunk_count"],
                                     # context_prompt=build_context_prompt(),
                                 )
-                                # Moved after send (both partial & final)
-                                chunk_index += 1
 
                                 # ─── NEW: Save partial audio after sending ───────────────────────
                                 # Use new subdir for partial saves
@@ -653,6 +653,11 @@ async def stream_microphone(ws) -> None:
                                 with open(meta_path, "w", encoding="utf-8") as f:
                                     json.dump(partial_meta, f, indent=2)
 
+                                # Moved after saved (both partial & final)
+                                # chunk_index += 1
+
+                                reset_speech()
+
                                 # IMPORTANT: update to current absolute end, not len(to_send)
                                 last_sent_byte_length = len(current_segment.buffer)
                                 last_chunk_sent_time = now
@@ -673,9 +678,9 @@ async def stream_microphone(ws) -> None:
                                     )
                                     # Optional strong fix: actually shrink the accumulator buffer
                                     # (prevents memory explosion on very long speech)
-                                    current_segment.trim_audio(
-                                        config.max_speech_duration_sec * 0.5
-                                    )
+                                    # current_segment.trim_audio(
+                                    #     config.max_speech_duration_sec // 2
+                                    # )
 
                                     # trimming invalidates previous byte pointer
                                     last_sent_byte_length = 0
@@ -733,35 +738,37 @@ async def stream_microphone(ws) -> None:
 
                             # Send final chunk if anything remains
                             if is_utterance_ongoing and len(current_segment.buffer) > 0:
-                                # ─── Send only new data (same logic as partial) ───
-                                small_overlap_bytes = int(
-                                    SMALL_OVERLAP_SEC * config.sample_rate * 2
-                                )
-                                if last_sent_byte_length == 0:
-                                    to_send = bytes(current_segment.buffer)
-                                else:
-                                    if last_sent_byte_length > len(
-                                        current_segment.buffer
-                                    ):
-                                        last_sent_byte_length = len(
-                                            current_segment.buffer
-                                        )
+                                # # ─── Send only new data (same logic as partial) ───
+                                # small_overlap_bytes = int(
+                                #     SMALL_OVERLAP_SEC * config.sample_rate * 2
+                                # )
+                                # if last_sent_byte_length == 0:
+                                #     to_send = bytes(current_segment.buffer)
+                                # else:
+                                #     if last_sent_byte_length > len(
+                                #         current_segment.buffer
+                                #     ):
+                                #         last_sent_byte_length = len(
+                                #             current_segment.buffer
+                                #         )
 
-                                    start_idx = last_sent_byte_length
+                                #     start_idx = last_sent_byte_length
 
-                                    if start_idx >= len(current_segment.buffer):
-                                        continue
+                                #     if start_idx >= len(current_segment.buffer):
+                                #         continue
 
-                                    if (
-                                        len(current_segment.buffer)
-                                        - last_sent_byte_length
-                                        < small_overlap_bytes * 2
-                                    ):
-                                        start_idx = max(
-                                            0,
-                                            last_sent_byte_length - small_overlap_bytes,
-                                        )
-                                    to_send = bytes(current_segment.buffer[start_idx:])
+                                #     if (
+                                #         len(current_segment.buffer)
+                                #         - last_sent_byte_length
+                                #         < small_overlap_bytes * 2
+                                #     ):
+                                #         start_idx = max(
+                                #             0,
+                                #             last_sent_byte_length - small_overlap_bytes,
+                                #         )
+                                #     to_send = bytes(current_segment.buffer[start_idx:])
+
+                                # current_segment.trim_audio(CHUNK_DURATION_SEC)
 
                                 # buffer_segments = extract_and_display_buffered_segments(
                                 #     # current_segment.buffer,
@@ -774,8 +781,8 @@ async def stream_microphone(ws) -> None:
 
                                 await send_audio_chunk(
                                     send_queue,
-                                    to_send,
-                                    # utterance_rms,
+                                    current_segment.buffer,
+                                    # to_send,
                                     current_segment.start_time,
                                     duration_sec=len(to_send)
                                     / (config.sample_rate * 2),
@@ -789,102 +796,109 @@ async def stream_microphone(ws) -> None:
                                     speech_chunk_count=stats["speech_chunk_count"],
                                     # context_prompt=build_context_prompt(),
                                 )
-                                # Moved after send (both partial & final)
-                                chunk_index += 1
-                                chunks_sent += 1
 
-                            # Save ORIGINAL audio (matches what server received)
-                            original_bytes = bytes(current_segment.buffer)
-                            audio_int16 = np.frombuffer(
-                                original_bytes, dtype=np.int16
-                            ).copy()
+                                # Save ORIGINAL audio (matches what server received)
+                                original_bytes = bytes(current_segment.buffer)
+                                audio_int16 = np.frombuffer(
+                                    original_bytes, dtype=np.int16
+                                ).copy()
 
-                            # Save segment audio + metadata
-                            if (
-                                current_segment_num is not None
-                                and current_segment is not None
-                            ):
-                                # ──────────────── NEW: final also uses same subdir format ───────
-                                seg_subdir = find_segments_subdir(
-                                    segments_root=SEGMENTS_DIR,
-                                    utterance_id=current_utterance_id,
-                                    chunk_index=chunk_index,
-                                    create_if_missing=True,
-                                )
-
-                                wav_path = os.path.join(seg_subdir, fname)
-
-                                wavfile.write(
-                                    wav_path,
-                                    config.sample_rate,
-                                    audio_int16,
-                                )
-
-                                duration = stats["duration_sec"]
-                                num_samples = current_segment.duration_samples()
-                                base_time = current_segment.start_time
-
-                                stats = current_segment.get_stats()
-
-                                # Centralized metadata building
-                                metadata = {
-                                    **build_segment_metadata(
-                                        filename=fname,
+                                # Save segment audio + metadata
+                                if (
+                                    current_segment_num is not None
+                                    and current_segment is not None
+                                ):
+                                    # ──────────────── NEW: final also uses same subdir format ───────
+                                    seg_subdir = find_segments_subdir(
+                                        segments_root=SEGMENTS_DIR,
                                         utterance_id=current_utterance_id,
                                         chunk_index=chunk_index,
-                                        is_partial=False,
-                                        duration_sec=duration,
-                                        start_sec=current_segment.start_time,
-                                        sample_rate=config.sample_rate,
-                                        channels=config.channels,
-                                        vad_stats={
-                                            "first": stats.get(
-                                                "vad_first", first_vad_confidence
-                                            ),
-                                            "last": stats.get(
-                                                "vad_last", last_vad_confidence
-                                            ),
-                                            "min": stats["vad_min"],
-                                            "max": stats["vad_max"],
-                                            "avg": stats["vad_sum"]
-                                            / stats["speech_chunk_count"]
-                                            if stats["speech_chunk_count"] > 0
-                                            else 0.0,
-                                        },
-                                        energy_stats={
-                                            "rms_min": stats["energy_min"],
-                                            "rms_max": stats["energy_max"],
-                                            "rms_ave": stats["energy_sum"]
-                                            / stats["speech_chunk_count"]
-                                            if stats["speech_chunk_count"] > 0
-                                            else 0.0,
-                                            "rms_std": np.sqrt(
-                                                (
-                                                    stats["energy_sum_squares"]
-                                                    / stats["speech_chunk_count"]
-                                                )
-                                                - (
-                                                    stats["energy_sum"]
-                                                    / stats["speech_chunk_count"]
-                                                )
-                                                ** 2
-                                            )
-                                            if stats["speech_chunk_count"] > 0
-                                            else 0.0,
-                                        },
-                                        sent_at=time.monotonic(),
-                                        num_samples=num_samples,
+                                        create_if_missing=True,
                                     )
-                                }
-                                metadata["num_chunks"] = stats["speech_chunk_count"]
-                                metadata["end_sec"] = (
-                                    time.monotonic()
-                                )  # add end time separately
 
-                                # Save metadata.json into segment subdirectory
-                                meta_path = os.path.join(seg_subdir, "metadata.json")
-                                with open(meta_path, "w", encoding="utf-8") as f:
-                                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+                                    wav_path = os.path.join(seg_subdir, fname)
+
+                                    wavfile.write(
+                                        wav_path,
+                                        config.sample_rate,
+                                        audio_int16,
+                                    )
+
+                                    duration = stats["duration_sec"]
+                                    num_samples = current_segment.duration_samples()
+                                    base_time = current_segment.start_time
+
+                                    stats = current_segment.get_stats()
+
+                                    # Centralized metadata building
+                                    metadata = {
+                                        **build_segment_metadata(
+                                            filename=fname,
+                                            utterance_id=current_utterance_id,
+                                            chunk_index=chunk_index,
+                                            is_partial=False,
+                                            duration_sec=duration,
+                                            start_sec=current_segment.start_time,
+                                            sample_rate=config.sample_rate,
+                                            channels=config.channels,
+                                            vad_stats={
+                                                "first": stats.get(
+                                                    "vad_first", first_vad_confidence
+                                                ),
+                                                "last": stats.get(
+                                                    "vad_last", last_vad_confidence
+                                                ),
+                                                "min": stats["vad_min"],
+                                                "max": stats["vad_max"],
+                                                "avg": stats["vad_sum"]
+                                                / stats["speech_chunk_count"]
+                                                if stats["speech_chunk_count"] > 0
+                                                else 0.0,
+                                            },
+                                            energy_stats={
+                                                "rms_min": stats["energy_min"],
+                                                "rms_max": stats["energy_max"],
+                                                "rms_ave": stats["energy_sum"]
+                                                / stats["speech_chunk_count"]
+                                                if stats["speech_chunk_count"] > 0
+                                                else 0.0,
+                                                "rms_std": np.sqrt(
+                                                    (
+                                                        stats["energy_sum_squares"]
+                                                        / stats["speech_chunk_count"]
+                                                    )
+                                                    - (
+                                                        stats["energy_sum"]
+                                                        / stats["speech_chunk_count"]
+                                                    )
+                                                    ** 2
+                                                )
+                                                if stats["speech_chunk_count"] > 0
+                                                else 0.0,
+                                            },
+                                            sent_at=time.monotonic(),
+                                            num_samples=num_samples,
+                                        )
+                                    }
+                                    metadata["num_chunks"] = stats["speech_chunk_count"]
+                                    metadata["end_sec"] = (
+                                        time.monotonic()
+                                    )  # add end time separately
+
+                                    # Save metadata.json into segment subdirectory
+                                    meta_path = os.path.join(
+                                        seg_subdir, "metadata.json"
+                                    )
+                                    with open(meta_path, "w", encoding="utf-8") as f:
+                                        json.dump(
+                                            metadata, f, indent=2, ensure_ascii=False
+                                        )
+
+                                    # Moved after saved (both partial & final)
+                                    # chunk_index += 1
+                                    chunks_sent += 1
+
+                                    reset_speech()
 
                                 # Update all_speech_meta.json
                                 with open(
@@ -1086,6 +1100,12 @@ async def send_audio_chunk(
 ) -> None:
     if len(buffer) == 0:
         return
+
+    # Enforce hard cap so transmitted audio never exceeds max_speech_duration_sec
+    max_bytes = int(config.max_speech_duration_sec * config.sample_rate * 2)
+    if len(buffer) > max_bytes:
+        buffer = buffer[-max_bytes:]
+        duration_sec = len(buffer) / (config.sample_rate * 2)
 
     # Optional: also compute how much was already sent before this chunk
     previous_duration_sec = max(0.0, duration_sec - overlap_sec)
