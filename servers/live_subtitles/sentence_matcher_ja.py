@@ -141,12 +141,6 @@ def main() -> None:
         default=20,
         help="Maximum extra characters allowed beyond query length",
     )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Show highlighted match in the original text",
-    )
 
     args = parser.parse_args()
 
@@ -157,27 +151,23 @@ def main() -> None:
         max_extra_chars=args.max_extra_chars,
     )
 
+    print(f"Query : {args.query}")
     print(f"Match : {result['match']}")
     print(f"Score : {result['score']:.1f}")
     print(f"Slice : [{result['start']}:{result['end']}]")
     print(f"Length: {result['end'] - result['start']}")
-    print(
-        f"From  : {result.get('text', '')[:50]}{'...' if len(result.get('text', '')) > 50 else ''}"
+    highlighted = (
+        result["text"][: result["start"]]
+        + f"\033[1;33m{result['text'][result['start'] : result['end']]}\033[0m"
+        + result["text"][result["end"] :]
     )
+    print("\nHighlighted in text:")
+    print(highlighted)
 
     if result["score"] >= args.score_cutoff:
         print("✅ Accepted")
     else:
         print("❌ Below threshold")
-
-    if args.verbose and result["start"] != -1 and result.get("text"):
-        highlighted = (
-            result["text"][: result["start"]]
-            + f"\033[1;33m{result['text'][result['start'] : result['end']]}\033[0m"
-            + result["text"][result["end"] :]
-        )
-        print("\nHighlighted in text:")
-        print(highlighted)
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ from audio_context_buffer import AudioContextBuffer
 from audio_search import search_audio
 from sentence_utils import split_sentences_ja
 from sentence_matcher_ja import fuzzy_shortest_best_match
+from diff_utils import console_diff_highlight
 
 import shutil
 from pathlib import Path
@@ -147,18 +148,40 @@ def blocking_process_audio(
         prev_full_en_text = last_meta.get("full_en_text", "")
         last_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
 
+        MATCH_SCORE_CUTOFF = 75
         match_result = fuzzy_shortest_best_match(
             query=last_sentence or "",
             texts=full_ja_text,
-            score_cutoff=75,
+            score_cutoff=MATCH_SCORE_CUTOFF,
             max_extra_chars=30,
         )
+        # === Fuzzy result logs (mirroring sentence_matcher_ja main output) ===
+        console_diff_highlight(
+            last_sentence or '',
+            match_result['match'],
+            "Query",
+            "Match",
+        )
+        console.print(f"[info]Score:[/info] [number]{match_result['score']:.1f}[/number]")
+        console.print(f"[info]Slice:[/info] [bright_white][{match_result['start']}:{match_result['end']}][/bright_white]")
+        console.print(f"[info]Length:[/info] [number]{match_result['end'] - match_result['start']}[/number]")
 
-        if match_result["score"] >= 75 and match_result["start"] != -1:
+        # Highlight the matched slice inside the full text
+        highlighted = (
+            match_result["text"][: match_result["start"]]
+            + f"\033[1;33m{match_result['text'][match_result['start'] : match_result['end']]}\033[0m"
+            + match_result["text"][match_result["end"] :]
+        )
+        print("\nHighlighted in text:")
+        print(highlighted)
+
+        if match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
+            console.print("[success bold]✅ Accepted[/success bold]")
             new_text_start = match_result["end"]
             new_text = full_ja_text[new_text_start:].strip()
-            console.print(f"[info]Fuzzy match used (score={match_result['score']:.1f})[/info]")
+            # (old one-line message removed — replaced by the detailed logs above)
         else:
+            console.print("[error]❌ Below threshold[/error]")
             console.print(
                 f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}).[/warning]"
             )
@@ -189,21 +212,18 @@ def blocking_process_audio(
         new_sents = split_sentences_ja(new_text)
         ja_text = "".join(new_sents).strip()
 
-        # === SHOW UNIFIED DIFF (exactly what you asked for) ===
+        # === SHOW DIFF CHANGES ===
         if prev_full_ja_text and full_ja_text != prev_full_ja_text:
             console.print("[info]Unified diff (previous full JA → current full JA):[/info]")
-            import difflib
-            diff = difflib.unified_diff(
-                prev_full_ja_text.splitlines(keepends=True),
-                full_ja_text.splitlines(keepends=True),
-                fromfile="prev_full_ja",
-                tofile="curr_full_ja",
-                lineterm="",
+            console_diff_highlight(
+                prev_full_ja_text,
+                full_ja_text,
+                "Prev",
+                "Curr",
             )
-            console.print("".join(diff).strip() or "[dim]No change in text[/dim]")
 
-        last_sentence_pos = match_result["start"] if match_result["score"] >= 75 else -1
-        last_sentence_clean = match_result["match"].strip() if match_result["score"] >= 75 else None
+        last_sentence_pos = match_result["start"] if match_result["score"] >= MATCH_SCORE_CUTOFF else -1
+        last_sentence_clean = match_result["match"].strip() if match_result["score"] >= MATCH_SCORE_CUTOFF else None
         old_sents = []  # no longer needed for translation
 
         if ja_text:
@@ -251,7 +271,7 @@ def blocking_process_audio(
         console.print(f"[success]Last Sentence (utt_id={last_utt_id[-6:]} | sent_idx={last_sent_idx}):[/success]")
         console.print(f"[bright_white]{last_sentence_clean}[/bright_white]")
     if last_sentence_pos != -1:
-        console.print(f"[success]New Text (pos={last_sentence_pos} | start={new_text_start}):[/success]")
+        console.print(f"[success]New Text (utt_id={header["uuid"][-6:]} | pos={last_sentence_pos} | start={new_text_start}):[/success]")
         console.print(f"[bright_white]{new_text}[/bright_white]")
     console.print(f"[success]Full JA ({len(full_ja_sents)} sent):[/success]")
     console.print(f"[bright_white]{full_ja_text}[/bright_white]")
@@ -371,6 +391,10 @@ def blocking_process_audio(
         "transcription_ja": ja_text,
         "translation_en": en_text,
         "success": bool(ja_text or en_text),
+        "transcribed_duration_sec": full_metadata["transcribed_duration_sec"],
+        "transcribed_duration_pctg": full_metadata["transcribed_duration_pctg"],
+        "coverage_label": full_metadata["coverage_label"],
+        "phrase_segments": full_phrase_segments,
     }
 
 

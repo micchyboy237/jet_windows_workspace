@@ -38,6 +38,7 @@ class TranscriptionMetadata(TypedDict, total=False):
     audio_duration_sec: float
     transcribed_duration_sec: float
     transcribed_duration_pctg: float
+    coverage_label: str
 
 
 class TranscriptionResult(TypedDict):
@@ -206,16 +207,11 @@ def _transcribe_file(
 
 
 def get_coverage_quality_label(pct: float) -> str:
-    if pct >= 92.0:
-        return "excellent (very clean)"
-    if pct >= 82.0:
-        return "good"
-    if pct >= 65.0:
-        return "fair (some noise/BGM)"
-    if pct >= 40.0:
-        return "sparse speech"
-    if pct >= 15.0:
-        return "very sparse"
+    if pct >= 92.0: return "excellent (very clean)"
+    if pct >= 82.0: return "good"
+    if pct >= 65.0: return "fair (some noise/BGM)"
+    if pct >= 40.0: return "sparse speech"
+    if pct >= 15.0: return "very sparse"
     return "almost no speech"
 
 
@@ -279,6 +275,7 @@ def transcribe_japanese_llm_from_file(
         segments, audio_duration
     )
     transcribed_duration_sec = (transcribed_percentage / 100) * audio_duration
+    coverage_label = get_coverage_quality_label(transcribed_percentage)
 
     metadata: TranscriptionMetadata = {
         "model": "SenseVoiceSmall",
@@ -288,6 +285,7 @@ def transcribe_japanese_llm_from_file(
         "audio_duration_sec": round(audio_duration, 3),
         "transcribed_duration_sec": round(transcribed_duration_sec, 3),
         "transcribed_duration_pctg": round(transcribed_percentage, 2),
+        "coverage_label": coverage_label,
     }
 
     phrase_segments: list[PhraseSegment] = []
