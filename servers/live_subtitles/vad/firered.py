@@ -1,4 +1,3 @@
-# servers\live_subtitles\fireredvad_utils.py
 from __future__ import annotations
 
 import logging
@@ -10,10 +9,10 @@ import torch
 from fireredvad.core.audio_feat import AudioFeat
 from fireredvad.core.detect_model import DetectModel
 from fireredvad.stream_vad import FireRedStreamVad, FireRedStreamVadConfig
-from hybrid_stream_vad_postprocessor import (
+from .hybrid_stream_vad_postprocessor import (
     HybridStreamVadPostprocessor,
 )
-from jet.audio.audio_waveform.speech_tracker2 import SpeechSegmentTracker
+from .speech_tracker import SpeechSegmentTracker
 
 logging.basicConfig(
     level=logging.INFO,

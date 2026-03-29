@@ -25,7 +25,8 @@ import scipy.io.wavfile as wavfile
 import websockets
 from concurrent.futures import ThreadPoolExecutor
 from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
-from translate_jp_en_llm import translate_japanese_to_english
+# from transcribe_jp_reazonspeech import transcribe_japanese, TranscriptionResult
+from translate_jp_en_llm import translate_japanese_to_english, llm
 # from transcribe_jp_funasr_nano import transcribe_japanese, TranscriptionResult
 # from translate_jp_en_sarashin import translate_japanese_to_english
 from audio_context_buffer import AudioContextBuffer
@@ -79,7 +80,7 @@ connected_clients = set()
 # SenseVoiceSmall + small LLM usually do well with 2–6 workers
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_worker")
 
-context_buffer = AudioContextBuffer(max_duration_sec=30.0, sample_rate=16000)
+context_buffer = AudioContextBuffer(max_duration_sec=90.0, sample_rate=16000)
 
 prev_vad_reason = None
 
@@ -101,11 +102,12 @@ def blocking_process_audio(
 
     # === FIXED: Silence detection & reset BEFORE transcription ===
     # Old bug: reset happened *after* concat + ASR → stale context leaked.
-    # Now the ASR only ever sees the correct context (empty after silence).
+    # Now the ASR only ever sees the correct context (empty after non_speech or true_silence).
     # prev_vad_reason is now updated unconditionally.
-    if context_buffer.segments and prev_vad_reason == "silence":
+    if context_buffer.segments and prev_vad_reason in ("non_speech", "true_silence"):
         context_buffer.reset()
-        console.print(f"[info]Silence detected - Reset context done[/info]")
+        llm.reset()
+        console.print(f"[info]{prev_vad_reason.title()} detected - Reset context done[/info]")
     prev_vad_reason = header["vad_reason"]
 
     context_audio_int16 = context_buffer.get_context_audio()
@@ -144,11 +146,44 @@ def blocking_process_audio(
     # === Decision logic (exactly as before; now sees the *post-reset* buffer state) ===
     if context_buffer.segments:
         _, last_meta = context_buffer.get_last_segment()
+        last_sentences = last_meta["new_sents"]
+    
         prev_full_ja_text = last_meta.get("full_ja_text", "")
         prev_full_en_text = last_meta.get("full_en_text", "")
         last_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
 
         MATCH_SCORE_CUTOFF = 75
+
+        print("--- Previous Sentences Matches ---")
+        for sent_num, last_sent in enumerate(last_sentences, start=1):
+            match_result = fuzzy_shortest_best_match(
+                query=last_sent or "",
+                texts=full_ja_text,
+                score_cutoff=MATCH_SCORE_CUTOFF,
+                max_extra_chars=30,
+            )
+            if match_result:
+                console_diff_highlight(
+                    last_sentence or '',
+                    match_result['match'],
+                    f"Last Sentence {sent_num}",
+                    "New Text Match",
+                )
+                print(f"Valid: {"✅" if match_result['valid'] else "❌"}")
+                console.print(f"[info]Fuzzy Score:[/info] [number]{match_result['score']:.1f}[/number]")
+                console.print(f"[info]Slice:[/info] [bright_white][{match_result['start']}:{match_result['end']}][/bright_white]")
+                console.print(f"[info]Length:[/info] [number]{match_result['end'] - match_result['start']}[/number]")
+                # Highlight the matched slice inside the full text
+                highlighted = (
+                    match_result["text"][: match_result["start"]]
+                    + f"\033[1;33m{match_result['text'][match_result['start'] : match_result['end']]}\033[0m"
+                    + match_result["text"][match_result["end"] :]
+                )
+                print("\nHighlighted in text:")
+                print(highlighted)
+                print("\n---\n")
+
+        print("--- Final Sentence Match ---")
         match_result = fuzzy_shortest_best_match(
             query=last_sentence or "",
             texts=full_ja_text,
@@ -156,34 +191,36 @@ def blocking_process_audio(
             max_extra_chars=30,
         )
         # === Fuzzy result logs (mirroring sentence_matcher_ja main output) ===
-        console_diff_highlight(
-            last_sentence or '',
-            match_result['match'],
-            "Query",
-            "Match",
-        )
-        console.print(f"[info]Score:[/info] [number]{match_result['score']:.1f}[/number]")
-        console.print(f"[info]Slice:[/info] [bright_white][{match_result['start']}:{match_result['end']}][/bright_white]")
-        console.print(f"[info]Length:[/info] [number]{match_result['end'] - match_result['start']}[/number]")
+        if match_result and match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
+            console_diff_highlight(
+                last_sentence or '',
+                match_result['match'],
+                "Final Sentence",
+                "New Text Match",
+            )
+            print(f"Valid: {"✅" if match_result['valid'] else "❌"}")
+            console.print(f"[info]Fuzzy Score:[/info] [number]{match_result['score']:.1f}[/number]")
+            console.print(f"[info]Slice:[/info] [bright_white][{match_result['start']}:{match_result['end']}][/bright_white]")
+            console.print(f"[info]Length:[/info] [number]{match_result['end'] - match_result['start']}[/number]")
+            # Highlight the matched slice inside the full text
+            highlighted = (
+                match_result["text"][: match_result["start"]]
+                + f"\033[1;33m{match_result['text'][match_result['start'] : match_result['end']]}\033[0m"
+                + match_result["text"][match_result["end"] :]
+            )
+            print("\nHighlighted in text:")
+            print(highlighted)
+            print("\n---\n")
 
-        # Highlight the matched slice inside the full text
-        highlighted = (
-            match_result["text"][: match_result["start"]]
-            + f"\033[1;33m{match_result['text'][match_result['start'] : match_result['end']]}\033[0m"
-            + match_result["text"][match_result["end"] :]
-        )
-        print("\nHighlighted in text:")
-        print(highlighted)
-
-        if match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
-            console.print("[success bold]✅ Accepted[/success bold]")
             new_text_start = match_result["end"]
-            new_text = full_ja_text[new_text_start:].strip()
+            # new_text = full_ja_text[new_text_start:].strip()
+            new_text = full_ja_text.strip()
             # (old one-line message removed — replaced by the detailed logs above)
         else:
+            score_val = match_result['score'] if match_result else 0.0
             console.print("[error]❌ Below threshold[/error]")
             console.print(
-                f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}).[/warning]"
+                f"[warning]Fuzzy match too weak or No Match (score={score_val:.1f}).[/warning]"
             )
             # console.print(
             #     f"[warning]Translating ONLY the new chunk instead of full context.[/warning]"
@@ -222,8 +259,8 @@ def blocking_process_audio(
                 "Curr",
             )
 
-        last_sentence_pos = match_result["start"] if match_result["score"] >= MATCH_SCORE_CUTOFF else -1
-        last_sentence_clean = match_result["match"].strip() if match_result["score"] >= MATCH_SCORE_CUTOFF else None
+        last_sentence_pos = match_result["start"] if (match_result and match_result["score"] >= MATCH_SCORE_CUTOFF) else -1
+        last_sentence_clean = match_result["match"].strip() if (match_result and match_result["score"] >= MATCH_SCORE_CUTOFF) else None
         old_sents = []  # no longer needed for translation
 
         if ja_text:
@@ -327,6 +364,10 @@ def blocking_process_audio(
     if len(subdirs) > N_SEGMENT_RESULTS:
         for old in subdirs[:-N_SEGMENT_RESULTS]:
             shutil.rmtree(old, ignore_errors=True)
+
+    context_uuid = context_buffer.get_context_uuid()
+    context_duration = context_buffer.get_total_duration()
+
     context_buffer.add_audio_segment(audio_np, {
         "uuid": header["uuid"],
         "forced": header["forced"],
@@ -388,13 +429,16 @@ def blocking_process_audio(
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
     return {
         "uuid": uuid_,
+        "duration": header.get("duration_sec"),
+        "context_uuid": context_uuid,
+        "context_duration": context_duration,
         "transcription_ja": ja_text,
         "translation_en": en_text,
         "success": bool(ja_text or en_text),
         "transcribed_duration_sec": full_metadata["transcribed_duration_sec"],
         "transcribed_duration_pctg": full_metadata["transcribed_duration_pctg"],
         "coverage_label": full_metadata["coverage_label"],
-        "phrase_segments": full_phrase_segments,
+        # "phrase_segments": full_phrase_segments,
     }
 
 

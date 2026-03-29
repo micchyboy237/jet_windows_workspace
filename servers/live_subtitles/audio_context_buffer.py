@@ -119,7 +119,7 @@ class AudioContextBuffer:
                 if sent:
                     sent = sent.strip()
                     if sent:
-                        return sent, meta.get("uuid"), idx
+                        return sent, meta["uuid"], idx
 
         return None, None, None
 
@@ -133,6 +133,18 @@ class AudioContextBuffer:
             return []
 
         return [meta for _, meta in self.segments]
+    
+    def get_context_uuid(self) -> Optional[str]:
+        """Return the UUID of the first (oldest) segment in the buffer.
+
+        Returns:
+            Optional[str]: UUID if buffer is not empty, otherwise None.
+        """
+        if not self.segments:
+            return None
+
+        _, meta = self.segments[0]
+        return meta["uuid"]
 
     def reset(self) -> None:
         """Clear all buffered audio and metadata, reset total ample count to 0."""

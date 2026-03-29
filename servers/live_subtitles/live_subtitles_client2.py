@@ -1,5 +1,4 @@
 # ====================== CLIENT ======================
-# client.py
 import asyncio
 import json
 import os
@@ -42,8 +41,19 @@ async def subtitle_receiver(websocket):
     try:
         async for message in websocket:
             data = json.loads(message)
-            if data.get("type") == "segment":
+            if data.get("type") == "segments_update":
+                segments = data.get("segments", [])
+                print(f"\n🔄 Received {len(segments)} segment update(s):")
+                for seg in segments:
+                    uid = seg["uuid"][:8]
+                    start = seg.get("start", 0)
+                    end = seg.get("end", 0)
+                    text = seg["text"]
+                    print(f"   [{start:6.2f} → {end:6.2f}] {uid} → {text}")
+            elif data.get("type") == "segment":  # backward compat
                 print(f"[{data['start']:6.2f} → {data['end']:6.2f}] {data['text']}")
+            else:
+                print("Unknown payload:", data)
     except Exception as e:
         print(f"Receiver closed: {e}")
 

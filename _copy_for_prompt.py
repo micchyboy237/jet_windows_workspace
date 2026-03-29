@@ -44,6 +44,7 @@ exclude_files = [
     # "**/*.sh"
     # "**/__init__.py",
     # "*.md",
+    "**/context.py",
 ]
 include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Examples\.vscode\launch.json",
@@ -55,33 +56,24 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\README.md",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\processing",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_handlers.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\ws_server_subtitles_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\start_server.ps1",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ReazonSpeech\pkg\espnet-asr\src",
+    # r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server3.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_client2.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\fireredvad_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speech_segment_tracker.py",
+    # r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\stream_vad_postprocessor.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\constants.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\stream_vad.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_llm.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\utils.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\context",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
     r"",
 ]
 
@@ -99,12 +91,75 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update live_subtitles_server2 with fuzzy result logs similar to sentence_matcher_ja main result print logs.
-Show unified diff.
+Analyze why the the hell is fuzzy score 100.0 for some non similar comparisons?
+Please fix.
+
+--- Previous Sentences Matches ---
+Last Sentence 1: 戦争を企てるオスタニ。
+New Text Match: 睨み合う2つの国、
+Similarity: 0.0%
+Valid: ✅
+Fuzzy Score: 100.0
+Slice: [24:33]
+Length: 9
+
+Highlighted in text:
+世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリックスを発動。
+
+---
+
+Last Sentence 2: 戦争を企てるオスタニ。
+New Text Match: 東のオスタニア、
+Similarity: 42.1%
+Valid: ✅
+Fuzzy Score: 100.0
+Slice: [33:41]
+Length: 8
+
+Highlighted in text:
+世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリックスを発動。
+
+---
+
+Last Sentence 3: 戦争を企てるオスタニ。
+New Text Match: 西のウェスタリス、
+Similarity: 20.0%
+Valid: ✅
+Fuzzy Score: 100.0
+Slice: [41:50]
+Length: 9
+
+Highlighted in text:
+世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリックスを発動。
+
+---
+
+Last Sentence 4:  戦争を企てるオスタニ。
+New Text Match: 、戦争を企てるオスタニ
+Similarity: 90.9%
+Valid: ✅
+Fuzzy Score: 90.9
+Slice: [49:60]
+Length: 11
+
+Highlighted in text:
+世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリックスを発動。
+
+---
+
+--- Final Sentence Match ---
+Final Sentence:  戦争を企てるオスタニ。
+New Text Match: 、戦争を企てるオスタニ
+Similarity: 90.9%
+Valid: ✅
+Fuzzy Score: 90.9
+Slice: [49:60]
+Length: 11
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
 Provide step by step analysis first.
+Show unified diff for updated files, while show python code block for new files.
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """

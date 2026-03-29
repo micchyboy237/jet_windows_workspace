@@ -84,7 +84,8 @@ class SubtitleServer:
                         self.tracker.context_buffer.append(completed)
 
                         print(f"📤 Sent: [{segment_dict['start']:.2f} → {segment_dict['end']:.2f}] "
-                                f"({len(text)} chars) {text[:100]}{'...' if len(text) > 100 else ''}")
+                                f"({len(text)} chars, ASR dur ~{len(completed.audio)/16000:.1f}s) "
+                                f"{text[:110]}{'...' if len(text) > 110 else ''}")
 
         except Exception as e:
             print(f"Handler error: {e}")

@@ -3,21 +3,21 @@ from datetime import datetime
 
 import numpy as np
 from fireredvad.core.stream_vad_postprocessor import StreamVadFrameResult
-from jet.audio.audio_waveform.hybrid_stream_vad_postprocessor import (
+from .hybrid_stream_vad_postprocessor import (
     HybridStreamVadPostprocessor,
 )
-from jet.audio.audio_waveform.speech_events import (
+from .speech_events import (
     SpeechSegmentEndEvent,
     SpeechSegmentStartEvent,
 )
-from jet.audio.audio_waveform.speech_handlers.base import SpeechSegmentHandler
-from jet.audio.audio_waveform.speech_types import SpeechFrame, VadStateLabel
-from jet.audio.helpers.energy import (
+from .handlers.base import SpeechSegmentHandler
+from .speech_types import SpeechFrame, VadStateLabel
+from energy import (
     compute_rms,
     has_sound,
     rms_to_loudness_label,
+    SILENCE_MAX_THRESHOLD,
 )
-from jet.audio.helpers.energy_base import SILENCE_MAX_THRESHOLD
 from rich.console import Console
 
 console = Console()

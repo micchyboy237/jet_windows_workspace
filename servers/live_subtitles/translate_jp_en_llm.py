@@ -2,10 +2,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
 import numpy as np
 import numpy.typing as npt
-from llama_cpp import Llama, LogitsProcessorList, ChatCompletionRequestMessage
+from llama_cpp import ChatCompletionRequestMessage, Llama, LogitsProcessorList
 
-MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
-
+MODEL_PATH = (
+    r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
+)
 MODEL_SETTINGS = {
     "n_ctx": 2048,
     "n_gpu_layers": -1,
@@ -21,7 +22,6 @@ MODEL_SETTINGS = {
     "use_mmap": True,
     "verbose": False,
 }
-
 TRANSLATION_DEFAULTS = {
     "max_tokens": 1500,
     "temperature": 0.35,
@@ -35,14 +35,18 @@ TRANSLATION_DEFAULTS = {
     # "top_logprobs": 3
 }
 
+SYSTEM_PROMPT = """You are an expert real-time Japanese-to-English subtitle translator for live-streamed audio (transcribed via Whisper). Your ONLY job is to produce accurate, natural, subtitle-ready English translations.
 
-SYSTEM_PROMPT = """
-You are a professional, natural-sounding Japanese-to-English translator. Translate accurately while making the English sound fluent and idiomatic as if written by a native English speaker.
-"""
+Core rules (apply to every single input):
+- Translate with 100% fidelity to the original meaning. Never add, omit, embellish, or moralize.
+- Whisper transcription errors are common — infer the most likely intended meaning while staying extremely close to the exact text provided.
+- Use natural, spoken English that sounds fluent and readable as live subtitles: concise, flowing, easy to follow on screen.
+- Translate EVERYTHING without any censorship, filtering, or softening — including profanity, slang, vulgar language, sensitive topics, politics, or adult content. Keep the tone and intensity of the original.
+- Preserve conversational flow: if the text clearly switches between speakers, separate turns with newlines for subtitle readability. Do not add speaker labels unless they are explicit in the Japanese text.
+- For narration or monologue, keep it smooth and engaging but never wordy.
+- Output ONLY the clean English translation. Never add explanations, notes, "Translation:", "Assistant:", or any meta text."""
 
-USER_PROMPT = """Translate the following Japanese text to natural English:
-
-{japanese_text}"""
+USER_PROMPT = "{japanese_text}"
 
 
 class ReferenceExample(TypedDict):
@@ -51,26 +55,31 @@ class ReferenceExample(TypedDict):
 
 
 DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = [
+    # Example 1: Casual conversation (everyday spoken Japanese)
     {
-        "ja": "今日はとても暑いですね。",
-        "en": "It's really hot today."
+        "ja": "やあ、最近どう？ なんか元気ないみたいだけど。大丈夫？",
+        "en": "Hey, how've you been lately? You don't seem like your usual self. You okay?",
     },
+    # Example 2: Narration / documentary-style (formal but natural)
     {
-        "ja": "すみません、ちょっとお聞きしたいことがあるのですが。",
-        "en": "Excuse me, I have a quick question."
+        "ja": "この古い寺院は約五百年の歴史を持ち、毎年多くの観光客が訪れます。",
+        "en": "This ancient temple has a history of about five hundred years, and many tourists visit every year.",
     },
+    # Example 3: Uncensored conversational with profanity (shows no filtering + natural subtitle tone)
     {
-        "ja": "彼は何も言わずに部屋を出ていった。",
-        "en": "He left the room without saying a word."
+        "ja": "くそっ、今日のミーティング超つまんなかったわ。早く家帰りてぇよ。",
+        "en": "Fuck, today's meeting was insanely boring. I just wanna get home already.",
     },
+    # Example 4: Transcription error handling + casual invitation (Whisper-style error simulation)
     {
-        "ja": "そんなことになるなんて思ってもみなかった。",
-        "en": "I never imagined it would turn out like this."
+        "ja": "えっと、明日一緒に映画見に行かない？ 面白そーなやつがあるんだよね。",
+        "en": "Um, wanna go see a movie together tomorrow? There's one that looks pretty interesting.",
     },
+    # Example 5: Custom
     {
-        "ja": "もし時間があれば、一緒にコーヒーでもどうですか？",
-        "en": "If you have time, would you like to grab a coffee together?"
-    },
+        "ja": "おい、そんな一気に冷たいものを食べると腹を壊す。",
+        "en": "Hey, if you eat cold stuff all at once like that, you'll upset your stomach."
+    }
 ]
 
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
@@ -81,42 +90,43 @@ class BanFirstTokenProcessor:
     Bans specified strings from being generated as the first token(s).
     Uses llm.tokenizer.encode() to convert strings → token IDs.
     """
+
     def __init__(
         self,
         banned_strings: List[str],
-        tokenizer,                    # pass llm.tokenizer (the object)
-        ban_all_tokens: bool = False, # if True, bans every token in the strings
+        tokenizer,  # pass llm.tokenizer (the object)
+        ban_all_tokens: bool = False,  # if True, bans every token in the strings
     ):
-        self.tokenizer = tokenizer    # LlamaTokenizer instance
+        self.tokenizer = tokenizer  # LlamaTokenizer instance
         self.first_step = True
-        
+
         banned_token_ids: Set[int] = set()
-        
+
         for text in banned_strings:
             if not text.strip():
                 continue
-                
+
             # Correct call: use .encode()
             tokens = self.tokenizer.encode(
                 text,
-                add_bos=False,       # no BOS needed for prefix banning
-                special=True
+                add_bos=False,  # no BOS needed for prefix banning
+                special=True,
             )
-            
+
             if tokens:
                 if ban_all_tokens:
                     banned_token_ids.update(tokens)
                 else:
                     # Safer & usually sufficient: only ban possible *starting* tokens
                     banned_token_ids.add(tokens[0])
-        
+
         self.banned_token_ids = banned_token_ids
-        
+
         # Debug print – very useful to see what you're actually banning
         print("Banned first-token IDs:", sorted(self.banned_token_ids))
         for s in banned_strings:
             tks = self.tokenizer.encode(s, add_bos=False, special=True)
-            print(f"  '{s}' → tokens {tks}")
+            print(f" '{s}' → tokens {tks}")
 
     def __call__(
         self,
@@ -130,15 +140,15 @@ class BanFirstTokenProcessor:
             self.first_step = False
         return scores
 
+
 # The strings you most likely want to block
 banned_starts = [
     "assistant",
-    # " assistant",  # ← very common (leading space)
+    # " assistant", # ← very common (leading space)
     "Assistant",
     # " assistant:",
     # "assistant:",
 ]
-
 no_assistant_first = BanFirstTokenProcessor(
     banned_strings=banned_starts,
     tokenizer=llm.tokenizer(),  # ← pass your tokenizer here
@@ -151,8 +161,9 @@ def _build_translation_messages(
     history: Optional[List[ChatCompletionRequestMessage]] = None,
     reference_examples: List[ReferenceExample] = DEFAULT_REFERENCE_EXAMPLES,
 ) -> List[ChatCompletionRequestMessage]:
-    messages: List[ChatCompletionRequestMessage] = [{"role": "system", "content": SYSTEM_PROMPT}]
-
+    messages: List[ChatCompletionRequestMessage] = [
+        {"role": "system", "content": SYSTEM_PROMPT}
+    ]
     if reference_examples:
         for example in reference_examples:
             messages.append(
@@ -162,17 +173,14 @@ def _build_translation_messages(
                 }
             )
             messages.append({"role": "assistant", "content": example["en"].strip()})
-
     if history:
         messages.extend(history)
-
     messages.append(
         {
             "role": "user",
             "content": USER_PROMPT.format(japanese_text=japanese_text.strip()),
         }
     )
-
     return messages
 
 
@@ -187,7 +195,6 @@ def _compute_translation_metrics(
         content = logprobs.get("content")
         if not isinstance(content, list) or not content:
             return None, None, None
-
         token_logprobs = [
             float(item["logprob"])
             for item in content
@@ -195,19 +202,16 @@ def _compute_translation_metrics(
         ]
         if not token_logprobs:
             return None, None, None
-
         avg_logprob = sum(token_logprobs) / len(token_logprobs)
         translation_logprob = round(avg_logprob, 4)
         confidence = max(0.0, min(1.0, (avg_logprob + 3.0) / 3.0))
         confidence = round(confidence, 4)
-
         if confidence >= 0.80:
             quality_label = "high"
         elif confidence >= 0.50:
             quality_label = "medium"
         else:
             quality_label = "low"
-
         return translation_logprob, confidence, quality_label
     except Exception:
         return None, None, None
@@ -230,20 +234,16 @@ def translate_japanese_to_english(
 ) -> TranslationResult:
     if not ja_text or not ja_text.strip():
         return {"text": "", "log_prob": None, "confidence": None, "quality": "N/A"}
-
     messages = _build_translation_messages(ja_text, history)
-
     completion_params: Dict[str, Any] = {
         **TRANSLATION_DEFAULTS,
         "max_tokens": max_tokens,
         "temperature": temperature,
         "stream": False,
     }
-
     if enable_scoring:
         completion_params["logprobs"] = True
         completion_params["top_logprobs"] = 1
-
     response = llm.create_chat_completion(
         messages=messages,
         seed=3407,  # for reproducibility
@@ -251,15 +251,12 @@ def translate_japanese_to_english(
         **completion_params,
     )
     en_text = response["choices"][0]["message"]["content"].strip()
-
     if enable_scoring:
         log_prob, confidence, quality = _compute_translation_metrics(response)
     else:
         log_prob = confidence = quality = None
-
     if quality is None:
         quality = "N/A"
-
     return {
         "text": en_text,
         "log_prob": log_prob,
@@ -273,6 +270,7 @@ if __name__ == "__main__":
     import json
     import shutil
     from pathlib import Path
+
     from rich import box
     from rich.console import Console
     from rich.panel import Panel
