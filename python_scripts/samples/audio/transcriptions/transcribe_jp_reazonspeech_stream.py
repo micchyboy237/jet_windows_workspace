@@ -3,6 +3,7 @@ Streaming transcription with clean Rich output + fixed final transcript panel
 """
 import time
 import sys
+import argparse
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
@@ -19,13 +20,23 @@ from reazonspeech.espnet.asr.interface import TranscribeConfig
 # ------------------------------------------------------------------
 console = Console(highlight=False, soft_wrap=True)
 
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
+DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
+
+parser = argparse.ArgumentParser(description="Streaming transcription with Rich output")
+parser.add_argument(
+    "audio_path",
+    nargs="?",
+    default=DEFAULT_AUDIO_PATH,
+    help=f"Path to audio file (default: {DEFAULT_AUDIO_PATH})"
+)
+args = parser.parse_args()
+audio_path = args.audio_path
 
 # ------------------------------------------------------------------
 # Starting header - using fit is good
 console.print(
     Panel.fit(
-        "🎙️ Starting Streaming Transcription",
+        f"🎙️ Starting Streaming Transcription\n[dim]Audio: {audio_path}[/dim]",
         style="bold cyan",
         box=box.ROUNDED,      # Explicit rounded box for consistency
     )
