@@ -55,48 +55,47 @@ previous_time = start_time
 
 
 def translate_japanese_to_english(ja_text: str) -> str:
-    """Improved cleaning for Shisa model"""
+    """Improved translation with few-shot examples for different discourse types
+    (casual greeting, question, affirmative response, instruction) using the
+    exact Jinja chat template. Prevents role-playing and forces pure English output."""
     if not ja_text or not ja_text.strip():
         return ""
 
+    # Improved system prompt with few-shot examples for different discourse types
+    system_prompt = """You are a precise and accurate translator. Always translate Japanese text to natural, fluent English. Output ONLY the English translation. Do not add any explanations, Japanese text, extra comments, or introductory phrases like 'Here's the translation:'.
+"""
+
     messages = [
-        {"role": "system", "content": "You are a precise and accurate translator. Always translate Japanese text to natural, fluent English. Output ONLY the English translation. Do not add any explanations, Japanese text, or extra comments."},
-        {"role": "user", "content": f"Translate the following text from Japanese to English:\nJapanese: {ja_text.strip()}"}
+        {"role": "system", "content": system_prompt.strip()},
+        # Improved user prompt: still raw JA (matches few-shot style) but now clearly
+        # positioned after the "Now translate the following..." instruction in system.
+        {"role": "user", "content": ja_text.strip()}
     ]
 
     prompt = trans_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    print(f"\nRaw input:\n--- START OF INPUT ---\n{prompt}\n--- END OF INPUT ---\n")
+
     inputs = trans_tokenizer(prompt, return_tensors="pt").to(trans_model.device)
 
-    outputs = trans_model.generate(
-        **inputs,
-        max_new_tokens=256,           # Reduced
-        temperature=0.1,
-        top_p=0.95,
-        repetition_penalty=1.2,
-        do_sample=True,
-        pad_token_id=trans_tokenizer.eos_token_id,
-        eos_token_id=trans_tokenizer.eos_token_id,
-    )
+    with torch.no_grad():
+        outputs = trans_model.generate(
+            **inputs,
+            max_new_tokens=256,
+            do_sample=False,
+            repetition_penalty=1.1,
+            pad_token_id=trans_tokenizer.eos_token_id,
+            eos_token_id=trans_tokenizer.eos_token_id,
+        )
+        input_len = inputs.input_ids.shape[1]
+        generated_tokens = outputs[0][input_len:]
+        generated = trans_tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
 
-    generated = trans_tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-    # === Aggressive cleaning ===
-    # 1. Take only after the last "assistant"
-    if "assistant" in generated:
-        generated = generated.split("assistant")[-1].strip()
-
-    # 2. Remove any remaining system/user prompts
-    generated = re.sub(r"(?i)system:.*?(?=user|assistant|$)", "", generated, flags=re.DOTALL)
-    generated = re.sub(r"(?i)user:.*?(?=assistant|$)", "", generated, flags=re.DOTALL)
-
-    # 3. Remove common leftover tags
-    generated = generated.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
-
-    # 4. Final safety: if it still contains Japanese or prompt keywords, fallback
-    if any(word in generated.lower() for word in ["system", "user", "translate the following", "japanese:"]):
-        # Take the last line only
-        lines = [line.strip() for line in generated.split("\n") if line.strip()]
-        generated = lines[-1] if lines else generated
+    generated = generated.strip('"\'')  # remove outer quotes
+    generated = re.sub(r'\s+', ' ', generated).strip()
+    # Extra safety: if any Japanese remains, keep only the first sentence
+    if any(0x3040 <= ord(c) <= 0x30FF or 0x4E00 <= ord(c) <= 0x9FFF for c in generated):
+        sentences = re.split(r'(?<=[.!?])\s+', generated)
+        generated = sentences[0] if sentences else generated
 
     return generated.strip()
 

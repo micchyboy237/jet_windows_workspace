@@ -1,3 +1,4 @@
+import argparse
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
@@ -11,11 +12,22 @@ model = AutoModelForCausalLM.from_pretrained(
     trust_remote_code=True,
 )
 
-ja_text = """
-こんにちは、今日はお元気ですか？ 
+# Default Japanese text
+default_ja_text = """こんにちは、今日はお元気ですか？ 
 私は最近、仕事がとても忙しくて、週末はゆっくり本を読んだり、散歩したりしてリラックスしています。
-あなたはどう過ごしていますか？
-"""
+あなたはどう過ごしていますか？"""
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Japanese to English translator using shisa-v2.1c model.")
+parser.add_argument(
+    "ja_text",
+    nargs="?",
+    default=default_ja_text,
+    help="Japanese text to translate (default: an example greeting)"
+)
+args = parser.parse_args()
+
+ja_text = args.ja_text
 
 # Strong system prompt for reliable translation
 messages = [

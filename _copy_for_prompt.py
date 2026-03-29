@@ -57,8 +57,9 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
 
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_jp_reazonspeech_stream.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\translators\translate_jp_en_shisa_2.1c.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_jp_reazonspeech_stream.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_jp_reazonspeech_en_stream.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\translators\translate_jp_en_shisa_2.1c.py",
 
     r"",
 ]
@@ -77,10 +78,40 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze how to translate japanese text in translate_jp_en_shisa_2
-Then update transcribe_jp_reazonspeech_stream with english translation for each generated segment.
-Improve logging and progress tracking.
-Show full updated transcribe_jp_reazonspeech_stream.
+Evaluate results then summarize all strengths, weaknesses, recommendations before fixing.
+See jinja chat template as well to see if the we're applying the inputs properly.
+Improve system prompt with some few shot examples for different types of discourse.
+Improve user prompt as well with proper template as well.
+
+Current results
+[  0.24 →   1.06]  (+1.59s)
+   JA: あっおかえり。
+   EN: Oh, welcome back!
+[  2.93 →   4.18]  (+4.21s)
+   JA: 学校どうだった?
+   EN: How was school?
+[  4.43 →   5.53]  (+0.17s)
+   JA: 楽しかった?
+   EN: That was fun! I hope you enjoyed it.
+[  6.30 →   8.90]  (+0.29s)
+   JA: うん楽しかったよ。
+   EN: ああ、楽しかったよ。
+[  9.67 →  10.30]  (+0.23s)
+   JA: よかったわね。
+   EN: That's great! I'm glad to hear it.
+[ 11.94 →  16.08]  (+3.25s)
+   JA: 今日もこのあと仕事だから鍋のものあっためて食べてね。
+   EN: I'm working again today, so eat up the stewed ingredients after this.
+
+
+https://huggingface.co/shisa-ai/shisa-v2.1c-lfm2-350m-sft3-tlonly/raw/main/chat_template.jinja
+{{- bos_token -}}{%- set system_prompt = "" -%}{%- set ns = namespace(system_prompt="") -%}{%- if messages[0]["role"] == "system" -%} {%- set ns.system_prompt = messages[0]["content"] -%} {%- set messages = messages[1:] -%}{%- endif -%}{%- if tools -%} {%- set ns.system_prompt = ns.system_prompt + ("
+" if ns.system_prompt else "") + "List of tools: <|tool_list_start|>[" -%} {%- for tool in tools -%} {%- if tool is not string -%} {%- set tool = tool | tojson -%} {%- endif -%} {%- set ns.system_prompt = ns.system_prompt + tool -%} {%- if not loop.last -%} {%- set ns.system_prompt = ns.system_prompt + ", " -%} {%- endif -%} {%- endfor -%} {%- set ns.system_prompt = ns.system_prompt + "]<|tool_list_end|>" -%}{%- endif -%}{%- if ns.system_prompt -%} {{- "<|im_start|>system
+" + ns.system_prompt + "<|im_end|>
+" -}}{%- endif -%}{%- for message in messages -%} {{- "<|im_start|>" + message["role"] + "
+" -}} {%- set content = message["content"] -%} {%- if content is not string -%} {%- set content = content | tojson -%} {%- endif -%} {%- if message["role"] == "tool" -%} {%- set content = "<|tool_response_start|>" + content + "<|tool_response_end|>" -%} {%- endif -%} {{- content + "<|im_end|>
+" -}}{%- endfor -%}{%- if add_generation_prompt -%} {{- "<|im_start|>assistant
+" -}}{%- endif -%}
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
