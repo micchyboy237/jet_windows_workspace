@@ -3,14 +3,6 @@ from typing import Deque, List, Optional, TypedDict
 import numpy as np
 
 
-class WordSegment(TypedDict):
-    index: int
-    start_ms: Optional[int]
-    end_ms: Optional[int]
-    duration_ms: Optional[int]
-    word: Optional[str]
-
-
 class SegmentMeta(TypedDict):
     uuid: str
     forced: bool

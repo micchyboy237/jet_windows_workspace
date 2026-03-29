@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import List, Optional, TypedDict
+from typing import List, TypedDict
 
 from rapidfuzz import fuzz, process
 
@@ -21,7 +21,7 @@ def fuzzy_shortest_best_match(
     texts: str | List[str],
     score_cutoff: int = 75,
     max_extra_chars: int = 20,
-) -> FuzzyMatchResult:
+) -> FuzzyMatchResult | None:
     """
     Find the shortest contiguous substring with the highest score across one or more texts.
     When multiple texts are provided, only the best result (highest score) is returned.
@@ -37,7 +37,7 @@ def fuzzy_shortest_best_match(
         FuzzyMatchResult containing match, score, start, end, and the original text.
     """
     if not query:
-        return {"match": "", "score": 0.0, "start": -1, "end": -1, "text": ""}
+        return None
 
     # Normalize input to list
     if isinstance(texts, str):
@@ -46,9 +46,9 @@ def fuzzy_shortest_best_match(
         text_list = [t for t in texts if t]  # remove empty strings
 
     if not text_list:
-        return {"match": "", "score": 0.0, "start": -1, "end": -1, "text": ""}
+        return None
 
-    best_result: Optional[FuzzyMatchResult] = None
+    best_result: FuzzyMatchResult | None = None
     best_score: float = -1.0
 
     for text in text_list:
@@ -102,7 +102,7 @@ def fuzzy_shortest_best_match(
             }
 
     if best_result is None:
-        return {"match": "", "score": 0.0, "start": -1, "end": -1, "text": ""}
+        return None
 
     return best_result
 
