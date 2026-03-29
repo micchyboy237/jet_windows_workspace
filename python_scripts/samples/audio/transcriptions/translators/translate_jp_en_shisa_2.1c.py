@@ -11,6 +11,12 @@ model = AutoModelForCausalLM.from_pretrained(
     trust_remote_code=True,
 )
 
+ja_text = """
+こんにちは、今日はお元気ですか？ 
+私は最近、仕事がとても忙しくて、週末はゆっくり本を読んだり、散歩したりしてリラックスしています。
+あなたはどう過ごしていますか？
+"""
+
 # Strong system prompt for reliable translation
 messages = [
     {
@@ -19,10 +25,7 @@ messages = [
     },
     {
         "role": "user",
-        "content": "Translate the following text from Japanese to English:\n"
-                   "Japanese: こんにちは、今日はお元気ですか？ "
-                   "私は最近、仕事がとても忙しくて、週末はゆっくり本を読んだり、散歩したりしてリラックスしています。"
-                   "あなたはどう過ごしていますか？"
+        "content": f"Translate the following text from Japanese to English:\nJapanese: {ja_text.strip()}"
     }
 ]
 
