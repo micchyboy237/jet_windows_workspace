@@ -365,7 +365,7 @@ def blocking_process_audio(
         for old in subdirs[:-N_SEGMENT_RESULTS]:
             shutil.rmtree(old, ignore_errors=True)
 
-    context_uuid = context_buffer.get_context_uuid()
+    context_uuid = context_buffer.get_context_uuid() or uuid_
     context_duration = context_buffer.get_total_duration()
 
     context_buffer.add_audio_segment(audio_np, {
