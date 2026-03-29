@@ -65,6 +65,43 @@ model = AutoModel(
 
 SYMBOL_PATTERN = re.compile(rf"[{SYMBOL_RANGE}]+")
 
+MAX_WORD_DURATION_SEC = 1.0
+MIN_WORD_DURATION_SEC = 0.02
+PUNCTUATION_SET = set("。、！？.,!?")
+
+def _postprocess_word_timing(
+    word: Optional[str],
+    start_sec: Optional[float],
+    end_sec: Optional[float],
+    duration_sec: Optional[float],
+) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """
+    Normalize word-level timestamps from SenseVoiceSmall.
+
+    Fixes:
+    - punctuation inheriting silence
+    - overly long durations from chunk alignment
+    - near-zero durations
+    """
+
+    # --- punctuation: assign minimal duration ---
+    if word and word in PUNCTUATION_SET:
+        duration_sec = MIN_WORD_DURATION_SEC
+        if start_sec is not None:
+            end_sec = start_sec + duration_sec
+
+    # --- clamp durations ---
+    if duration_sec is not None:
+        if duration_sec > MAX_WORD_DURATION_SEC:
+            duration_sec = MAX_WORD_DURATION_SEC
+            if start_sec is not None:
+                end_sec = start_sec + duration_sec
+        elif duration_sec < MIN_WORD_DURATION_SEC:
+            duration_sec = MIN_WORD_DURATION_SEC
+            if start_sec is not None:
+                end_sec = start_sec + duration_sec
+
+    return start_sec, end_sec, duration_sec
 
 def _normalize_phrase(text: str) -> str:
     """
@@ -260,13 +297,24 @@ def transcribe_japanese_llm_from_file(
             if start_sec is not None and end_sec is not None:
                 duration_sec = end_sec - start_sec
 
+        # --- apply postprocessing normalization ---
+        word = words[idx] if idx < len(words) else None
+        start_sec, end_sec, duration_sec = _postprocess_word_timing(
+            word,
+            start_sec,
+            end_sec,
+            duration_sec,
+        )
+
         segments.append(
             {
                 "index": idx,
                 "start_sec": start_sec,
                 "end_sec": end_sec,
-                "duration_sec": round(duration_sec, 3),
-                "word": words[idx] if idx < len(words) else None,
+                "duration_sec": round(duration_sec, 3)
+                if duration_sec is not None
+                else None,
+                "word": word,
             }
         )
 

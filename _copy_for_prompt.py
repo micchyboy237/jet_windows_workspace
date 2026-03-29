@@ -68,12 +68,13 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\stream_vad.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
     r"",
 ]
 
@@ -91,70 +92,37 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze why the the hell is fuzzy score 100.0 for some non similar comparisons?
-Please fix.
+Check why word segments seem to have wrong long durations on some.
+Browse if this is related to FunAudioLLM/SenseVoiceSmall word timestamps logic.
 
---- Previous Sentences Matches ---
-Last Sentence 1: 戦争を企てるオスタニ。
-New Text Match: 睨み合う2つの国、
-Similarity: 0.0%
-Valid: ✅
-Fuzzy Score: 100.0
-Slice: [24:33]
-Length: 9
-
-Highlighted in text:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリックスを発動。
-
----
-
-Last Sentence 2: 戦争を企てるオスタニ。
-New Text Match: 東のオスタニア、
-Similarity: 42.1%
-Valid: ✅
-Fuzzy Score: 100.0
-Slice: [33:41]
-Length: 8
-
-Highlighted in text:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリックスを発動。
-
----
-
-Last Sentence 3: 戦争を企てるオスタニ。
-New Text Match: 西のウェスタリス、
-Similarity: 20.0%
-Valid: ✅
-Fuzzy Score: 100.0
-Slice: [41:50]
-Length: 9
-
-Highlighted in text:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリックスを発動。
-
----
-
-Last Sentence 4:  戦争を企てるオスタニ。
-New Text Match: 、戦争を企てるオスタニ
-Similarity: 90.9%
-Valid: ✅
-Fuzzy Score: 90.9
-Slice: [49:60]
-Length: 11
-
-Highlighted in text:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリックスを発動。
-
----
-
---- Final Sentence Match ---
-Final Sentence:  戦争を企てるオスタニ。
-New Text Match: 、戦争を企てるオスタニ
-Similarity: 90.9%
-Valid: ✅
-Fuzzy Score: 90.9
-Slice: [49:60]
-Length: 11
+{
+  "level": "word",
+  "count": 3,
+  "text": "だら。",
+  "segments": [
+    {
+      "index": 0,
+      "start_sec": 0.0,
+      "end_sec": 3.27,
+      "duration_sec": 3.27,
+      "word": "だ"
+    },
+    {
+      "index": 1,
+      "start_sec": 3.27,
+      "end_sec": 3.63,
+      "duration_sec": 0.36,
+      "word": "ら"
+    },
+    {
+      "index": 2,
+      "start_sec": 3.63,
+      "end_sec": 6.45,
+      "duration_sec": 2.82,
+      "word": "。"
+    }
+  ]
+}
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
