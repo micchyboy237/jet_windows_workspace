@@ -55,26 +55,11 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\README.md",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
+
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ReazonSpeech\pkg\espnet-asr\src",
-    # r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server3.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_client2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\fireredvad_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speech_segment_tracker.py",
-    # r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\stream_vad_postprocessor.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\constants.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\stream_vad.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
-    r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_jp_reazonspeech_stream.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\translators\translate_jp_en_shisa_2.1c.py",
+
     r"",
 ]
 
@@ -92,37 +77,10 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Check why word segments seem to have wrong long durations on some.
-Browse if this is related to FunAudioLLM/SenseVoiceSmall word timestamps logic.
-
-{
-  "level": "word",
-  "count": 3,
-  "text": "だら。",
-  "segments": [
-    {
-      "index": 0,
-      "start_sec": 0.0,
-      "end_sec": 3.27,
-      "duration_sec": 3.27,
-      "word": "だ"
-    },
-    {
-      "index": 1,
-      "start_sec": 3.27,
-      "end_sec": 3.63,
-      "duration_sec": 0.36,
-      "word": "ら"
-    },
-    {
-      "index": 2,
-      "start_sec": 3.63,
-      "end_sec": 6.45,
-      "duration_sec": 2.82,
-      "word": "。"
-    }
-  ]
-}
+Analyze how to translate japanese text in translate_jp_en_shisa_2
+Then update transcribe_jp_reazonspeech_stream with english translation for each generated segment.
+Improve logging and progress tracking.
+Show full updated transcribe_jp_reazonspeech_stream.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
