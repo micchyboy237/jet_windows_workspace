@@ -75,11 +75,6 @@ DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = [
         "ja": "えっと、明日一緒に映画見に行かない？ 面白そーなやつがあるんだよね。",
         "en": "Um, wanna go see a movie together tomorrow? There's one that looks pretty interesting.",
     },
-    # Example 5: Custom
-    {
-        "ja": "おい、そんな一気に冷たいものを食べると腹を壊す。",
-        "en": "Hey, if you eat cold stuff all at once like that, you'll upset your stomach."
-    }
 ]
 
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
@@ -156,31 +151,48 @@ no_assistant_first = BanFirstTokenProcessor(
 )
 
 
+def _build_system_prompt_with_examples(
+    base_prompt: str,
+    reference_examples: List[ReferenceExample],
+) -> str:
+    if not reference_examples:
+        return base_prompt
+
+    examples_block = "\n\nFew-shot examples (strictly follow style and tone):\n"
+
+    for ex in reference_examples:
+        ja = ex["ja"].strip()
+        en = ex["en"].strip()
+
+        examples_block += f"\nJapanese:\n{ja}\nEnglish:\n{en}\n"
+
+    return base_prompt.rstrip() + "\n" + examples_block.strip()
+
+
 def _build_translation_messages(
     japanese_text: str,
     history: Optional[List[ChatCompletionRequestMessage]] = None,
     reference_examples: List[ReferenceExample] = DEFAULT_REFERENCE_EXAMPLES,
 ) -> List[ChatCompletionRequestMessage]:
+    system_prompt = _build_system_prompt_with_examples(
+        SYSTEM_PROMPT,
+        reference_examples,
+    )
+
     messages: List[ChatCompletionRequestMessage] = [
-        {"role": "system", "content": SYSTEM_PROMPT}
+        {"role": "system", "content": system_prompt}
     ]
-    if reference_examples:
-        for example in reference_examples:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": USER_PROMPT.format(japanese_text=example["ja"].strip()),
-                }
-            )
-            messages.append({"role": "assistant", "content": example["en"].strip()})
+
     if history:
         messages.extend(history)
+
     messages.append(
         {
             "role": "user",
             "content": USER_PROMPT.format(japanese_text=japanese_text.strip()),
         }
     )
+
     return messages
 
 
