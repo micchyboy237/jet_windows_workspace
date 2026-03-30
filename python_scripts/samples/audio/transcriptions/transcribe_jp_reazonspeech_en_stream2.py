@@ -18,7 +18,7 @@ from reazonspeech.espnet.asr.transcribe import load_model, transcribe_stream
 from reazonspeech.espnet.asr.audio import audio_from_path
 from reazonspeech.espnet.asr.interface import TranscribeConfig
 
-from translators.translate_jp_en_shisa_llama import translate_japanese_to_english
+from translators.translate_jp_en_shisa_lfm import translate_japanese_to_english
 
 console = Console(highlight=False, soft_wrap=True)
 

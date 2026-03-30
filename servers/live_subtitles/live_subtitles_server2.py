@@ -24,8 +24,8 @@ from datetime import datetime
 import scipy.io.wavfile as wavfile
 import websockets
 from concurrent.futures import ThreadPoolExecutor
-from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
-# from transcribe_jp_reazonspeech import transcribe_japanese, TranscriptionResult
+# from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
+from transcribe_jp_reazonspeech import transcribe_japanese, TranscriptionResult
 from translate_jp_en_llm import translate_japanese_to_english, llm
 # from transcribe_jp_funasr_nano import transcribe_japanese, TranscriptionResult
 # from translate_jp_en_sarashin import translate_japanese_to_english
@@ -80,7 +80,7 @@ connected_clients = set()
 # SenseVoiceSmall + small LLM usually do well with 2–6 workers
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_worker")
 
-context_buffer = AudioContextBuffer(max_duration_sec=90.0, sample_rate=16000)
+context_buffer = AudioContextBuffer(max_duration_sec=30.0, sample_rate=16000)
 
 prev_vad_reason = None
 
@@ -110,12 +110,9 @@ def blocking_process_audio(
         console.print(f"[info]{prev_vad_reason.title()} detected - Reset context done[/info]")
     prev_vad_reason = header["vad_reason"]
 
-    context_audio_int16 = context_buffer.get_context_audio()
-    if context_audio_int16.size > 0:
-        full_audio_int16 = np.concatenate([context_audio_int16, audio_np])
-    else:
-        full_audio_int16 = audio_np
+    full_audio_int16 = context_buffer.get_prepared_audio_for_transcription(audio_np)
     full_audio_bytes = full_audio_int16.tobytes()
+
     search_audio(
         full_audio_bytes,
         audio_bytes,

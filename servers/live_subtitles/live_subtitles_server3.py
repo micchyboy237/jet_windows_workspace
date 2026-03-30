@@ -20,7 +20,11 @@ from fireredvad_utils import load_vad
 from speech_segment_tracker import SpeechSegmentTracker, AccumulatedSpeechSegment
 
 # ====================== REAZONSPEECH IMPORTS (now resolvable) ======================
-from reazonspeech.espnet.asr import load_model, transcribe, audio_from_numpy, TranscribeConfig
+# from reazonspeech.espnet.asr import load_model, transcribe, audio_from_numpy, TranscribeConfig
+from reazonspeech.k2.asr.interface import TranscribeConfig
+from reazonspeech.k2.asr.transcribe import transcribe
+from reazonspeech.k2.asr.audio import audio_from_numpy
+from reazonspeech.k2.asr.huggingface import load_model
 
 
 SAMPLE_RATE = 16000

@@ -40,7 +40,42 @@ class AudioContextBuffer:
         self.segments: Deque[tuple[np.ndarray[np.int16], SegmentMeta]] = deque()
         self.total_samples: int = 0
 
-    # ────────────────────────────────────────────────
+    def get_prepared_audio_for_transcription(
+        self,
+        current_audio_np: np.ndarray,
+        max_transcribe_sec: float = 30.0,
+    ) -> np.ndarray:
+        """
+        Return context + current audio, trimmed from the oldest part if needed.
+
+        Guarantees the audio passed to ReazonSpeech k2-asr never exceeds the 30 s hard limit.
+        Returns the *most recent* possible audio (exactly what the buffer will contain
+        after the subsequent add_audio_segment + prune).
+
+        Args:
+            current_audio_np: New segment (must be int16 PCM).
+            max_transcribe_sec: Hard limit (matches TOO_LONG_SECONDS in ReazonSpeech).
+
+        Returns:
+            np.ndarray[int16]: Audio ready for transcription (≤ max_transcribe_sec).
+        """
+        if current_audio_np.dtype != np.int16:
+            current_audio_np = current_audio_np.astype(np.int16, copy=True)
+
+        context_audio = self.get_context_audio()
+        if context_audio.size == 0:
+            return current_audio_np
+
+        full_audio = np.concatenate([context_audio, current_audio_np])
+
+        max_samples = int(max_transcribe_sec * self.sample_rate)
+        if len(full_audio) > max_samples:
+            excess_samples = len(full_audio) - max_samples
+            full_audio = full_audio[excess_samples:]
+
+        return full_audio
+
+
     def add_audio_segment(
         self,
         audio_np: np.ndarray,

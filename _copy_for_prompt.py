@@ -57,13 +57,14 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\requirements.txt",
 
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_jp_reazonspeech_stream.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_jp_reazonspeech_en_stream.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\translators\translate_jp_en_shisa_2.1c.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ReazonSpeech\pkg\k2-asr\src",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ReazonSpeech\pkg\k2-asr\src",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_reazonspeech.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server3.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_client2.py",
     r"",
 ]
 
@@ -81,7 +82,43 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Write the code for transcribe_jp_reazonspeech with same functions and types based on transcribe_jp_funasr so it can work on live_subtitles_server2.
+Analyze root cause then fix
+
+Traceback (most recent call last):
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\websockets\asyncio\server.py", line 376, in conn_handler
+    await self.handler(connection)
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py", line 484, in process_audio
+    response = await future
+               ^^^^^^^^^^^^
+  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py", line 264, in blocking_process_audio
+    trans_en = translate_japanese_to_english(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py", line 257, in translate_japanese_to_english
+    response = llm.create_chat_completion(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 2003, in create_chat_completion
+    return handler(
+           ^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama_chat_format.py", line 669, in chat_completion_handler
+    completion_or_chunks = llama.create_completion(
+                           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 1837, in create_completion
+    completion: Completion = next(completion_or_chunks)  # type: ignore
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 1322, in _create_completion
+    for token in self.generate(
+                 ^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 914, in generate
+    self.eval(tokens)
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py", line 648, in eval
+    self._ctx.decode(self._batch)
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\_internals.py", line 327, in decode
+    raise RuntimeError(f"llama_decode returned {return_code}")
+RuntimeError: llama_decode returned -1
+
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
