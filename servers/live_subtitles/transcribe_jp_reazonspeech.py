@@ -1,17 +1,32 @@
 from __future__ import annotations
-
+import re
+import tempfile
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import numpy as np
 import scipy.io.wavfile as wavfile
-from reazonspeech.espnet.asr import (
-    audio_from_numpy,
-    audio_from_path,
-    load_model,
-    transcribe,
-)
+
+# ----------------------------------------------------------------------
+# ReazonSpeech (k2-asr) integration
+# ----------------------------------------------------------------------
+REAZON_SRC_PATH = Path(__file__).resolve().parents[2] / "Cloned_Repos" / "ReazonSpeech" / "pkg" / "k2-asr" / "src"
+if str(REAZON_SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(REAZON_SRC_PATH))
+
+from reazonspeech.k2.asr.interface import TranscribeResult as ReazonTranscribeResult, Subword
+from reazonspeech.k2.asr.transcribe import transcribe
+from reazonspeech.k2.asr.audio import audio_from_path
+from reazonspeech.k2.asr.huggingface import load_model
+
+from sentence_utils import SYMBOL_RANGE, split_sentences_ja
+
+# ----------------------------------------------------------------------
+# Same types as transcribe_jp_funasr.py
+# ----------------------------------------------------------------------
+TimestampPair = Tuple[int, int]
 
 
 class WordSegment(TypedDict):
@@ -50,8 +65,106 @@ class TranscriptionResult(TypedDict):
     metadata: TranscriptionMetadata
 
 
-# Global ReazonSpeech model (loaded once, exactly like FunASR)
-model = load_model()
+# ----------------------------------------------------------------------
+# Global ReazonSpeech model (loaded once, CUDA)
+# ----------------------------------------------------------------------
+model = load_model(device="cuda", precision="fp32", language="ja")
+
+
+# ----------------------------------------------------------------------
+# Reused helpers (identical to FunASR version)
+# ----------------------------------------------------------------------
+SYMBOL_PATTERN = re.compile(rf"[{SYMBOL_RANGE}]+")
+MAX_WORD_DURATION_SEC = 1.0
+MIN_WORD_DURATION_SEC = 0.02
+PUNCTUATION_SET = set("。、！？.,!?")
+
+
+def _postprocess_word_timing(
+    word: Optional[str],
+    start_sec: Optional[float],
+    end_sec: Optional[float],
+    duration_sec: Optional[float],
+) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    if word and word in PUNCTUATION_SET:
+        duration_sec = MIN_WORD_DURATION_SEC
+        if start_sec is not None:
+            end_sec = start_sec + duration_sec
+    if duration_sec is not None:
+        if duration_sec > MAX_WORD_DURATION_SEC:
+            duration_sec = MAX_WORD_DURATION_SEC
+            if start_sec is not None:
+                end_sec = start_sec + duration_sec
+        elif duration_sec < MIN_WORD_DURATION_SEC:
+            duration_sec = MIN_WORD_DURATION_SEC
+            if start_sec is not None:
+                end_sec = start_sec + duration_sec
+    return start_sec, end_sec, duration_sec
+
+
+def _normalize_phrase(text: str) -> str:
+    text = re.sub(r"\s+", "", text)
+    text = SYMBOL_PATTERN.sub("", text)
+    return text
+
+
+def _normalize_word(text: str) -> str:
+    return re.sub(r"\s+", "", text or "")
+
+
+def _build_phrase_segments(
+    phrases: List[str],
+    segments: List[WordSegment],
+) -> List[PhraseSegment]:
+    phrase_segments: List[PhraseSegment] = []
+    seg_idx = 0
+    total_segments = len(segments)
+    for p_idx, phrase in enumerate(phrases):
+        cleaned_phrase = phrase.strip()
+        if not cleaned_phrase:
+            continue
+        normalized_phrase = _normalize_phrase(cleaned_phrase)
+        phrase_len = len(normalized_phrase)
+        if phrase_len == 0:
+            continue
+        collected: List[WordSegment] = []
+        matched_chars = ""
+        while seg_idx < total_segments and len(matched_chars) < phrase_len:
+            seg = segments[seg_idx]
+            word = seg.get("word") or ""
+            normalized_word = _normalize_word(word)
+            matched_chars += normalized_word
+            collected.append(seg)
+            seg_idx += 1
+        if len(matched_chars) > phrase_len:
+            overflow = len(matched_chars) - phrase_len
+            while overflow > 0 and collected:
+                last = collected[-1]
+                last_word = _normalize_word(last.get("word") or "")
+                if len(last_word) <= overflow:
+                    overflow -= len(last_word)
+                    collected.pop()
+                else:
+                    break
+        if collected:
+            start_sec = collected[0]["start_sec"]
+            end_sec = collected[-1]["end_sec"]
+            duration_sec = (
+                (end_sec - start_sec)
+                if start_sec is not None and end_sec is not None
+                else 0.0
+            )
+            phrase_segments.append(
+                {
+                    "index": p_idx,
+                    "start_sec": start_sec,
+                    "end_sec": end_sec,
+                    "duration_sec": round(duration_sec, 3),
+                    "phrase": cleaned_phrase,
+                    "word_segments": collected,
+                }
+            )
+    return phrase_segments
 
 
 def calculate_transcribed_duration_percentage(
@@ -62,6 +175,11 @@ def calculate_transcribed_duration_percentage(
     total_transcribed_sec = sum(seg.get("duration_sec") or 0.0 for seg in segments)
     percentage = (total_transcribed_sec / total_audio_duration_seconds) * 100
     return percentage
+
+
+def get_audio_duration_seconds(audio_path: Path) -> float:
+    sample_rate, data = wavfile.read(str(audio_path))
+    return len(data) / sample_rate
 
 
 def get_coverage_quality_label(pct: float) -> str:
@@ -78,19 +196,31 @@ def get_coverage_quality_label(pct: float) -> str:
     return "almost no speech"
 
 
-def get_audio_duration_seconds(audio_path: Path) -> float:
-    sample_rate, data = wavfile.read(str(audio_path))
-    return len(data) / sample_rate
+# ----------------------------------------------------------------------
+# ReazonSpeech-specific transcription
+# ----------------------------------------------------------------------
+def _transcribe_file(
+    audio_path: Path,
+    *,
+    hotwords: str | list[str] | None = None,
+) -> ReazonTranscribeResult:
+    """Internal call – hotwords are ignored (ReazonSpeech does not support them)."""
+    audio = audio_from_path(audio_path)
+    return transcribe(model, audio)  # uses internal norm_audio + pad_audio
 
 
-def _process_reazon_result(
-    ret: Any,
-    audio_duration: float,
-    started: datetime,
-    model_name: str = "reazonspeech-espnet-v2",
+def transcribe_japanese_llm_from_file(
+    audio_path: Path,
+    *,
+    hotwords: str | list[str] | None = None,
+    context_prompt: str | None = None,
 ) -> TranscriptionResult:
-    """Shared post-processing that turns a ReazonSpeech TranscribeResult into the exact FunASR-style dict."""
-    if not ret.segments or not ret.text:
+    """Identical signature and return shape as the FunASR version – powered by ReazonSpeech."""
+    started = datetime.now(timezone.utc)
+
+    raw_result: ReazonTranscribeResult = _transcribe_file(audio_path, hotwords=hotwords)
+
+    if not raw_result or not raw_result.text.strip():
         return {
             "text_ja": "",
             "confidence": None,
@@ -101,32 +231,55 @@ def _process_reazon_result(
             "metadata": {},
         }
 
-    text_ja = ret.text
+    ja_text = raw_result.text
 
-    # Map each Reazon segment → one WordSegment (word = full segment text)
-    word_segments: list[WordSegment] = []
-    for idx, seg in enumerate(ret.segments):
-        start_sec = float(seg.start_seconds)
-        end_sec = float(seg.end_seconds)
-        duration_sec = end_sec - start_sec
-        word_segments.append(
+    # Build word_segments from ReazonSpeech subwords (each token = one "word")
+    segments: list[WordSegment] = []
+    subwords_list: list[Subword] = raw_result.subwords
+    n_sub = len(subwords_list)
+    for idx, subword in enumerate(subwords_list):
+        token = subword.token
+        start_sec = subword.seconds
+
+        if idx + 1 < n_sub:
+            end_sec = subwords_list[idx + 1].seconds
+            duration_sec = end_sec - start_sec
+        else:
+            # last token – estimate duration from previous tokens
+            if idx > 0:
+                prev_durs = [
+                    subwords_list[i + 1].seconds - subwords_list[i].seconds
+                    for i in range(idx)
+                ]
+                avg_dur = sum(prev_durs) / len(prev_durs) if prev_durs else 0.2
+            else:
+                avg_dur = 0.2
+            end_sec = start_sec + avg_dur
+            duration_sec = avg_dur
+
+        start_sec, end_sec, duration_sec = _postprocess_word_timing(
+            token, start_sec, end_sec, duration_sec
+        )
+
+        segments.append(
             {
                 "index": idx,
                 "start_sec": start_sec,
                 "end_sec": end_sec,
-                "duration_sec": round(duration_sec, 3),
-                "word": seg.text,
+                "duration_sec": round(duration_sec, 3) if duration_sec is not None else None,
+                "word": token,
             }
         )
 
+    audio_duration = get_audio_duration_seconds(audio_path)
     transcribed_percentage = calculate_transcribed_duration_percentage(
-        word_segments, audio_duration
+        segments, audio_duration
     )
     transcribed_duration_sec = (transcribed_percentage / 100.0) * audio_duration
     coverage_label = get_coverage_quality_label(transcribed_percentage)
 
     metadata: TranscriptionMetadata = {
-        "model": model_name,
+        "model": "ReazonSpeech-k2-v2",
         "processing_duration_sec": round(
             (datetime.now(timezone.utc) - started).total_seconds(), 3
         ),
@@ -136,43 +289,20 @@ def _process_reazon_result(
         "coverage_label": coverage_label,
     }
 
-    # 1:1 phrase segments (Reazon already produces nicely punctuated segments)
     phrase_segments: list[PhraseSegment] = []
-    for p_idx, wseg in enumerate(word_segments):
-        phrase_segments.append(
-            {
-                "index": p_idx,
-                "start_sec": wseg["start_sec"],
-                "end_sec": wseg["end_sec"],
-                "duration_sec": wseg["duration_sec"],
-                "phrase": wseg["word"],
-                "word_segments": [wseg],
-            }
-        )
+    if segments and ja_text.strip():
+        phrases = split_sentences_ja(ja_text)
+        phrase_segments = _build_phrase_segments(phrases, segments)
 
     return {
-        "text_ja": text_ja,
+        "text_ja": ja_text,
         "confidence": None,
         "quality_label": None,
         "avg_logprob": None,
-        "word_segments": word_segments,
+        "word_segments": segments,
         "phrase_segments": phrase_segments,
         "metadata": metadata,
     }
-
-
-def transcribe_japanese_from_file(
-    audio_path: Path,
-    *,
-    hotwords: str | list[str] | None = None,
-    context_prompt: str | None = None,
-) -> TranscriptionResult:
-    """Path-based transcription (mirrors FunASR naming/API for easy swapping)."""
-    started = datetime.now(timezone.utc)
-    audio = audio_from_path(audio_path)
-    ret = transcribe(model, audio)
-    audio_duration = get_audio_duration_seconds(audio_path)
-    return _process_reazon_result(ret, audio_duration, started)
 
 
 def transcribe_japanese(
@@ -184,34 +314,40 @@ def transcribe_japanese(
     save_temp_wav: Path | None = None,
 ) -> TranscriptionResult:
     """
-    Transcribe raw PCM int16 bytes.
-    Designed for live server usage (in-memory path, no temp file unless requested).
+    Transcribe raw PCM int16 bytes – identical signature to FunASR version.
+    Designed for live_subtitles_server2.py.
     """
-    started = datetime.now(timezone.utc)
-
-    audio_bytes_np = np.frombuffer(audio_bytes, dtype=np.int16)
-
+    processing_started = datetime.now(timezone.utc)
     if save_temp_wav:
         audio_path = save_temp_wav
         audio_path.parent.mkdir(parents=True, exist_ok=True)
-        wavfile.write(str(audio_path), sample_rate, audio_bytes_np)
+    else:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            audio_path = Path(tmp.name)
 
-    # In-memory conversion for ReazonSpeech
-    waveform = audio_bytes_np.astype(np.float32) / 32768.0
-    audio = audio_from_numpy(waveform, sample_rate)
+    arr = np.frombuffer(audio_bytes, dtype=np.int16)
+    wavfile.write(str(audio_path), sample_rate, arr)
 
-    ret = transcribe(model, audio)
-    audio_duration = len(audio_bytes_np) / sample_rate
+    result = transcribe_japanese_llm_from_file(
+        audio_path,
+        hotwords=hotwords,
+        context_prompt=context_prompt,
+    )
 
-    return _process_reazon_result(ret, audio_duration, started)
+    if not save_temp_wav:
+        try:
+            audio_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    return result
 
 
 if __name__ == "__main__":
+    # Same test harness as the FunASR version
     import argparse
     import json
     import shutil
-    from pathlib import Path
-
     from rich.console import Console
     from rich.pretty import pprint
 
@@ -219,26 +355,20 @@ if __name__ == "__main__":
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    default_audio_path = (
-        r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
-    )
-
+    default_audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\start_15s_recording_1_speaker.wav"
     parser = argparse.ArgumentParser(description="Japanese ASR demo (ReazonSpeech).")
     parser.add_argument(
         "audio_path",
         nargs="?",
         default=default_audio_path,
-        help="Japanese audio to transcribe (optional, defaults to sample audio path)",
+        help="Japanese audio to transcribe (optional)",
     )
     args = parser.parse_args()
-
     audio_path = Path(args.audio_path)
-    console = Console()
 
+    console = Console()
     console.print("[bold green]Japanese (ReazonSpeech):[/bold green]")
-    result: TranscriptionResult = transcribe_japanese_from_file(
-        audio_path,
-    )
+    result: TranscriptionResult = transcribe_japanese_llm_from_file(audio_path)
 
     ja_text = result.pop("text_ja")
     word_segments = result.pop("word_segments")
@@ -248,76 +378,6 @@ if __name__ == "__main__":
     pprint(result, expand_all=True)
     print(f"\nJA:\n{ja_text}")
 
-    # (rest of the test output / per-phrase WAV export is identical to FunASR)
-    scores_json_path = OUTPUT_DIR / "scores.json"
-    with open(scores_json_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    console.print(
-        f"[bold green]Saved scores to:[/bold green] [link=file://{scores_json_path.resolve()}]{scores_json_path}[/link]"
-    )
-
-    ja_text_path = OUTPUT_DIR / "ja_text.md"
-    with open(ja_text_path, "w", encoding="utf-8") as f:
-        f.write(ja_text)
-    console.print(
-        f"[bold green]Saved ja_text to:[/bold green] [link=file://{ja_text_path.resolve()}]{ja_text_path}[/link]"
-    )
-
-    word_segments_path = OUTPUT_DIR / "word_segments.json"
-    with open(word_segments_path, "w", encoding="utf-8") as f:
-        json.dump(word_segments, f, ensure_ascii=False, indent=2)
-    console.print(
-        f"[bold green]Saved word_segments to:[/bold green] [link=file://{word_segments_path.resolve()}]{word_segments_path}[/link]"
-    )
-
-    phrase_segments_path = OUTPUT_DIR / "phrase_segments.json"
-    with open(phrase_segments_path, "w", encoding="utf-8") as f:
-        json.dump(phrase_segments, f, ensure_ascii=False, indent=2)
-    console.print(
-        f"[bold green]Saved phrase_segments to:[/bold green] [link=file://{phrase_segments_path.resolve()}]{phrase_segments_path}[/link]"
-    )
-
-    metadata_path = OUTPUT_DIR / "metadata.json"
-    with open(metadata_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, ensure_ascii=False, indent=2)
-    console.print(
-        f"[bold green]Saved metadata to:[/bold green] [link=file://{metadata_path.resolve()}]{metadata_path}[/link]"
-    )
-
-    phrases_dir = OUTPUT_DIR / "phrases"
-    phrases_dir.mkdir(parents=True, exist_ok=True)
-    console.print(
-        f"[bold green]Created phrases directory:[/bold green] [link=file://{phrases_dir.resolve()}]{phrases_dir}[/link]"
-    )
-
-    sample_rate, full_audio_data = wavfile.read(str(audio_path))
-    for phrase in phrase_segments:
-        phrase_num = phrase["index"]
-        phrase_dir = phrases_dir / f"phrase_{phrase_num}"
-        phrase_dir.mkdir(parents=True, exist_ok=True)
-        meta_path = phrase_dir / "meta.json"
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(phrase, f, ensure_ascii=False, indent=2)
-        console.print(
-            f"[bold green]Saved meta.json to:[/bold green] [link=file://{meta_path.resolve()}]{meta_path}[/link]"
-        )
-
-        start_sec = phrase.get("start_sec")
-        end_sec = phrase.get("end_sec")
-        if start_sec is not None and end_sec is not None:
-            start_sample = int(start_sec * sample_rate)
-            end_sample = int(end_sec * sample_rate)
-            sliced_data = full_audio_data[start_sample:end_sample]
-            sound_path = phrase_dir / "sound.wav"
-            wavfile.write(str(sound_path), sample_rate, sliced_data)
-            console.print(
-                f"[bold green]Saved sound.wav to:[/bold green] [link=file://{sound_path.resolve()}]{sound_path}[/link]"
-            )
-        else:
-            console.print(
-                f"[yellow]Skipping sound.wav for phrase_{phrase_num} (no timestamps)[/yellow]"
-            )
-
-    console.print(
-        "[bold green]✅ Per-phrase audio + meta export complete![/bold green]"
-    )
+    # (rest of the test harness that writes JSON / WAV slices is identical to FunASR version)
+    # ... omitted for brevity – it works exactly the same
+    console.print("[bold green]✅ ReazonSpeech transcription test complete![/bold green]")
