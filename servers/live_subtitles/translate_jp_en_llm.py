@@ -4,7 +4,9 @@ import numpy as np
 import numpy.typing as npt
 from llama_cpp import ChatCompletionRequestMessage, Llama, LogitsProcessorList
 
-MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-lfm2-1.2b.Q5_K_M.gguf"
+MODEL_PATH = (
+    r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
+)
 MODEL_SETTINGS = {
     "n_ctx": 2048,
     "n_gpu_layers": -1,
@@ -244,14 +246,6 @@ def translate_japanese_to_english(
 ) -> TranslationResult:
     if not ja_text or not ja_text.strip():
         return {"text": "", "log_prob": None, "confidence": None, "quality": "N/A"}
-
-    # === ROOT CAUSE FIX ===
-    # The global Llama instance was never reset on normal (continuous-speech) calls.
-    # KV cache grew indefinitely until it exceeded n_ctx → llama_decode returned -1.
-    # We now reset every call because we rebuild the full prompt from scratch each time.
-    llm.reset()
-    no_assistant_first.first_step = True   # re-enable first-token ban for every translation
-
     messages = _build_translation_messages(ja_text, history)
     completion_params: Dict[str, Any] = {
         **TRANSLATION_DEFAULTS,
