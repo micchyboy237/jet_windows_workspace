@@ -24,8 +24,8 @@ from datetime import datetime
 import scipy.io.wavfile as wavfile
 import websockets
 from concurrent.futures import ThreadPoolExecutor
-# from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
-from transcribe_jp_reazonspeech import transcribe_japanese, TranscriptionResult
+from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
+# from transcribe_jp_reazonspeech import transcribe_japanese, TranscriptionResult
 from translate_jp_en_llm import translate_japanese_to_english, llm
 # from transcribe_jp_funasr_nano import transcribe_japanese, TranscriptionResult
 # from translate_jp_en_sarashin import translate_japanese_to_english
