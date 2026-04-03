@@ -56,22 +56,15 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\constants.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\stream_vad_postprocessor.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
-    # r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_reazonspeech.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speech_segment_tracker.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speaker_manager.py",
-    # r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ReazonSpeech\pkg\k2-asr\src",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server3.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_client2.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ReazonSpeech\pkg\k2-asr\src",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server3.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_client2.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\add-punctuation.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\add-punctuation-online.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_words.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_diff_words.py",
     r"",
 ]
 
@@ -89,7 +82,267 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze the best optimal approach to implementing english translation without losing context
+Analyze remaining issues carefully before fixing
+
+pytest C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_diff_words.py
+C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.0.1)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+================================================= test session starts =================================================
+platform win32 -- Python 3.12.10, pytest-9.0.2, pluggy-1.6.0
+benchmark: 5.1.0 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: C:\Users\druiv
+plugins: anyio-4.12.0, hydra-core-1.3.2, langsmith-0.4.38, asyncio-1.3.0, benchmark-5.1.0, mock-3.15.1, snapshot-0.9.0, typeguard-4.5.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 18 items
+
+Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_diff_words.py ....FF.FF...F....F             [100%]
+
+====================================================== FAILURES =======================================================
+____________________ test_count_newly_appended_words[The quick brown-The quick blue fox jumps- -2] ____________________
+
+a = 'The quick brown', b = 'The quick blue fox jumps', word_sep = ' ', expected = 2
+
+    @pytest.mark.parametrize(
+        "a, b, word_sep, expected",
+        [
+            # Basic append cases
+            ("", "hello world", " ", 2),
+            ("hello", "hello world", " ", 1),
+            ("hello world", "hello world extra", " ", 1),
+            ("a b c", "a b c d e f", " ", 3),
+
+            # Changes in the middle + append at the end
+            ("The quick brown", "The quick blue fox jumps", " ", 2),   # "fox", "jumps"
+            ("Python is great", "Python is powerful and awesome", " ", 2),  # "and", "awesome"
+
+            # No new words appended
+            ("hello world", "hello world", " ", 0),
+            ("hello world", "hello universe", " ", 0),
+            ("hello world", "hello world!!!", " ", 0),
+
+            # Edge cases
+            ("", "", " ", 0),
+            (" ", "word", " ", 1),
+            ("word", " ", " ", 0),
+            ("a b c d", "x y z a b c d e", " ", 1),   # only "e" is appended
+
+            # Whitespace handling
+            ("hello   world", "hello   world   extra", " ", 1),
+
+            # Japanese example
+            ("えあうめ楽しか", "えあうん楽しか 追加の単語です", " ", 2),
+
+            # Custom separators
+            ("apple,banana,cherry", "apple,banana,cherry,date", ",", 1),
+            ("1|2|3", "1|2|3|4|5", "|", 2),
+        ],
+    )
+    def test_count_newly_appended_words(a: str, b: str, word_sep: str, expected: int):
+>       assert count_newly_appended_words(a, b, word_sep) == expected
+E       AssertionError: assert 3 == 2
+E        +  where 3 = count_newly_appended_words('The quick brown', 'The quick blue fox jumps', ' ')
+
+Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_diff_words.py:43: AssertionError
+_________________ test_count_newly_appended_words[Python is great-Python is powerful and awesome- -2] _________________
+
+a = 'Python is great', b = 'Python is powerful and awesome', word_sep = ' ', expected = 2
+
+    @pytest.mark.parametrize(
+        "a, b, word_sep, expected",
+        [
+            # Basic append cases
+            ("", "hello world", " ", 2),
+            ("hello", "hello world", " ", 1),
+            ("hello world", "hello world extra", " ", 1),
+            ("a b c", "a b c d e f", " ", 3),
+
+            # Changes in the middle + append at the end
+            ("The quick brown", "The quick blue fox jumps", " ", 2),   # "fox", "jumps"
+            ("Python is great", "Python is powerful and awesome", " ", 2),  # "and", "awesome"
+
+            # No new words appended
+            ("hello world", "hello world", " ", 0),
+            ("hello world", "hello universe", " ", 0),
+            ("hello world", "hello world!!!", " ", 0),
+
+            # Edge cases
+            ("", "", " ", 0),
+            (" ", "word", " ", 1),
+            ("word", " ", " ", 0),
+            ("a b c d", "x y z a b c d e", " ", 1),   # only "e" is appended
+
+            # Whitespace handling
+            ("hello   world", "hello   world   extra", " ", 1),
+
+            # Japanese example
+            ("えあうめ楽しか", "えあうん楽しか 追加の単語です", " ", 2),
+
+            # Custom separators
+            ("apple,banana,cherry", "apple,banana,cherry,date", ",", 1),
+            ("1|2|3", "1|2|3|4|5", "|", 2),
+        ],
+    )
+    def test_count_newly_appended_words(a: str, b: str, word_sep: str, expected: int):
+>       assert count_newly_appended_words(a, b, word_sep) == expected
+E       AssertionError: assert 3 == 2
+E        +  where 3 = count_newly_appended_words('Python is great', 'Python is powerful and awesome', ' ')
+
+Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_diff_words.py:43: AssertionError
+___________________________ test_count_newly_appended_words[hello world-hello universe- -0] ___________________________
+
+a = 'hello world', b = 'hello universe', word_sep = ' ', expected = 0
+
+    @pytest.mark.parametrize(
+        "a, b, word_sep, expected",
+        [
+            # Basic append cases
+            ("", "hello world", " ", 2),
+            ("hello", "hello world", " ", 1),
+            ("hello world", "hello world extra", " ", 1),
+            ("a b c", "a b c d e f", " ", 3),
+
+            # Changes in the middle + append at the end
+            ("The quick brown", "The quick blue fox jumps", " ", 2),   # "fox", "jumps"
+            ("Python is great", "Python is powerful and awesome", " ", 2),  # "and", "awesome"
+
+            # No new words appended
+            ("hello world", "hello world", " ", 0),
+            ("hello world", "hello universe", " ", 0),
+            ("hello world", "hello world!!!", " ", 0),
+
+            # Edge cases
+            ("", "", " ", 0),
+            (" ", "word", " ", 1),
+            ("word", " ", " ", 0),
+            ("a b c d", "x y z a b c d e", " ", 1),   # only "e" is appended
+
+            # Whitespace handling
+            ("hello   world", "hello   world   extra", " ", 1),
+
+            # Japanese example
+            ("えあうめ楽しか", "えあうん楽しか 追加の単語です", " ", 2),
+
+            # Custom separators
+            ("apple,banana,cherry", "apple,banana,cherry,date", ",", 1),
+            ("1|2|3", "1|2|3|4|5", "|", 2),
+        ],
+    )
+    def test_count_newly_appended_words(a: str, b: str, word_sep: str, expected: int):
+>       assert count_newly_appended_words(a, b, word_sep) == expected
+E       AssertionError: assert 1 == 0
+E        +  where 1 = count_newly_appended_words('hello world', 'hello universe', ' ')
+
+Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_diff_words.py:43: AssertionError
+___________________________ test_count_newly_appended_words[hello world-hello world!!!- -0] ___________________________
+
+a = 'hello world', b = 'hello world!!!', word_sep = ' ', expected = 0
+
+    @pytest.mark.parametrize(
+        "a, b, word_sep, expected",
+        [
+            # Basic append cases
+            ("", "hello world", " ", 2),
+            ("hello", "hello world", " ", 1),
+            ("hello world", "hello world extra", " ", 1),
+            ("a b c", "a b c d e f", " ", 3),
+
+            # Changes in the middle + append at the end
+            ("The quick brown", "The quick blue fox jumps", " ", 2),   # "fox", "jumps"
+            ("Python is great", "Python is powerful and awesome", " ", 2),  # "and", "awesome"
+
+            # No new words appended
+            ("hello world", "hello world", " ", 0),
+            ("hello world", "hello universe", " ", 0),
+            ("hello world", "hello world!!!", " ", 0),
+
+            # Edge cases
+            ("", "", " ", 0),
+            (" ", "word", " ", 1),
+            ("word", " ", " ", 0),
+            ("a b c d", "x y z a b c d e", " ", 1),   # only "e" is appended
+
+            # Whitespace handling
+            ("hello   world", "hello   world   extra", " ", 1),
+
+            # Japanese example
+            ("えあうめ楽しか", "えあうん楽しか 追加の単語です", " ", 2),
+
+            # Custom separators
+            ("apple,banana,cherry", "apple,banana,cherry,date", ",", 1),
+            ("1|2|3", "1|2|3|4|5", "|", 2),
+        ],
+    )
+    def test_count_newly_appended_words(a: str, b: str, word_sep: str, expected: int):
+>       assert count_newly_appended_words(a, b, word_sep) == expected
+E       AssertionError: assert 1 == 0
+E        +  where 1 = count_newly_appended_words('hello world', 'hello world!!!', ' ')
+
+Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_diff_words.py:43: AssertionError
+____________________________ test_count_newly_appended_words[a b c d-x y z a b c d e- -1] _____________________________
+
+a = 'a b c d', b = 'x y z a b c d e', word_sep = ' ', expected = 1
+
+    @pytest.mark.parametrize(
+        "a, b, word_sep, expected",
+        [
+            # Basic append cases
+            ("", "hello world", " ", 2),
+            ("hello", "hello world", " ", 1),
+            ("hello world", "hello world extra", " ", 1),
+            ("a b c", "a b c d e f", " ", 3),
+
+            # Changes in the middle + append at the end
+            ("The quick brown", "The quick blue fox jumps", " ", 2),   # "fox", "jumps"
+            ("Python is great", "Python is powerful and awesome", " ", 2),  # "and", "awesome"
+
+            # No new words appended
+            ("hello world", "hello world", " ", 0),
+            ("hello world", "hello universe", " ", 0),
+            ("hello world", "hello world!!!", " ", 0),
+
+            # Edge cases
+            ("", "", " ", 0),
+            (" ", "word", " ", 1),
+            ("word", " ", " ", 0),
+            ("a b c d", "x y z a b c d e", " ", 1),   # only "e" is appended
+
+            # Whitespace handling
+            ("hello   world", "hello   world   extra", " ", 1),
+
+            # Japanese example
+            ("えあうめ楽しか", "えあうん楽しか 追加の単語です", " ", 2),
+
+            # Custom separators
+            ("apple,banana,cherry", "apple,banana,cherry,date", ",", 1),
+            ("1|2|3", "1|2|3|4|5", "|", 2),
+        ],
+    )
+    def test_count_newly_appended_words(a: str, b: str, word_sep: str, expected: int):
+>       assert count_newly_appended_words(a, b, word_sep) == expected
+E       AssertionError: assert 8 == 1
+E        +  where 8 = count_newly_appended_words('a b c d', 'x y z a b c d e', ' ')
+
+Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_diff_words.py:43: AssertionError
+________________________________________________ test_complex_changes _________________________________________________
+
+    def test_complex_changes():
+        \"\"\"Heavy changes early, but new words appended at the end.\"\"\"
+>       assert count_newly_appended_words(
+            "The quick brown fox jumps over the lazy dog",
+            "A completely different sentence that ends with new words here"
+        ) == 3   # "new", "words", "here"
+E       AssertionError: assert 10 == 3
+E        +  where 10 = count_newly_appended_words('The quick brown fox jumps over the lazy dog', 'A completely different sentence that ends with new words here')
+
+Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_diff_words.py:48: AssertionError
+=============================================== short test summary info ===============================================
+FAILED Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/test_diff_words.py::test_count_newly_appended_words[The quick brown-The quick blue fox jumps- -2] - AssertionError: assert 3 == 2
+FAILED Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/test_diff_words.py::test_count_newly_appended_words[Python is great-Python is powerful and awesome- -2] - AssertionError: assert 3 == 2
+FAILED Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/test_diff_words.py::test_count_newly_appended_words[hello world-hello universe- -0] - AssertionError: assert 1 == 0
+FAILED Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/test_diff_words.py::test_count_newly_appended_words[hello world-hello world!!!- -0] - AssertionError: assert 1 == 0
+FAILED Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/test_diff_words.py::test_count_newly_appended_words[a b c d-x y z a b c d e- -1] - AssertionError: assert 8 == 1
+FAILED Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/test_diff_words.py::test_complex_changes - AssertionError: assert 10 == 3
+============================================ 6 failed, 12 passed in 0.34s =============================================
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
