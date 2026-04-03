@@ -4,57 +4,46 @@ from diff_words import count_newly_appended_words
 
 
 @pytest.mark.parametrize(
-    "a, b, word_sep, expected",
+    "a, b, expected",
     [
-        
-        # Basic append cases
-        ("", "hello world", " ", 2),
-        ("hello", "hello world", " ", 1),
-        ("hello world", "hello world extra", " ", 1),
-        ("a b c", "a b c d e f", " ", 3),
-        
-        # Changes in the middle + append at the end
-        ("The quick brown", "The quick blue fox jumps", " ", 2),   # "fox", "jumps"
-        ("Python is great", "Python is powerful and awesome", " ", 2),  # "and", "awesome"
-        
-        # No new words appended
-        ("hello world", "hello world", " ", 0),
-        ("hello world", "hello universe", " ", 0),
-        ("hello world", "hello world!!!", " ", 0),
-        
-        # Edge cases (early changes ignored)
-        ("", "", " ", 0),
-        (" ", "word", " ", 1),
-        ("word", " ", " ", 0),
-        ("a b c d", "x y z a b c d e", " ", 1),   # only "e" is appended
-        
-        # Whitespace handling
-        ("hello world", "hello world extra", " ", 1),
-        
-        # Japanese example (first word replaced + 1 appended)
-        ("えあうめ楽しか", "えあうん楽しか 追加の単語です", " ", 1),
-        
-        # Custom separators
-        ("apple,banana,cherry", "apple,banana,cherry,date", ",", 1),
-        ("1|2|3", "1|2|3|4|5", "|", 2),
+        # Simple replacement + append (Sudachi tokenizes "追加の単語です" into 4 tokens)
+        ("えあうめ楽しか", "えあうん楽しか 追加の単語です", 4),
+
+        # Long real-world subtitle example
+        (
+            "世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウスタリス戦争を企てるオスタニア政府用人の動向を探るべくウェスタリスはオペレーションストリックスを発動作戦を担うスゴーデエージェント黄昏れ00の顔を使い分ける彼の任務は家族を作ること.",
+            "世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウスタリス戦争を企てるオスタニア政府用人の動向を探るべくウェスタリスはオペレーションストリックスを発動作戦を担うスゴーデエージェント黄昏れ0の顔を使い分ける彼の任務は家族を作ること父・ロイドフォージャー、精神科医正体・スパイ・コードネーム黄昏れ、母、ヨルフォージャー・市役所職員、正体。",
+            21,
+        ),
+
+        # Punctuation handling
+        ("テストです。", "テストです。追加の文章です。", 5),
+
+        # Name change + append
+        ("黄昏れ00", "黄昏れ0の顔を使い分ける父・ロイドフォージャー", 8),
+
+        # Only replacement, no append
+        ("家族を作ること。", "家族を作る任務。", 0),
+
+        # Pure append after identical prefix
+        ("スゴーデエージェント黄昏れ", "スゴーデエージェント黄昏れの任務は家族を作ること。", 8),
     ],
 )
-def test_count_newly_appended_words(a: str, b: str, word_sep: str, expected: int):
-    assert count_newly_appended_words(a, b, word_sep) == expected
+def test_count_newly_appended_words(a: str, b: str, expected: int):
+    assert count_newly_appended_words(a, b) == expected
 
 
-def test_complex_changes():
-    """Heavy changes early, but new words appended at the end."""
-    # Full rewrite (no exact word matches) + net 1 extra word appended
+def test_japanese_punctuation_handling():
+    """SudachiPy punctuation and name handling."""
     assert count_newly_appended_words(
-        "The quick brown fox jumps over the lazy dog",
-        "A completely different sentence that ends with new words here"
-    ) == 1
+        "テストです。",
+        "テストです。追加の文章です。",
+    ) == 5
 
     assert count_newly_appended_words(
-        "Old version of the document",
-        "Totally rewritten content with many changes finally appended"
-    ) == 3  # net 3 extra words appended after full rewrite
+        "黄昏れ00の顔",
+        "黄昏れ0の顔を使い分ける父・ロイドフォージャー",
+    ) > 0
 
 
 if __name__ == "__main__":
