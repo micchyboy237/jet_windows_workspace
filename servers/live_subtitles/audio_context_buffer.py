@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Deque, List, Optional, TypedDict
+from typing import Deque, List, Optional, TypedDict, Literal
 import numpy as np
 
 
@@ -19,6 +19,12 @@ class SegmentMeta(TypedDict):
     full_en_text: str
     ja_text: str
     en_text: str
+
+
+class TranslationHistoryItem(TypedDict):
+    """Structured history item for LLM chat completion."""
+    role: Literal["user", "assistant"]
+    content: str
 
 
 class AudioContextBuffer:
@@ -144,6 +150,48 @@ class AudioContextBuffer:
 
         _, meta = self.segments[0]
         return meta["uuid"]
+
+    def get_context_history(
+        self,
+        max_segments: int = 5,
+    ) -> List[TranslationHistoryItem]:
+        """
+        Build translation history from buffered segments.
+
+        Returns:
+            List[TranslationHistoryItem]:
+                Alternating user (JA) and assistant (EN) messages.
+
+        Notes:
+            - Uses only segments with both JA and EN text.
+            - Returns last N segments only (bounded context).
+            - Preserves chronological order.
+        """
+        if not self.segments:
+            return []
+
+        history: List[TranslationHistoryItem] = []
+
+        # Take last N segments
+        selected_segments = list(self.segments)[-max_segments:]
+
+        for _, meta in selected_segments:
+            ja = (meta.get("ja_text") or "").strip()
+            en = (meta.get("en_text") or "").strip()
+
+            if not ja or not en:
+                continue
+
+            history.append({
+                "role": "user",
+                "content": ja,
+            })
+            history.append({
+                "role": "assistant",
+                "content": en,
+            })
+
+        return history
 
     def reset(self) -> None:
         """Clear all buffered audio and metadata, reset total ample count to 0."""

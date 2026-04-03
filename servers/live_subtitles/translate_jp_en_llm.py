@@ -3,6 +3,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 import numpy as np
 import numpy.typing as npt
 from llama_cpp import ChatCompletionRequestMessage, Llama, LogitsProcessorList
+from rich.console import Console
+
+console = Console()
 
 MODEL_PATH = (
     r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
@@ -23,7 +26,7 @@ MODEL_SETTINGS = {
     "verbose": False,
 }
 TRANSLATION_DEFAULTS = {
-    "max_tokens": 1500,
+    "max_tokens": 2000,
     "temperature": 0.35,
     "top_p": 0.90,
     "top_k": 40,
@@ -169,6 +172,61 @@ def _build_system_prompt_with_examples(
     return base_prompt.rstrip() + "\n" + examples_block.strip()
 
 
+def _count_tokens(text: str) -> int:
+    """Count tokens using the model's tokenizer (accurate for llama.cpp)."""
+    if not text:
+        return 0
+    try:
+        tokens = llm.tokenizer().encode(text, add_bos=False, special=True)
+        return len(tokens)
+    except Exception:
+        # Fallback: very conservative character-based estimate
+        return len(text) // 3 + 10
+
+
+def _truncate_history_for_context(
+    history: List[ChatCompletionRequestMessage],
+    current_ja_text: str,
+    max_input_tokens: int = 1000,
+) -> List[ChatCompletionRequestMessage]:
+    """
+    Remove oldest complete (user+assistant) pairs from history until the estimated
+    total input tokens stay under max_input_tokens (recommended: max_tokens // 2).
+    Always keeps the most recent pairs.
+    """
+    if not history:
+        return []
+
+    # Build full input for token estimation
+    system_tokens = _count_tokens(SYSTEM_PROMPT)
+    current_user_tokens = _count_tokens(USER_PROMPT.format(japanese_text=current_ja_text))
+
+    truncated: List[ChatCompletionRequestMessage] = []
+    prev_total_tokens = system_tokens + current_user_tokens
+    total_tokens = prev_total_tokens
+
+    # Add pairs from the end (most recent first) until we hit the limit
+    for i in range(len(history) - 1, -1, -2):  # step by 2 to take complete pairs
+        if i - 1 < 0:
+            break
+        pair = history[i - 1 : i + 1]  # user + assistant
+        pair_tokens = sum(_count_tokens(msg["content"]) for msg in pair)
+
+        if total_tokens + pair_tokens > max_input_tokens:
+            break
+
+        truncated = pair + truncated  # prepend to keep chronological order
+        total_tokens += pair_tokens
+
+    if len(truncated) < len(history):
+        removed = len(history) - len(truncated)
+        console.print(
+            f"[yellow]History truncated: kept {len(truncated)} messages, "
+            f"removed {removed} oldest messages (input tokens from {prev_total_tokens} -> {total_tokens})[/yellow]"
+        )
+    return truncated
+
+
 def _build_translation_messages(
     japanese_text: str,
     history: Optional[List[ChatCompletionRequestMessage]] = None,
@@ -246,7 +304,16 @@ def translate_japanese_to_english(
 ) -> TranslationResult:
     if not ja_text or not ja_text.strip():
         return {"text": "", "log_prob": None, "confidence": None, "quality": "N/A"}
-    messages = _build_translation_messages(ja_text, history)
+
+    # Truncate history to prevent input tokens from exceeding half of max_tokens
+    safe_history = _truncate_history_for_context(
+        history or [],
+        current_ja_text=ja_text,
+        max_input_tokens=max_tokens // 2,
+    )
+
+    messages = _build_translation_messages(ja_text, safe_history)
+
     completion_params: Dict[str, Any] = {
         **TRANSLATION_DEFAULTS,
         "max_tokens": max_tokens,
@@ -284,14 +351,11 @@ if __name__ == "__main__":
     from pathlib import Path
 
     from rich import box
-    from rich.console import Console
     from rich.panel import Panel
 
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    console = Console()
 
     parser = argparse.ArgumentParser(
         description="Japanese → English subtitle translator using llama.cpp"

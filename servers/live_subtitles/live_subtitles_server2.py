@@ -32,7 +32,7 @@ from audio_context_buffer import AudioContextBuffer
 from audio_search import search_audio
 from sentence_utils import split_sentences_ja
 from sentence_matcher_ja import fuzzy_shortest_best_match
-from diff_utils import console_diff_highlight
+from diff_utils import console_diff_highlight, extract_new_ja_text
 
 import shutil
 from pathlib import Path
@@ -48,31 +48,6 @@ LIVE_AUDIO_BUFFER_DIR = OUTPUT_DIR
 LIVE_AUDIO_BUFFER_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _save_subtitles_srt(segments: list, srt_path: Path) -> None:
-    """Generate simple SRT from word segments (one line per segment)."""
-    if not segments:
-        srt_path.write_text(
-            "1\n00:00:00,000 --> 00:00:01,000\n[No transcription]\n\n",
-            encoding="utf-8",
-        )
-        return
-
-    def _ms_to_srt_time(ms):
-        ms = ms or 0
-        hours = ms // 3_600_000
-        minutes = (ms % 3_600_000) // 60_000
-        seconds = (ms % 60_000) // 1_000
-        millis = ms % 1_000
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
-
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for i, seg in enumerate(segments, 1):
-            start_str = _ms_to_srt_time(seg.get("start_ms"))
-            end_str = _ms_to_srt_time(seg.get("end_ms"))
-            word = seg.get("word") or "[no speech]"
-            f.write(f"{i}\n{start_str} --> {end_str}\n{word}\n\n")
-
-
 connected_clients = set()
 
 # Adjust max_workers depending on your CPU cores + GPU contention
@@ -81,7 +56,37 @@ executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_work
 
 context_buffer = AudioContextBuffer(max_duration_sec=30.0, sample_rate=16000)
 
+# ====================== GLOBAL STATE FOR GAP DETECTION ======================
+prev_start_sec: float = 0.0          # Tracks the start_sec of the last processed segment
 prev_vad_reason = None
+
+
+def should_reset_context(header: dict) -> bool:
+    """Determine if we should reset the context buffer based on time gap or silence."""
+    global prev_start_sec
+
+    current_start_sec = float(header.get("start_sec", 0.0))
+    vad_reason = header.get("vad_reason")
+
+    # Case 1: Large time gap (> 5.0 seconds)
+    # gap = current_start_sec - prev_start_sec
+    # if gap > 5.0:
+    #     console.print(
+    #         f"[warning]Large time gap detected: {gap:.2f}s > 5.0s → Resetting context[/warning]"
+    #     )
+    #     prev_start_sec = current_start_sec
+    #     return True
+
+    # Case 2: Silence from VAD (existing logic)
+    if context_buffer.segments and vad_reason == "silence":
+        console.print("[info]Silence detected via VAD → Resetting context[/info]")
+        prev_start_sec = current_start_sec
+        return True
+
+    # No reset needed - just update previous start time
+    prev_start_sec = current_start_sec
+    return False
+
 
 def blocking_process_audio(
     audio_bytes: bytes,
@@ -90,23 +95,22 @@ def blocking_process_audio(
     """
     Runs in thread pool — contains the blocking CPU/GPU heavy work
     """
-    global prev_vad_reason
+    global prev_vad_reason, prev_start_sec
+
     uuid_ = header.get("uuid")
     if not uuid_:
         console.print("[error]Missing UUID in header[/error]")
-        return {"error": "missing uuid", "success": False}
+        return {"message": "missing uuid", "success": False}
     sample_rate = header.get("sample_rate", 16000)
     full_trans_result = None
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
 
-    # === FIXED: Silence detection & reset BEFORE transcription ===
-    # Old bug: reset happened *after* concat + ASR → stale context leaked.
-    # Now the ASR only ever sees the correct context (empty after silence).
-    # prev_vad_reason is now updated unconditionally.
-    if context_buffer.segments and prev_vad_reason == "silence":
+    # === NEW: Reset decision BEFORE any transcription ===
+    # Resets on either: 1) silence (VAD), or 2) time gap > 5.0 seconds
+    if should_reset_context(header):
         context_buffer.reset()
-        console.print(f"[info]Silence detected - Reset context done[/info]")
-    prev_vad_reason = header["vad_reason"]
+    else:
+        prev_vad_reason = header["vad_reason"]
 
     context_audio_int16 = context_buffer.get_context_audio()
     if context_audio_int16.size > 0:
@@ -114,10 +118,6 @@ def blocking_process_audio(
     else:
         full_audio_int16 = audio_np
     full_audio_bytes = full_audio_int16.tobytes()
-    search_audio(
-        full_audio_bytes,
-        audio_bytes,
-    )
     console.print(
         f"[info]VAD Reason:[/info] [value]{header["vad_reason"]}[/value]"
     )
@@ -138,71 +138,86 @@ def blocking_process_audio(
     full_word_segments_text = "".join(s["word"] for s in full_word_segments)
     full_ja_text = full_word_segments_text
     full_ja_sents = split_sentences_ja(full_ja_text)
-    full_ja_sents_str = "".join(full_ja_sents).strip()
-    full_ja_text = full_ja_sents_str
+    # full_ja_sents_str = "".join(full_ja_sents).strip()
+    # full_ja_text = full_ja_sents_str
 
     prev_full_ja_text = None
     prev_full_en_text = None
+
+    unchanged_text = ""
+    new_ja_text = full_ja_text
+    new_ja_start_index = 0
+    new_ja_similarity = 0.0
+    history = None
 
     # === Decision logic (exactly as before; now sees the *post-reset* buffer state) ===
     if context_buffer.segments:
         _, last_meta = context_buffer.get_last_segment()
         prev_full_ja_text = last_meta.get("full_ja_text", "")
         prev_full_en_text = last_meta.get("full_en_text", "")
+
+        new_ja_text_res = extract_new_ja_text(prev_full_ja_text, full_ja_text)
+        unchanged_text = new_ja_text_res["unchanged_text"]
+        new_ja_text = new_ja_text_res["new_text"]
+        new_ja_start_index = new_ja_text_res["start_index"]
+        new_ja_similarity = new_ja_text_res["similarity"]
+    
+        # if not new_ja_similarity == 1.0:
+        #     console.print("[error]No change in previous speech[/error]")
+        #     return {"message": "no change", "success": False}
+        
+
         last_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
 
         MATCH_SCORE_CUTOFF = 75
         match_result = fuzzy_shortest_best_match(
-            query=last_sentence or "",
+            # query=last_sentence or "",
+            query=new_ja_text,
             texts=full_ja_text,
             score_cutoff=MATCH_SCORE_CUTOFF,
             max_extra_chars=30,
         )
-        # === Fuzzy result logs (mirroring sentence_matcher_ja main output) ===
-        console_diff_highlight(
-            last_sentence or '',
-            match_result['match'],
-            "Last JA Sent",
-            "Match",
-        )
-        console.print(f"[info]Score:[/info] [number]{match_result['score']:.1f}[/number]")
-        console.print(f"[info]Slice:[/info] [bright_white][{match_result['start']}:{match_result['end']}][/bright_white]")
-        console.print(f"[info]Length:[/info] [number]{match_result['end'] - match_result['start']}[/number]")
+        # # === Fuzzy result logs (mirroring sentence_matcher_ja main output) ===
+        # console_diff_highlight(
+        #     last_sentence or '',
+        #     match_result['match'],
+        #     "Last JA Sent",
+        #     "Match",
+        # )
+        # console.print(f"[info]Score:[/info] [number]{match_result['score']:.1f}[/number]")
+        # console.print(f"[info]Slice:[/info] [bright_white][{match_result['start']}:{match_result['end']}][/bright_white]")
+        # console.print(f"[info]Length:[/info] [number]{match_result['end'] - match_result['start']}[/number]")
 
-        # Highlight the matched slice inside the full text
-        highlighted = (
-            match_result["text"][: match_result["start"]]
-            + f"\033[1;33m{match_result['text'][match_result['start'] : match_result['end']]}\033[0m"
-            + match_result["text"][match_result["end"] :]
-        )
-        print("\nHighlighted in text:")
-        print(highlighted)
+        # # Highlight the matched slice inside the full text
+        # highlighted = (
+        #     match_result["text"][: match_result["start"]]
+        #     + f"\033[1;33m{match_result['text'][match_result['start'] : match_result['end']]}\033[0m"
+        #     + match_result["text"][match_result["end"] :]
+        # )
+        # print("\nHighlighted in text:")
+        # print(highlighted)
 
         if match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
             console.print("[success bold]✅ Accepted[/success bold]")
             new_text_start = match_result["end"]
+
             # Just the added parts
             # new_text = full_ja_text[new_text_start:].strip()
+
             # Including full context
-            new_text = full_ja_text.strip()
+            # new_text = full_ja_text.strip()
+
+            # Just the new JA text
+            new_text = new_ja_text
         else:
             console.print("[error]❌ Below threshold[/error]")
             console.print(
                 f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}).[/warning]"
             )
-            # console.print(
-            #     f"[warning]Translating ONLY the new chunk instead of full context.[/warning]"
-            # )
-            # new_text = full_ja_text.strip()  # ← ONLY current incremental text
             console.print(
-                f"[warning]End process.[/warning]"
+                f"[warning]Translating the full text.[/warning]"
             )
-            return {
-                "uuid": uuid_,
-                "transcription_ja": "",
-                "translation_en": "",
-                "success": False,
-            }
+            new_text = full_ja_text.strip()  # ← ONLY current incremental text
 
         new_clean = new_text.rstrip('.。！？、…・「」『』').rstrip()
         if not new_clean:
@@ -211,21 +226,27 @@ def blocking_process_audio(
                 "transcription_ja": "",
                 "translation_en": "",
                 "success": False,
+                "message": "Same text as previous",
             }
+
+        old_sents = split_sentences_ja(prev_full_ja_text)  # no longer needed for translation
+        old_ja_text = prev_full_ja_text
 
         # Always translate only the incremental new text
         new_sents = split_sentences_ja(new_text)
         ja_text = "".join(new_sents).strip()
+        # new_sents = split_sentences_ja(new_ja_text)
+        # ja_text = "".join(new_ja_text).strip()
 
         last_sentence_pos = match_result["start"] if match_result["score"] >= MATCH_SCORE_CUTOFF else -1
         last_sentence_clean = match_result["match"].strip() if match_result["score"] >= MATCH_SCORE_CUTOFF else None
-        old_sents = []  # no longer needed for translation
 
         if ja_text:
+            history = context_buffer.get_context_history()
             trans_en = translate_japanese_to_english(
                 ja_text=ja_text,
                 enable_scoring=False,
-                history=None,
+                history=history,
             )
             en_text = trans_en["text"].strip()
         else:
@@ -236,14 +257,14 @@ def blocking_process_audio(
             full_en_text = en_text
     else:
         ja_sents = full_ja_sents
-        ja_sents_str = full_ja_sents_str
         ja_text = full_ja_text
         curr_clean = ja_text.rstrip('.。！？、…・「」『』').rstrip()
         if curr_clean:
+            history = context_buffer.get_context_history()
             full_trans_en = translate_japanese_to_english(
                 ja_text=ja_text,
                 enable_scoring=False,
-                history=None,
+                history=history,
             )
             new_sents = ja_sents
             full_en_text = full_trans_en["text"].strip()
@@ -254,6 +275,7 @@ def blocking_process_audio(
                 "transcription_ja": "",
                 "translation_en": "",
                 "success": False,
+                "message": "Empty transcription after cleaning",
             }
         old_sents = []
         last_sentence_clean = None
@@ -272,28 +294,40 @@ def blocking_process_audio(
     # === Everything below this point is 100% unchanged from original ===
     # (prints, file saving, context_buffer.add_audio_segment, return)
 
+    if history:
+        console.print(f"[bold yellow]History ({len(history)}):[/bold yellow]")
+        console.print(f"[bold cyan]{history!r}[/bold cyan]")
+
     if last_sentence_clean:
         console.print(f"[success]Last Sentence (utt_id={last_utt_id[-6:]} | sent_idx={last_sent_idx}):[/success]")
         console.print(f"[bright_white]{last_sentence_clean}[/bright_white]")
     if last_sentence_pos != -1:
         console.print(f"[success]New Text (utt_id={header["uuid"][-6:]} | pos={last_sentence_pos} | start={new_text_start}):[/success]")
         console.print(f"[bright_white]{new_text}[/bright_white]")
-    console.print(f"[success]Full JA ({len(full_ja_sents)} sent):[/success]")
-    console.print(f"[bright_white]{full_ja_text}[/bright_white]")
     if old_sents:
-        old_ja_text = "".join(old_sents).strip()
-        console.print(f"[success]Old JA ({len(old_sents)} sent):[/success]")
+        console.print(f"[success]Old JA ({len(old_sents)} sents):[/success]")
         console.print(f"[bright_white]{old_ja_text}[/bright_white]")
-    if ja_text.strip():
-        console.print(f"[success]New JA ({len(new_sents)} sent):[/success]")
-        console.print(f"[bright_white]{ja_text}[/bright_white]")
-    else:
-        console.print("[dim]No new Japanese text[/dim]")
+
+    if new_ja_text:
+        console.print(f"[success]Unchanged JA ({len(unchanged_text)} chars):[/success]")
+        console.print(f"[white]{unchanged_text}[/white]")
+        console.print(f"[success]Start index:[/success] [bold cyan]{new_ja_start_index}[/bold cyan]")
+        console.print(f"[success]Matched Similarity:[/success] [bold cyan]{new_ja_similarity}[/bold cyan]")
+        console.print(f"[success]New JA ({len(new_ja_text)} chars):[/success]")
+        console.print(f"[bold cyan]{new_ja_text}[/bold cyan]")
+
+    console.print(f"[success]Full JA ({len(full_ja_sents)} sents):[/success]")
+    console.print(f"[bright_white]{full_ja_text}[/bright_white]")
     if en_text.strip():
-        console.print("[success]EN:[/success]")
-        console.print(f"[white]{en_text}[/white]")
+        console.print("[success]Full EN:[/success]")
+        console.print(f"[bold white]{en_text}[/bold white]")
     else:
         console.print("[dim italic]No new translation[/dim italic]")
+
+    search_audio(
+        full_audio_bytes,
+        audio_bytes,
+    )
 
     started_at_iso = header.get("started_at")
     if started_at_iso and isinstance(started_at_iso, str):
@@ -397,11 +431,13 @@ def blocking_process_audio(
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
     return {
         "uuid": uuid_,
+        "success": bool(ja_text and en_text),
         "context_duration": context_duration,
         "context_uuid": context_uuid,
-        "transcription_ja": ja_text,
+        "new_ja_similarity": new_ja_similarity,
+        "new_ja_start_index": new_ja_start_index,
+        "transcription_ja": new_ja_text,
         "translation_en": en_text,
-        "success": bool(ja_text or en_text),
         "transcribed_duration_sec": full_metadata["transcribed_duration_sec"],
         "transcribed_duration_pctg": full_metadata["transcribed_duration_pctg"],
         "coverage_label": full_metadata["coverage_label"],
@@ -455,9 +491,9 @@ async def process_audio(websocket):
 
             if response["success"]:
                 await websocket.send(json.dumps(response).encode("utf-8"))
-                console.print(f"[success]Processed[/success] [uuid]{uuid_[-6:]}…[/uuid]")
+                console.print(f"[success]Processed successfully[/success] [uuid]{uuid_[-6:]}…[/uuid]")
             else:
-                console.print(f"[warning]Processed empty audio[/warning] [uuid]{uuid_[-6:]}…[/uuid]")
+                console.print(f"[warning]Empty response message: {response["message"]}[/warning] [uuid]{uuid_[-6:]}…[/uuid]")
 
             console.rule(style="dim")
 

@@ -14,7 +14,7 @@ SYMBOL_RANGE = (
 
 def split_sentences_ja(
     text: str,
-    punctuations: str = "、…・",
+    punctuations: str = "、…",
 ) -> List[str]:
     if not text.strip():
         return []
