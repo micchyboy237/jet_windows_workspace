@@ -62,6 +62,12 @@ def test_extract_newly_appended_text():
                 "の任務は家族を作ること。",
             ),
             ("黄昏れ00", "黄昏れ0の顔を使い分ける父・ロイドフォージャー", "の顔を使い分ける父・ロイドフォージャー"),
+            # New test demonstrating the fix for partial-token prefix bug
+            (
+                "オペ",
+                "オペレーションストリックスを発動作戦を担うスゴーデエージェント注昏れ。",
+                "レーションストリックスを発動作戦を担うスゴーデエージェント注昏れ。",
+            ),
         ],
     )
     def _inner(a: str, b: str, expected: str):

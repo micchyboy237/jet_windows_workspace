@@ -3,6 +3,7 @@ from typing import List
 import argparse
 
 from rich.console import Console
+from rich.text import Text
 
 # SudachiPy (required)
 from sudachipy import tokenizer
@@ -26,51 +27,21 @@ def split_tokens(text: str) -> List[str]:
         console.print(f"[red]SudachiPy error:[/red] {e}", style="bold")
         return []
 
-
-def count_newly_appended_words(a: str, b: str) -> int:
-    """
-    Count how many tokens were newly appended at the *end* of b.
-    Uses SudachiPy for accurate Japanese tokenization.
-    Ignores earlier changes/replacements/deletions.
-    Punctuation (sentence terminators) are now excluded from the count.
-    """
-    if not b or a == b:
-        return 0
-
-    tokens_a: List[str] = split_tokens(a)
-    tokens_b: List[str] = split_tokens(b)
-    if not tokens_b:
-        return 0
-    if not tokens_a:
-        # only non-punctuation tokens; skip blank tokens as well
-        return sum(1 for t in tokens_b if not _is_punctuation(t) and t.strip())
-
-    matcher = SequenceMatcher(None, tokens_a, tokens_b)
-    covered = 0
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal":
-            covered = max(covered, j2)
-        elif tag == "replace":
-            a_len = i2 - i1
-            covered = max(covered, j1 + a_len)
-    appended_tokens = tokens_b[covered:]
-    appended_count = sum(1 for t in appended_tokens if not _is_punctuation(t) and t.strip())
-    return max(0, appended_count)
-
-
 def _is_punctuation(token: str) -> bool:
     """Return True if token is a sentence-terminating punctuation (not counted as a word)."""
     return token in {"。", "！", "？", "…"}
 
-def extract_newly_appended_text(a: str, b: str) -> str:
+def _get_appended_text(a: str, b: str) -> str:
     """
-    Extract the newly appended text at the *end* of b (including punctuations
-    and any whitespace). Uses the same covered-token logic as count_newly_appended_words
-    so earlier changes/replacements/deletions are ignored.
-    Returns "" when nothing new was appended (or only punctuation was appended).
+    Return the text that was newly appended at the end of b.
+    Hybrid logic:
+      - If b starts with a (exact prefix, common in live subtitles), use fast slice.
+      - Otherwise fall back to original token-based matcher (preserves "ignore earlier changes").
     """
     if not b or a == b:
         return ""
+    if b.startswith(a):
+        return b[len(a):]
     tokens_a: List[str] = split_tokens(a)
     tokens_b: List[str] = split_tokens(b)
     if not tokens_b:
@@ -89,6 +60,31 @@ def extract_newly_appended_text(a: str, b: str) -> str:
         return ""
     prefix_len = sum(len(t) for t in tokens_b[:covered])
     return b[prefix_len:]
+
+def count_newly_appended_words(a: str, b: str) -> int:
+    """
+    Count how many tokens were newly appended at the *end* of b.
+    Uses SudachiPy for accurate Japanese tokenization.
+    Ignores earlier changes/replacements/deletions.
+    Punctuation (sentence terminators) are now excluded from the count.
+    Uses hybrid prefix logic for correctness on compound words.
+    """
+    if not b or a == b:
+        return 0
+    appended_text = _get_appended_text(a, b)
+    if not appended_text:
+        return 0
+    tokens = split_tokens(appended_text)
+    appended_count = sum(1 for t in tokens if not _is_punctuation(t) and t.strip())
+    return max(0, appended_count)
+
+def extract_newly_appended_text(a: str, b: str) -> str:
+    """
+    Extract the newly appended text at the *end* of b (including punctuations
+    and any whitespace). Uses hybrid logic to ignore earlier changes/replacements/deletions,
+    and get the true appended portion.
+    """
+    return _get_appended_text(a, b)
 
 
 if __name__ == "__main__":
@@ -121,26 +117,25 @@ if __name__ == "__main__":
         else:
             console.print(f"[dim]→ Length: {len(extracted)} chars[/dim]")
     else:
-        # Original counting behavior
+        # Updated counting behavior using hybrid logic
         count = count_newly_appended_words(args.base, args.new)
 
+        # Use appended text and tokens for pretty output
+        extracted = extract_newly_appended_text(args.base, args.new)
+        new_tokens = split_tokens(extracted) if extracted else []
         tokens_a = split_tokens(args.base)
-        tokens_b = split_tokens(args.new)
-        # compute the same covered index used by count_newly_appended_words
-        if tokens_a and tokens_b:
-            matcher = SequenceMatcher(None, tokens_a, tokens_b)
-            covered = 0
-            for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-                if tag == "equal":
-                    covered = max(covered, j2)
-                elif tag == "replace":
-                    a_len = i2 - i1
-                    covered = max(covered, j1 + a_len)
-            new_tokens = tokens_b[covered:]
-        else:
-            new_tokens = tokens_b
+
         console.print(f"[dim]Base tokens:[/dim] {tokens_a}")
-        console.print(f"[dim]New tokens (appended only):[/dim] {[f"[bold cyan]{t}[/bold cyan]" for t in new_tokens]}")
+        console.print("[dim]New tokens (appended only):[/dim] ", end="")
+        if new_tokens:
+            token_text = Text()
+            for i, token in enumerate(new_tokens):
+                if i > 0:
+                    token_text.append(" ")
+                token_text.append(token, style="bold cyan")
+            console.print(token_text)
+        else:
+            console.print("[]")
 
         console.rule()
         console.print(
