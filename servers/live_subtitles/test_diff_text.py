@@ -44,37 +44,32 @@ def test_japanese_punctuation_handling():
         "黄昏れ0の顔を使い分ける父・ロイドフォージャー",
     ) > 0
 
-    
-# Additional tests for extract_newly_appended_text (from file_context_0)
-def test_extract_newly_appended_text():
-    """Unit tests for the new extract function (includes punctuations)."""
-    @pytest.mark.parametrize(
-        "a, b, expected",
-        [
-            ("えあうめ楽しか", "えあうん楽しか 追加の単語です", " 追加の単語です"),
-            ("テストです。", "テストです。追加の文章です。", "追加の文章です。"),
-            ("", "新しいテキストです。", "新しいテキストです。"),
-            ("同じテキスト", "同じテキスト", ""),
-            ("家族を作ること。", "家族を作る任務。", ""),
-            (
-                "スゴーデエージェント黄昏れ",
-                "スゴーデエージェント黄昏れの任務は家族を作ること。",
-                "の任務は家族を作ること。",
-            ),
-            ("黄昏れ00", "黄昏れ0の顔を使い分ける父・ロイドフォージャー", "の顔を使い分ける父・ロイドフォージャー"),
-            # New test demonstrating the fix for partial-token prefix bug
-            (
-                "オペ",
-                "オペレーションストリックスを発動作戦を担うスゴーデエージェント注昏れ。",
-                "レーションストリックスを発動作戦を担うスゴーデエージェント注昏れ。",
-            ),
-        ],
-    )
-    def _inner(a: str, b: str, expected: str):
-        from diff_text import extract_newly_appended_text
-        assert extract_newly_appended_text(a, b) == expected
 
-    _inner  # pytest will pick up the parametrized inner test via pytest discovery
+@pytest.mark.parametrize(
+    "a, b, expected",
+    [
+        ("えあうめ楽しか", "えあうん楽しか 追加の単語です", " 追加の単語です"),
+        ("テストです。", "テストです。追加の文章です。", "追加の文章です。"),
+        ("", "新しいテキストです。", "新しいテキストです。"),
+        ("同じテキスト", "同じテキスト", ""),
+        ("家族を作ること。", "家族を作る任務。", ""),
+        (
+            "スゴーデエージェント黄昏れ",
+            "スゴーデエージェント黄昏れの任務は家族を作ること。",
+            "の任務は家族を作ること。",
+        ),
+        ("黄昏れ00", "黄昏れ0の顔を使い分ける父・ロイドフォージャー", "の顔を使い分ける父・ロイドフォージャー"),
+        # New test demonstrating the fix for partial-token prefix bug
+        (
+            "オペ",
+            "オペレーションストリックスを発動作戦を担うスゴーデエージェント注昏れ。",
+            "レーションストリックスを発動作戦を担うスゴーデエージェント注昏れ。",
+        ),
+    ],
+)
+def test_extract_newly_appended_text(a: str, b: str, expected: str):
+    from diff_text import extract_newly_appended_text
+    assert extract_newly_appended_text(a, b) == expected
 
 
 if __name__ == "__main__":

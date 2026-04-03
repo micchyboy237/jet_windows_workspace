@@ -80,17 +80,19 @@ def count_newly_appended_words(a: str, b: str) -> int:
 
 def extract_newly_appended_text(a: str, b: str) -> str:
     """
-    Extract the newly appended text at the *end* of b (including punctuations
-    and any whitespace). Uses hybrid logic to ignore earlier changes/replacements/deletions,
-    and get the true appended portion.
+    Extract the newly appended text at the *end* of b.
     """
-    return _get_appended_text(a, b)
+    appended = _get_appended_text(a, b).rstrip()
+    if _is_punctuation(appended):
+        return ""
+    return appended
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Count newly appended Japanese tokens using SudachiPy "
-                    "or extract the newly appended text (including punctuation).",
+                    "or extract the newly appended text (strips trailing whitespace "
+                    "and sentence-terminating punctuation).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("base", type=str, help="Original/base Japanese string")
