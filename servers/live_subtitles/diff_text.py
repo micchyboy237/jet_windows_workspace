@@ -96,6 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("base", type=str, help="Original/base Japanese string")
     parser.add_argument("new", type=str, help="New/updated Japanese string")
     parser.add_argument(
+        "-x",
         "--extract",
         action="store_true",
         help="Instead of counting, extract and print the newly appended text "
