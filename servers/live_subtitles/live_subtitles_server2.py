@@ -63,7 +63,7 @@ prev_vad_reason = None
 
 def should_reset_context(header: dict) -> bool:
     """Determine if we should reset the context buffer based on time gap or silence."""
-    global prev_start_sec
+    global prev_vad_reason, prev_start_sec
 
     current_start_sec = float(header.get("start_sec", 0.0))
     vad_reason = header.get("vad_reason")

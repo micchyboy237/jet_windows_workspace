@@ -177,10 +177,13 @@ def extract_new_ja_text(a: str, b: str) -> ExtractedNewText:
     sentences_a = split_sentences_ja(a)
     sentences_b = split_sentences_ja(b)
 
-    # Find common sentence prefix (exact string match)
+    # Find common sentence prefix ignoring trailing punctuation
     common_count = 0
     for sa, sb in zip(sentences_a, sentences_b):
-        if sa == sb:
+        # Ignore trailing punctuation differences (。 vs 、 etc.) which are
+        # extremely common in live Japanese subtitle streams. This uses the
+        # exact same helper already used for similarity scoring.
+        if strip_trailing_punctuation(sa) == strip_trailing_punctuation(sb):
             common_count += 1
         else:
             break
