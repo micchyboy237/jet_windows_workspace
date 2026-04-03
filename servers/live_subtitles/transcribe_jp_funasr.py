@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import tempfile
+import torch
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
@@ -230,17 +232,30 @@ def _transcribe_file(
     *,
     hotwords: str | list[str] | None = None,
 ) -> List[Dict[str, Any]]:
-    results = model.generate(
-        input=str(audio_path),
-        cache={},
-        language="ja",
-        use_itn=True,
-        batch_size=32,
-        output_timestamp=True,
-        hotwords=hotwords,
-        merge_vad=False,
-    )
-    return results
+    # Clear GPU cache before every inference (prevents fragmentation after silence resets)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    try:
+        results = model.generate(
+            input=str(audio_path),
+            cache={},
+            language="ja",
+            use_itn=True,
+            batch_size=1,                  # critical for live short chunks
+            output_timestamp=True,
+            hotwords=hotwords,
+            merge_vad=False,
+        )
+        return results
+    except (torch.AcceleratorError, torch.cuda.CudaError, RuntimeError, AttributeError) as e:
+        from rich.console import Console
+        console = Console()
+        console.print(f"[bold red]CUDA / FunASR error during transcription:[/bold red] {e}")
+        console.print("[dim]Full traceback:[/dim]")
+        console.print(traceback.format_exc())
+        # Return safe empty result so the server does NOT crash the websocket handler
+        return []
 
 
 def get_coverage_quality_label(pct: float) -> str:

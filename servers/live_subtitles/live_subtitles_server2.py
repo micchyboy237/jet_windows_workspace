@@ -78,13 +78,14 @@ def should_reset_context(header: dict) -> bool:
     #     return True
 
     # Case 2: Silence from VAD (existing logic)
-    if context_buffer.segments and vad_reason == "silence":
+    if context_buffer.segments and prev_vad_reason == "silence":
         console.print("[info]Silence detected via VAD → Resetting context[/info]")
         prev_start_sec = current_start_sec
         return True
 
     # No reset needed - just update previous start time
     prev_start_sec = current_start_sec
+    prev_vad_reason = vad_reason
     return False
 
 

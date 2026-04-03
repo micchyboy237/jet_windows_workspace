@@ -60,7 +60,8 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server3.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_client2.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
@@ -82,7 +83,53 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze how to improve english translation given the start_index for each extracted new text
+What caused this and how to fix
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+VAD Reason: silence
+Processing 66eb25…
+  0%|                                                                                            | 0/1 [01:03<?, ?it/s]
+  0%|                                                                                            | 0/1 [00:46<?, ?it/s]
+Context duration: 0.00s
+Audio duration: 3.17s
+  0%|                                                                                            | 0/1 [00:00<?, ?it/s]Client disconnected — total 0
+ERROR:websockets.server:connection handler failed
+Traceback (most recent call last):
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\websockets\asyncio\server.py", line 376, in conn_handler
+    await self.handler(connection)
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py", line 490, in process_audio
+    response = await future
+               ^^^^^^^^^^^^
+  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py", line 130, in blocking_process_audio
+    full_trans_result = transcribe_japanese(
+                        ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py", line 377, in transcribe_japanese
+    result = transcribe_japanese_llm_from_file(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py", line 267, in transcribe_japanese_llm_from_file
+    raw_results = _transcribe_file(audio_path, hotwords=hotwords)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py", line 233, in _transcribe_file
+    results = model.generate(
+              ^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\funasr\auto\auto_model.py", line 331, in generate
+    results = self.inference(
+              ^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\funasr\auto\auto_model.py", line 398, in inference
+    res = model.inference(**batch, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\funasr\models\sense_voice\model.py", line 849, in inference
+    speech = speech.to(device=kwargs["device"])
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.AcceleratorError: CUDA error: unknown error
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+Client connected — total 1
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
