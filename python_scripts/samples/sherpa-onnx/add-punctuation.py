@@ -14,11 +14,21 @@ rm sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2
 """
 
 from pathlib import Path
+import argparse
 
 import sherpa_onnx
 
-
 def main():
+    parser = argparse.ArgumentParser(
+        description="Add punctuation to a list of texts using sherpa-onnx OfflinePunctuation."
+    )
+    parser.add_argument(
+        "text_list",
+        nargs="+",
+        help="List of texts to punctuate. Example: 'text1' 'text2' ...",
+    )
+    args = parser.parse_args()
+
     base_dir = Path(r"C:\Users\druiv\.cache\pretrained_models\sherpa-onnx")
     model = base_dir / "sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12" / "model.onnx"
 
@@ -31,19 +41,13 @@ def main():
 
     punct = sherpa_onnx.OfflinePunctuation(config)
 
-    text_list = [
-        "这是一个测试你好吗How are you我很好thank you are you ok谢谢你",
-        "我们都是木头人不会说话不会动",
-        "The African blogosphere is rapidly expanding bringing more voices online in the form of commentaries opinions analyses rants and poetry",
-    ]
-    for text in text_list:
+    for text in args.text_list:
         text_with_punct = punct.add_punctuation(text)
         print("----------")
         print(f"input: {text}")
         print(f"output: {text_with_punct}")
 
     print("----------")
-
 
 if __name__ == "__main__":
     main()

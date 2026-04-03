@@ -14,10 +14,21 @@ rm sherpa-onnx-online-punct-en-2024-08-06.tar.bz2
 """
 
 from pathlib import Path
+import argparse
 
 import sherpa_onnx
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Add punctuation and case to texts using sherpa-onnx OnlinePunctuation."
+    )
+    parser.add_argument(
+        "texts",
+        nargs="+",
+        help="Text(s) to punctuate. Example: 'text1' 'text2' ..."
+    )
+    args = parser.parse_args()
+
     base_dir = Path(r"C:\Users\druiv\.cache\pretrained_models\sherpa-onnx")
     model_dir = base_dir / "sherpa-onnx-online-punct-en-2024-08-06"
     
@@ -36,12 +47,7 @@ def main():
     config = sherpa_onnx.OnlinePunctuationConfig(model_config=model_config)
     punct = sherpa_onnx.OnlinePunctuation(config)
 
-    texts = [
-        "how are you i am fine thank you",
-        "The African blogosphere is rapidly expanding bringing more voices online in the form of commentaries opinions analyses rants and poetry",
-    ]
-
-    for text in texts:
+    for text in args.texts:
         text_with_punct = punct.add_punctuation_with_case(text)
         print("----------")
         print(f"input : {text}")

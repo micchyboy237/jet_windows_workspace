@@ -63,22 +63,15 @@ def console_diff_highlight(
 # ==================== Example Usage ====================
 
 if __name__ == "__main__":
-    # s1 = "The quick brown fox jumps over the lazy dog"
-    # s2 = "The quick blue fox jumps over the lazy cat"
+    import argparse
 
-    # console_diff_highlight(s1, s2)
+    parser = argparse.ArgumentParser(
+        description="Show diff highlight between two strings with optional labels."
+    )
+    parser.add_argument("s1", help="First (original) string")
+    parser.add_argument("s2", help="Second (modified) string")
+    parser.add_argument("-l1", "--label1", default="Original", help="Label for first string")
+    parser.add_argument("-l2", "--label2", default="Modified", help="Label for second string")
+    args = parser.parse_args()
 
-    # # Another example with longer changes
-    # print("\n" + "=" * 60)
-    # s3 = "Python is an excellent programming language for beginners and experts"
-    # s4 = "Python is a powerful programming language used by data scientists"
-
-    # console_diff_highlight(s3, s4)
-
-    s1 = "えあうめ楽しか"
-    s2 = "えあうん楽しか"
-
-    label_a = "Query"
-    label_b = "Match"
-
-    console_diff_highlight(s1, s2, label_a, label_b)
+    console_diff_highlight(args.s1, args.s2, args.label1, args.label2)
