@@ -1,6 +1,6 @@
 import pytest
 
-from diff_words import count_newly_appended_words
+from diff_text import count_newly_appended_words
 
 
 @pytest.mark.parametrize(
