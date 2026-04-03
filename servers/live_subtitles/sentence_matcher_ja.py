@@ -1,17 +1,19 @@
 from __future__ import annotations
+
 import argparse
-from typing import List, TypedDict
+from typing import List, Optional, TypedDict
+
 from rapidfuzz import fuzz, process
 
 
 class FuzzyMatchResult(TypedDict):
     """TypedDict for the return value of fuzzy_shortest_best_match."""
+
     match: str
     score: float
     start: int
     end: int
-    text: str          # the original text from which this match was taken
-    valid: bool        # NEW: True only if score >= score_cutoff
+    text: str  # the original text from which this match was taken
 
 
 def fuzzy_shortest_best_match(
@@ -19,13 +21,11 @@ def fuzzy_shortest_best_match(
     texts: str | List[str],
     score_cutoff: int = 75,
     max_extra_chars: int = 20,
-) -> FuzzyMatchResult | None:
+) -> FuzzyMatchResult:
     """
     Find the shortest contiguous substring with the highest score across one or more texts.
     When multiple texts are provided, only the best result (highest score) is returned.
     using fuzzy matching (WRatio), preferring higher score then shorter length.
-
-    The 'valid' field indicates whether the match meets the score_cutoff threshold.
 
     Args:
         query: The string to search for.
@@ -37,7 +37,7 @@ def fuzzy_shortest_best_match(
         FuzzyMatchResult containing match, score, start, end, and the original text.
     """
     if not query:
-        return None
+        return {"match": "", "score": 0.0, "start": -1, "end": -1, "text": ""}
 
     # Normalize input to list
     if isinstance(texts, str):
@@ -46,9 +46,9 @@ def fuzzy_shortest_best_match(
         text_list = [t for t in texts if t]  # remove empty strings
 
     if not text_list:
-        return None
+        return {"match": "", "score": 0.0, "start": -1, "end": -1, "text": ""}
 
-    best_result: FuzzyMatchResult | None = None
+    best_result: Optional[FuzzyMatchResult] = None
     best_score: float = -1.0
 
     for text in text_list:
@@ -73,6 +73,7 @@ def fuzzy_shortest_best_match(
             for i in range(len(text) - length + 1):
                 window = text[i : i + length]
                 score = fuzz.WRatio(query, window)
+
                 if score > local_best_score or (
                     score == local_best_score and length < local_best_length
                 ):
@@ -82,28 +83,26 @@ def fuzzy_shortest_best_match(
                     local_best_match = window
                     local_best_length = length
 
-        # Fallback for this text (if exhaustive search didn't find anything good)
+        # Fallback for this text
         if local_best_score < score_cutoff and candidates:
             local_best_match = candidates[0][0]
             local_best_score = float(candidates[0][1])
             local_best_start = text.find(local_best_match)
             local_best_end = local_best_start + len(local_best_match)
 
-        # Only consider this text's result if it has a valid score
+        # Compare with global best
         if local_best_score > best_score:
             best_score = local_best_score
-            is_valid = local_best_score >= score_cutoff
             best_result = {
                 "match": local_best_match,
                 "score": local_best_score,
                 "start": local_best_start,
                 "end": local_best_end,
                 "text": text,
-                "valid": is_valid,          # NEW
             }
 
     if best_result is None:
-        return None
+        return {"match": "", "score": 0.0, "start": -1, "end": -1, "text": ""}
 
     return best_result
 
@@ -114,10 +113,20 @@ def main() -> None:
         "When multiple texts are given, returns only the highest-scoring result.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("query", type=str, help="The query string to search for")
+
+    # Positional required arguments
     parser.add_argument(
-        "texts", nargs="+", type=str, help="One or more texts to search within"
+        "query",
+        type=str,
+        help="The query string to search for",
     )
+    parser.add_argument(
+        "texts",
+        nargs="+",
+        type=str,
+        help="One or more texts to search within",
+    )
+
     parser.add_argument(
         "-c",
         "--score-cutoff",
@@ -135,24 +144,18 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    result: FuzzyMatchResult | None = fuzzy_shortest_best_match(
+    result: FuzzyMatchResult = fuzzy_shortest_best_match(
         query=args.query,
         texts=args.texts,
         score_cutoff=args.score_cutoff,
         max_extra_chars=args.max_extra_chars,
     )
 
-    if result is None:
-        print("No match found.")
-        return
-
     print(f"Query : {args.query}")
     print(f"Match : {result['match']}")
     print(f"Score : {result['score']:.1f}")
-    print(f"Valid : {"✅" if result['valid'] else "❌"}")
     print(f"Slice : [{result['start']}:{result['end']}]")
     print(f"Length: {result['end'] - result['start']}")
-
     highlighted = (
         result["text"][: result["start"]]
         + f"\033[1;33m{result['text'][result['start'] : result['end']]}\033[0m"
@@ -160,6 +163,11 @@ def main() -> None:
     )
     print("\nHighlighted in text:")
     print(highlighted)
+
+    if result["score"] >= args.score_cutoff:
+        print("✅ Accepted")
+    else:
+        print("❌ Below threshold")
 
 
 if __name__ == "__main__":

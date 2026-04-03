@@ -1,35 +1,38 @@
 # servers\live_subtitles\live_subtitles_server3.py
 import asyncio
 import json
-import numpy as np
 import sys
-import websockets
-from typing import Optional
 from pathlib import Path
-import concurrent.futures
+from typing import Optional
+
+import numpy as np
+import websockets
 
 # ====================== CLONED-REPO PATH SETUP (must be first) ======================
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 FIRE_RED_VAD_PATH = str((PROJECT_ROOT / "Cloned_Repos" / "FireRedVAD").resolve())
-REAZON_ASR_PATH = str((PROJECT_ROOT / "Cloned_Repos" / "ReazonSpeech" / "pkg" / "espnet-asr" / "src").resolve())
+REAZON_ASR_PATH = str(
+    (
+        PROJECT_ROOT / "Cloned_Repos" / "ReazonSpeech" / "pkg" / "espnet-asr" / "src"
+    ).resolve()
+)
 
 sys.path.insert(0, FIRE_RED_VAD_PATH)
 sys.path.insert(0, REAZON_ASR_PATH)
 
 # ====================== LOCAL MODULES ======================
 from fireredvad_utils import load_vad
-from speech_segment_tracker import SpeechSegmentTracker, AccumulatedSpeechSegment
+from reazonspeech.k2.asr.audio import audio_from_numpy
+from reazonspeech.k2.asr.huggingface import load_model
 
 # ====================== REAZONSPEECH IMPORTS (now resolvable) ======================
 # from reazonspeech.espnet.asr import load_model, transcribe, audio_from_numpy, TranscribeConfig
 from reazonspeech.k2.asr.interface import TranscribeConfig
 from reazonspeech.k2.asr.transcribe import transcribe
-from reazonspeech.k2.asr.audio import audio_from_numpy
-from reazonspeech.k2.asr.huggingface import load_model
-
+from speech_segment_tracker import AccumulatedSpeechSegment, SpeechSegmentTracker
+from translate_jp_en_llm import translate_japanese_to_english
 
 SAMPLE_RATE = 16000
-MIN_RMS_THRESHOLD = 0.005  # Tune between ~0.003–0.02 depending on environment
 
 
 class SubtitleServer:
@@ -41,7 +44,6 @@ class SubtitleServer:
         self.vad = None
         self.asr_model = None
         self.tracker = None
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
     def _load_models(self):
         print("Loading FireRedVAD...")
@@ -63,52 +65,43 @@ class SubtitleServer:
                 if len(audio_chunk) == 0:
                     continue
 
-                # -------------------- Noise Gate (RMS-based) --------------------
-                # Skip very low-energy chunks (likely background noise)
-                rms = float(np.sqrt(np.mean(audio_chunk ** 2)))
-                if rms < MIN_RMS_THRESHOLD:
-                    continue
-
                 # VAD (stateful)
                 vad_results = self.vad.detect_chunk(audio_chunk)
 
                 # Tracker decides if a speech segment just finished
-                completed: Optional[AccumulatedSpeechSegment] = self.tracker.process_vad_results(
-                    audio_chunk, vad_results
+                completed: Optional[AccumulatedSpeechSegment] = (
+                    self.tracker.process_vad_results(audio_chunk, vad_results)
                 )
 
                 if completed is not None:
                     # Transcribe the exact speech waveform
                     audio_data = audio_from_numpy(completed.audio, SAMPLE_RATE)
                     cfg = TranscribeConfig(verbose=False)
-
-                    # -------------------- Non-blocking ASR --------------------
-                    loop = asyncio.get_running_loop()
-                    asr_result = await loop.run_in_executor(
-                        self.executor,
-                        transcribe,
-                        self.asr_model,
-                        audio_data,
-                        cfg,
-                    )
-
+                    asr_result = transcribe(self.asr_model, audio_data, cfg)
                     jp_text = asr_result.text.strip()
+                    en_text = ""
+                    if jp_text:
+                        translated_result = translate_japanese_to_english(jp_text)
+                        en_text = translated_result["text"].strip()
+
                     if jp_text:
                         segment_dict = {
                             "type": "segment",
                             "start": completed.start_seconds,
                             "end": completed.end_seconds,
                             "jp": jp_text,
-                            "en": "",
+                            "en": en_text,
                         }
                         await websocket.send(json.dumps(segment_dict))
-
                         completed.jp = jp_text
+                        completed.en = en_text
                         self.tracker.context_buffer.append(completed)
 
-                        print(f"📤 Sent: [{segment_dict['start']:.2f} → {segment_dict['end']:.2f}] "
-                                f"({len(jp_text)} chars, ASR dur ~{len(completed.audio)/16000:.1f}s) "
-                                f"{jp_text[:110]}{'...' if len(jp_text) > 110 else ''}")
+                        print(
+                            f"📤 Sent: [{segment_dict['start']:.2f} → {segment_dict['end']:.2f}] "
+                            f"JP:{jp_text}\n"
+                            f"EN:{en_text}"
+                        )
 
         except Exception as e:
             print(f"Handler error: {e}")
@@ -126,9 +119,7 @@ if __name__ == "__main__":
     host = "0.0.0.0"
     port = 8765
     vad_model_dir = str(
-        Path("~/.cache/pretrained_models/FireRedVAD/Stream-VAD")
-        .expanduser()
-        .resolve()
+        Path("~/.cache/pretrained_models/FireRedVAD/Stream-VAD").expanduser().resolve()
     )
     server = SubtitleServer(vad_model_dir, {"host": host, "port": port})
     asyncio.run(server.start())

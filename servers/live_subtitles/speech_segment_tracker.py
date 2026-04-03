@@ -12,7 +12,8 @@ class AccumulatedSpeechSegment:
     start_seconds: float
     end_seconds: float
     audio: np.ndarray
-    text: str = ""
+    jp: str = ""
+    en: str = ""
 
 
 class SpeechSegmentTracker:

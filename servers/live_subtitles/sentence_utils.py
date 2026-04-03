@@ -12,30 +12,9 @@ SYMBOL_RANGE = (
 )
 
 
-def _clean_sentence(
-    text: str,
-    trailing_punctuations: str = "、…。！？",
-) -> str:
-    """
-    Normalize a sentence by:
-    - stripping whitespace
-    - removing leading and trailing punctuation characters
-    """
-    if not text:
-        return ""
-    text = text.strip()
-    if trailing_punctuations:
-        escaped = re.escape(trailing_punctuations)
-        # Remove leading punctuation
-        text = re.sub(f"^[{escaped}]+", "", text)
-        # Remove trailing punctuation
-        text = re.sub(f"[{escaped}]+$", "", text)
-    return text.strip()
-
-
 def split_sentences_ja(
     text: str,
-    punctuations: str = "",
+    punctuations: str = "、…・",
 ) -> List[str]:
     if not text.strip():
         return []
@@ -44,11 +23,7 @@ def split_sentences_ja(
     chunks = list(splitter(text))  # First pass: respect 。！？ properly
 
     if not punctuations:
-        return [
-            cleaned
-            for s in chunks
-            if (cleaned := _clean_sentence(s))
-        ]
+        return [s.strip() for s in chunks if s.strip()]
 
     # Pattern: split *after* each extra punctuation, keeping it with the left side
     extra_punc_escaped = re.escape(punctuations)
@@ -59,7 +34,8 @@ def split_sentences_ja(
     for chunk in chunks:
         # If no extra punctuations in this chunk → keep as-is
         if not re.search(f"[{extra_punc_escaped}]", chunk):
-            if (cleaned := _clean_sentence(chunk)):
+            cleaned = chunk.strip()
+            if cleaned:
                 result.append(cleaned)
             continue
 
@@ -67,7 +43,8 @@ def split_sentences_ja(
         pieces = re.split(pattern, chunk)
 
         for piece in pieces:
-            if (cleaned := _clean_sentence(piece)):
+            cleaned = piece.strip()
+            if cleaned:
                 result.append(cleaned)
 
     return result

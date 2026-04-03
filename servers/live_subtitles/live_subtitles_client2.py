@@ -48,10 +48,25 @@ async def subtitle_receiver(websocket):
                     uid = seg["uuid"][:8]
                     start = seg.get("start", 0)
                     end = seg.get("end", 0)
-                    text = seg["text"]
-                    print(f"   [{start:6.2f} → {end:6.2f}] {uid} → {text}")
-            elif data.get("type") == "segment":  # backward compat
-                print(f"[{data['start']:6.2f} → {data['end']:6.2f}] {data['text']}")
+                    jp = seg.get("jp", "")
+                    en = seg.get("en", "")
+
+                    print(f"[{start:6.2f} → {end:6.2f}]")
+                    print(f"  JP: {jp}")
+                    print(f"  EN: {en}")
+                    print("Status: Update")
+                    print("-" * 60)
+            elif data.get("type") == "segment":
+                start = data["start"]
+                end = data["end"]
+                jp = data.get("jp", "")
+                en = data.get("en", "")
+
+                print(f"[{start:6.2f} → {end:6.2f}]")
+                print(f"  JP: {jp}")
+                print(f"  EN: {en}")
+                print("Status: Final")
+                print("-" * 60)
             else:
                 print("Unknown payload:", data)
     except Exception as e:
