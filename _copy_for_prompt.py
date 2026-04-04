@@ -67,8 +67,9 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\main_speech_segments_extractor.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\vad_speechbrain.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\speech_segments_extractor.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\main_speech_segments_extractor.py",
     r"",
 ]
 
@@ -86,12 +87,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Write main_speech_segments_extractor using argparse with positional arg for audio file and keyword args with shorthands and defaults for the other settings.
-I want these files to be saved:
-- Under each <OUTPUT_DIR>/segments/segment_<num>, save a sound.wav, speech_probs.json, speech_probs.png chart, segment.json (includes start_sec, end_sec, duration_sec, average probs, average rms, etc.)
-- Under OUTPUT_DIR, save a global segments.json, summary.json
-
-Use rich logging using console.print
+Update vad_speechbrain to follow the same audio loader logic from speech_segments_extractor
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

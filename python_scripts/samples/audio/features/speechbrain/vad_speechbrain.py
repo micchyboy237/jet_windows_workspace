@@ -1,9 +1,26 @@
 import os
 import shutil
 from pathlib import Path
+import argparse
 import warnings
 from speechbrain.inference.VAD import VAD
 from speechbrain.utils.fetching import LocalStrategy
+
+# ====================== ARGPARSE + AUDIO PATH ======================
+DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+
+parser = argparse.ArgumentParser(
+    description="Run SpeechBrain VAD and save detected speech segments."
+)
+parser.add_argument(
+    "audio_path",
+    type=str,
+    nargs="?",
+    default=DEFAULT_AUDIO_PATH,
+    help=f"Path to input audio file (default: '{DEFAULT_AUDIO_PATH}')",
+)
+args = parser.parse_args()
+audio_path = Path(args.audio_path)
 
 # ====================== OUTPUT SETUP ======================
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
@@ -18,6 +35,7 @@ SAVE_DIR = str(
 warnings.filterwarnings("ignore", category=UserWarning, module="speechbrain")
 warnings.filterwarnings("ignore", category=ImportWarning)
 
+
 print("Loading VAD model...")
 
 vad_model = VAD.from_hparams(
@@ -25,11 +43,6 @@ vad_model = VAD.from_hparams(
     savedir=SAVE_DIR,
     local_strategy=LocalStrategy.COPY,
     run_opts={"device": "cpu"},
-)
-
-# ====================== AUDIO SETUP ======================
-audio_path = Path(
-    r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
 )
 
 # Change working directory to avoid SpeechBrain absolute path bug

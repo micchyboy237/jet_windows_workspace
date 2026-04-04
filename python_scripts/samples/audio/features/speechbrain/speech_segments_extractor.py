@@ -505,18 +505,73 @@ def extract_speech_timestamps(
         return enhanced
 
 
+
 if __name__ == "__main__":
-    audio_file = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
-    console.print(f"[bold cyan]Processing:[/bold cyan] {Path(audio_file).name}")
+    import argparse
+
+    DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\video\generated\extract_video_segment_short\video_segment.mp4"
+
+    parser = argparse.ArgumentParser(description="Extract speech timestamps from audio")
+    parser.add_argument(
+        "--audio_file",
+        default=DEFAULT_AUDIO_PATH,
+        help=f"Path to audio file (default: {DEFAULT_AUDIO_PATH})"
+    )
+    parser.add_argument(
+        "-t", "--threshold",
+        type=float,
+        default=0.5,
+        help="Speech threshold (default: 0.5)"
+    )
+    parser.add_argument(
+        "-n", "--neg-threshold",
+        type=float,
+        default=0.25,
+        help="Negative noise threshold (default: 0.25)"
+    )
+    parser.add_argument(
+        "-m", "--max-speech-duration-sec",
+        type=float,
+        default=8.0,
+        help="Maximum speech segment duration in seconds (default: 8.0)"
+    )
+    parser.add_argument(
+        "-s", "--return-seconds",
+        action="store_true",
+        default=True,
+        help="Return timestamps in seconds (default: True)"
+    )
+    parser.add_argument(
+        "-r", "--time-resolution",
+        type=int,
+        default=2,
+        help="Time resolution in ms (default: 2)"
+    )
+    parser.add_argument(
+        "-l", "--normalize-loudness",
+        action="store_true",
+        default=False,
+        help="Normalize loudness (default: False)"
+    )
+    parser.add_argument(
+        "-w", "--with-scores",
+        action="store_true",
+        default=True,
+        help="Return probability scores along with segments (default: True)"
+    )
+
+    args = parser.parse_args()
+
+    console.print(f"[bold cyan]Processing:[/bold cyan] {Path(args.audio_file).name}")
     segments, speech_probs = extract_speech_timestamps(
-        audio_file,
-        threshold=0.5,
-        neg_threshold=0.25,
-        max_speech_duration_sec=8.0,
-        return_seconds=True,
-        time_resolution=2,
-        normalize_loudness=False,
-        with_scores=True,
+        args.audio_file,
+        threshold=args.threshold,
+        neg_threshold=args.neg_threshold,
+        max_speech_duration_sec=args.max_speech_duration_sec,
+        return_seconds=args.return_seconds,
+        time_resolution=args.time_resolution,
+        normalize_loudness=args.normalize_loudness,
+        with_scores=args.with_scores,
     )
     console.print(f"\n[bold green]Segments found:[/bold green] {len(segments)}\n")
     for seg in segments:
