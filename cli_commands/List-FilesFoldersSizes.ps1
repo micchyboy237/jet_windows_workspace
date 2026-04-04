@@ -1,78 +1,96 @@
-# List-FilesFoldersSizes.ps1
+# List-FilesFoldersSizes.ps1 - Optimized & Fast Version
 #
-# PURPOSE:
-#   Displays files and folders with their sizes and last modified dates.
-#   Shows recursive size for directories, color coding, human-readable sizes.
-#
-# FEATURES:
-#   - Recursive folder size calculation
-#   - Cyan folders / Gray files
-#   - Yellow <DIR> marker
-#   - Sort by LastWriteTime (oldest first by default)
-#
-# USAGE EXAMPLES:
-#
-#   # Current directory, oldest first (default)
-#   .\List-FilesFoldersSizes.ps1
-#
-#   # Current directory, newest first
-#   .\List-FilesFoldersSizes.ps1 -Descending
-#   .\List-FilesFoldersSizes.ps1 -d
-#
-#   # Specific folder, oldest first
-#   .\List-FilesFoldersSizes.ps1 -Path C:\Projects
-#   .\List-FilesFoldersSizes.ps1 -p C:\Projects
-#
-#   # Specific folder, newest first (short form)
-#   .\List-FilesFoldersSizes.ps1 -p .. -d
-#
-#   # Explicit oldest first (rarely needed)
-#   .\List-FilesFoldersSizes.ps1 -Ascending -p .\src
-#   .\List-FilesFoldersSizes.ps1 -a -p .\src
-#
+# Now much faster on large directories with smart progress updates.
 
 param(
     [Alias("p")]
     [string]$Path = ".",
-
+    
     [Alias("a")]
-    [switch]$Ascending = $true,
-
+    [switch]$Ascending,
+    
     [Alias("d")]
     [switch]$Descending
 )
 
-# If both -Descending and -Ascending provided, Descending takes precedence
+# Default: largest first
+if (-not $Ascending -and -not $Descending) {
+    $Descending = $true
+}
 if ($Descending) { $Ascending = $false }
 
-Get-ChildItem -Path $Path -Force |
-  Sort-Object LastWriteTime -Descending:(!$Ascending) |
-  ForEach-Object {
-    $size = if ($_.PSIsContainer) {
-              (Get-ChildItem $_ -Recurse -Force -File -ErrorAction SilentlyContinue |
-               Measure-Object -Property Length -Sum).Sum
-            } else {
-              $_.Length
-            }
+$Path = Resolve-Path $Path
 
-    $size = if ($null -eq $size) { 0 } else { $size }
+Write-Host "Scanning and calculating sizes for: $Path" -ForegroundColor Cyan
 
-    $sizeStr = if ($size -ge 1GB)     { "{0:N2} GB" -f ($size / 1GB) }
-               elseif ($size -ge 1MB) { "{0:N0} MB" -f ($size / 1MB) }
-               elseif ($size -ge 1KB) { "{0:N0} KB" -f ($size / 1KB) }
-               else                   { "{0} B " -f $size }
+$sizeCache = @{}          # directory -> total size
+$filesProcessed = 0
+$progressId = 1
+$lastProgress = [DateTime]::Now
 
-    # Size + Date
-    Write-Host ("{0,10} {1} " -f $sizeStr, $_.LastWriteTime.ToString("yyyy-MM-dd HH:mm")) -NoNewline
+Get-ChildItem -Path $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        $filesProcessed++
+        $dir = $_.DirectoryName
 
-    # <DIR> indicator only for folders
-    if ($_.PSIsContainer) {
-      Write-Host "<DIR>     " -ForegroundColor Yellow -NoNewline
-    } else {
-      Write-Host "          " -NoNewline   # 10 spaces to align
+        if (-not $sizeCache.ContainsKey($dir)) {
+            $sizeCache[$dir] = 0
+        }
+        $sizeCache[$dir] += $_.Length
+
+        # Smart progress: update only every 500 files OR every ~800ms
+        if (($filesProcessed % 500 -eq 0) -or 
+            (([DateTime]::Now - $lastProgress).TotalMilliseconds -gt 800)) {
+            
+            $status = "Processed {0:N0} files..." -f $filesProcessed
+            $percent = -1   # indeterminate if we don't know total
+
+            Write-Progress -Id $progressId `
+                           -Activity "Calculating recursive folder sizes" `
+                           -Status $status `
+                           -PercentComplete $percent
+
+            $lastProgress = [DateTime]::Now
+        }
     }
 
-    # Name with color
-    $color = if ($_.PSIsContainer) { "Cyan" } else { "Gray" }
-    Write-Host $_.Name -ForegroundColor $color
-  }
+Write-Progress -Id $progressId -Completed
+
+# Enrich top-level items with sizes
+$items = Get-ChildItem -Path $Path -Force |
+    ForEach-Object {
+        $size = if ($_.PSIsContainer) {
+                    if ($sizeCache.ContainsKey($_.FullName)) { $sizeCache[$_.FullName] } else { 0 }
+                } else {
+                    $_.Length
+                }
+        $_ | Add-Member -NotePropertyName "Size" -NotePropertyValue $size -PassThru -Force
+    }
+
+# Sort (largest first by default)
+$sorted = $items | Sort-Object Size -Descending:(!$Ascending)
+
+# Output
+foreach ($item in $sorted) {
+    $size = $item.Size
+    $sizeStr = switch ($size) {
+        { $_ -ge 1GB } { "{0:N2} GB" -f ($size / 1GB); break }
+        { $_ -ge 100MB } { "{0:N1} MB" -f ($size / 1MB); break }
+        { $_ -ge 1MB }   { "{0:N0} MB" -f ($size / 1MB); break }
+        { $_ -ge 1KB }   { "{0:N0} KB" -f ($size / 1KB); break }
+        default          { "{0} B" -f $size }
+    }
+
+    Write-Host ("{0,12}  {1} " -f $sizeStr, $item.LastWriteTime.ToString("yyyy-MM-dd HH:mm")) -NoNewline
+
+    if ($item.PSIsContainer) {
+        Write-Host "<DIR> " -ForegroundColor Yellow -NoNewline
+    } else {
+        Write-Host "      " -NoNewline
+    }
+
+    $color = if ($item.PSIsContainer) { "Cyan" } else { "Gray" }
+    Write-Host $item.Name -ForegroundColor $color
+}
+
+Write-Host "`nTotal items shown: $($sorted.Count) | Files scanned: $filesProcessed" -ForegroundColor DarkGray

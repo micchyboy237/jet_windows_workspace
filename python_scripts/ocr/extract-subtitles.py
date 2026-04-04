@@ -298,7 +298,7 @@ if __name__ == "__main__":
         description="Extract .srt subtitles from a video using soft track or OCR.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    DEFAULT_VIDEO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\video\generated\extract_video_segment\video_segment.mp4"
+    DEFAULT_VIDEO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\video\generated\extract_video_segment_short\video_segment.mp4"
     parser.add_argument(
         "video",
         type=str,

@@ -64,8 +64,12 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\vad_speechbrain.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\speech_segments_extractor.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\main_speech_segments_extractor.py",
     r"",
 ]
 
@@ -83,34 +87,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix diff_utils on why start index is 0 here. It should ignore the punctuation.
-
-Original:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代。
-Modified:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべくウェスタリスはオペレー。
-
-Unchanged text:
-(none)
-Ending new text:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべくウェスタリスはオペレー。
-Length: 85 chars
-Similarity: 43.0%
-Start index: 0
-
-
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py 世界各国が水面下で熾烈な情報戦を繰り広げる時代。
-Using mode: split_sentences_ja (default)
-
- 1. 世界各国が水面下で熾烈な情報戦を繰り広げる時代。
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py 世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべくウェスタリスはオペレー。
-Using mode: split_sentences_ja (default)
-
- 1. 世界各国が水面下で熾烈な情報戦を繰り広げる時代、
- 2. 睨み合う2つの国、
- 3. 東のオスタニア、
- 4. 西のウェスタリス、
- 5. 戦争を企てるオスタニア政府要人の動向を探るべくウェスタリスはオペレー。
+Update vad_speechbrain to follow the same audio loader logic from speech_segments_extractor
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
