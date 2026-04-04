@@ -513,51 +513,59 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Extract speech timestamps from audio")
     parser.add_argument(
-        "--audio_file",
+        "audio_file",
+        nargs="?",
         default=DEFAULT_AUDIO_PATH,
-        help=f"Path to audio file (default: {DEFAULT_AUDIO_PATH})"
+        help=f"Path to audio file (default: {DEFAULT_AUDIO_PATH})",
     )
     parser.add_argument(
-        "-t", "--threshold",
+        "-t",
+        "--threshold",
         type=float,
         default=0.5,
-        help="Speech threshold (default: 0.5)"
+        help="Speech threshold (default: 0.5)",
     )
     parser.add_argument(
-        "-n", "--neg-threshold",
+        "-n",
+        "--neg-threshold",
         type=float,
         default=0.25,
-        help="Negative noise threshold (default: 0.25)"
+        help="Negative noise threshold (default: 0.25)",
     )
     parser.add_argument(
-        "-m", "--max-speech-duration-sec",
+        "-m",
+        "--max-speech-duration-sec",
         type=float,
         default=8.0,
-        help="Maximum speech segment duration in seconds (default: 8.0)"
+        help="Maximum speech segment duration in seconds (default: 8.0)",
     )
     parser.add_argument(
-        "-s", "--return-seconds",
+        "-s",
+        "--return-seconds",
         action="store_true",
         default=True,
-        help="Return timestamps in seconds (default: True)"
+        help="Return timestamps in seconds (default: True)",
     )
     parser.add_argument(
-        "-r", "--time-resolution",
+        "-r",
+        "--time-resolution",
         type=int,
         default=2,
-        help="Time resolution in ms (default: 2)"
+        help="Time resolution in ms (default: 2)",
     )
     parser.add_argument(
-        "-l", "--normalize-loudness",
+        "-l",
+        "--normalize-loudness",
         action="store_true",
         default=False,
-        help="Normalize loudness (default: False)"
+        help="Normalize loudness (default: False)",
     )
     parser.add_argument(
-        "-w", "--with-scores",
+        "-w",
+        "--with-scores",
         action="store_true",
         default=True,
-        help="Return probability scores along with segments (default: True)"
+        help="Return probability scores along with segments (default: True)",
     )
 
     args = parser.parse_args()
