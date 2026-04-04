@@ -224,34 +224,71 @@ if __name__ == "__main__":
         torchaudio.save(str(sound_path), waveform, sr)
         console.print(f"  [green]Saved[/green] {sound_path.name}")
 
-        # 2. speech_probs.json
+        # Compute frame-level RMS energies (exactly matching VAD 160-sample hop)
+        hop_samples = 160
+        energies: list[float] = []
+        if len(segment_audio_np) > 0:
+            num_frames = len(seg.get("segment_probs", []))
+            if num_frames == 0:
+                num_frames = (len(segment_audio_np) + hop_samples - 1) // hop_samples
+            for i in range(num_frames):
+                start_samp = i * hop_samples
+                end_samp = min(start_samp + hop_samples, len(segment_audio_np))
+                frame = segment_audio_np[start_samp:end_samp]
+                rms_val = float(np.sqrt(np.mean(frame**2))) if len(frame) > 0 else 0.0
+                energies.append(rms_val)
+
+        # 2. energies.json (new)
+        energies_path = seg_dir / "energies.json"
+        with open(energies_path, "w", encoding="utf-8") as f:
+            json.dump(energies, f, indent=2)
+        console.print(f"  [green]Saved[/green] {energies_path.name}")
+
+        # 3. speech_probs.json
         if seg.get("segment_probs"):
             probs_path = seg_dir / "speech_probs.json"
             with open(probs_path, "w", encoding="utf-8") as f:
                 json.dump(seg["segment_probs"], f, indent=2)
             console.print(f"  [green]Saved[/green] {probs_path.name}")
 
-        # 3. speech_probs.png
-        if seg.get("segment_probs"):
+        # 4. speech_probs.png (now 2-panel chart with energy)
+        if seg.get("segment_probs") and energies:
             plot_path = seg_dir / "speech_probs.png"
             probs_arr = np.array(seg["segment_probs"])
-            hop_sec = 160 / sr  # hardcoded from VAD impl
+            hop_sec = 160 / sr
             times = np.arange(len(probs_arr)) * hop_sec
-            plt.figure(figsize=(12, 5))
-            plt.plot(times, probs_arr, "b-", label="Speech probability")
-            plt.axhline(y=seg["prob"], color="red", linestyle="--", label=f"Avg prob = {seg['prob']:.3f}")
-            plt.title(f"Segment {seg_num} | {start_sec:.2f}-{end_sec:.2f}s | Duration {duration_sec:.2f}s")
-            plt.xlabel("Time (s)")
-            plt.ylabel("Probability")
-            plt.ylim(0, 1)
-            plt.grid(True, alpha=0.3)
-            plt.legend()
+
+            energies_arr = np.array(energies)
+
+            fig, axs = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+            # Top: Speech probability
+            axs[0].plot(times, probs_arr, "b-", label="Speech probability")
+            axs[0].axhline(y=seg["prob"], color="red", linestyle="--",
+                           label=f"Avg prob = {seg['prob']:.3f}")
+            axs[0].set_title(f"Segment {seg_num} | {start_sec:.2f}-{end_sec:.2f}s "
+                             f"| Duration {duration_sec:.2f}s")
+            axs[0].set_ylabel("Probability")
+            axs[0].set_ylim(0, 1)
+            axs[0].grid(True, alpha=0.3)
+            axs[0].legend()
+
+            # Bottom: RMS Energy
+            rms = float(np.sqrt(np.mean(segment_audio_np**2))) if len(segment_audio_np) > 0 else 0.0
+            axs[1].plot(times, energies_arr, "g-", label="RMS Energy")
+            axs[1].axhline(y=rms, color="orange", linestyle="--",
+                           label=f"Avg RMS = {rms:.3f}")
+            axs[1].set_ylabel("RMS Energy")
+            axs[1].set_xlabel("Time (s)")
+            axs[1].grid(True, alpha=0.3)
+            axs[1].legend()
+
             plt.tight_layout()
             plt.savefig(plot_path)
             plt.close()
             console.print(f"  [green]Saved[/green] {plot_path.name}")
 
-        # 4. segment.json (enhanced)
+        # 5. segment.json (enhanced - unchanged except ordering)
         rms = float(np.sqrt(np.mean(segment_audio_np**2))) if len(segment_audio_np) > 0 else 0.0
         seg_dict = dict(seg)
         seg_dict.update(
@@ -270,7 +307,7 @@ if __name__ == "__main__":
             json.dump(seg_dict, f, indent=2)
         console.print(f"  [green]Saved[/green] {seg_json_path.name}")
 
-        all_segments_json.append(seg_dict)
+        all_segments_json.append(seg_dict)  # note: energies list is NOT duplicated here (saved separately)
 
         if seg["type"] == "speech":
             total_speech_sec += duration_sec
