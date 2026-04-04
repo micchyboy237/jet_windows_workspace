@@ -10,6 +10,10 @@ OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+SAVE_DIR = str(
+    Path("~/.cache/pretrained_models/vad-crdnn-libriparty").expanduser().resolve()
+)
+
 # ====================== WARNINGS ======================
 warnings.filterwarnings("ignore", category=UserWarning, module="speechbrain")
 warnings.filterwarnings("ignore", category=ImportWarning)
@@ -18,7 +22,7 @@ print("Loading VAD model...")
 
 vad_model = VAD.from_hparams(
     source="speechbrain/vad-crdnn-libriparty",
-    savedir=r"C:\Users\druiv\.cache\pretrained_models\vad-crdnn-libriparty",
+    savedir=SAVE_DIR,
     local_strategy=LocalStrategy.COPY,
     run_opts={"device": "cpu"},
 )

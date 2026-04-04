@@ -64,8 +64,11 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\speech_segments_extractor.py",
+    r"",
     r"",
 ]
 
@@ -83,34 +86,107 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix diff_utils on why start index is 0 here. It should ignore the punctuation.
+Browse fix
 
-Original:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代。
-Modified:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべくウェスタリスはオペレー。
+python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\speech_segments_extractor.py
+C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\torch_audio_backend.py:60: UserWarning: torchaudio._backend.list_audio_backends has been deprecated. This deprecation is part of a large refactoring effort to transition TorchAudio into a maintenance phase. The decoding and encoding capabilities of PyTorch for both audio and video are being consolidated into TorchCodec. Please see https://github.com/pytorch/audio/issues/3902 for more information. It will be removed from the 2.9 release.
+  available_backends = torchaudio.list_audio_backends()
+C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.0.1)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\torch_audio_backend.py:60: UserWarning:
+torchaudio._backend.list_audio_backends has been deprecated. This deprecation is part of a large refactoring effort to
+transition TorchAudio into a maintenance phase. The decoding and encoding capabilities of PyTorch for both audio and
+video are being consolidated into TorchCodec. Please see https://github.com/pytorch/audio/issues/3902 for more
+information. It will be removed from the 2.9 release.
+  available_backends = torchaudio.list_audio_backends()
+C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.pretrained' was
+deprecated, redirecting to 'speechbrain.inference'. Please update your script. This is a change from SpeechBrain 1.0.
+See: https://github.com/speechbrain/speechbrain/releases/tag/v1.0.0
+  if ismodule(module) and hasattr(module, '__file__'):
+C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.k2_integration'
+was deprecated, redirecting to 'speechbrain.integrations.k2_fsa'. Please update your script.
+  if ismodule(module) and hasattr(module, '__file__'):
+C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.wordemb' was
+deprecated, redirecting to 'speechbrain.integrations.huggingface.wordemb'. Please update your script.
+  if ismodule(module) and hasattr(module, '__file__'):
+C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module
+'speechbrain.lobes.models.huggingface_transformers' was deprecated, redirecting to
+'speechbrain.integrations.huggingface'. Please update your script.
+  if ismodule(module) and hasattr(module, '__file__'):
+C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module
+'speechbrain.lobes.models.spacy' was deprecated, redirecting to 'speechbrain.integrations.nlp'. Please update your
+script.
+  if ismodule(module) and hasattr(module, '__file__'):
+C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module
+'speechbrain.lobes.models.flair' was deprecated, redirecting to 'speechbrain.integrations.nlp'. Please update your
+script.
+  if ismodule(module) and hasattr(module, '__file__'):
+C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module
+'speechbrain.nnet.loss.transducer_loss' was deprecated, redirecting to 'speechbrain.integrations.numba.transducer_loss'.
+Please update your script. This module depends on the optional 'numba' package. If you encounter an ImportError here,
+please install numba, for example with: pip install numba
+  if ismodule(module) and hasattr(module, '__file__'):
+C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.wordemb' was
+deprecated, redirecting to 'speechbrain.integrations.huggingface.wordemb'. Please update your script.
+  if ismodule(module) and hasattr(module, '__file__'):
+C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\parameter_transfer.py:234: UserWarning:
+Requested Pretrainer collection using symlinks on Windows. This might not work; see `LocalStrategy` documentation.
+Consider unsetting `collect_in` in Pretrainer to avoid symlinking altogether.
+  warnings.warn(
+✅ SpeechBrain VAD model ready
+Processing: recording_spyx_1_speaker.wav
+C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchaudio\_backend\utils.py:337: UserWarning: In 2.9, this function's implementation will be changed to use torchaudio.save_with_torchcodec` under the hood. Some parameters like format, encoding, bits_per_sample, buffer_size, and ``backend`` will be ignored. We recommend that you port your code to rely directly on TorchCodec's encoder instead: https://docs.pytorch.org/torchcodec/stable/generated/torchcodec.encoders.AudioEncoder
+  warnings.warn(
+Traceback (most recent call last):
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\dataio\audio_io.py", line 208, in info
+    file_info = sf.info(path)
+                ^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\soundfile.py", line 488, in info
+    return _SoundFileInfo(file, verbose)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\soundfile.py", line 433, in __init__
+    with SoundFile(file) as f:
+         ^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\soundfile.py", line 690, in __init__
+    self._file = self._open(file, mode_int, closefd)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\soundfile.py", line 1265, in _open
+    raise LibsndfileError(err, prefix="Error opening {0!r}: ".format(self.name))
+soundfile.LibsndfileError: Error opening 'C:\\Users\\druiv\\C:\\Users\\druiv\\AppData\\Local\\Temp\\tmpe0kqyrei.wav': System error.
 
-Unchanged text:
-(none)
-Ending new text:
-世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべくウェスタリスはオペレー。
-Length: 85 chars
-Similarity: 43.0%
-Start index: 0
+The above exception was the direct cause of the following exception:
 
+Traceback (most recent call last):
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\speech_segments_extractor.py", line 217, in extract_speech_timestamps
+    boundaries_sec = vad.get_speech_segments(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\VAD.py", line 923, in get_speech_segments
+    prob_chunks = self.get_speech_prob_file(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\VAD.py", line 98, in get_speech_prob_file
+    sample_rate, audio_len = self._get_audio_info(audio_file)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\VAD.py", line 651, in _get_audio_info
+    metadata = audio_io.info(str(audio_file))
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\dataio\audio_io.py", line 217, in info
+    raise RuntimeError(f"Failed to get info for {path}: {e}") from e
+RuntimeError: Failed to get info for C:\Users\druiv\C:\Users\druiv\AppData\Local\Temp\tmpe0kqyrei.wav: Error opening 'C:\\Users\\druiv\\C:\\Users\\druiv\\AppData\\Local\\Temp\\tmpe0kqyrei.wav': System error.
 
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py 世界各国が水面下で熾烈な情報戦を繰り広げる時代。
-Using mode: split_sentences_ja (default)
+During handling of the above exception, another exception occurred:
 
- 1. 世界各国が水面下で熾烈な情報戦を繰り広げる時代。
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py 世界各国が水面下で熾烈な情報戦を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオスタニア政府要人の動向を探るべくウェスタリスはオペレー。
-Using mode: split_sentences_ja (default)
+Traceback (most recent call last):
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\speech_segments_extractor.py", line 549, in <module>
+    segments, speech_probs = extract_speech_timestamps(
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\utils\_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speechbrain\speech_segments_extractor.py", line 461, in extract_speech_timestamps
+    os.remove(temp_path)
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\Users\\druiv\\AppData\\Local\\Temp\\tmpe0kqyrei.wav'
+(jet_venv) PS C:\Users\druiv>
 
- 1. 世界各国が水面下で熾烈な情報戦を繰り広げる時代、
- 2. 睨み合う2つの国、
- 3. 東のオスタニア、
- 4. 西のウェスタリス、
- 5. 戦争を企てるオスタニア政府要人の動向を探るべくウェスタリスはオペレー。
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
