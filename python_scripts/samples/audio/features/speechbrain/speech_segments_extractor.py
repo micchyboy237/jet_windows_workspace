@@ -634,7 +634,11 @@ if __name__ == "__main__":
     console.print(f"\n[bold green]Segments found:[/bold green] {len(segments)}\n")
     for seg in segments:
         console.print(
-            f"[yellow][[/yellow] [bold white]{seg['start']:.2f}[/bold white] - [bold white]{seg['end']:.2f}[/bold white] [yellow]][/yellow] "
-            f"duration=[bold magenta]{seg['duration']}s[/bold magenta] "
-            f"prob=[bold cyan]{seg['prob']:.3f}[/bold cyan]"
+            f"[yellow][[/yellow] "
+            f"[bold white]{seg['start']:.2f}[/bold white] - "
+            f"[bold white]{seg['end']:.2f}[/bold white] "
+            f"[yellow]][/yellow] "
+            f"duration=[bold magenta]{seg['duration']:.2f}s[/bold magenta] "
+            f"prob=[bold cyan]{seg['prob']:.3f}[/bold cyan] "
+            f"type=[bold {'green' if seg['type']=='speech' else 'red'}]{seg['type']}[/bold {'green' if seg['type']=='speech' else 'red'}]"
         )
