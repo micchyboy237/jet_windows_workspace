@@ -7,7 +7,7 @@ from speechbrain.inference.VAD import VAD
 from speechbrain.utils.fetching import LocalStrategy
 
 # ====================== ARGPARSE + AUDIO PATH ======================
-DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+DEFAULT_AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\generated\extract_audio_segment\extracted_audio_16k_mono.wav"
 
 parser = argparse.ArgumentParser(
     description="Run SpeechBrain VAD and save detected speech segments."
