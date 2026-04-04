@@ -146,10 +146,10 @@ def blocking_process_audio(
     prev_full_ja_text = None
     prev_full_en_text = None
 
-    unchanged_text = ""
+    unchanged_text = None
     new_ja_text = full_ja_text
-    new_ja_start_index = 0
-    new_ja_similarity = 0.0
+    new_ja_start_index = None
+    new_ja_similarity = None
     history = None
 
     # === Decision logic (exactly as before; now sees the *post-reset* buffer state) ===
@@ -311,10 +311,13 @@ def blocking_process_audio(
         console.print(f"[bright_white]{old_ja_text}[/bright_white]")
 
     if new_ja_text:
-        console.print(f"[success]Unchanged JA ({len(unchanged_text)} chars):[/success]")
-        console.print(f"[white]{unchanged_text}[/white]")
-        console.print(f"[success]Start index:[/success] [bold cyan]{new_ja_start_index}[/bold cyan]")
-        console.print(f"[success]Matched Similarity:[/success] [bold cyan]{new_ja_similarity}[/bold cyan]")
+        if unchanged_text is not None:
+            console.print(f"[success]Unchanged JA ({len(unchanged_text)} chars):[/success]")
+            console.print(f"[white]{unchanged_text}[/white]")
+        if new_ja_start_index is not None:
+            console.print(f"[success]Start index:[/success] [bold cyan]{new_ja_start_index}[/bold cyan]")
+        if new_ja_similarity is not None:
+            console.print(f"[success]Matched Similarity:[/success] [bold cyan]{new_ja_similarity}[/bold cyan]")
         console.print(f"[success]New JA ({len(new_ja_text)} chars):[/success]")
         console.print(f"[bold cyan]{new_ja_text}[/bold cyan]")
 
@@ -343,10 +346,18 @@ def blocking_process_audio(
         ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     segment_dir = LAST_N_SEGMENTS_DIR / f"segments_{ts_str}"
     segment_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save new audio
     with open(segment_dir / "header.json", "w", encoding="utf-8") as f:
         json.dump(header, f, ensure_ascii=False, indent=2)
     audio_np_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
     wavfile.write(str(segment_dir / "sound.wav"), sample_rate, audio_np_int16)
+
+    # Save audio with context
+    with open(segment_dir / "header.json", "w", encoding="utf-8") as f:
+        json.dump(header, f, ensure_ascii=False, indent=2)
+    wavfile.write(str(segment_dir / "full_sound.wav"), sample_rate, full_audio_int16)
+
     md_results = (
         f"JA: {ja_text}\n"
         f"EN: {en_text}\n"
