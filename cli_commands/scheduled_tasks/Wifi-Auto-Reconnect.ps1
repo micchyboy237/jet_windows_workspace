@@ -2,8 +2,11 @@
 # CONFIGURATION
 # =========================
 $SSID = "estradadeco"
-$LogFile = "$PSScriptRoot\wifi_reconnect.log"
+$LogFile = Join-Path $PSScriptRoot "wifi_reconnect.log"
 $CheckIntervalSeconds = 10
+
+$ParentDir = Split-Path -Path $PSScriptRoot -Parent
+$ResetScriptPath = Join-Path $ParentDir "Reset-Wifi.ps1"
 
 # =========================
 # LOGGING
@@ -20,6 +23,13 @@ function Write-Log {
     Add-Content -Path $LogFile -Value $logLine
     Write-Output $logLine
 }
+
+# Log configuration variables
+Write-Log "Script configuration:"
+Write-Log "SSID = $SSID"
+Write-Log "LogFile = $LogFile"
+Write-Log "CheckIntervalSeconds = $CheckIntervalSeconds"
+Write-Log "ResetScriptPath = $ResetScriptPath"
 
 # =========================
 # WIFI HELPERS
@@ -87,6 +97,30 @@ function Connect-ToSSID {
 }
 
 # =========================
+# WIFI RESET
+# =========================
+function Reset-WifiAdapter {
+    try {
+        if (-not (Test-Path $ResetScriptPath)) {
+            Write-Log "Reset script not found at: $ResetScriptPath" "ERROR"
+            return $false
+        }
+
+        Write-Log "Invoking Wi-Fi reset script..."
+
+        & $ResetScriptPath
+
+        Write-Log "Wi-Fi reset script executed"
+        Start-Sleep -Seconds 5
+
+        return $true
+    } catch {
+        Write-Log "Failed to execute reset script: $_" "ERROR"
+        return $false
+    }
+}
+
+# =========================
 # INIT
 # =========================
 if (!(Test-Path $LogFile)) {
@@ -105,6 +139,9 @@ while ($true) {
 
     if (-not $isConnected -or $currentSSID -ne $SSID) {
         Write-Log "Wi-Fi not connected or wrong SSID (Current: $currentSSID)"
+
+        Reset-WifiAdapter | Out-Null
+
         Connect-ToSSID -TargetSSID $SSID | Out-Null
     } else {
         Write-Log "Already connected to correct SSID: $SSID"
