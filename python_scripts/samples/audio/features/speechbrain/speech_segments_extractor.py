@@ -505,66 +505,6 @@ def extract_speech_timestamps(
         return enhanced
 
 
-def extract_speech_audio(
-    audio: Union[str, Path, np.ndarray, torch.Tensor, list[np.ndarray]],
-    sampling_rate: int = 16000,
-    threshold: float = 0.5,
-    neg_threshold: float = 0.25,
-    max_speech_duration_sec: float | None = None,
-    large_chunk_size: int = 30,
-    small_chunk_size: int = 10,
-    double_check: bool = True,
-) -> List[np.ndarray]:
-    """
-    Extract contiguous speech segments from the input audio using SpeechBrain VAD.
-
-    Returns a flat list of numpy arrays where each array represents one complete
-    speech segment (utterance/turn) in float32 format, normalized to [-1.0, 1.0].
-    """
-    speech_segments = extract_speech_timestamps(
-        audio=audio,
-        threshold=threshold,
-        neg_threshold=neg_threshold,
-        sampling_rate=sampling_rate,
-        max_speech_duration_sec=max_speech_duration_sec,
-        return_seconds=True,
-        include_non_speech=False,
-        large_chunk_size=large_chunk_size,
-        small_chunk_size=small_chunk_size,
-        double_check=double_check,
-    )
-
-    audio_np, sr = load_audio(
-        audio=audio,
-        sr=sampling_rate,
-        mono=True,
-    )
-
-    if sr != sampling_rate:
-        raise ValueError(
-            f"Loaded sample rate {sr} does not match requested {sampling_rate}"
-        )
-
-    speech_audio_chunks: List[np.ndarray] = []
-
-    for segment in speech_segments:
-        start_sec: float = segment["start"]
-        end_sec: float = segment["end"]
-
-        start_sample = int(round(start_sec * sr))
-        end_sample = int(round(end_sec * sr))
-
-        segment_audio = audio_np[start_sample:end_sample]
-
-        if len(segment_audio) == 0:
-            continue
-
-        segment_audio = segment_audio.astype(np.float32, copy=False)
-        speech_audio_chunks.append(segment_audio)
-
-    return speech_audio_chunks
-
-
 if __name__ == "__main__":
     audio_file = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
     console.print(f"[bold cyan]Processing:[/bold cyan] {Path(audio_file).name}")
