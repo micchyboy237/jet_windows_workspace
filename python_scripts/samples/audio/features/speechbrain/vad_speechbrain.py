@@ -22,6 +22,9 @@ parser.add_argument(
 args = parser.parse_args()
 audio_path = Path(args.audio_path)
 
+threshold = 0.5
+neg_threshold = 0.25
+
 # ====================== OUTPUT SETUP ======================
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
@@ -53,7 +56,11 @@ try:
     audio_file = audio_path.name
 
     print("Running VAD on audio...")
-    boundaries = vad_model.get_speech_segments(audio_file)
+    boundaries = vad_model.get_speech_segments(
+        audio_file,
+        activation_th=threshold,
+        deactivation_th=neg_threshold,
+    )
 
 finally:
     # Always restore original working directory

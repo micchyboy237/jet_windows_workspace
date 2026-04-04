@@ -21,6 +21,41 @@ SAVE_DIR = str(
     Path("~/.cache/pretrained_models/vad-crdnn-libriparty").expanduser().resolve()
 )
 
+TARGET_RMS_DBFS: float = -20.0      # Recommended for speech VAD/ASR (-18 to -23 range)
+SAFETY_HEADROOM_DB: float = 0.5     # Prevent hard clipping (~ -0.5 dBFS max peak)
+
+
+def _normalize_loudness(audio_np: np.ndarray, sr: int) -> np.ndarray:
+    """
+    Best-practice loudness normalization for speech/VAD pipelines (zero extra deps).
+    1. Peak normalize (prevent clipping).
+    2. RMS gain to target dBFS (consistent perceived volume).
+    3. Final safety limiter.
+    Works reliably on short segments unlike full integrated LUFS.
+    """
+    if audio_np.size == 0:
+        return audio_np.astype(np.float32)
+
+    # 1. Peak normalization
+    peak = np.max(np.abs(audio_np))
+    if peak > 1e-8:
+        audio_np = audio_np / peak
+
+    # 2. RMS-based loudness normalization
+    rms = np.sqrt(np.mean(audio_np.astype(np.float64)**2) + 1e-10)
+    if rms > 1e-8:
+        target_rms = 10 ** (TARGET_RMS_DBFS / 20.0)
+        gain = target_rms / rms
+        audio_np = audio_np * gain
+
+    # 3. Safety peak limiter
+    current_peak = np.max(np.abs(audio_np))
+    if current_peak > (1.0 - 10 ** (-SAFETY_HEADROOM_DB / 20.0)):
+        limiter = (1.0 - 10 ** (-SAFETY_HEADROOM_DB / 20.0)) / current_peak
+        audio_np = audio_np * limiter
+
+    return np.clip(audio_np, -1.0, 1.0).astype(np.float32)
+
 
 class SpeechSegment(TypedDict):
     num: int
@@ -48,9 +83,10 @@ def load_audio(
     audio: AudioInput,
     sr: int = 16_000,
     mono: bool = True,
+    normalize_loudness: bool = False,
 ) -> tuple[np.ndarray, int]:
     """
-    Robust audio loader for ASR pipelines.
+    Robust audio loader for ASR/VAD pipelines.
 
     Handles:
       - File paths
@@ -136,20 +172,28 @@ def load_audio(
     elif y.ndim == 2:
         if y.shape[0] > y.shape[1]:
             y = y.T
+        # Force mono early if requested
+        if mono and y.shape[0] > 1:
+            y = np.mean(y, axis=0, keepdims=True)
     else:
         raise ValueError(f"Audio must be 1D or 2D, got shape {y.shape}")
-
-    # ─────── Mono conversion ───────
-    if mono and y.shape[0] > 1:
-        y = np.mean(y, axis=0, keepdims=True)
 
     # ─────── Sample rate handling ───────
     effective_sr = current_sr or sr
 
-    # ─────── Resample if needed ───────
+    # Resample ONLY if needed
     if effective_sr != sr:
         y = librosa.resample(y, orig_sr=effective_sr, target_sr=sr)
         effective_sr = sr
+        # After resampling we may need to re-mono (rare)
+        if mono and y.shape[0] > 1:
+            y = np.mean(y, axis=0, keepdims=True)
+
+    # ─────── Loudness Normalization (optional inside loader) ───────
+    if normalize_loudness:
+        y = _normalize_loudness(y.squeeze(), effective_sr)
+        if y.ndim == 1:
+            y = y[None, :]
 
     return y.squeeze().astype(np.float32), effective_sr
 
@@ -216,9 +260,14 @@ def _vad_tensor_context(waveform: torch.Tensor, sample_rate: int, audio_np: np.n
         elif torch.cuda.is_available():
             tensor = tensor.to('cuda')
 
-        # Ensure (1, time) shape expected by VAD internals
+        # Robust shape handling — VAD expects [batch, time] (mono)
         if tensor.dim() == 1:
-            tensor = tensor.unsqueeze(0)
+            tensor = tensor.unsqueeze(0)          # [time] → [1, time]
+        elif tensor.dim() == 3 and tensor.shape[0] == 1 and tensor.shape[2] == 1:
+            tensor = tensor.squeeze(-1)           # rare [1, time, 1] → [1, time]
+        elif tensor.dim() == 2 and tensor.shape[0] != 1:
+            # stereo case — should not reach here because load_audio already made mono
+            tensor = tensor.mean(dim=0, keepdim=True)
 
         return tensor, sample_rate
 
@@ -269,7 +318,14 @@ def extract_speech_timestamps(
     audio_np, sr = load_audio(
         audio,
         sr=sampling_rate,
+        normalize_loudness=normalize_loudness,
     )
+
+    # ─────── Loudness Normalization (applied here - best location) ───────
+    if normalize_loudness:
+        with console.status("[bold yellow]Normalizing loudness...[/bold yellow]"):
+            audio_np = _normalize_loudness(audio_np, sr)
+
     # Shape: (1, time) for VAD compatibility
     waveform = torch.from_numpy(audio_np).unsqueeze(0).clamp(-1.0, 1.0)
 
@@ -554,13 +610,6 @@ if __name__ == "__main__":
         help="Time resolution in ms (default: 2)",
     )
     parser.add_argument(
-        "-l",
-        "--normalize-loudness",
-        action="store_true",
-        default=False,
-        help="Normalize loudness (default: False)",
-    )
-    parser.add_argument(
         "-w",
         "--with-scores",
         action="store_true",
@@ -578,8 +627,9 @@ if __name__ == "__main__":
         max_speech_duration_sec=args.max_speech_duration_sec,
         return_seconds=args.return_seconds,
         time_resolution=args.time_resolution,
-        normalize_loudness=args.normalize_loudness,
         with_scores=args.with_scores,
+        include_non_speech=True,
+        normalize_loudness=True,
     )
     console.print(f"\n[bold green]Segments found:[/bold green] {len(segments)}\n")
     for seg in segments:
