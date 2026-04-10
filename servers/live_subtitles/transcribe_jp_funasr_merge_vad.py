@@ -13,6 +13,7 @@ import scipy.io.wavfile as wavfile
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 from sentence_utils import SYMBOL_RANGE, split_sentences_ja
+from ja_punctuator import add_punctuation
 
 TimestampPair = Tuple[int, int]
 
@@ -357,8 +358,10 @@ def transcribe_japanese_llm_from_file(
     phrase_segments: list[PhraseSegment] = []
 
     if segments and ja_text.strip():
+        ja_text = add_punctuation(ja_text)
         phrases = split_sentences_ja(ja_text)
         phrase_segments = _build_phrase_segments(phrases, segments)
+        ja_text = "".join(phrases)
 
     return {
         "text_ja": ja_text,

@@ -16,36 +16,62 @@ def split_sentences_ja(
     text: str,
     punctuations: str = "、…",
 ) -> List[str]:
-    if not text.strip():
+    """
+    Split Japanese text into sentences.
+    Updated behavior:
+    - First splits on symbol clusters (🎼, emojis, etc.) as hard section dividers.
+    - Then applies FastBunkai + extra punctuation logic to each block independently.
+    - Symbols are removed.
+    """
+    if not text or not text.strip():
+        return []
+
+    # Step 1: Split on symbol clusters first (treat as hard boundaries)
+    blocks = re.split(rf"[{SYMBOL_RANGE}]+", text)
+    # Remove empty/blank blocks (from leading, trailing, or consecutive symbols)
+    blocks = [block.strip() for block in blocks if block.strip()]
+
+    if not blocks:
         return []
 
     splitter = FastBunkai()
-    chunks = list(splitter(text))  # First pass: respect 。！？ properly
+    result: List[str] = []
 
-    if not punctuations:
-        return [s.strip() for s in chunks if s.strip()]
-
-    # Pattern: split *after* each extra punctuation, keeping it with the left side
-    extra_punc_escaped = re.escape(punctuations)
-    pattern = f"(?<=[{extra_punc_escaped}])\\s*(?![{extra_punc_escaped}])"
-
-    result = []
-
-    for chunk in chunks:
-        # If no extra punctuations in this chunk → keep as-is
-        if not re.search(f"[{extra_punc_escaped}]", chunk):
-            cleaned = chunk.strip()
-            if cleaned:
-                result.append(cleaned)
+    # Step 2: Apply original sentence splitting logic to each block independently
+    for block in blocks:
+        # Normalize internal whitespace
+        block = re.sub(r"\s+", " ", block).strip()
+        if not block:
             continue
 
-        # Split after extra punctuation (lookbehind ensures punctuation stays left)
-        pieces = re.split(pattern, chunk)
+        # First pass: respect 。！？ properly using FastBunkai
+        chunks = list(splitter(block))
 
-        for piece in pieces:
-            cleaned = piece.strip()
-            if cleaned:
-                result.append(cleaned)
+        if not punctuations:
+            for s in chunks:
+                cleaned = s.strip()
+                if cleaned:
+                    result.append(cleaned)
+            continue
+
+        # Pattern: split *after* each extra punctuation (、…), keeping it with the left side
+        extra_punc_escaped = re.escape(punctuations)
+        pattern = f"(?<=[{extra_punc_escaped}])\\s*(?![{extra_punc_escaped}])"
+
+        for chunk in chunks:
+            # If no extra punctuations in this chunk → keep as-is
+            if not re.search(f"[{extra_punc_escaped}]", chunk):
+                cleaned = chunk.strip()
+                if cleaned:
+                    result.append(cleaned)
+                continue
+
+            # Split after extra punctuation
+            pieces = re.split(pattern, chunk)
+            for piece in pieces:
+                cleaned = piece.strip()
+                if cleaned:
+                    result.append(cleaned)
 
     return result
 
