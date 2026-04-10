@@ -49,7 +49,7 @@ Core rules (apply to every single input):
 - For narration or monologue, keep it smooth and engaging but never wordy.
 - Output ONLY the clean English translation. Never add explanations, notes, "Translation:", "Assistant:", or any meta text."""
 
-USER_PROMPT = "Japanese:\n{japanese_text}\nEnglish:\n"
+USER_PROMPT = "{japanese_text}"
 
 
 class ReferenceExample(TypedDict):
