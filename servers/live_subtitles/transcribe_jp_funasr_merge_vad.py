@@ -418,6 +418,8 @@ if __name__ == "__main__":
     from rich.pretty import pprint
     from scipy.io import wavfile
 
+    from translate_jp_en_llm import translate_japanese_to_english
+
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -524,12 +526,12 @@ if __name__ == "__main__":
                 f"[yellow]Skipping sound.wav for phrase_{phrase_num} (no timestamps)[/yellow]"
             )
 
+    console.print(f"JA:\n[bold cyan]{ja_text}[/bold cyan]")
+
     # Translate to English
     console.print("[dim]Loading translator...[/dim]")
-    from translate_jp_en_llm import translate_japanese_to_english
     en_text = translate_japanese_to_english(ja_text)["text"]
     
-    console.print(f"JA:\n[bold cyan]{ja_text}[/bold cyan]")
     console.print(f"EN:\n[bold cyan]{en_text}[/bold cyan]")
 
     console.print(
