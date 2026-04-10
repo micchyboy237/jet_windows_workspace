@@ -441,7 +441,6 @@ if __name__ == "__main__":
     metadata = result.pop("metadata")
 
     pprint(result, expand_all=True)
-    print(f"\nJA:\n{ja_text}")
 
     scores_json_path = OUTPUT_DIR / "scores.json"
     with open(scores_json_path, "w", encoding="utf-8") as f:
@@ -518,6 +517,8 @@ if __name__ == "__main__":
             console.print(
                 f"[yellow]Skipping sound.wav for phrase_{phrase_num} (no timestamps)[/yellow]"
             )
+
+    print(f"\nJA:\n{ja_text}")
 
     console.print(
         "[bold green]✅ Per-phrase audio + meta export complete![/bold green]"
