@@ -38,23 +38,19 @@ TRANSLATION_DEFAULTS = {
     # "top_logprobs": 3
 }
 
-SYSTEM_PROMPT = """You are a highly skilled real-time Japanese-to-English subtitle translator for live audio transcriptions (Whisper output).
+SYSTEM_PROMPT = """You are a Japanese→English subtitle translator.
 
-Your ONLY task is to produce accurate, natural, subtitle-ready English translations.
+Rules:
+- Preserve meaning strictly; no additions or invented context.
+- Input may contain ASR noise — fix only with high confidence.
+- If uncertain, keep words close to original (do not reinterpret into unrelated meanings).
+- Prefer partial/literal translation over fluent but incorrect output.
+- Do NOT infer names, objects, or topics not clearly present.
+- Keep output concise and subtitle-ready.
+- Preserve tone exactly.
+- Output ONLY the English translation."""
 
-Core rules (apply to every input):
-- Preserve meaning exactly. Do not add, omit, alter intent, or moralize.
-- Whisper transcripts may contain errors. Infer the most likely intended meaning while staying very close to the original text.
-- Write in natural, spoken English suitable for subtitles: concise, fluid, and easy to read in real time.
-- Translate everything as-is, including profanity, slang, vulgar language, sensitive topics, or explicit content. Do not censor or soften tone.
-- Maintain the original tone, intensity, and emotional nuance.
-- If the input clearly shifts between speakers, separate lines for readability. Do not add speaker labels unless explicitly present.
-- If the input is fragmented, incomplete, or trailing, translate it naturally as a partial thought without forcing completion.
-- For narration or monologue, keep it smooth and engaging, but never verbose.
-- Output ONLY the final English translation. Do not include explanations, notes, or any meta text.
-"""
-
-USER_PROMPT = "{japanese_text}"
+USER_PROMPT = "Japanese:\n{japanese_text}\nEnglish:\n"
 
 
 class ReferenceExample(TypedDict):
@@ -62,32 +58,15 @@ class ReferenceExample(TypedDict):
     en: str
 
 
-DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = [
-    # Example 1: Casual conversation (everyday spoken Japanese)
+DEFAULT_REFERENCE_EXAMPLES = [
     {
-        "ja": "やあ、最近どう？ なんか元気ないみたいだけど。大丈夫？",
-        "en": "Hey, how've you been lately? You don't seem like your usual self. You okay?",
+        "ja": "しクらス時キドがもうとしている、今のうちに手ゴマを増やしておく子。",
+        "en": "The class phase is about to start, so I'll increase my pieces while I still can.",
     },
-    # Example 2: Narration / documentary-style (formal but natural)
     {
-        "ja": "この古い寺院は約五百年の歴史を持ち、毎年多くの観光客が訪れます。",
-        "en": "This ancient temple has a history of about five hundred years, and many tourists visit every year.",
+        "ja": "アジがドコかヘンだけど、まあいいか。",
+        "en": "The taste is a bit off, but whatever.",
     },
-    # Example 3: Uncensored conversational with profanity (shows no filtering + natural subtitle tone)
-    {
-        "ja": "くそっ、今日のミーティング超つまんなかったわ。早く家帰りてぇよ。",
-        "en": "Fuck, today's meeting was insanely boring. I just wanna get home already.",
-    },
-    # Example 4: Transcription error handling + casual invitation (Whisper-style error simulation)
-    {
-        "ja": "えっと、明日一緒に映画見に行かない？ 面白そーなやつがあるんだよね。",
-        "en": "Um, wanna go see a movie together tomorrow? There's one that looks pretty interesting.",
-    },
-    # Example 5: Fragmented / trailing Whisper input (incomplete sentence handling)
-    # {
-    #     "ja": "だからさ…その時に急に来て…えっと、なんか変な感じで…",
-    #     "en": "So, like… it suddenly came at that moment… um, it felt kinda weird…",
-    # },
 ]
 
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
