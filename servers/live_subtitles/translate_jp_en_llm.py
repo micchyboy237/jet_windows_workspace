@@ -84,10 +84,10 @@ DEFAULT_REFERENCE_EXAMPLES: List[ReferenceExample] = [
         "en": "Um, wanna go see a movie together tomorrow? There's one that looks pretty interesting.",
     },
     # Example 5: Fragmented / trailing Whisper input (incomplete sentence handling)
-    {
-        "ja": "だからさ…その時に急に来て…えっと、なんか変な感じで…",
-        "en": "So, like… it suddenly came at that moment… um, it felt kinda weird…",
-    },
+    # {
+    #     "ja": "だからさ…その時に急に来て…えっと、なんか変な感じで…",
+    #     "en": "So, like… it suddenly came at that moment… um, it felt kinda weird…",
+    # },
 ]
 
 llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
