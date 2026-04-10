@@ -1,43 +1,43 @@
 # Start-LlamaServer-Embedding.ps1
-# Optimized for: Ryzen 5 3600 + GTX 1660 (6GB) + 16GB RAM - 2026 best practices
-# 4 parallel workers, ctx scaled automatically per worker
+# Optimized for: Ryzen 5 3600 (6-core) + GTX 1660 (6GB) + 16GB RAM - 2026 best practices
+# Parallel reduced to 4 for better stability and lower memory pressure
 
 Write-Host "Starting llama.cpp embedding server launcher (optimized for short-to-medium text workloads)" -ForegroundColor Cyan
 Write-Host "Select an embedding model to start:`n" -ForegroundColor Cyan
-Write-Host "1. embeddinggemma-300M-Q8_0         (fast, 2048 natural ctx)"
-Write-Host "2. nomic-embed-text-v1.5.Q4_K_M     (long context capable)"
-Write-Host "3. nomic-embed-text-v2-moe.Q4_K_M   (MOE variant)"
-Write-Host "4. all-MiniLM-L12-v2-q4_0           (fastest, lower quality)"
+Write-Host "1. embeddinggemma-300M-Q8_0         (fast, lightweight, great quality/speed)"
+Write-Host "2. nomic-embed-text-v1.5.Q4_K_M     (good for longer documents)"
+Write-Host "3. nomic-embed-text-v2-moe.Q4_K_M   (Recommended: best quality for semantic search / RAG)"
+Write-Host "4. all-MiniLM-L12-v2-q4_0           (fastest but lower quality)"
 Write-Host ""
 
 $modelChoice = Read-Host "Enter the number of your choice (1-4)"
 $port = 8081
 
-# ---- Runtime scaling variables ----
-$parallel     = 6
-$threadsHttp  = 6
-$threads      = 10
+# ---- Runtime scaling variables (tuned for your hardware) ----
+$parallel     = 4          # Reduced from 6 → more stable on 6-core CPU + 6GB VRAM
+$threadsHttp  = 4
+$threads      = 6          # Matches physical cores; good balance with GPU offload
 
 switch ($modelChoice) {
     "1" {
         $modelName  = "embeddinggemma-300M-Q8_0.gguf"
         $naturalCtx = 2048
-        $vramEst    = "~200-300 MB"
+        $vramEst    = "~200-350 MB"
     }
     "2" {
         $modelName  = "nomic-embed-text-v1.5.Q4_K_M.gguf"
         $naturalCtx = 4096
-        $vramEst    = "~250-400 MB"
+        $vramEst    = "~250-420 MB"
     }
     "3" {
         $modelName  = "nomic-embed-text-v2-moe.Q4_K_M.gguf"
         $naturalCtx = 2048
-        $vramEst    = "~350-480 MB"
+        $vramEst    = "~350-500 MB"
     }
     "4" {
         $modelName  = "all-MiniLM-L12-v2-q4_0.gguf"
         $naturalCtx = 1024
-        $vramEst    = "~150-220 MB"
+        $vramEst    = "~150-250 MB"
     }
     default {
         Write-Host "Invalid selection. Please choose 1-4." -ForegroundColor Red
@@ -45,7 +45,7 @@ switch ($modelChoice) {
     }
 }
 
-# ---- Derived values (DRY + scalable) ----
+# ---- Derived values ----
 $ctxSize   = $naturalCtx * $parallel
 $batchSize = $ctxSize
 
@@ -70,7 +70,7 @@ Write-Host " GPU layers        : -1 (full offload)"
 Write-Host " Threads           : $threads"
 Write-Host " HTTP Threads      : $threadsHttp"
 Write-Host " KV cache quant    : f16 / f16"
-Write-Host " Est. VRAM         : $vramEst"
+Write-Host " Est. VRAM         : $vramEst (very safe on 6GB GTX 1660)"
 Write-Host ""
 
 $confirm = Read-Host "Start server with these settings? [Y/n]"

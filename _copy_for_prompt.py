@@ -91,8 +91,9 @@ Update vad_speechbrain to follow the same audio loader logic from speech_segment
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
-Provide step by step analysis first.
-Show unified diff for updated files unless specified otherwise, while show python code block for new files.
+Provide step by step analysis and outline blueprint first.
+Show unified diff for updated files, while show language code block for new files.
+Use easy to understand terms when explaining.
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """
