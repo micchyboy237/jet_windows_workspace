@@ -355,7 +355,7 @@ def transcribe_japanese_llm_from_file(
     phrase_segments: list[PhraseSegment] = []
 
     if segments and ja_text.strip():
-        ja_text = add_punctuation(ja_text)
+        ja_text = add_punctuation(ja_text, space_replacement='、')
         phrases = split_sentences_ja(ja_text)
         phrase_segments = _build_phrase_segments(phrases, segments)
         ja_text = "".join(phrases)

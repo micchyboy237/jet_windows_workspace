@@ -253,10 +253,21 @@ def blocking_process_audio(
             en_text = trans_en["text"].strip()
         else:
             en_text = ""
+
         if prev_full_en_text:
-            full_en_text = (prev_full_en_text + "\n" + en_text).strip() if en_text else prev_full_en_text
+            # FIX: Prevent redundancy in full_en_text (Curr EN)
+            # When extract_new_ja_text reports start_index == 0 it means
+            # an early correction happened → the LLM already gave us a clean
+            # full translation of the current full_ja_text.
+            # In all other cases (pure suffix addition) we keep the old append logic.
+            if new_ja_text_res["start_index"] == 0:
+                full_en_text = en_text.strip()
+                console.print("[success]Early correction detected → full_en_text reset to clean latest translation (no duplication)[/success]")
+            else:
+                full_en_text = (prev_full_en_text + "\n" + en_text).strip() if en_text else prev_full_en_text
         else:
             full_en_text = en_text
+
     else:
         ja_sents = full_ja_sents
         ja_text = full_ja_text

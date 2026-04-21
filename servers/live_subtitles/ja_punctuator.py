@@ -62,6 +62,7 @@ def add_punctuation(
     punctuator: Optional[sherpa_onnx.OfflinePunctuation] = None,
     model_dir: Optional[Union[str, Path]] = None,
     model_path: Optional[Union[str, Path]] = None,
+    space_replacement: Optional[str] = None,
 ) -> Union[str, List[str]]:
     """
     Add punctuation to one or more text strings using sherpa-onnx.
@@ -73,6 +74,8 @@ def add_punctuation(
         punctuator: Optional pre-created OfflinePunctuation instance (for reuse)
         model_dir: Directory containing the punctuation model (if punctuator not provided)
         model_path: Direct path to model.onnx (if punctuator not provided)
+        space_replacement: Optional character to replace spaces with in each
+                           punctuated output string (e.g. "_" or "·")
 
     Returns:
         Punctuated text(s) with the same type as input:
@@ -87,6 +90,9 @@ def add_punctuation(
         >>> results = add_punctuation(["i love you", "what time is it"])
         >>> print(results)
         ["I love you.", "What time is it?"]
+
+        >>> add_punctuation("see you soon", space_replacement="_")
+        "See_you_soon."
     """
     # Create punctuator if not provided
     if punctuator is None:
@@ -99,8 +105,13 @@ def add_punctuation(
     else:
         text_list = texts  # type: ignore[assignment]
 
-    # Add punctuation
-    punctuated_list = [punctuator.add_punctuation(text) for text in text_list]
+    # Add punctuation with optional space replacement
+    punctuated_list = [
+        punctuator.add_punctuation(text.replace(" ", space_replacement))
+        if space_replacement is not None
+        else punctuator.add_punctuation(text)
+        for text in text_list
+    ]
 
     # Return same type as input
     return punctuated_list[0] if was_single else punctuated_list
@@ -118,8 +129,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "texts",
-        nargs="+",
+        nargs="*",
+        default=["おはようございます 今日はいい天気ですね 何か予定がありますか"],
         help="One or more text strings to punctuate. For multi-word use quotes. (Ex.: 'hello world how are you today')",
+    )
+    parser.add_argument(
+        "-s", "--space-replacement",
+        default=None,
+        help="Character to replace spaces with in punctuated output (e.g. '_' or '·').",
     )
     args = parser.parse_args()
 
@@ -129,10 +146,10 @@ if __name__ == "__main__":
     punctuator = create_punctuation_model()
 
     if len(input_texts) == 1:
-        punctuated = add_punctuation(input_texts[0], punctuator=punctuator)
+        punctuated = add_punctuation(input_texts[0], punctuator=punctuator, space_replacement=args.space_replacement)
         print(punctuated)
     else:
-        results = add_punctuation(input_texts, punctuator=punctuator)
+        results = add_punctuation(input_texts, punctuator=punctuator, space_replacement=args.space_replacement)
         for orig, punct in zip(input_texts, results):
             print(f"Input : {orig}")
             print(f"Output: {punct}")
