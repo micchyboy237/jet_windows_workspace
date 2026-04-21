@@ -144,8 +144,17 @@ banned_starts = [
     "assistant",
     # " assistant", # ← very common (leading space)
     "Assistant",
-    # " assistant:",
-    # "assistant:",
+    "I",
+    "I’m",
+    "I'm",
+    "I can",
+    "I cannot",
+    "I can’t",
+    "Sorry",
+    "I'm sorry",
+    "I’m sorry",
+    "As an AI",
+    "I cannot comply",
 ]
 no_assistant_first = BanFirstTokenProcessor(
     banned_strings=banned_starts,
@@ -287,6 +296,29 @@ def _compute_translation_metrics(
         return None, None, None
 
 
+def _is_refusal(text: str) -> bool:
+    if not text:
+        return False
+
+    lowered = text.lower()
+
+    refusal_patterns = [
+        "i can't",
+        "i cannot",
+        "i’m unable",
+        "i am unable",
+        "i won't",
+        "sorry",
+        "as an ai",
+        "cannot assist",
+        "can't help",
+        "not allowed",
+        "against the rules",
+    ]
+
+    return any(p in lowered for p in refusal_patterns)
+
+
 class TranslationResult(TypedDict):
     text: str
     log_prob: Optional[float]
@@ -323,13 +355,28 @@ def translate_japanese_to_english(
     if enable_scoring:
         completion_params["logprobs"] = True
         completion_params["top_logprobs"] = 1
-    response = llm.create_chat_completion(
-        messages=messages,
-        seed=3407,  # for reproducibility
-        logits_processor=LogitsProcessorList([no_assistant_first]),
-        **completion_params,
-    )
+    def _run_completion(params):
+        return llm.create_chat_completion(
+            messages=messages,
+            seed=3407,
+            logits_processor=LogitsProcessorList([no_assistant_first]),
+            **params,
+        )
+
+    response = _run_completion(completion_params)
     en_text = response["choices"][0]["message"]["content"].strip()
+
+    if _is_refusal(en_text):
+        console.print("[yellow]Refusal detected → retrying with stricter decoding[/yellow]")
+
+        retry_params = {
+            **completion_params,
+            "temperature": 0.0,
+            "top_p": 0.7,
+        }
+
+        response = _run_completion(retry_params)
+        en_text = response["choices"][0]["message"]["content"].strip()
     if enable_scoring:
         log_prob, confidence, quality = _compute_translation_metrics(response)
     else:
