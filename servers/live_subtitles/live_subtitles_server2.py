@@ -236,6 +236,8 @@ def blocking_process_audio(
 
         old_ja_sents = split_sentences_ja(prev_full_ja_text)  # no longer needed for translation
         old_ja_text = prev_full_ja_text
+        old_en_sents = split_sentences_ja(prev_full_en_text)
+        old_en_text = prev_full_en_text
 
         # Always translate only the incremental new text
         new_ja_sents = split_sentences_ja(new_text)
@@ -294,6 +296,7 @@ def blocking_process_audio(
                 "message": "Empty transcription after cleaning",
             }
         old_ja_sents = []
+        old_en_sents = []
         last_sentence_clean = None
         last_sentence_pos = -1
 
@@ -310,9 +313,18 @@ def blocking_process_audio(
     if last_sentence_pos != -1:
         console.print(f"[success]New Text (utt_id={header["uuid"][-6:]} | pos={last_sentence_pos} | start={new_text_start}):[/success]")
         console.print(f"[bright_white]{new_text}[/bright_white]")
+ 
     if old_ja_sents:
         console.print(f"[success]Old JA ({len(old_ja_sents)} sents):[/success]")
         console.print(f"[bright_white]{old_ja_text}[/bright_white]")
+    console.print(f"[success]New JA ({len(new_ja_text)} chars):[/success]")
+    console.print(f"[bold cyan]{new_ja_text}[/bold cyan]")
+
+    if old_en_sents:
+        console.print(f"[success]Old EN ({len(old_en_sents)} sents):[/success]")
+        console.print(f"[bright_white]{old_en_text}[/bright_white]")
+    console.print(f"[success]New EN ({len(en_text)} chars):[/success]")
+    console.print(f"[bold cyan]{en_text}[/bold cyan]")
 
     if new_ja_text:
         if unchanged_text is not None:
@@ -322,8 +334,6 @@ def blocking_process_audio(
             console.print(f"[success]Start index:[/success] [bold cyan]{new_ja_start_index}[/bold cyan]")
         if new_ja_similarity is not None:
             console.print(f"[success]Matched Similarity:[/success] [bold cyan]{new_ja_similarity}[/bold cyan]")
-        console.print(f"[success]New JA ({len(new_ja_text)} chars):[/success]")
-        console.print(f"[bold cyan]{new_ja_text}[/bold cyan]")
 
     console.print(f"[success]Full JA ({len(full_ja_sents)} sents):[/success]")
     console.print(f"[bright_white]{full_ja_text}[/bright_white]")
@@ -355,7 +365,6 @@ def blocking_process_audio(
             "Curr EN",
         )
 
-    old_en_sents = split_sentences_ja(prev_full_en_text)
     new_en_sents = split_sentences_ja(full_en_text)
 
     started_at_iso = header.get("started_at")
