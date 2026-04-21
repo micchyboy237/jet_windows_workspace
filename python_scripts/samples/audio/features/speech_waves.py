@@ -401,6 +401,7 @@ def _build_wave_report(
 
     dir_name = f"segment_{parent_seg_num:03d}_wave_{wave_idx:03d}"
     wav_abs = (waves_dir / dir_name / "sound.wav").resolve()
+    plot_abs = (waves_dir / dir_name / "wave_plot.png").resolve()
     short = _shorten_path(str(wav_abs))
 
     d = wave["details"]
@@ -412,6 +413,8 @@ def _build_wave_report(
         "start_sec": round(wave["start_sec"], 4),
         "end_sec": round(wave["end_sec"], 4),
         "dur_sec": round(d["duration_sec"], 4),
+        # ── Plot file ────────────────────────────────────────────────
+        "plot_path": str(plot_abs),
         # ── audio file ────────────────────────────────────────────────
         "sound_short": short,
         "sound_path": str(wav_abs),
@@ -470,15 +473,15 @@ def build_summary_rows(
     ]
 
 
-def _shorten_path(path_str: str, max_parts: int = 4) -> str:
+def _shorten_path(path_str: str) -> str:
     """
-    Show only the last `max_parts` components of a path to keep the table
-    columns narrow.  E.g. …/waves/segment_001_wave_003/sound.wav
+    Show only the last 2 components of a path to keep the table columns narrow.
+    E.g. segment_001_wave_003/sound.wav
     """
     parts = Path(path_str).parts
-    if len(parts) <= max_parts:
+    if len(parts) <= 2:
         return path_str
-    return "…/" + "/".join(parts[-max_parts:])
+    return "/".join(parts[-2:])
 
 
 if __name__ == "__main__":
@@ -632,16 +635,17 @@ if __name__ == "__main__":
         row_style = "bold" if is_top5 else ""
         star = "★ " if is_top5 else "  "
 
+        dir_cell = f"[link=file://{r['plot_path']}]{r['dir']}[/link]"
         sound_cell = f"[link=file://{r['sound_path']}]{r['sound_short']}[/link]"
 
         table.add_row(
             f"{star}{r['wave']}",
-            r["dir"],
-            f"{r['start_sec']:.3f}",
-            f"{r['end_sec']:.3f}",
-            f"{r['dur_sec']:.3f}",
-            f"{r['scores']['prominence']:.4f}",
-            f"{r['scores']['max_prob']:.4f}",
+            dir_cell,
+            f"{r['start_sec']:.2f}",
+            f"{r['end_sec']:.2f}",
+            f"{r['dur_sec']:.2f}",
+            f"{r['scores']['prominence']:.3f}",
+            f"{r['scores']['max_prob']:.3f}",
             sound_cell,
             style=row_style,
         )
