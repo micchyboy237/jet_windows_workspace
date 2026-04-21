@@ -71,9 +71,11 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speech_waves.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\loader.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\file_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\energy.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_tenvad.py",
     r"",
 ]
 
@@ -91,147 +93,40 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py
-C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.0.1)/charset_normalizer (3.4.4) doesn't match a supported version!
-  warnings.warn(
-funasr version: 1.3.1.
-Fetching 29 files: 100%|██████████████████████████████████████████████████████████████████| 29/29 [00:00<?, ?it/s]
-WARNING:root:trust_remote_code: False
-llama_context: n_ctx_per_seq (2048) < n_ctx_train (131072) -- the full capacity of the model will not be utilized
-Banned first-token IDs: [72803, 78191]
- 'assistant' → tokens [78191]
- 'Assistant' → tokens [72803]
-Server listening on ws://0.0.0.0:8765
-Client connected — total 1
-VAD Reason: valley_detection
-Context duration: 0.00s
-Audio duration: 5.18s
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Processing 10cf41…
-rtf_avg: 0.235: 100%|███████████████████████████████████████████████████████████████| 1/1 [00:01<00:00,  1.22s/it]
-INFO:C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023921_001:create_chat_completion called  stream=False
-╭─────────────────────────── ⟶ LLM Request ───────────────────────────╮
-│ Last user message: 世界各国が水面下で熾烈な情報戦を繰り広げる時代。 │
-│                                                                     │
-│ Params:                                                             │
-│   temperature: 0.35                                                 │
-│   top_p: 0.9                                                        │
-│   top_k: 40                                                         │
-│   min_p: 0.05                                                       │
-│   typical_p: 0.95                                                   │
-│   stream: False                                                     │
-│   stop: ['\n\n', '<|eot_id|>', '<|end_of_text|>', '<|im_end|>']     │
-│   seed: 3407                                                        │
-│   max_tokens: 2000                                                  │
-│   presence_penalty: 0.0                                             │
-│   frequency_penalty: 0.0                                            │
-│   repeat_penalty: 1.18                                              │
-│   tfs_z: 1.0                                                        │
-│   mirostat_mode: 0                                                  │
-│   mirostat_tau: 5.0                                                 │
-│   mirostat_eta: 0.1                                                 │
-╰─────────────────────────────────────────────────────────────────────╯
-INFO:C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023921_001:request.json saved  messages=2
-╭──────────────────────────────────── ⟵ LLM Response ────────────────────────────────────╮
-│ These are dark times—worlds of nations engaging in fierce, secret information warfare. │
-│                                                                                        │
-│ Tokens — prompt: 489  completion: 17  total: 506                                       │
-╰────────────────────────────────────────────────────────────────────────────────────────╯
-INFO:C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023921_001:Response saved  path=C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023921_001\response.md  uri=file:///C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/generated/live_subtitles_server2/llm_calls/20260422_023921_001/response.md
-Response →
-C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_
-calls\20260422_023921_001\response.md
-INFO:C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023921_001:Non-stream done  elapsed=2.314s  tokens={'prompt_tokens': 489, 'completion_tokens': 17, 'total_tokens': 506}
-New JA (24 chars):
-世界各国が水面下で熾烈な情報戦を繰り広げる時代。
-Full JA (1 sents):
-世界各国が水面下で熾烈な情報戦を繰り広げる時代。
-Full EN:
-These are dark times—worlds of nations engaging in fierce, secret information warfare.
+Check speech wave logic on why it treats this flat line as a valid wave. What is the best and most sophisticated approach to detecting wave mountains.
 
-Audio Files:
-  Long audio (A)   :      5.18s
-  Short clip  (B)  :      5.18s
+speech_probs.json
+[
+  0.513070821762085,
+  0.513070821762085,
+  0.5008558034896851,
+  0.5008558034896851,
+  0.5115349888801575,
+  0.5158008933067322,
+  0.5158008933067322
+]
 
-────────────────────────────────────────── Searching for partial matches ──────────────────────────────────────────
-
-Match 1   Confidence: 1.0000
-  Matched segment duration:   5.18 seconds
-  • Covers 100.0% of long audio (A)
-  • Covers 100.0% of short clip (B)
-┏━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━┓
-┃    Signal    ┃ Start (s) ┃ End (s) ┃ Total (s) ┃ % of Total ┃
-┡━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━┩
-│   A (long)   │      0.00 │    5.18 │      5.18 │     100.0% │
-├──────────────┼───────────┼─────────┼───────────┼────────────┤
-│   B (clip)   │      0.00 │    5.18 │      5.18 │     100.0% │
-└──────────────┴───────────┴─────────┴───────────┴────────────┘
-
-1 partial match found (conf ≥ 0.75, matched ≥ 50% of short clip)
-Processed successfully 10cf41…
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-Processing b4f4d6…
-VAD Reason: valley_detection
-Context duration: 5.18s
-Audio duration: 14.40s
-rtf_avg: 0.028: 100%|███████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  1.84it/s]
-✅ Accepted
-INFO:C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023933_002:create_chat_completion called  stream=False
-╭───────────────────────────────────────────────── ⟶ LLM Request ─────────────────────────────────────────────────╮
-│ Last user message:                                                                                              │
-│ 睨み合う2つの国、東のオスタニア、西のウェスタリス戦争を企てるオスタニア政府要人の動向を探るべく、ウスタリスはオ │
-│ ペレーションストリクスを発動。                                                                                  │
-│                                                                                                                 │
-│ Params:                                                                                                         │
-│   temperature: 0.35                                                                                             │
-│   top_p: 0.9                                                                                                    │
-│   top_k: 40                                                                                                     │
-│   min_p: 0.05                                                                                                   │
-│   typical_p: 0.95                                                                                               │
-│   stream: False                                                                                                 │
-│   stop: ['\n\n', '<|eot_id|>', '<|end_of_text|>', '<|im_end|>']                                                 │
-│   seed: 3407                                                                                                    │
-│   max_tokens: 2000                                                                                              │
-│   presence_penalty: 0.0                                                                                         │
-│   frequency_penalty: 0.0                                                                                        │
-│   repeat_penalty: 1.18                                                                                          │
-│   tfs_z: 1.0                                                                                                    │
-│   mirostat_mode: 0                                                                                              │
-│   mirostat_tau: 5.0                                                                                             │
-│   mirostat_eta: 0.1                                                                                             │
-╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-INFO:C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023933_002:request.json saved  messages=4
-╭──────────────────────────────────────────────── ⟵ LLM Response ─────────────────────────────────────────────────╮
-│ With Westaリス watching, Ostania—eying the movements of key officials planning a war between their nation and   │
-│ the Eastern nation of Ostania—is activating Operation Striks.                                                   │
-│                                                                                                                 │
-│ Tokens — prompt: 574  completion: 35  total: 609                                                                │
-╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-INFO:C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023933_002:Response saved  path=C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023933_002\response.md  uri=file:///C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/generated/live_subtitles_server2/llm_calls/20260422_023933_002/response.md
-Response →
-C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_
-calls\20260422_023933_002\response.md
-INFO:C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\live_subtitles_server2\llm_calls\20260422_023933_002:Non-stream done  elapsed=0.994s  tokens={'prompt_tokens': 574, 'completion_tokens': 35, 'total_tokens': 609}
-History (2):
-[{'role': 'user', 'content': '世界各国が水面下で熾烈な情報戦を繰り広げる時代。'}, {'role': 'assistant', 'content':
-'These are dark times—worlds of nations engaging in fierce, secret information warfare.'}]
-Client disconnected — total 0
-ERROR:websockets.server:connection handler failed
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\websockets\asyncio\server.py", line 376, in conn_handler
-    await self.handler(connection)
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py", line 543, in process_audio
-    response = await future
-               ^^^^^^^^^^^^
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\concurrent\futures\thread.py", line 59, in run
-    result = self.fn(*self.args, **self.kwargs)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py", line 305, in blocking_process_audio
-    console.print(f"[success]Last Sentence (utt_id={last_utt_id[-6:]} | sent_idx={last_sent_idx}):[/success]")
-                                                    ~~~~~~~~~~~^^^^^
-TypeError: 'NoneType' object is not subscriptable
+wave.json
+{
+  "has_risen": true,
+  "has_multi_passed": true,
+  "has_fallen": true,
+  "is_valid": true,
+  "start_sec": 1.11,
+  "end_sec": 1.18,
+  "details": {
+    "frame_start": 111,
+    "frame_end": 118,
+    "frame_len": 7,
+    "duration_sec": 0.06999999999999984,
+    "min_prob": 0.5008558034896851,
+    "max_prob": 0.5158008933067322,
+    "avg_prob": 0.5101414322853088,
+    "std_prob": 0.006526988174272964
+  },
+  "segment_num": 0,
+  "wave_num": 2
+}
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
