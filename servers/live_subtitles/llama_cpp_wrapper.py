@@ -37,6 +37,8 @@ from llama_log_utils import (
     save_markdown,
 )
 
+MAX_LOG_LLM_DIRS = 20
+
 
 class Llama(BaseLlama):
     def __init__(
@@ -217,6 +219,7 @@ class Llama(BaseLlama):
         # ── 2. Create per-call log folder + file logger ──────────────────────
         call_dir = make_call_dir(self.logs_dir)
         logger = get_file_logger(call_dir)
+        self._prune_call_dirs()
         logger.info("create_chat_completion called  stream=%s", stream)
 
         # ── 3. Print + save request ──────────────────────────────────────────
@@ -388,3 +391,19 @@ class Llama(BaseLlama):
             )
 
         return _stream_wrapper(raw)
+
+    def _prune_call_dirs(self) -> None:
+        """Remove oldest call dirs under self.logs_dir, keeping at most MAX_LOG_LLM_DIRS."""
+        logs_dir = Path(self.logs_dir)
+        if not logs_dir.is_dir():
+            return
+        call_dirs = sorted(
+            (d for d in logs_dir.iterdir() if d.is_dir()),
+            key=lambda d: d.stat().st_mtime,
+        )
+        excess = len(call_dirs) - MAX_LOG_LLM_DIRS
+        if excess <= 0:
+            return
+        import shutil
+        for old_dir in call_dirs[:excess]:
+            shutil.rmtree(old_dir, ignore_errors=True)
