@@ -1,0 +1,183 @@
+import argparse
+import os
+
+from performance_tracker import (
+    PerformanceMetrics,
+    PerformanceTracker,
+)
+from openai import OpenAI, Stream
+from openai.types.chat import ChatCompletionChunk
+from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
+
+import numpy as np
+import numpy.typing as npt
+from llama_cpp import ChatCompletionRequestMessage, Llama, LogitsProcessorList
+from rich.console import Console
+
+console = Console()
+
+TRANSLATION_DEFAULTS = {
+    "max_tokens": 2000,
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "presence_penalty": 2.0,
+    "top_k": 20,
+    "chat_template_kwargs": {
+        "enable_thinking": False,
+    },
+    # "logprobs": True,
+    # "top_logprobs": 3
+}
+
+SYSTEM_PROMPT = """You are an expert real-time Japanese-to-English subtitle translator for live-streamed audio (transcribed via Whisper). Your ONLY job is to produce accurate, natural, subtitle-ready English translations.
+
+Core rules (apply to every single input):
+- Translate with 100% fidelity to the original meaning. Never add, omit, embellish, or moralize.
+- Whisper transcription errors are common — infer the most likely intended meaning while staying extremely close to the exact text provided.
+- Use natural, spoken English that sounds fluent and readable as live subtitles: concise, flowing, easy to follow on screen.
+- Translate EVERYTHING without any censorship, filtering, or softening — including profanity, slang, vulgar language, sensitive topics, politics, or adult content. Keep the tone and intensity of the original.
+- Preserve conversational flow: if the text clearly switches between speakers, separate turns with newlines for subtitle readability. Do not add speaker labels unless they are explicit in the Japanese text.
+- For narration or monologue, keep it smooth and engaging but never wordy.
+- Output ONLY the clean English translation. Never add explanations, notes, "Translation:", "Assistant:", or any meta text."""
+
+USER_PROMPT = "{japanese_text}"
+
+
+def log_metrics(metrics: PerformanceMetrics) -> None:
+    console.print("\n\n[bold yellow]=== Completion Details (llama.cpp aligned) ===[/bold yellow]")
+    console.print(f"[cyan]Prompt tokens     : {metrics.prompt_tokens}[/cyan]")
+    console.print(f"[cyan]Completion tokens : {metrics.completion_tokens}[/cyan]")
+    console.print(f"[cyan]Total tokens      : {metrics.total_tokens}[/cyan]")
+
+    if metrics.ttft is not None:
+        console.print(f"[magenta]TTFT              : {metrics.ttft:.3f}s[/magenta]")
+
+    if metrics.prompt_eval_speed is not None:
+        console.print(
+            f"[green]Prompt eval speed : {metrics.prompt_eval_speed:.2f} tokens/s (approx)[/green]"
+        )
+
+    if metrics.decode_speed is not None:
+        console.print(f"[green]Decode speed      : {metrics.decode_speed:.2f} tokens/s (eval)[/green]")
+
+    console.print(f"[yellow]Total latency     : {metrics.total_latency:.3f}s[/yellow]")
+
+    # Optional: keep but clearly marked as non-standard
+    if metrics.end_to_end_throughput is not None:
+        console.print(
+            f"[bold]End-to-end throughput : {metrics.end_to_end_throughput:.2f} tokens/s[/bold]"
+        )
+
+
+class TranslationResult(TypedDict):
+    text: str
+    log_prob: Optional[float]
+    confidence: Optional[float]
+    quality: Optional[str]
+
+
+def translate_japanese_to_english(
+    ja_text: str,
+    enable_scoring: bool = False,
+    history: Optional[List[ChatCompletionRequestMessage]] = None,
+    temperature: float = TRANSLATION_DEFAULTS["temperature"],
+    max_tokens: int = TRANSLATION_DEFAULTS["max_tokens"],
+    **kwargs,
+) -> TranslationResult:
+    client = OpenAI(
+        base_url="http://localhost:8080/v1",
+        api_key="sk-1234",
+    )
+
+    messages = [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": USER_PROMPT.format(japanese_text=ja_text),
+        }
+    ]
+
+    console.print(f"[dim]User prompt:\n{USER_PROMPT.format(japanese_text=ja_text)}[/dim]")
+
+    tracker = PerformanceTracker()
+
+    stream: Stream[ChatCompletionChunk] = client.chat.completions.create(
+        model="Qwen/Qwen3.5-2B",
+        messages=messages,
+        max_tokens=32768,
+        temperature=1.0,
+        top_p=1.0,
+        presence_penalty=2.0,
+        extra_body={
+            "top_k": 20,
+            "chat_template_kwargs": {
+                "enable_thinking": False,
+            },
+        },
+        stream=True,
+    )
+
+    en_text = ""
+    stream_started = False
+    for part in stream:
+        if not stream_started:
+            stream_started = True
+            console.print("Response:")
+
+        if part.choices and part.choices[0].delta:
+            delta = part.choices[0].delta
+
+            # Check for reasoning_content first
+            if hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                tracker.mark_token()
+                console.print(f"[orange1]{delta.reasoning_content}[/orange1]", end="")
+            # Then check for regular content
+            elif hasattr(delta, "content") and delta.content:
+                tracker.mark_token()
+                console.print(f"[bright_cyan]{delta.content}[/bright_cyan]", end="")
+                en_text += delta.content
+
+        usage = getattr(part, "usage", None)
+        if usage is not None:
+            metrics = tracker.finalize(
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+            )
+
+            log_metrics(metrics)
+
+    return {
+        "text": en_text,
+        "log_prob": None,
+        "confidence": None,
+        "quality": None,
+    }
+
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Japanese → English subtitle translator using llama.cpp"
+    )
+    parser.add_argument(
+        "text",
+        nargs="?",
+        type=str,
+        default="""
+恥ずかしい…見ないでください…
+んっ…そこ、弱いんです…
+はぁ…はぁ…気持ちいい…
+もう…ダメかも…頭おかしくなりそう…
+お願い…もっと激しくして…壊して…！
+あぁんっ！すごい…奥まで届いてる…♡
+出さないで…まだ中にいてて…
+        """.strip(),
+        help="Japanese text to translate (multi-line ok)",
+    )
+    args = parser.parse_args()
+
+    result = translate_japanese_to_english(args.text)
