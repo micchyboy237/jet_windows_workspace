@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 
 import numpy as np
 import numpy.typing as npt
-from llama_cpp import ChatCompletionRequestMessage, Llama, LogitsProcessorList
+from llama_cpp_wrapper import ChatCompletionRequestMessage, Llama, LogitsProcessorList
 from rich.console import Console
 
 console = Console()
