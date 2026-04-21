@@ -62,22 +62,47 @@ def frames_from_seconds(sec: float) -> int:
     return int(round(sec * 100.0))  # 1 / 0.010 = 100
 
 
+def compute_rms(signal: np.ndarray, frame_length: int = 160, hop_length: int = 160) -> np.ndarray:
+    """Compute RMS energy aligned to 10 ms frames (160 samples @16kHz)."""
+    if signal.size == 0:
+        return np.array([])
+
+    num_frames = 1 + max(0, (len(signal) - frame_length) // hop_length)
+    rms = np.zeros(num_frames, dtype=np.float32)
+
+    for i in range(num_frames):
+        start = i * hop_length
+        frame = signal[start : start + frame_length]
+        if frame.size == 0:
+            continue
+        rms[i] = float(np.sqrt(np.mean(frame ** 2)))
+
+    return rms
+
+
 def generate_plot(
     probs: np.ndarray,
     segment_idx: int,
     duration_sec: float,
     output_path: Path,
     is_dummy: bool = False,
+    rms: Optional[np.ndarray] = None,
 ) -> None:
     num_frames = len(probs)
     if num_frames == 0:
         return
 
-    fig, ax = plt.subplots(figsize=(9.5, 3.2), dpi=140)
+    has_rms = rms is not None and len(rms) > 0
+    rows = 2 if has_rms else 1
+
+    fig, axes = plt.subplots(rows, 1, figsize=(9.5, 3.2 * rows), dpi=140)
+    if rows == 1:
+        axes = [axes]
 
     label = "Speech probability (dummy)" if is_dummy else "Speech probability"
     color = "#ff7f0e" if is_dummy else "#2ca02c"
 
+    ax = axes[0]
     ax.plot(probs, color=color, linewidth=1.8, label=label)
     ax.fill_between(range(num_frames), probs, color=color, alpha=0.14)
 
@@ -104,6 +129,20 @@ def generate_plot(
 
     ax.grid(True, alpha=0.28, linestyle="--", zorder=0)
     ax.legend(loc="upper right", fontsize=9.5, framealpha=0.92)
+
+    # --- RMS subplot ---
+    if has_rms:
+        ax_rms = axes[1]
+        x = range(len(rms))
+        ax_rms.plot(x, rms, linewidth=1.6, label="RMS energy")
+        ax_rms.fill_between(x, rms, alpha=0.15)
+
+        ax_rms.set_ylabel("RMS Energy", fontsize=10.5)
+        ax_rms.set_xlabel("Frame (10 ms)", fontsize=10.5)
+        ax_rms.set_xlim(0, len(rms) - 1)
+
+        ax_rms.grid(True, alpha=0.28, linestyle="--", zorder=0)
+        ax_rms.legend(loc="upper right", fontsize=9.5, framealpha=0.92)
 
     fig.tight_layout(pad=0.9)
     plt.savefig(output_path, bbox_inches="tight", dpi=140)
@@ -277,6 +316,9 @@ def save_segments(
                 start_frame = frames_from_seconds(meta["start_sec"])
                 end_frame = frames_from_seconds(meta["end_sec"])
 
+                # Compute RMS once per segment for use in both plotting and energies.json
+                rms = compute_rms(audio_np)
+
                 if (
                     full_probs is not None
                     and start_frame < len(full_probs)
@@ -315,15 +357,41 @@ def save_segments(
                         indent=2,
                     )
 
-                # Plot
-                plot_path = seg_dir / "speech_probs.png"
+                # Plot both speech probability and RMS
+                plot_path = seg_dir / "speech_and_rms.png"
                 generate_plot(
                     probs=segment_probs,
                     segment_idx=idx,
                     duration_sec=meta["duration_sec"],
                     output_path=plot_path,
                     is_dummy=is_dummy,
+                    rms=rms,
                 )
+
+                # Save RMS energies JSON (per segment)
+                with open(seg_dir / "energies.json", "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "rms": rms.tolist(),
+                            "frame_shift_sec": 0.010,
+                            "num_frames": int(len(rms)),
+                        },
+                        f,
+                        indent=2,
+                    )
+            else:
+                # Even if there are no probabilities, always save RMS energies
+                rms = compute_rms(audio_np)
+                with open(seg_dir / "energies.json", "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "rms": rms.tolist(),
+                            "frame_shift_sec": 0.010,
+                            "num_frames": int(len(rms)),
+                        },
+                        f,
+                        indent=2,
+                    )
 
             saved_metadata.append(meta)
             progress.advance(task)
@@ -341,19 +409,55 @@ if __name__ == "__main__":
     import shutil
 
     DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
+    DEFAULT_OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 
     parser = argparse.ArgumentParser(description="VAD segmentation with FireRedVAD")
+
     parser.add_argument(
-        "audio_path", nargs="?", default=DEFAULT_AUDIO, help="input audio file"
+        "audio_path",
+        nargs="?",
+        default=DEFAULT_AUDIO,
+        help="input audio file",
     )
+
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        default=str(DEFAULT_OUTPUT_DIR),
+        type=str,
+        help=f"output directory (default: '{DEFAULT_OUTPUT_DIR}')",
+    )
+
+    # --- VAD parameters (with shorthands) ---
+    parser.add_argument("-sw", "--smooth-window-size", type=int, default=5)
+    parser.add_argument("-st", "--speech-threshold", type=float, default=0.3)
+    parser.add_argument("-ms", "--min-speech-frame", type=int, default=20)
+    parser.add_argument("-xs", "--max-speech-frame", type=int, default=800)
+    parser.add_argument("-mi", "--min-silence-frame", type=int, default=20)
+    parser.add_argument("-mg", "--merge-silence-frame", type=int, default=50)
+    parser.add_argument("-es", "--extend-speech-frame", type=int, default=0)
+    parser.add_argument("-cm", "--chunk-max-frame", type=int, default=30000)
+
     args = parser.parse_args()
 
-    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    OUTPUT_DIR = Path(args.output_dir)
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 
     console.rule("Audio Segmenter – FireRedVAD", style="blue")
 
-    results, full_probs = extract_speech_segments(args.audio_path)
+    results, full_probs = extract_speech_segments(
+        args.audio_path,
+        vad=None,
+        vad_model_dir=MODEL_DIR,
+        smooth_window_size=args.smooth_window_size,
+        speech_threshold=args.speech_threshold,
+        min_speech_frame=args.min_speech_frame,
+        max_speech_frame=args.max_speech_frame,
+        min_silence_frame=args.min_silence_frame,
+        merge_silence_frame=args.merge_silence_frame,
+        extend_speech_frame=args.extend_speech_frame,
+        chunk_max_frame=args.chunk_max_frame,
+    )
 
     if not results:
         console.print("[red]No segments found.[/red]")
@@ -361,12 +465,13 @@ if __name__ == "__main__":
 
     saved_metas = save_segments(results, full_probs, OUTPUT_DIR)
 
-    # Save to JSON using with open, and log success with full path.
     output_json_path = OUTPUT_DIR / "all_speech_segments.json"
     with open(output_json_path, "w", encoding="utf-8") as f:
         json.dump(saved_metas, f, ensure_ascii=False, indent=2)
+
     console.print(
-        f"[bold green]✓ Segments metadata saved to:[/bold green] [link=file://{output_json_path.resolve()}]{output_json_path}[/link]"
+        f"[bold green]✓ Segments metadata saved to:[/bold green] "
+        f"[link=file://{output_json_path.resolve()}]{output_json_path}[/link]"
     )
 
     console.rule("Done", style="green")

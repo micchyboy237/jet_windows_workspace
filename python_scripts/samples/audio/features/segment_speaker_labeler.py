@@ -19,7 +19,7 @@ from pyannote.audio.pipelines.clustering import AgglomerativeClustering as Pyann
 from pyannote.audio.pipelines.clustering import KMeansClustering as PyannoteKMeansClustering
 from tqdm import tqdm
 
-from vad_firered import extract_speech_segments, SpeechSegment, generate_plot, frames_from_seconds
+from vad_firered import extract_speech_segments, SpeechSegment, generate_plot, frames_from_seconds, compute_rms
 
 AudioInput = Union[np.ndarray, bytes, bytearray, io.BytesIO, str, Path]
 
@@ -649,16 +649,31 @@ class SegmentSpeakerLabeler:
                         indent=2,
                     )
 
-                plot_path = seg_dir / "speech_probs.png"
+                # === NEW: Save energies.json and use combined plot ===
+                rms = compute_rms(audio_np)
+                with open(seg_dir / "energies.json", "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "rms": rms.tolist(),
+                            "frame_shift_sec": 0.010,
+                            "num_frames": int(len(rms)),
+                        },
+                        f,
+                        indent=2,
+                    )
+
+                plot_path = seg_dir / "speech_and_rms.png"
                 generate_plot(
                     probs=segment_probs,
                     segment_idx=idx,
                     duration_sec=meta["duration_sec"],
                     output_path=plot_path,
                     is_dummy=is_dummy,
+                    rms=rms,          # <-- now passes RMS for dual plot
                 )
 
             saved_metadata.append(enriched_meta)
+       
 
         # Save combined JSON
         all_json_path = output_base_dir / "all_speech_segments.json"

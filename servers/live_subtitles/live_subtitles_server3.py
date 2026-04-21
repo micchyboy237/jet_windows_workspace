@@ -2,11 +2,14 @@
 import asyncio
 import json
 import numpy as np
+import shutil
 import sys
+import wave
 import websockets
-from typing import Optional
+from typing import Optional, Deque
 from pathlib import Path
-import concurrent.futures
+from collections import deque
+from energy import has_sound
 
 # ====================== CLONED-REPO PATH SETUP (must be first) ======================
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -21,15 +24,105 @@ from fireredvad_utils import load_vad
 from speech_segment_tracker import SpeechSegmentTracker, AccumulatedSpeechSegment
 
 # ====================== REAZONSPEECH IMPORTS (now resolvable) ======================
-# from reazonspeech.espnet.asr import load_model, transcribe, audio_from_numpy, TranscribeConfig
 from reazonspeech.k2.asr.interface import TranscribeConfig
 from reazonspeech.k2.asr.transcribe import transcribe
 from reazonspeech.k2.asr.audio import audio_from_numpy
 from reazonspeech.k2.asr.huggingface import load_model
 
-
 SAMPLE_RATE = 16000
-MIN_RMS_THRESHOLD = 0.005  # Tune between ~0.003–0.02 depending on environment
+BUFFER_DURATION_SECONDS = 5 * 60  # 5 minutes
+MAX_BUFFER_SAMPLES = BUFFER_DURATION_SECONDS * SAMPLE_RATE  # 480,000 samples @ 16kHz
+
+OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+SOUND_5_MINS_FILE = OUTPUT_DIR / "sound_5_mins.wav"
+
+
+class CircularAudioBuffer:
+    """
+    Reusable circular buffer for accumulating audio data up to a fixed duration.
+    Maintains the last N seconds of audio at a given sample rate.
+    
+    Thread-safe for single-threaded async use. For multi-threaded scenarios,
+    add appropriate locks.
+    """
+    
+    def __init__(self, max_samples: int, sample_rate: int):
+        """
+        Initialize the circular audio buffer.
+        
+        Args:
+            max_samples: Maximum number of samples to retain (e.g., 5 min * 16000 Hz = 480000)
+            sample_rate: Audio sample rate in Hz
+        """
+        self.max_samples = max_samples
+        self.sample_rate = sample_rate
+        self._buffer: Deque[np.float32] = deque(maxlen=max_samples)
+    
+    def append(self, audio_chunk: np.ndarray):
+        """
+        Append audio samples to the buffer. Oldest samples are automatically
+        dropped when the buffer reaches capacity.
+        
+        Args:
+            audio_chunk: numpy array of float32 audio samples
+        """
+        if len(audio_chunk) == 0:
+            return
+        # Extend deque with new samples; oldest samples automatically dropped
+        self._buffer.extend(audio_chunk.astype(np.float32))
+    
+    def get_audio(self) -> np.ndarray:
+        """
+        Get the current audio content as a numpy array.
+        
+        Returns:
+            numpy array of float32 samples (up to max_samples)
+        """
+        if not self._buffer:
+            return np.array([], dtype=np.float32)
+        return np.array(self._buffer, dtype=np.float32)
+    
+    def save_to_wav(self, filepath: Path):
+        """
+        Save the current buffer contents to a WAV file.
+        
+        Args:
+            filepath: Path where the WAV file should be saved
+        """
+        audio_data = self.get_audio()
+        if len(audio_data) == 0:
+            print(f"⚠️  No audio data to save to {filepath}")
+            return
+        
+        # Convert float32 [-1, 1] to int16 for WAV format
+        audio_int16 = np.clip(audio_data * 32768, -32768, 32767).astype(np.int16)
+        
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(filepath), 'wb') as wav_file:
+            wav_file.setnchannels(1)  # Mono
+            wav_file.setsampwidth(2)   # 2 bytes = int16
+            wav_file.setframerate(self.sample_rate)
+            wav_file.writeframes(audio_int16.tobytes())
+        print(f"💾 Saved {len(audio_data)/self.sample_rate:.1f}s audio to {filepath}")
+    
+    def clear(self):
+        """Clear all audio data from the buffer."""
+        self._buffer.clear()
+    
+    def __len__(self) -> int:
+        """Return the current number of samples in the buffer."""
+        return len(self._buffer)
+    
+    @property
+    def duration_seconds(self) -> float:
+        """Return the current duration of audio in the buffer in seconds."""
+        return len(self._buffer) / self.sample_rate
+    
+    def __repr__(self) -> str:
+        return f"CircularAudioBuffer({self.duration_seconds:.1f}s / {self.max_samples/self.sample_rate:.1f}s max)"
 
 
 class SubtitleServer:
@@ -41,7 +134,7 @@ class SubtitleServer:
         self.vad = None
         self.asr_model = None
         self.tracker = None
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        self.audio_buffer: Optional[CircularAudioBuffer] = None
 
     def _load_models(self):
         print("Loading FireRedVAD...")
@@ -51,7 +144,13 @@ class SubtitleServer:
         self.asr_model = load_model()  # auto-selects CUDA if available
 
         self.tracker = SpeechSegmentTracker(sample_rate=SAMPLE_RATE)
-        print("✅ All models ready – waiting for clients")
+        
+        # Initialize the 5-minute circular audio buffer
+        self.audio_buffer = CircularAudioBuffer(
+            max_samples=MAX_BUFFER_SAMPLES,
+            sample_rate=SAMPLE_RATE
+        )
+        print(f"✅ All models ready – audio buffer: {self.audio_buffer} – waiting for clients")
 
     async def handler(self, websocket):
         print("🎤 Client connected – starting live subtitle stream")
@@ -63,11 +162,11 @@ class SubtitleServer:
                 if len(audio_chunk) == 0:
                     continue
 
-                # -------------------- Noise Gate (RMS-based) --------------------
-                # Skip very low-energy chunks (likely background noise)
-                rms = float(np.sqrt(np.mean(audio_chunk ** 2)))
-                if rms < MIN_RMS_THRESHOLD:
+                if not has_sound(audio_chunk):
                     continue
+
+                # 🔁 Always accumulate audio in circular buffer (regardless of VAD)
+                self.audio_buffer.append(audio_chunk)
 
                 # VAD (stateful)
                 vad_results = self.vad.detect_chunk(audio_chunk)
@@ -78,19 +177,13 @@ class SubtitleServer:
                 )
 
                 if completed is not None:
+                    # 💾 Save the last 5 minutes of audio on each detected speech event
+                    self.audio_buffer.save_to_wav(SOUND_5_MINS_FILE)
+                    
                     # Transcribe the exact speech waveform
                     audio_data = audio_from_numpy(completed.audio, SAMPLE_RATE)
                     cfg = TranscribeConfig(verbose=False)
-
-                    # -------------------- Non-blocking ASR --------------------
-                    loop = asyncio.get_running_loop()
-                    asr_result = await loop.run_in_executor(
-                        self.executor,
-                        transcribe,
-                        self.asr_model,
-                        audio_data,
-                        cfg,
-                    )
+                    asr_result = transcribe(self.asr_model, audio_data, cfg)
 
                     jp_text = asr_result.text.strip()
                     if jp_text:

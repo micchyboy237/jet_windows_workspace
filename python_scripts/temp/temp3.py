@@ -1,316 +1,228 @@
-"""
-Option 1 — Long Audio Translation
-ASR → Semantic Chunking → Rolling Context Translation
-
-Single-file reference implementation
-"""
+#!/usr/bin/env python3
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import List, Optional, Iterable, Deque, Union
-from collections import deque
-from threading import Lock
+import argparse
+from pathlib import Path
+from typing import Literal, Optional, Tuple
 
-from llama_cpp import Llama
-from llama_cpp.llama_types import ChatCompletionRequestMessage
+import numpy as np
+import torch
+import torchaudio
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from tqdm import tqdm
+from scipy.spatial.distance import cdist
 
-from rich import print
-from rich.pretty import pprint
-import json
+from pyannote.audio.pipelines.speaker_verification import (
+    PretrainedSpeakerEmbedding,
+)
 
-# ────────────────────────────────────────────────
-# LLM CONFIGURATION (reuse / adjust freely)
-# ────────────────────────────────────────────────
+# -----------------------------
+# Types
+# -----------------------------
+BackendType = Literal[1, 2, 3, 4]
 
-MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\LFM2-350M-ENJP-MT.Q4_K_M.gguf"
-# MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\translators\gemma-2-2b-jpn-it-translate-Q4_K_M.gguf"
-
-MODEL_SETTINGS = {
-    "n_ctx": 1024,
-    "n_gpu_layers": -1,
-    "flash_attn": True,
-    "logits_all": True,
-    "cache_type_k": "q8_0",
-    "cache_type_v": "q8_0",
-    "tokenizer_kwargs": {"add_bos_token": False},
-    "n_batch": 128,
-    "n_threads": 6,
-    "n_threads_batch": 6,
-    "use_mlock": True,
-    "use_mmap": True,
-    "verbose": False,
+# -----------------------------
+# Constants
+# -----------------------------
+BACKEND_MAP: dict[BackendType, str] = {
+    1: "speechbrain/spkrec-ecapa-voxceleb",
+    2: "pyannote/embedding",
+    3: "nvidia/speakerverification_en_titanet_large",
+    4: "hbredin/wespeaker-voxceleb-resnet34-LM",
 }
 
-TRANSLATION_DEFAULTS = {
-    "temperature": 0.5,
-    "top_p": 1.0,
-    "repeat_penalty": 1.05,
-    "max_tokens": 512,
-}
+DEFAULT_SAMPLE_RATE = 16000
 
-_llm: Llama | None = None
-_llm_lock = Lock()
+console = Console()
 
 
-def get_llm() -> Llama:
-    global _llm
-    if _llm is None:
-        with _llm_lock:
-            if _llm is None:
-                _llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
-    return _llm
+# -----------------------------
+# Utils
+# -----------------------------
+def load_audio(
+    path: Path,
+    target_sr: int = DEFAULT_SAMPLE_RATE,
+) -> torch.Tensor:
+    """Load audio file and return (1, 1, samples) tensor."""
+    waveform, sr = torchaudio.load(path)
+
+    # Convert to mono
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+
+    # Resample if needed
+    if sr != target_sr:
+        waveform = torchaudio.functional.resample(waveform, sr, target_sr)
+
+    # Add batch dimension
+    waveform = waveform.unsqueeze(0)  # (1, 1, samples)
+
+    return waveform
 
 
-# ────────────────────────────────────────────────
-# ASR DATA MODEL (engine-agnostic)
-# ────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class ASRSegment:
-    text: str
-    start: float
-    end: float
-    speaker: Optional[str] = None
+def compute_embedding(
+    model,
+    waveform: torch.Tensor,
+) -> np.ndarray:
+    """Compute embedding."""
+    return model(waveform)
 
 
-# ────────────────────────────────────────────────
-# SEMANTIC CHUNKER
-# ────────────────────────────────────────────────
-
-class SemanticChunker:
-    """
-    Groups ASR segments into sentence-safe chunks
-    using pauses and size thresholds.
-    """
-
-    def __init__(
-        self,
-        max_chars: int = 800,
-        min_pause: float = 0.4,
-    ) -> None:
-        self.max_chars = max_chars
-        self.min_pause = min_pause
-
-    def chunk(self, segments: Iterable[Union[ASRSegment, str]]) -> List[List[ASRSegment]]:
-        chunks: List[List[ASRSegment]] = []
-        current: List[ASRSegment] = []
-        char_count = 0
-        prev_end: Optional[float] = None
-
-        for seg in segments:
-            if isinstance(seg, str):
-                segment = ASRSegment(text=seg, start=0.0, end=0.0)
-            else:
-                segment = seg
-
-            pause = (segment.start - prev_end) if prev_end is not None else None
-            prev_end = segment.end
-
-            if current and (
-                char_count + len(segment.text) > self.max_chars
-                or (pause is not None and pause >= self.min_pause)
-            ):
-                chunks.append(current)
-                current = []
-                char_count = 0
-
-            current.append(segment)
-            char_count += len(segment.text)
-
-        if current:
-            chunks.append(current)
-
-        return chunks
+def compute_distance(
+    emb1: np.ndarray,
+    emb2: np.ndarray,
+    metric: str = "cosine",
+) -> float:
+    """Compute distance between embeddings."""
+    return float(cdist(emb1, emb2, metric=metric)[0, 0])
 
 
-# ────────────────────────────────────────────────
-# ROLLING TRANSLATION CONTEXT
-# ────────────────────────────────────────────────
+def interpret_result(distance: float, threshold: float) -> str:
+    """Interpret similarity result."""
+    return "SAME SPEAKER" if distance < threshold else "DIFFERENT SPEAKER"
 
-class TranslationContext:
-    """
-    Maintains short-term translated context
-    to preserve discourse continuity.
-    """
 
-    def __init__(self, max_items: int = 4) -> None:
-        self._history: Deque[str] = deque(maxlen=max_items)
+# -----------------------------
+# CLI
+# -----------------------------
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Speaker verification CLI using multiple backends."
+    )
 
-    def add(self, text: str) -> None:
-        self._history.append(text.strip())
+    # Positional
+    parser.add_argument("audio1", type=Path, help="Path to first audio file")
+    parser.add_argument("audio2", type=Path, help="Path to second audio file")
 
-    def render(self) -> str:
-        if not self._history:
-            return ""
-        return "Previous translated context:" + "\n".join(
-            f"- {t}" for t in self._history
+    # Backend
+    parser.add_argument(
+        "-b",
+        "--backend",
+        type=int,
+        choices=[1, 2, 3, 4],
+        default=1,
+        help="Backend: 1=SpeechBrain (default), 2=pyannote, 3=NeMo, 4=WeSpeaker",
+    )
+
+    # Device
+    parser.add_argument(
+        "-d",
+        "--device",
+        type=str,
+        default="cpu",
+        help="Device (cpu or cuda)",
+    )
+
+    # Threshold
+    parser.add_argument(
+        "-t",
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Decision threshold for cosine distance",
+    )
+
+    # Token
+    parser.add_argument(
+        "-k",
+        "--token",
+        type=str,
+        default=None,
+        help="HuggingFace token",
+    )
+
+    # Cache dir
+    parser.add_argument(
+        "-c",
+        "--cache-dir",
+        type=Path,
+        default=None,
+        help="Cache directory",
+    )
+
+    return parser.parse_args()
+
+
+# -----------------------------
+# Main Logic
+# -----------------------------
+def main() -> None:
+    args = parse_args()
+
+    backend: BackendType = args.backend
+    model_name = BACKEND_MAP[backend]
+
+    device = torch.device(args.device)
+
+    console.print(
+        Panel.fit(
+            f"[bold cyan]Speaker Verification[/bold cyan]\n"
+            f"Backend: [yellow]{backend}[/yellow] → {model_name}\n"
+            f"Device: [green]{device}[/green]"
         )
+    )
 
+    # Validate files
+    for path in [args.audio1, args.audio2]:
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {path}")
 
-# ────────────────────────────────────────────────
-# CONTEXT-AWARE TRANSLATOR
-# ────────────────────────────────────────────────
+    # Load model
+    console.print("[bold]Loading model...[/bold]")
+    model = PretrainedSpeakerEmbedding(
+        model_name,
+        device=device,
+        token=args.token,
+        cache_dir=args.cache_dir,
+    )
 
-class ContextAwareTranslator:
-    def __init__(self) -> None:
-        self._context = TranslationContext()
+    # Process audio with progress
+    waveforms: list[torch.Tensor] = []
 
-    def translate(self, japanese_text: str) -> str:
-        messages: List[ChatCompletionRequestMessage] = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a professional Japanese-to-English translator. "
-                    "Translate accurately while preserving references and producing "
-                    "natural, fluent English."
-                ),
-            }
-        ]
+    for path in tqdm([args.audio1, args.audio2], desc="Loading audio"):
+        waveform = load_audio(path)
+        waveforms.append(waveform)
 
-        context_text = self._context.render()
-        if context_text:
-            messages.append({
-                "role": "user",
-                "content": (
-                    f"{context_text}\n\n"
-                    "Using the above previous English translation for context if needed, "
-                    "now translate the following Japanese text to natural, fluent English:"
-                ),
-            })
+    # Compute embeddings
+    embeddings: list[np.ndarray] = []
 
-        messages.append(
-            {
-                "role": "user",
-                "content": japanese_text.strip(),
-            }
+    for waveform in tqdm(waveforms, desc="Computing embeddings"):
+        emb = compute_embedding(model, waveform)
+        embeddings.append(emb)
+
+    emb1, emb2 = embeddings
+
+    # Compute distance
+    distance = compute_distance(emb1, emb2)
+    decision = interpret_result(distance, args.threshold)
+
+    # Display results
+    table = Table(title="Results")
+
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="magenta")
+
+    table.add_row("Distance (cosine)", f"{distance:.6f}")
+    table.add_row("Threshold", f"{args.threshold:.3f}")
+    table.add_row("Decision", decision)
+
+    console.print(table)
+
+    # Extra debug info
+    console.print(
+        Panel.fit(
+            f"[bold]Embedding Details[/bold]\n"
+            f"Shape: {emb1.shape}\n"
+            f"Backend: {model_name}"
         )
-
-        llm = get_llm()
-        response = llm.create_chat_completion(
-            messages=messages,
-            **TRANSLATION_DEFAULTS,
-        )
-
-        translated = response["choices"][0]["message"]["content"]
-        self._context.add(translated)
-        llm.reset()
-
-        return translated
+    )
 
 
-# ────────────────────────────────────────────────
-# END-TO-END PIPELINE
-# ────────────────────────────────────────────────
-
-class LongAudioTranslator:
-    def __init__(
-        self,
-        chunker: SemanticChunker,
-        translator: ContextAwareTranslator,
-    ) -> None:
-        self.chunker = chunker
-        self.translator = translator
-
-    def translate(self, segments: Union[List[ASRSegment], List[str]]) -> str:
-        # Normalize input to List[ASRSegment]
-        normalized: List[ASRSegment]
-        if segments and isinstance(segments[0], str):
-            normalized = [ASRSegment(text=s, start=0.0, end=0.0) for s in segments]
-        else:
-            normalized = segments  # type: ignore[assignment]
-
-        chunks = self.chunker.chunk(normalized)
-        results: List[str] = []
-
-        for chunk in chunks:
-            jp_text = " ".join(seg.text for seg in chunk)
-            en_text = self.translator.translate(jp_text)
-            results.append(en_text)
-
-        return "\n\n".join(results)
-
-
-def translate_text(segments: Union[List[ASRSegment], List[str]]) -> str:
-    chunker = SemanticChunker(max_chars=40)
-    translator = ContextAwareTranslator()
-    pipeline = LongAudioTranslator(chunker, translator)
-
-    english = pipeline.translate(segments)
-    return english
-
-
-import re
-from typing import List
-from fast_bunkai import FastBunkai
-
-def split_sentences_ja(text: str) -> List[str]:
-    """
-    Split Japanese text into sentences using FastBunkai.
-    
-    FastBunkai provides excellent speed and accuracy for punctuated or emoji-rich text.
-    For casual/spoken-style text with spaces instead of periods (common in transcripts or chats),
-    we apply a lightweight preprocessing step: replace single spaces surrounded by Japanese characters
-    with a period (。) to guide the splitter toward natural clause boundaries.
-    
-    This keeps the implementation generic, reusable, and minimal—no heavy dependencies beyond fast_bunkai.
-    
-    Args:
-        text: The Japanese text to split.
-    
-    Returns:
-        A list of sentences as strings (stripped of whitespace).
-    
-    Example:
-        >>> text = "3人の先生から電話があった 近地なんか心当たりある?"
-        >>> split_sentences_ja(text)
-        ['3人の先生から電話があった', '近地なんか心当たりある?']
-        
-        >>> text = "羽田から✈️出発して、友だちと🍣食べました。最高！また行きたいな😂でも、予算は大丈夫かな…?"
-        >>> split_sentences_ja(text)
-        ['羽田から✈️出発して、友だちと🍣食べました。', '最高！', 'また行きたいな😂', 'でも、予算は大丈夫かな…?']
-    """
-    import re
-    
-    # Preprocess: treat isolated spaces (common in informal text) as potential sentence breaks
-    # Only replace spaces that are between Japanese chars (hiragana, katakana, kanji, some punctuation)
-    text = re.sub(r'([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F])[ ]+([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F])',
-                  r'\1。\2', text)
-    
-    splitter = FastBunkai()
-    sentences = list(splitter(text))
-    return [s.strip() for s in sentences if s.strip()]
-
-
-
-# ────────────────────────────────────────────────
-# USAGE EXAMPLE
-# ────────────────────────────────────────────────
-
-def example_long_text(ja_text: str):
-    print("\n[bold yellow]Running example_texts_only (texts only)...[/bold yellow]")
-
-    ja_sentences = split_sentences_ja(ja_text)
-    # Temporary limit for faster testing
-    ja_sentences = ja_sentences[:2]
-
-    english = translate_text(ja_sentences)
-
-    print(f"\n[bold cyan]Translation:[/bold cyan]")
-    pprint(english)
-
-    print()
-
-
-
+# -----------------------------
+# Entry
+# -----------------------------
 if __name__ == "__main__":
-    ja_text = """
-世界各国が水面下でれつな情報戦を繰り広げる時代にらみ合う2つの国東のオスタニ西のタリス戦争を企てるオスタニア政府要人の動
-向を探るべくウェスタリスはオペレーションストリスを発動作戦を担うスゴー腕エージェントたそがれ100の顔を使い分ける彼の任務
-は家族を作ること父ロイドォージャー精神科正体スパイコードネーム多そがれ母ヨルフォージャー市役所職員正体殺しやコードネーム
-イバラ姫
-れ母ォージャー市役所職員正体殺し屋コードネームイ姫娘ージャー正体心を読むことができるス犬ボンドフォージャー正体未来を余知
-できる超能力家逃ディのため疑似家族を作り互い無正体を隠した彼らのミッションは続く。
-""".strip()
-
-    example_long_text(ja_text)
+    main()

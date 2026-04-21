@@ -44,6 +44,15 @@ $categories = @(
             @{ Num=8;  Size="Medium"; Name="Mistral-Nemo-Instruct-2407";  Alias="mistral-nemo:12b-ish";       File="Mistral-Nemo-Instruct-2407-Q4_K_M.gguf";               Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Excellent quality" }
             @{ Num=9;  Size="Medium"; Name="DeepSeek-R1-Distill-Qwen-7B"; Alias="deepseek-r1:7b";             File="DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf";              Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Strong reasoning distill" }
             @{ Num=10; Size="Medium"; Name="Meta-Llama-3.1-8B-Instruct";  Alias="llama-3.1:8b";               File="Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf";               Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Classic capable 8B" }
+
+            # --- Qwen3.5 Series ---
+            @{ Num=11; Size="Tiny";   Name="Qwen3.5-0.8B-Instruct";  Alias="qwen3.5:0.8b"; File="Qwen3.5-0.8B-Q4_K_M.gguf"; Ctx=8192;  Gpu=999; Jinja=$true; Desc="Ultra fast tiny model" }
+            @{ Num=12; Size="Small";  Name="Qwen3.5-2B-Instruct";    Alias="qwen3.5:2b";   File="Qwen3.5-2B-Q4_K_M.gguf";   Ctx=8192;  Gpu=999; Jinja=$true; Desc="Fast + good quality small model" }
+            @{ Num=13; Size="Small";  Name="Qwen3.5-4B-Instruct";    Alias="qwen3.5:4b";   File="Qwen3.5-4B-Q4_K_M.gguf";   Ctx=12288; Gpu=999; Jinja=$true; Desc="Strong latest 4B Qwen" }
+
+
+            # --- Ministral ---
+            @{ Num=14; Size="Small";  Name="Ministral-3B-Instruct";  Alias="ministral:3b"; File="Ministral-3b-instruct.Q4_K_M.gguf"; Ctx=8192; Gpu=999; Jinja=$true; Desc="Mistral-style compact reasoning model" }
         )
     },
     @{

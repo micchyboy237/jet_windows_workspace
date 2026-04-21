@@ -1,11 +1,17 @@
-# energy_base.py
+# energy.py
+
+from typing import Optional, Tuple
 
 import numpy as np
 from config import (
     FRAME_LENGTH_MS,
     HOP_LENGTH_MS,
+    LOUD_MAX,
+    NORMAL_MAX,
     SAMPLE_RATE,
     SILENCE_MAX_THRESHOLD,
+    # New loudness thresholds
+    VERY_QUIET_MAX,
 )
 
 
@@ -42,15 +48,32 @@ def compute_amplitude(samples: np.ndarray) -> float:
     return float(np.max(np.abs(samples)))
 
 
+def compute_rms_delta(
+    rms_values: list[float] | np.ndarray, smoothing: int = 3
+) -> float:
+    """Compute smoothed first-order derivative (slope) of RMS sequence.
+    Positive = rising energy, negative = falling.
+    Returns average delta of the last `smoothing` steps (or all if fewer).
+    """
+    if len(rms_values) < 2:
+        return 0.0
+    rms_arr = np.asarray(rms_values, dtype=np.float64)
+    deltas = np.diff(rms_arr)
+    # Average last few deltas for stability
+    recent_deltas = deltas[-smoothing:] if len(deltas) >= smoothing else deltas
+    return float(np.mean(recent_deltas))
+
+
 def compute_rms(samples: np.ndarray) -> float:
     """Root Mean Square – best simple measure of perceived loudness/energy.
 
     Range: 0.0 (true silence) → ~0.707 (full-scale sine wave)
     Typical speech values:
       - < SILENCE_MAX_THRESHOLD     → silence / noise floor
-      - SILENCE_MAX_THRESHOLD–0.03  → very quiet / breath
-      - 0.03–0.15   → normal conversational speech
-      - 0.15–0.4+   → loud speech / shouting
+      - SILENCE_MAX_THRESHOLD–VERY_QUIET_MAX → very quiet / breath
+      - VERY_QUIET_MAX–NORMAL_MAX → normal conversational speech
+      - NORMAL_MAX–LOUD_MAX       → loud speech
+      - > LOUD_MAX                → very loud / shouting
     """
     if len(samples) == 0:
         return 0.0
@@ -76,11 +99,11 @@ def rms_to_loudness_label(rms_value: float) -> str:
     """Return a human-readable loudness label based on RMS."""
     if rms_value < SILENCE_MAX_THRESHOLD:
         return "silent"
-    elif rms_value < 0.03:
+    elif rms_value < VERY_QUIET_MAX:
         return "very_quiet"
-    elif rms_value < 0.12:
+    elif rms_value < NORMAL_MAX:
         return "normal"
-    elif rms_value < 0.25:
+    elif rms_value < LOUD_MAX:
         return "loud"
     else:
         return "very_loud"
@@ -161,3 +184,48 @@ def trim_silent(
 
     # Return trimmed copy (preserve original dtype)
     return samples[start:end].copy()
+
+
+def normalize_energy(
+    rms_values: np.ndarray | list[float],
+    max_rms: Optional[float] = None,
+    # fallback_max now reuses the "normal" threshold so visualization scale
+    # stays consistent with loudness classification.
+    fallback_max: float = NORMAL_MAX,
+    clip: bool = True,
+    return_max: bool = False,
+) -> np.ndarray | Tuple[np.ndarray, float]:
+    """Normalize RMS values to [0, 1] adaptively for visualization.
+
+    - Uses per-segment max_rms when available.
+    - fallback_max defaults to NORMAL_MAX for consistency with rms_to_loudness_label().
+    """
+    rms_arr = np.asarray(rms_values, dtype=np.float64)
+    if len(rms_arr) == 0:
+        result = np.array([], dtype=np.float64)
+        return (result, 0.0) if return_max else result
+
+    effective_max = max_rms if max_rms is not None and max_rms > 0 else np.max(rms_arr)
+    effective_max = max(effective_max, fallback_max)
+
+    norm = rms_arr / effective_max
+    if clip:
+        norm = np.clip(norm, 0.0, 1.0)
+
+    if return_max:
+        return norm, float(effective_max)
+    return norm
+
+
+def smooth_signal(
+    values: np.ndarray | list[float], window: int = 5, mode: str = "same"
+) -> np.ndarray:
+    """Simple moving average smoothing for signals (e.g. energy or probability).
+
+    Returns array of the same length as input.
+    """
+    arr = np.asarray(values, dtype=np.float64)
+    if len(arr) < window or window < 1:
+        return arr.copy()
+    kernel = np.ones(window) / window
+    return np.convolve(arr, kernel, mode=mode)

@@ -1,65 +1,52 @@
-from rich.console import Console
-from rich.progress import track
-import re
-from fast_bunkai import FastBunkai
-import jaconv
-import fugashi
-# from kudasai import Kudasai       # ← 削除したいならここをコメントアウト
-
-console = Console()
-
-def split_sentences_ja(text: str) -> list[str]:
-    # Preprocess: treat isolated spaces (common in informal text) as potential sentence breaks
-    # Only replace spaces that are between Japanese chars (hiragana, katakana, kanji, some punctuation)
-    text = re.sub(
-        r'([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F])[ ]+([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F])',
-        r'\1。\2',
-        text,
+def detect_pauses_spectral(
+    audio: np.ndarray,
+    sr: int = 16000,
+    n_fft: int = 512,
+    hop_length: int = 256
+) -> List[dict]:
+    """
+    Use spectral features to detect pauses vs. background noise.
+    """
+    # Compute spectral features
+    S = np.abs(librosa.stft(audio, n_fft=n_fft, hop_length=hop_length))
+    
+    # Spectral flatness (high for noise, low for speech)
+    spectral_flatness = librosa.feature.spectral_flatness(S=S)[0]
+    
+    # Spectral centroid (higher for speech)
+    spectral_centroid = librosa.feature.spectral_centroid(S=S, sr=sr)[0]
+    
+    # RMS energy
+    rms = librosa.feature.rms(S=S)[0]
+    
+    # Combined pause score
+    pause_score = (
+        spectral_flatness * 0.4 +  # High flatness = noise/pause
+        (1 - rms / rms.max()) * 0.4 +  # Low energy = pause
+        (1 - spectral_centroid / spectral_centroid.max()) * 0.2  # Low centroid = pause
     )
-
-    splitter = FastBunkai()
-    sentences = list(splitter(text))
-    return [s.strip() for s in sentences if s.strip()]
-
-def clean_asr_text(text: str) -> str:
-    """ASR日本語テキストを翻訳用にきれいにする"""
-    # 1. 極端な空白・改行の正規化
-    text = jaconv.normalize(text)
-    # 2. フィラー・言い直し系をざっくり削除
-    text = re.sub(r'(えっと|あのー|あのね|えー|まぁ|そのー|じゃなくて|っていうか)\s*', '', text)
-    text = re.sub(r'(.)\1{3,}', r'\1\1', text)
-
-    # 3. 文境界復元
-    sentences = split_sentences_ja(text)
-
-    # 4. 形態素レベルの正規化（表記ゆれ対策）
-    tagger = fugashi.Tagger('-Owakati')  # Much more reasonable token grouping for translation
-
-    cleaned_sentences = []
-    for sent in track(sentences, description="Cleaning..."):
-        # Parse → get surface forms only
-        parsed_lines = tagger.parse(sent).splitlines()
-        surfaces = []
-        for line in parsed_lines:
-            if line == 'EOS':
-                continue
-            fields = line.split('\t')
-            if len(fields) >= 1:
-                surfaces.append(fields[0])  # surface form
-
-        # Optional: join with space + post-process
-        cleaned = jaconv.h2z(' '.join(surfaces))
-        cleaned = jaconv.normalize(cleaned)
-        cleaned_sentences.append(cleaned)
-
-    # 5. 最終結合
-    final_text = ' '.join(cleaned_sentences)
-
-    console.print("[bold green]Before:[/]", text[:200] + "...")
-    console.print("[bold cyan]After :[/]", final_text[:200] + "...")
-    return final_text
-
-
-# 使用例
-raw_asr = "あのーえっと今日はですねえー晴れてますあのー昨日じゃなくて一昨日は雨だったんですけど"
-cleaned = clean_asr_text(raw_asr)
+    
+    # Threshold to find pauses
+    pause_threshold = 0.7
+    frame_duration = hop_length / sr
+    
+    pauses = []
+    in_pause = False
+    pause_start = 0
+    
+    for i, score in enumerate(pause_score):
+        if score > pause_threshold and not in_pause:
+            in_pause = True
+            pause_start = i
+        elif score <= pause_threshold and in_pause:
+            in_pause = False
+            duration = (i - pause_start) * frame_duration
+            if duration > 0.2:  # 200ms minimum
+                pauses.append({
+                    "start": pause_start * frame_duration,
+                    "end": i * frame_duration,
+                    "duration": duration,
+                    "avg_pause_score": float(np.mean(pause_score[pause_start:i]))
+                })
+    
+    return pauses
