@@ -63,13 +63,16 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\segment_speaker_labeler.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_tenvad.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
+    r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
     r"",
 ]
 
@@ -87,31 +90,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix what is causing the redundancy in Curr EN.
-
-Diff (previous full JA → current full JA):
-Prev JA:
-世界各国が水面下で熾烈な情歩線を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオス
-タニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリクスを発動 作戦を担うスゴーデエージェント注昏れ
-。
-Curr JA:
-世界各国が水面下で熾烈な譲歩線を繰り広げる時代、睨み合う2つの国、東のオスタニア、西のウェスタリス、戦争を企てるオス
-タニア政府要人の動向を探るべく、ウェスタリスはオペレーションストリクスを発動、作戦を担うスゴーデエージェント黄昏れ
-、00の顔を使い分ける彼の任務は家族を作ること。
-Similarity: 88.9%
-Diff (previous full EN → current full EN):
-Prev EN: It’s an era where nations around the world are locked in fierce competition beneath the waves.
-It’s an era where nations around the world are locked in fierce competition beneath the waves. Two countries,
-Ostania to the east and Westaris to the west, are secretly plotting war. The Westaris government has activated
-Operation Strix—code name for a top-secret operation led by their most elite agent, Sgoedea.
-Curr EN: It’s an era where nations around the world are locked in fierce competition beneath the waves.
-It’s an era where nations around the world are locked in fierce competition beneath the waves. Two countries,
-Ostania to the east and Westaris to the west, are secretly plotting war. The Westaris government has activated
-Operation Strix—code name for a top-secret operation led by their most elite agent, Sgoedea.
-It’s an era where nations around the world are locked in fierce competition beneath the waves. Two countries,
-Ostania to the east and Westaris to the west, are secretly plotting war. The Westaris government has activated
-Operation Strix—a covert operation led by their most elite agent, Sgoedea, codename "Dusk." His mission is complex:
-he must gather intelligence on Ostanian officials planning the conflict while also starting a family of his own.
+Update extract_new_ja_text so that the new text replaces the text from unchanged text starting with the matching sentence.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
