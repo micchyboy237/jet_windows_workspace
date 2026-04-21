@@ -110,24 +110,30 @@ def add_punctuation(
 # Example Usage
 # ======================
 
+
 if __name__ == "__main__":
-    # Option 1: Simple usage (auto-creates model each time)
-    result = add_punctuation("hello world how are you today")
-    print("Single text:", result)
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Add punctuation to English/Chinese/Japanese text via sherpa-onnx."
+    )
+    parser.add_argument(
+        "texts",
+        nargs="+",
+        help="One or more text strings to punctuate. For multi-word use quotes. (Ex.: 'hello world how are you today')",
+    )
+    args = parser.parse_args()
 
-    # Option 2: Batch processing
-    texts = [
-        "i am fine thank you and you",
-        "what is the weather like today",
-        "上海今天天气怎么样呢",
-    ]
-    results = add_punctuation(texts)
-    for orig, punct in zip(texts, results):
-        print(f"Input : {orig}")
-        print(f"Output: {punct}")
-        print("-" * 40)
+    input_texts = args.texts
 
-    # Option 3: Reuse the model for better performance (recommended for many texts)
+    # Reuse the punctuation model instance for all calls (better perf)
     punctuator = create_punctuation_model()
-    result = add_punctuation("this is very convenient", punctuator=punctuator)
-    print("Reused model:", result)
+
+    if len(input_texts) == 1:
+        punctuated = add_punctuation(input_texts[0], punctuator=punctuator)
+        print(punctuated)
+    else:
+        results = add_punctuation(input_texts, punctuator=punctuator)
+        for orig, punct in zip(input_texts, results):
+            print(f"Input : {orig}")
+            print(f"Output: {punct}")
+            print("-" * 40)

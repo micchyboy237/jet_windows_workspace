@@ -50,7 +50,6 @@ $categories = @(
             @{ Num=12; Size="Small";  Name="Qwen3.5-2B-Instruct";    Alias="qwen3.5:2b";   File="Qwen3.5-2B-Q4_K_M.gguf";   Ctx=8192;  Gpu=999; Jinja=$true; Desc="Fast + good quality small model" }
             @{ Num=13; Size="Small";  Name="Qwen3.5-4B-Instruct";    Alias="qwen3.5:4b";   File="Qwen3.5-4B-Q4_K_M.gguf";   Ctx=12288; Gpu=999; Jinja=$true; Desc="Strong latest 4B Qwen" }
 
-
             # --- Ministral ---
             @{ Num=14; Size="Small";  Name="Ministral-3B-Instruct";  Alias="ministral:3b"; File="Ministral-3b-instruct.Q4_K_M.gguf"; Ctx=8192; Gpu=999; Jinja=$true; Desc="Mistral-style compact reasoning model" }
         )
@@ -76,6 +75,9 @@ $categories = @(
                Desc="Strong vision + text (OCR, charts)"; 
                MmprojFile="ggml-org_Qwen2.5-VL-7B-Instruct-GGUF_mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf" 
             }
+            @{ Num=3; Size="Tiny";   Name="Qwen3.5-0.8B-Instruct";  Alias="qwen3.5:0.8b"; File="Qwen3.5-0.8B-Q4_K_M.gguf"; Ctx=8192;  Gpu=999; Jinja=$true; Desc="Ultra fast tiny model";        MmprojFile="unsloth_Qwen3.5-0.8B-GGUF_mmproj-F16.gguf" }
+            @{ Num=4; Size="Small";  Name="Qwen3.5-2B-Instruct";    Alias="qwen3.5:2b";   File="Qwen3.5-2B-Q4_K_M.gguf";   Ctx=8192;  Gpu=999; Jinja=$true; Desc="Fast + good quality small model"; MmprojFile="unsloth_Qwen3.5-2B-GGUF_mmproj-F16.gguf" }
+            @{ Num=5; Size="Small";  Name="Qwen3.5-4B-Instruct";    Alias="qwen3.5:4b";   File="Qwen3.5-4B-Q4_K_M.gguf";   Ctx=12288; Gpu=999; Jinja=$true; Desc="Strong latest 4B Qwen";        MmprojFile="unsloth_Qwen3.5-4B-GGUF_mmproj-F16.gguf" }
         )
     },
     @{

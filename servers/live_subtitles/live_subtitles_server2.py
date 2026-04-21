@@ -283,16 +283,6 @@ def blocking_process_audio(
         last_sentence_clean = None
         last_sentence_pos = -1
 
-    # === SHOW DIFF CHANGES ===
-    if prev_full_ja_text and full_ja_text != prev_full_ja_text:
-        console.print("[info]Diff (previous full JA → current full JA):[/info]")
-        console_diff_highlight(
-            prev_full_ja_text,
-            full_ja_text,
-            "Prev",
-            "Curr",
-        )
-
     # === Everything below this point is 100% unchanged from original ===
     # (prints, file saving, context_buffer.add_audio_segment, return)
 
@@ -329,10 +319,27 @@ def blocking_process_audio(
     else:
         console.print("[dim italic]No new translation[/dim italic]")
 
-    search_audio(
-        full_audio_bytes,
-        audio_bytes,
-    )
+    # Show current audio similarity to previous
+    search_audio(full_audio_bytes, audio_bytes)
+
+    # === SHOW DIFF CHANGES ===
+    if prev_full_ja_text and full_ja_text != prev_full_ja_text:
+        console.print("[info]Diff (previous full JA → current full JA):[/info]")
+        console_diff_highlight(
+            prev_full_ja_text,
+            full_ja_text,
+            "Prev JA",
+            "Curr JA",
+        )
+
+    if prev_full_en_text and full_en_text != prev_full_en_text:
+        console.print("[info]Diff (previous full EN → current full EN):[/info]")
+        console_diff_highlight(
+            prev_full_en_text,
+            full_en_text,
+            "Prev EN",
+            "Curr EN",
+        )
 
     started_at_iso = header.get("started_at")
     if started_at_iso and isinstance(started_at_iso, str):
