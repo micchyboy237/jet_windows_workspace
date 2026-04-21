@@ -72,7 +72,6 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
     r"",
     r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama_types.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\llama_cpp_wrapper.py",
     r"",
 ]
 
@@ -90,9 +89,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Please complete my llama_cpp_wrapper, the goal is it should use self.logs_dir to save request.json which contains the messages, response.md, and other files or metadata based on provided input args and resppnse keys.
-Use rich console.print to improve logging. For stream, please flush log each chunk reasoning content or content.
-Also save *.log files.
+Please log the full path to the saved response file with file link.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

@@ -1,3 +1,7 @@
+"""
+llama_cpp_wrapper.py
+"""
+
 from __future__ import annotations
 
 import time
@@ -272,6 +276,10 @@ class Llama(BaseLlama):
 
             save_json(call_dir / "response.json", response)
             save_markdown(call_dir / "response.md", content, reasoning or None)
+            response_md = call_dir / "response.md"
+            file_uri = response_md.resolve().as_uri()
+            logger.info("Response saved  path=%s  uri=%s", response_md, file_uri)
+            console.print(f"[dim]Response → [link={file_uri}]{response_md}[/link][/dim]")
             save_json(
                 call_dir / "metadata.json",
                 {
@@ -354,6 +362,10 @@ class Llama(BaseLlama):
 
             save_json(call_dir / "response.json", stream_response_summary)
             save_markdown(call_dir / "response.md", full_content, full_reasoning or None)
+            response_md = call_dir / "response.md"
+            file_uri = response_md.resolve().as_uri()
+            logger.info("Response saved  path=%s  uri=%s", response_md, file_uri)
+            console.print(f"[dim]Response → [link={file_uri}]{response_md}[/link][/dim]")
             save_json(
                 call_dir / "metadata.json",
                 {
