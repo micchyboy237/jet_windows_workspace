@@ -13,8 +13,10 @@ class SegmentMeta(TypedDict):
     started_at: str
     matched_pos: int
     matched_sent: str
-    old_sents: list[str]
-    new_sents: list[str]
+    old_ja_sents: list[str]
+    new_ja_sents: list[str]
+    old_en_sents: list[str]
+    new_en_sents: list[str]
     full_ja_text: str
     full_en_text: str
     ja_text: str
@@ -100,33 +102,48 @@ class AudioContextBuffer:
             return None, None
         return self.segments[-1]   # most recent is at the right end
 
-    def get_last_sentence(self) -> tuple[Optional[str], Optional[str], Optional[int]]:
-        """Return the most recent sentence with its utterance ID and sentence index.
+    def get_last_sentence(self) -> tuple[Optional[str], Optional[str], Optional[str], Optional[int]]:
+        """Return the most recent JA/EN sentence pair with its utterance ID and sentence index.
 
         Returns:
             tuple:
-                sentence (Optional[str])
+                ja_sentence (Optional[str])
+                en_sentence (Optional[str])
                 utt_id (Optional[str])
                 sent_idx (Optional[int])
         """
         if not self.segments:
-            return None, None, None
+            return None, None, None, None
 
-        # iterate backwards (most recent first)
+        # iterate backwards (most recent segment first)
         for _, meta in reversed(self.segments):
-            new_sents = meta.get("new_sents")
-            if not new_sents:
+            new_ja_sents = meta.get("new_ja_sents")
+            new_en_sents = meta.get("new_en_sents")
+
+            if not new_ja_sents:
                 continue
 
-            # iterate backwards within sentences to ensure non-empty
-            for idx in range(len(new_sents) - 1, -1, -1):
-                sent = new_sents[idx]
-                if sent:
-                    sent = sent.strip()
-                    if sent:
-                        return sent, meta["uuid"], idx
+            # iterate backwards within JA sentences
+            for idx in range(len(new_ja_sents) - 1, -1, -1):
+                ja_sent = new_ja_sents[idx]
+                if not ja_sent:
+                    continue
 
-        return None, None, None
+                ja_sent = ja_sent.strip()
+                if not ja_sent:
+                    continue
+
+                # safely get aligned EN sentence (if exists)
+                en_sent: Optional[str] = None
+                if new_en_sents and idx < len(new_en_sents):
+                    en_candidate = new_en_sents[idx]
+                    if en_candidate:
+                        en_sent = en_candidate.strip() or None
+
+                return ja_sent, en_sent, meta["uuid"], idx
+
+        return None, None, None, None
+   
 
     def get_list_metadata(self) -> List[SegmentMeta]:
         """Return list of metadata for all buffered segments.

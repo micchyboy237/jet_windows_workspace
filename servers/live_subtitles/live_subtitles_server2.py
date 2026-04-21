@@ -169,11 +169,11 @@ def blocking_process_audio(
         #     return {"message": "no change", "success": False}
         
 
-        last_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
+        last_ja_sentence, last_en_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
 
         MATCH_SCORE_CUTOFF = 75
         match_result = fuzzy_shortest_best_match(
-            # query=last_sentence or "",
+            # query=last_ja_sentence or "",
             query=new_ja_text,
             texts=full_ja_text,
             score_cutoff=MATCH_SCORE_CUTOFF,
@@ -181,7 +181,7 @@ def blocking_process_audio(
         )
         # # === Fuzzy result logs (mirroring sentence_matcher_ja main output) ===
         # console_diff_highlight(
-        #     last_sentence or '',
+        #     last_ja_sentence or '',
         #     match_result['match'],
         #     "Last JA Sent",
         #     "Match",
@@ -231,13 +231,13 @@ def blocking_process_audio(
                 "message": "Same text as previous",
             }
 
-        old_sents = split_sentences_ja(prev_full_ja_text)  # no longer needed for translation
+        old_ja_sents = split_sentences_ja(prev_full_ja_text)  # no longer needed for translation
         old_ja_text = prev_full_ja_text
 
         # Always translate only the incremental new text
-        new_sents = split_sentences_ja(new_text)
-        ja_text = "".join(new_sents).strip()
-        # new_sents = split_sentences_ja(new_ja_text)
+        new_ja_sents = split_sentences_ja(new_text)
+        ja_text = "".join(new_ja_sents).strip()
+        # new_ja_sents = split_sentences_ja(new_ja_text)
         # ja_text = "".join(new_ja_text).strip()
 
         last_sentence_pos = match_result["start"] if match_result["score"] >= MATCH_SCORE_CUTOFF else -1
@@ -279,7 +279,7 @@ def blocking_process_audio(
                 enable_scoring=False,
                 history=history,
             )
-            new_sents = ja_sents
+            new_ja_sents = ja_sents
             full_en_text = full_trans_en["text"].strip()
             en_text = full_en_text
         else:
@@ -290,7 +290,7 @@ def blocking_process_audio(
                 "success": False,
                 "message": "Empty transcription after cleaning",
             }
-        old_sents = []
+        old_ja_sents = []
         last_sentence_clean = None
         last_sentence_pos = -1
 
@@ -307,8 +307,8 @@ def blocking_process_audio(
     if last_sentence_pos != -1:
         console.print(f"[success]New Text (utt_id={header["uuid"][-6:]} | pos={last_sentence_pos} | start={new_text_start}):[/success]")
         console.print(f"[bright_white]{new_text}[/bright_white]")
-    if old_sents:
-        console.print(f"[success]Old JA ({len(old_sents)} sents):[/success]")
+    if old_ja_sents:
+        console.print(f"[success]Old JA ({len(old_ja_sents)} sents):[/success]")
         console.print(f"[bright_white]{old_ja_text}[/bright_white]")
 
     if new_ja_text:
@@ -352,6 +352,9 @@ def blocking_process_audio(
             "Curr EN",
         )
 
+    old_en_sents = split_sentences_ja(prev_full_en_text)
+    new_en_sents = split_sentences_ja(full_en_text)
+
     started_at_iso = header.get("started_at")
     if started_at_iso and isinstance(started_at_iso, str):
         iso_str = started_at_iso.replace("Z", "+00:00") if started_at_iso.endswith("Z") else started_at_iso
@@ -376,6 +379,19 @@ def blocking_process_audio(
         json.dump(header, f, ensure_ascii=False, indent=2)
     wavfile.write(str(segment_dir / "full_sound.wav"), sample_rate, full_audio_int16)
 
+    # Save sentences
+    with open(segment_dir / "ja_sents.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "old_ja_sents": old_ja_sents,
+            "new_ja_sents": new_ja_sents,
+        }, f, ensure_ascii=False, indent=2)
+    with open(segment_dir / "en_sents.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "old_en_sents": old_en_sents,
+            "new_en_sents": new_en_sents,
+        }, f, ensure_ascii=False, indent=2)
+
+    # Save transcribed and translated texts
     md_results = (
         f"JA: {ja_text}\n"
         f"EN: {en_text}\n"
@@ -411,8 +427,10 @@ def blocking_process_audio(
         "started_at": header["started_at"],
         "matched_pos": last_sentence_pos,
         "matched_sent": last_sentence_clean,
-        "old_sents": old_sents,
-        "new_sents": new_sents,
+        "old_ja_sents": old_ja_sents,
+        "new_ja_sents": new_ja_sents,
+        "old_en_sents": old_en_sents,
+        "new_en_sents": new_en_sents,
         "full_ja_text": full_ja_text,
         "full_en_text": full_en_text,
         "ja_text": ja_text,
@@ -462,9 +480,10 @@ def blocking_process_audio(
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
     return {
         "uuid": uuid_,
-        "success": bool(ja_text and en_text),
-        "context_duration": context_duration,
+        "new_duration": header['duration_sec'],
         "context_uuid": context_uuid,
+        "context_duration": context_duration,
+        "success": bool(ja_text and en_text),
         "new_ja_similarity": new_ja_similarity,
         "new_ja_start_index": new_ja_start_index,
         "transcription_ja": new_ja_text,
@@ -472,6 +491,10 @@ def blocking_process_audio(
         "transcribed_duration_sec": full_metadata["transcribed_duration_sec"],
         "transcribed_duration_pctg": full_metadata["transcribed_duration_pctg"],
         "coverage_label": full_metadata["coverage_label"],
+        "old_ja_sents": old_ja_sents,
+        "new_ja_sents": new_ja_sents,
+        "old_en_sents": old_en_sents,
+        "new_en_sents": new_en_sents,
         "phrase_segments": full_phrase_segments,
     }
 
