@@ -57,35 +57,38 @@ executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_work
 context_buffer = AudioContextBuffer(max_duration_sec=30.0, sample_rate=16000)
 
 # ====================== GLOBAL STATE FOR GAP DETECTION ======================
-prev_start_sec: float = 0.0          # Tracks the start_sec of the last processed segment
+prev_end_sec: float | None = None          # Tracks the end_sec of the last processed segment
 prev_vad_reason = None
 
 
 def should_reset_context(header: dict) -> bool:
     """Determine if we should reset the context buffer based on time gap or silence."""
-    global prev_vad_reason, prev_start_sec
+    global prev_vad_reason, prev_end_sec
 
     current_start_sec = float(header.get("start_sec", 0.0))
+    current_end_sec = float(header.get("end_sec", 0.0))
     vad_reason = header.get("vad_reason")
 
-    # Case 1: Large time gap (> 5.0 seconds)
-    # gap = current_start_sec - prev_start_sec
-    # if gap > 5.0:
-    #     console.print(
-    #         f"[warning]Large time gap detected: {gap:.2f}s > 5.0s → Resetting context[/warning]"
-    #     )
-    #     prev_start_sec = current_start_sec
-    #     return True
+    # Case 1: Large time gap (> 3.0 seconds)
+    if prev_end_sec is not None:
+        gap = current_start_sec - prev_end_sec
+        if gap > 3.0:
+            console.print(
+                f"[warning]Large time gap detected: {gap:.2f}s > 3.0s → Resetting context[/warning]"
+            )
+            prev_end_sec = current_end_sec
+            prev_vad_reason = vad_reason
+            return True
 
     # Case 2: Silence from VAD
     if context_buffer.segments and prev_vad_reason == "silence":
         console.print("[info]Silence detected via VAD → Resetting context[/info]")
-        prev_start_sec = current_start_sec
+        prev_end_sec = current_end_sec
         prev_vad_reason = vad_reason
         return True
 
     # No reset needed - just update previous start time
-    prev_start_sec = current_start_sec
+    prev_end_sec = current_end_sec
     prev_vad_reason = vad_reason
     return False
 
@@ -97,7 +100,7 @@ def blocking_process_audio(
     """
     Runs in thread pool — contains the blocking CPU/GPU heavy work
     """
-    global prev_vad_reason, prev_start_sec
+    global prev_vad_reason, prev_end_sec
 
     uuid_ = header.get("uuid")
     if not uuid_:
@@ -108,7 +111,7 @@ def blocking_process_audio(
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
 
     # === NEW: Reset decision BEFORE any transcription ===
-    # Resets on either: 1) silence (VAD), or 2) time gap > 5.0 seconds
+    # Resets on either: 1) silence (VAD), or 2) time gap > 3.0 seconds
     if should_reset_context(header):
         context_buffer.reset()
     else:
