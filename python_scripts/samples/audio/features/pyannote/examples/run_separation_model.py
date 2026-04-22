@@ -6,6 +6,8 @@ import torchaudio
 import scipy.io.wavfile
 import numpy as np
 from pyannote.audio import Model
+from pathlib import Path
+import shutil
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 AUDIO_PATH    = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
@@ -14,10 +16,11 @@ SAMPLE_RATE   = 16_000
 CHUNK_SECONDS = 5.0
 CHUNK_SAMPLES = int(CHUNK_SECONDS * SAMPLE_RATE)   # 80 000 samples per chunk
 MAX_SPEAKERS  = 3
-OUTPUT_DIR    = "output_model"
+OUTPUT_DIR    = Path(__file__).parent / "generated" / Path(__file__).stem
 # ────────────────────────────────────────────────────────────────────────────
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
 # ── STEP 1: Load audio ───────────────────────────────────────────────────────
 print("Loading audio …")
@@ -94,7 +97,7 @@ print("Saving speaker WAVs …")
 for spk in range(MAX_SPEAKERS):
     spk_audio = sources_full[:, spk]                   # (total_samples,)
     spk_audio = (spk_audio * 32767).astype(np.int16)   # float → 16-bit PCM
-    out_path  = os.path.join(OUTPUT_DIR, f"SPEAKER_{spk:02d}.wav")
+    out_path  = OUTPUT_DIR / f"SPEAKER_{spk:02d}.wav"
     scipy.io.wavfile.write(out_path, SAMPLE_RATE, spk_audio)
     print(f"  Saved {out_path}")
 
@@ -104,4 +107,5 @@ for spk in range(MAX_SPEAKERS):
     activity = diarization_full[:, spk].mean()
     print(f"  SPEAKER_{spk:02d}: {activity:.1%} active")
 
-print("\nDone! Check the 'output_model/' folder.")
+print("\nDone! Check the results here")
+print(OUTPUT_DIR)

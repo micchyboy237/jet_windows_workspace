@@ -6,14 +6,17 @@ import scipy.io.wavfile
 import os
 from pyannote.audio import Pipeline
 from pyannote.audio.pipelines.utils.hook import ProgressHook
+from pathlib import Path
+import shutil
 
 # ── CONFIG ──────────────────────────────────────────────────────────────────
 AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
 HF_TOKEN   = os.getenv("HF_TOKEN")
-OUTPUT_DIR = "output_pipeline"
+OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 # ────────────────────────────────────────────────────────────────────────────
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
 # ── STEP 1: Load the full pipeline ───────────────────────────────────────────
 print("Loading speech-separation-ami-1.0 pipeline …")
@@ -41,7 +44,7 @@ with ProgressHook() as hook:
 # sources     : SlidingWindowFeature – separated audio per speaker
 
 # ── STEP 5: Save diarization as RTTM ─────────────────────────────────────────
-rttm_path = os.path.join(OUTPUT_DIR, "diarization.rttm")
+rttm_path = OUTPUT_DIR / "diarization.rttm"
 with open(rttm_path, "w") as f:
     diarization.write_rttm(f)
 print(f"  Saved diarization → {rttm_path}")
@@ -60,7 +63,7 @@ for s, speaker in enumerate(labels):
         spk_audio = spk_audio / max_val   # normalise to [-1, 1]
     spk_audio_int16 = (spk_audio * 32767).astype("int16")
 
-    out_path = os.path.join(OUTPUT_DIR, f"{speaker}.wav")
+    out_path = OUTPUT_DIR / f"{speaker}.wav"
     scipy.io.wavfile.write(out_path, 16_000, spk_audio_int16)
     print(f"  Saved {out_path}")
 
@@ -69,4 +72,5 @@ print("\n── Diarization Timeline ──────────────�
 for turn, _, speaker in diarization.itertracks(yield_label=True):
     print(f"  [{turn.start:6.1f}s → {turn.end:6.1f}s]  {speaker}")
 
-print(f"\nDone! Check the '{OUTPUT_DIR}/' folder.")
+print("\nDone! Check the rttm file")
+print(rttm_path)
