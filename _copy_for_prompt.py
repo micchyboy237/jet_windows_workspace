@@ -84,12 +84,13 @@ include_files = [
     r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--separation-ami-1.0\snapshots\4d38e95cfd067c894b8b60b00761831fb01e4a8c\README.md",
     r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9\README.md",
     r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9\config.yaml",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\run_separation_pipeline.py",
     r"",
 ]
 
 structure_include = [
-    r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--separation-ami-1.0\snapshots\4d38e95cfd067c894b8b60b00761831fb01e4a8c",
-    r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9",
+    # r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--separation-ami-1.0\snapshots\4d38e95cfd067c894b8b60b00761831fb01e4a8c",
+    # r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9",
 ]
 structure_exclude = []
 
@@ -98,11 +99,45 @@ exclude_content = []
 
 # Args defaults
 SHORTEN_FUNCTS = False 
-INCLUDE_FILE_STRUCTURE = True
+INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Write working code examples for both models on this audio path
-r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+Browse how to resolve then fix run_separation_pipeline
+
+Traceback (most recent call last):
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\run_separation_pipeline.py", line 23, in <module>
+    pipeline = Pipeline.from_pretrained(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\pipeline.py", line 245, in from_pretrained
+    pipeline = Klass(**params)
+               ^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\speech_separation.py", line 179, in __init__
+    self._embedding = PretrainedSpeakerEmbedding(
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\speaker_verification.py", line 762, in PretrainedSpeakerEmbedding
+    return SpeechBrainPretrainedSpeakerEmbedding(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\speaker_verification.py", line 255, in __init__
+    self.classifier_ = SpeechBrain_EncoderClassifier.from_hparams(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\interfaces.py", line 487, in from_hparams
+    return pretrained_from_hparams(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\interfaces.py", line 183, in pretrained_from_hparams
+    hparams_local_path = fetch(
+                         ^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py", line 429, in fetch
+    download_file_hf(hf_kwargs, destination, local_strategy)
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\distributed.py", line 318, in main_proc_wrapped_func
+    result = function(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py", line 277, in download_file_hf
+    link_with_strategy(fetched_file, destination, local_strategy)
+  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py", line 164, in link_with_strategy
+    dst.symlink_to(src)
+  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\pathlib.py", line 1386, in symlink_to
+    os.symlink(target, self, target_is_directory)
+OSError: [WinError 1314] A required privilege is not held by the client: 'C:\\Users\\druiv\\.cache\\huggingface\\hub\\models--speechbrain--spkrec-ecapa-voxceleb\\snapshots\\0f99f2d0ebe89ac095bcc5903c4dd8f72b367286\\hyperparams.yaml' -> 'C:\\Users\\druiv\\None\\speechbrain\\hyperparams.yaml'
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
