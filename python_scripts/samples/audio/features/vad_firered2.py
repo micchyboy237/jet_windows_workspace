@@ -1,99 +1,36 @@
 import io
+import json
 import os
 from pathlib import Path
-from typing import List, Literal, Optional, TypedDict, Union
+from typing import List, Literal, Optional, Tuple, TypedDict, Union
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import librosa
 import numpy as np
 import numpy.typing as npt
 import torch
+import torchaudio
 from fireredvad.core.constants import SAMPLE_RATE
 from fireredvad.stream_vad import FireRedStreamVad, FireRedStreamVadConfig
 from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+from loader import load_audio
+from _types import AudioInput, SpeechSegment, WordSegment
 
-# Allow flexible input types
-AudioInput = Union[
-    str,
-    bytes,
-    os.PathLike,
-    npt.NDArray[np.floating | np.integer],
-    "torch.Tensor",
-]
-
-
-def load_audio(
-    audio: AudioInput,
-    sr: int = 16_000,
-    mono: bool = True,
-) -> tuple[np.ndarray, int]:
-    """
-    Robust audio loader for ASR pipelines with correct datatype, normalization, layout, and resampling.
-
-    Handles:
-      - File paths
-      - In-memory WAV bytes
-      - NumPy arrays (any shape/layout/dtype/sr)
-      - Torch tensors
-      - Automatically normalizes to [-1.0, 1.0] float32
-      - Always resamples to target_sr
-      - Correctly converts stereo → mono regardless of channel position
-    Returns
-    -------
-    np.ndarray
-        Shape (samples,), float32, [-1.0, 1.0], exactly `sr` Hz
-    """
-    # ─────── FIX 1: In-memory arrays/tensors have unknown original sr ───────
-
-    current_sr: int | None
-    if isinstance(audio, (str, os.PathLike)):
-        y, current_sr = librosa.load(audio, sr=None, mono=False)
-    elif isinstance(audio, bytes):
-        y, current_sr = librosa.load(io.BytesIO(audio), sr=None, mono=False)
-    elif isinstance(audio, np.ndarray):
-        y = audio.astype(np.float32, copy=False)
-        current_sr = None
-    elif isinstance(audio, torch.Tensor):
-        y = audio.float().cpu().numpy()
-        current_sr = None
-    else:
-        raise TypeError(f"Unsupported audio input type: {type(audio)}")
-
-    # ─────── FIX 2: Correct normalization (NumPy, not torch) ───────
-    if np.issubdtype(y.dtype, np.integer):
-        y = y / (2 ** (np.iinfo(y.dtype).bits - 1))
-
-    if len(y) > 0 and np.abs(y).max() > 1.0 + 1e-6:
-        y = y / np.abs(y).max()
-
-    # ─────── FIX 3: Always make (channels, time) layout ───────
-    if y.ndim == 1:
-        y = y[None, :]
-    elif y.ndim == 2:
-        if y.shape[0] > y.shape[1]:
-            y = y.T
-    else:
-        raise ValueError(f"Audio must be 1D or 2D, got shape {y.shape}")
-
-    # Mono conversion
-    if mono and y.shape[0] > 1:
-        y = np.mean(y, axis=0, keepdims=True)
-
-    sr = current_sr or sr
-
-    # ─────── FIX 4: ALWAYS resample if current_sr is None or wrong ───────
-    if current_sr != sr:
-        y = librosa.resample(y, orig_sr=sr, target_sr=sr)
-
-    return y.squeeze(), sr
-
-
-# assuming SAVE_DIR is defined somewhere; adjust if needed
+console = Console()
 
 SAVE_DIR = str(
     Path("~/.cache/pretrained_models/FireRedVAD/Stream-VAD").expanduser().resolve()
 )
-
-console = Console()
 
 
 class FireRedVAD:
@@ -104,23 +41,17 @@ class FireRedVAD:
         model_dir: str = SAVE_DIR,
         device: str | None = None,
         threshold: float = 0.65,
-        min_silence_duration_sec: float = 0.20,  # 200 ms
-        min_speech_duration_sec: float = 0.15,  # 150 ms
+        min_silence_duration_sec: float = 0.20,
+        min_speech_duration_sec: float = 0.15,
         max_speech_duration_sec: float = 12.0,
         smooth_window_size: int = 5,
         pad_start_frame: int = 5,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
-
         self.device = torch.device(device)
-        print(
-            f"Loading FireRedVAD (streaming) on {self.device}... ", end="", flush=True
-        )
-
-        # Convert durations → frame counts (100 frames = 1 second)
+        console.print(f"[cyan]Loading FireRedVAD (streaming) on {self.device}…[/cyan]")
         frames_per_sec = 100
-
         config = FireRedStreamVadConfig(
             use_gpu=(device == "cuda"),
             speech_threshold=threshold,
@@ -131,17 +62,13 @@ class FireRedVAD:
             min_silence_frame=int(min_silence_duration_sec * frames_per_sec),
             chunk_max_frame=30000,
         )
-
         self.vad = FireRedStreamVad.from_pretrained(model_dir, config=config)
         self.vad.vad_model.to(self.device)
-        print("done.")
-
-        self.sample_rate = SAMPLE_RATE  # 16000
+        console.print("[green]done.[/green]")
+        self.sample_rate = SAMPLE_RATE
         self.audio_buffer: np.ndarray = np.array([], dtype=np.float32)
         self.last_prob: float = 0.0
-
-        # Minimal look-back — just enough for model right-context + smoothing
-        self.max_buffer_samples = int(1.2 * self.sample_rate)  # ~1.2 seconds max
+        self.max_buffer_samples = int(1.2 * self.sample_rate)
 
     def reset(self) -> None:
         """Reset internal VAD state and clear audio buffer."""
@@ -150,21 +77,18 @@ class FireRedVAD:
         self.last_prob = 0.0
 
     def _normalize_chunk(self, chunk: np.ndarray) -> np.ndarray:
-        """Simple dynamic range compression / gain normalization"""
+        """Simple dynamic range compression / gain normalization."""
         if len(chunk) == 0:
             return chunk.astype(np.float32)
-
         chunk = chunk.astype(np.float32)
         chunk_max = np.max(np.abs(chunk)) + 1e-10
         target_peak = 0.30
-
         if chunk_max < 0.20:
             gain = min(target_peak / chunk_max, 8.0)
             chunk = chunk * gain
         elif chunk_max > 0.60:
             gain = 0.60 / chunk_max
             chunk = chunk * gain
-
         return chunk
 
     @torch.inference_mode()
@@ -175,24 +99,15 @@ class FireRedVAD:
         """
         if len(chunk) == 0:
             return self.last_prob
-
-        # Normalize level (helps a lot with real mic input)
         chunk = self._normalize_chunk(chunk)
-
-        # Append new audio
         self.audio_buffer = np.concatenate([self.audio_buffer, chunk])
-
         if len(self.audio_buffer) < 4800:
             return self.last_prob
-
         to_process = self.audio_buffer[-9600:]
         results = self.vad.detect_chunk(to_process)
-
         self.audio_buffer = self.audio_buffer[-512:]
-
         if not results:
             return self.last_prob
-
         last = results[-1]
         prob = last.smoothed_prob
         self.last_prob = prob
@@ -201,13 +116,10 @@ class FireRedVAD:
     def get_latest_result(self) -> Optional[dict]:
         """
         Optional: return more detailed info about the last processed frame
-        (useful for debugging or when you need is_speech_start / is_speech_end)
+        (useful for debugging or when you need is_speech_start / is_speech_end).
         """
-        # This would require keeping the last result object — omitted for simplicity
-        # You can extend the class to store self.last_result = results[-1] if needed
         return None
 
-    # Optional: full-file processing (unchanged from original)
     def detect_full(
         self,
         audio: Union[str, np.ndarray],
@@ -215,26 +127,6 @@ class FireRedVAD:
         self.reset()
         frame_results, result = self.vad.detect_full(audio)
         return frame_results, result
-
-
-class SpeechSegment(TypedDict):
-    num: int
-    start: float | int
-    end: float | int
-    prob: float
-    duration: float
-    frames_length: int
-    frame_start: int
-    frame_end: int
-    type: Literal["speech", "non-speech"]
-    segment_probs: List[float]
-
-
-class WordSegment(TypedDict):
-    index: int
-    start_ms: Optional[int]
-    end_ms: Optional[int]
-    word: Optional[str]
 
 
 def extract_speech_timestamps(
@@ -254,16 +146,11 @@ def extract_speech_timestamps(
     """
     if max_speech_duration_sec is None:
         max_speech_duration_sec = 15.0
-    # Convert input audio to numpy array
-    audio_np, sr = load_audio(
-        audio,
-        sr=16000,  # FireRedVAD expects 16000 Hz
-        mono=True,
-    )
+
+    audio_np, sr = load_audio(audio, sr=16000, mono=True)
     if sr != 16000:
         raise ValueError(f"FireRedVAD requires 16000 Hz, got {sr}")
 
-    # Initialize FireRedVAD
     vad = FireRedVAD(
         model_dir=SAVE_DIR,
         threshold=threshold,
@@ -272,14 +159,12 @@ def extract_speech_timestamps(
         max_speech_duration_sec=max_speech_duration_sec,
     )
 
-    # Run VAD inference
     with console.status("[bold blue]Running FireRedVAD inference...[/bold blue]"):
         frame_results, result = vad.detect_full(audio_np)
 
-    # Extract timestamps
     timestamps = result["timestamps"]
     probs = [r.smoothed_prob for r in frame_results]
-    hop_sec = 0.010  # FireRedVAD frame shift (10ms)
+    hop_sec = 0.010
 
     def make_segment(
         num: int,
@@ -292,7 +177,7 @@ def extract_speech_timestamps(
         frame_start = int(start_sec / hop_sec)
         frame_end = int(end_sec / hop_sec)
         segment_probs_slice = probs[frame_start : frame_end + 1]
-        avg_prob = np.mean(segment_probs_slice) if segment_probs_slice else 0.0
+        avg_prob = float(np.mean(segment_probs_slice)) if segment_probs_slice else 0.0
         duration_sec = end_sec - start_sec
         start_val = start_sec if return_seconds else start_sample
         end_val = end_sec if return_seconds else end_sample
@@ -313,13 +198,11 @@ def extract_speech_timestamps(
     current_time = 0.0
     seg_num = 1
 
-    # Handle initial non-speech segment
     if include_non_speech and timestamps and timestamps[0][0] > 0.001:
         enhanced.append(make_segment(seg_num, 0.0, timestamps[0][0], "non-speech"))
         seg_num += 1
         current_time = timestamps[0][0]
 
-    # Process speech segments
     for start_sec, end_sec in timestamps:
         if include_non_speech and start_sec > current_time + 0.01:
             enhanced.append(
@@ -330,7 +213,6 @@ def extract_speech_timestamps(
         seg_num += 1
         current_time = end_sec
 
-    # Handle final non-speech segment
     total_duration = result["dur"]
     if include_non_speech and current_time < total_duration - 0.01:
         enhanced.append(
@@ -368,11 +250,7 @@ def extract_speech_audio(
         include_non_speech=False,
     )
 
-    audio_np, sr = load_audio(
-        audio=audio,
-        sr=sampling_rate,
-        mono=True,
-    )
+    audio_np, sr = load_audio(audio=audio, sr=sampling_rate, mono=True)
     if sr != sampling_rate:
         raise ValueError(
             f"Loaded sample rate {sr} does not match requested {sampling_rate}"
@@ -387,46 +265,360 @@ def extract_speech_audio(
         segment_audio = audio_np[start_sample:end_sample]
         if len(segment_audio) == 0:
             continue
-        segment_audio = segment_audio.astype(np.float32, copy=False)
-        speech_audio_chunks.append(segment_audio)
+        speech_audio_chunks.append(segment_audio.astype(np.float32, copy=False))
 
     return speech_audio_chunks
 
 
+# ---------------------------------------------------------------------------
+# Helpers used by save_segments
+# ---------------------------------------------------------------------------
+
+def _frames_from_seconds(sec: float) -> int:
+    """Convert seconds to a 10 ms frame index (100 frames per second)."""
+    return int(round(sec * 100.0))
+
+
+def _compute_rms(
+    signal: np.ndarray,
+    frame_length: int = 160,
+    hop_length: int = 160,
+) -> np.ndarray:
+    """
+    Compute per-frame RMS energy aligned to 10 ms frames.
+    160 samples @ 16 kHz = exactly 10 ms per frame.
+    """
+    if signal.size == 0:
+        return np.array([], dtype=np.float32)
+    num_frames = 1 + max(0, (len(signal) - frame_length) // hop_length)
+    rms = np.zeros(num_frames, dtype=np.float32)
+    for i in range(num_frames):
+        start = i * hop_length
+        frame = signal[start : start + frame_length]
+        if frame.size:
+            rms[i] = float(np.sqrt(np.mean(frame ** 2)))
+    return rms
+
+
+def _generate_plot(
+    probs: np.ndarray,
+    segment_idx: int,
+    duration_sec: float,
+    output_path: Path,
+    is_dummy: bool = False,
+    rms: Optional[np.ndarray] = None,
+) -> None:
+    """Save a speech-probability (+ optional RMS energy) plot to *output_path*."""
+    num_frames = len(probs)
+    if num_frames == 0:
+        return
+
+    has_rms = rms is not None and len(rms) > 0
+    rows = 2 if has_rms else 1
+    fig, axes = plt.subplots(rows, 1, figsize=(9.5, 3.2 * rows), dpi=140)
+    if rows == 1:
+        axes = [axes]
+
+    label = "Speech probability (dummy)" if is_dummy else "Speech probability"
+    color = "#ff7f0e" if is_dummy else "#2ca02c"
+    ax = axes[0]
+    ax.plot(probs, color=color, linewidth=1.8, label=label)
+    ax.fill_between(range(num_frames), probs, color=color, alpha=0.14)
+    ax.axhline(
+        y=0.4, linestyle="--", color="#d62728", alpha=0.65,
+        linewidth=1.2, label="threshold ≈ 0.4",
+    )
+    ax.set_ylim(-0.03, 1.03)
+    ax.set_xlim(0, num_frames - 1)
+    ax.set_ylabel("Speech Probability", fontsize=10.5)
+    ax.set_xlabel(
+        f"Frame (10 ms)  —  {num_frames} frames ≈ {duration_sec:.1f} s",
+        fontsize=10.5,
+    )
+    ax.set_title(
+        f"Segment {segment_idx:03d} — {'Dummy ' if is_dummy else ''}Model Probabilities",
+        fontsize=12, pad=12,
+    )
+    ax.grid(True, alpha=0.28, linestyle="--", zorder=0)
+    ax.legend(loc="upper right", fontsize=9.5, framealpha=0.92)
+
+    if has_rms:
+        ax_rms = axes[1]
+        ax_rms.plot(range(len(rms)), rms, linewidth=1.6, label="RMS energy")
+        ax_rms.fill_between(range(len(rms)), rms, alpha=0.15)
+        ax_rms.set_ylabel("RMS Energy", fontsize=10.5)
+        ax_rms.set_xlabel("Frame (10 ms)", fontsize=10.5)
+        ax_rms.set_xlim(0, len(rms) - 1)
+        ax_rms.grid(True, alpha=0.28, linestyle="--", zorder=0)
+        ax_rms.legend(loc="upper right", fontsize=9.5, framealpha=0.92)
+
+    fig.tight_layout(pad=0.9)
+    plt.savefig(output_path, bbox_inches="tight", dpi=140)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# save_segments
+# ---------------------------------------------------------------------------
+
+def save_segments(
+    segments: List[SpeechSegment],
+    audio_chunks: List[np.ndarray],
+    output_base_dir: Path,
+) -> List[SpeechSegment]:
+    """
+    Persist every speech segment to *output_base_dir/segments/segment_NNN/*.
+
+    For each segment the function writes:
+      sound.wav          – 16-kHz PCM-16 audio
+      meta.json          – SpeechSegment metadata + probs_info summary
+      speech_probs.json  – per-frame probabilities + summary stats
+      energies.json      – per-frame RMS energy
+      speech_and_rms.png – probability + RMS energy plot
+
+    Parameters
+    ----------
+    segments:
+        Output of ``extract_speech_timestamps(..., return_seconds=True,
+        with_scores=True)``.  Non-speech segments are skipped automatically.
+    audio_chunks:
+        Output of ``extract_speech_audio()``.  Must contain one array per
+        *speech* segment in the same order.
+    output_base_dir:
+        Root directory that will receive the ``segments/`` sub-tree.
+
+    Returns
+    -------
+    List[SpeechSegment]
+        Metadata for every saved segment (``output_path`` field populated).
+    """
+    output_base_dir.mkdir(parents=True, exist_ok=True)
+    segments_dir = output_base_dir / "segments"
+    segments_dir.mkdir(exist_ok=True)
+
+    speech_segments = [s for s in segments if s["type"] == "speech"]
+
+    if len(speech_segments) != len(audio_chunks):
+        console.print(
+            f"[yellow]save_segments: {len(speech_segments)} speech segments but "
+            f"{len(audio_chunks)} audio chunks — zipping by position, extras ignored.[/yellow]"
+        )
+
+    pairs = list(zip(speech_segments, audio_chunks))
+    saved: List[SpeechSegment] = []
+
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        "[progress.percentage]{task.percentage:>3.0f}%",
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    )
+
+    with progress:
+        task = progress.add_task("[cyan]Saving segments + plots…", total=len(pairs))
+
+        for meta, audio_np in pairs:
+            idx = meta["num"]
+            seg_dir = segments_dir / f"segment_{idx:03d}"
+            seg_dir.mkdir(exist_ok=True)
+
+            # ── 1. WAV ────────────────────────────────────────────────────
+            wav_path = seg_dir / "sound.wav"
+            try:
+                torchaudio.save(
+                    str(wav_path),
+                    torch.from_numpy(audio_np).unsqueeze(0),
+                    16000,
+                    encoding="PCM_S",
+                    bits_per_sample=16,
+                )
+            except Exception as exc:
+                console.print(f"[red]Failed to save WAV {wav_path}: {exc}[/red]")
+                progress.advance(task)
+                continue
+
+            # ── 2. Probability array ──────────────────────────────────────
+            seg_probs_list: List[float] = meta.get("segment_probs", [])
+            seg_probs_arr = np.asarray(seg_probs_list, dtype=np.float32)
+            is_dummy = len(seg_probs_arr) == 0
+
+            if is_dummy:
+                # Synthetic sigmoid fallback so the plot is still meaningful
+                num_frames = max(1, _frames_from_seconds(meta["duration"]))
+                t = np.linspace(0, 1, num_frames)
+                base = 0.12 + 0.76 / (1 + np.exp(-14 * (t - 0.48)))
+                noise = np.random.default_rng().normal(0, 0.035, num_frames)
+                seg_probs_arr = np.clip(base + noise, 0.03, 0.99).astype(np.float32)
+                seg_probs_arr *= 0.88 + 0.12 * np.sin(np.pi * t) ** 0.35
+                console.print(
+                    f"[yellow]Segment {idx:03d}: no probabilities stored — "
+                    "using synthetic fallback.[/yellow]"
+                )
+
+            # ── 3. probs_info summary stats ───────────────────────────────
+            probs_info = {
+                "num_frames": int(len(seg_probs_arr)),
+                "mean":       float(np.mean(seg_probs_arr)),
+                "max":        float(np.max(seg_probs_arr)),
+                "min":        float(np.min(seg_probs_arr)),
+                "std":        float(np.std(seg_probs_arr)),
+                "median":     float(np.median(seg_probs_arr)),
+                "frame_rate_hz": 100,
+            }
+
+            # ── 4. meta.json ──────────────────────────────────────────────
+            meta_to_save = dict(meta)
+            meta_to_save["output_path"] = str(
+                wav_path.relative_to(output_base_dir)
+            )
+            meta_to_save["probs_info"] = probs_info
+            # segment_probs can be large; keep it out of meta.json
+            meta_to_save.pop("segment_probs", None)
+            with open(seg_dir / "meta.json", "w", encoding="utf-8") as fh:
+                json.dump(meta_to_save, fh, indent=2, ensure_ascii=False)
+
+            # ── 5. speech_probs.json ──────────────────────────────────────
+            with open(seg_dir / "speech_probs.json", "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "probs": seg_probs_arr.tolist(),
+                        "frame_shift_sec": 0.010,
+                        "frame_start": meta.get("frame_start", 0),
+                        "summary": probs_info,
+                        "is_dummy": is_dummy,
+                    },
+                    fh,
+                    indent=2,
+                )
+
+            # ── 6. energies.json ──────────────────────────────────────────
+            rms = _compute_rms(audio_np)
+            with open(seg_dir / "energies.json", "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "rms": rms.tolist(),
+                        "frame_shift_sec": 0.010,
+                        "num_frames": int(len(rms)),
+                    },
+                    fh,
+                    indent=2,
+                )
+
+            # ── 7. speech_and_rms.png ─────────────────────────────────────
+            _generate_plot(
+                probs=seg_probs_arr,
+                segment_idx=idx,
+                duration_sec=float(meta["duration"]),
+                output_path=seg_dir / "speech_and_rms.png",
+                is_dummy=is_dummy,
+                rms=rms,
+            )
+
+            meta["output_path"] = meta_to_save["output_path"]
+            saved.append(meta)
+            progress.advance(task)
+
+    console.print(f"[bold green]✓ Saved {len(saved)} segments[/bold green]")
+    console.print(
+        f"Output: [link=file://{segments_dir.resolve()}]{segments_dir}[/link]"
+    )
+    return saved
+
+
 if __name__ == "__main__":
     import argparse
+    import shutil
+
+    DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 
     parser = argparse.ArgumentParser(
         description="Extract speech segments with FireRedVAD"
     )
     parser.add_argument(
-        "audio_file",
+        "audio_path",
         nargs="?",
-        default=r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav",
-        help="Path to audio file (default: demo file)",
+        default=DEFAULT_AUDIO,
+        help="input audio file",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        default=str(OUTPUT_DIR),
+        type=str,
+        help=f"output directory (default: '{OUTPUT_DIR}')",
     )
     args = parser.parse_args()
-    audio_file = args.audio_file
+    audio_path = args.audio_path
+    output_dir = Path(args.output_dir)
+    shutil.rmtree(output_dir, ignore_errors=True)
 
-    console.print(f"[bold cyan]Processing:[/bold cyan] {Path(audio_file).name}")
-    segments, all_probs = extract_speech_timestamps(
-        audio_file,
+    console.rule("Audio Segmenter – FireRedVAD2", style="blue")
+    console.print(f"[bold cyan]Processing:[/bold cyan] {Path(audio_path).name}\n")
+
+    # ── Step 1: detect segments (with per-frame probabilities) ────────────
+    segments, speech_probs = extract_speech_timestamps(
+        audio_path,
         max_speech_duration_sec=8.0,
         return_seconds=True,
-        time_resolution=2,
         with_scores=True,
-        include_non_speech=True,
+        include_non_speech=False,
     )
+
     console.print(f"\n[bold green]Segments found:[/bold green] {len(segments)}\n")
     for seg in segments:
         seg_type = seg["type"]
-        if seg_type == "speech":
-            type_color = "bold green"
-        else:
-            type_color = "bold red"
+        type_color = "bold green" if seg_type == "speech" else "bold red"
         console.print(
-            f"[yellow][[/yellow] [bold white]{seg['start']:.2f}[/bold white] - [bold white]{seg['end']:.2f}[/bold white] [yellow]][/yellow] "
+            f"[yellow][[/yellow] [bold white]{seg['start']:.2f}[/bold white]"
+            f" - [bold white]{seg['end']:.2f}[/bold white] [yellow]][/yellow] "
             f"dur=[bold magenta]{seg['duration']:.2f}s[/bold magenta] "
             f"prob=[bold cyan]{seg['prob']:.3f}[/bold cyan] "
             f"type=[{type_color}]{seg_type}[/{type_color}]"
         )
+
+    if not any(s["type"] == "speech" for s in segments):
+        console.print("[red]No speech segments found.[/red]")
+        raise SystemExit(0)
+
+    # ── Step 2: extract raw audio for each speech segment ─────────────────
+    audio_chunks = extract_speech_audio(
+        audio_path,
+        sampling_rate=16000,
+        max_speech_duration_sec=8.0,
+    )
+
+    # ── Step 3: save everything to disk ───────────────────────────────────
+    saved_metas = save_segments(segments, audio_chunks, output_dir)
+
+    # ── Step 4: write summary JSON files ──────────────────────────────────
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    summary_path = output_dir / "all_speech_segments.json"
+    with open(summary_path, "w", encoding="utf-8") as fh:
+        slim = [
+            {k: v for k, v in m.items() if k != "segment_probs"}
+            for m in saved_metas
+        ]
+        json.dump(slim, fh, ensure_ascii=False, indent=2)
+    console.print(
+        f"[bold green]✓ Summary saved to:[/bold green] "
+        f"[link=file://{summary_path.resolve()}]{summary_path}[/link]"
+    )
+
+    all_probs_path = output_dir / "speech_probs.json"
+    with open(all_probs_path, "w", encoding="utf-8") as fh:
+        json.dump(
+            speech_probs if isinstance(speech_probs, list) else [],
+            fh,
+            indent=2,
+        )
+    console.print(
+        f"[bold green]✓ Full probs saved to:[/bold green] "
+        f"[link=file://{all_probs_path.resolve()}]{all_probs_path}[/link]"
+    )
+
+    console.rule("Done", style="green")

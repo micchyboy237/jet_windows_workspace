@@ -77,7 +77,9 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\energy.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_tenvad.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp4.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp4.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered2.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered.py",
     r"",
 ]
 
@@ -95,40 +97,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Browse how resolve issues
-
-=== ENROLLMENT ===
-  Enrolled 'alice' — embedding shape (1, 512)
-  Enrolled 'bob' — embedding shape (1, 512)
-
-=== VERIFICATION ===
-Alice's clip vs Alice's profile  → ACCEPT ✓ (dist=0.0213)
-Impostor's clip vs Alice's profile → ACCEPT ✓ (dist=0.0750)
-
-=== IDENTIFICATION ===
-Mystery clip identified as: bob (dist=0.0184)
-
-=== BATCH PROCESSING ===
-Batch input shape : torch.Size([4, 1, 32000])
-Batch output shape: (4, 512)
-Pairwise distance matrix:
-[[0.    0.097 0.055 0.055]
- [0.097 0.    0.101 0.099]
- [0.055 0.101 0.    0.086]
- [0.055 0.099 0.086 0.   ]]
-
-=== MASKED BATCH (speech regions only) ===
-Embeddings with NaN (too-short masked region): 0 of 4
-Valid embeddings shape: (4, 512)
-
-=== DEVICE SWITCHING ===
-Current device: cuda
-Moved to GPU: cuda
-GPU inference shape: (1, 512)
-
-=== EDGE CASE: Very Short Clip ===
-Model minimum samples: 4771 (298.2 ms)
-Error on short clip (expected): RuntimeError: Calculated padded input size per channel: (6). Kernel size: (7). Kernel size can't be greater than actual input size
+Create and call save_segments in vad_firered2
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
