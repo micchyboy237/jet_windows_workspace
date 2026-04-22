@@ -1,37 +1,33 @@
-import os
-import torch
-import soundfile as sf  # <-- ADD THIS
+# instantiate the pipeline
 from pyannote.audio import Pipeline
-from pyannote.audio.pipelines.utils.hook import ProgressHook
+import argparse
+import os
 
-# audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
 
-# Community-1 open-source speaker diarization pipeline
+parser = argparse.ArgumentParser(description="Speaker diarization with pyannote.audio")
+parser.add_argument("audio_path", nargs="?", default=DEFAULT_AUDIO,
+                    help="Path to the audio file (default: use hardcoded path)")
+args = parser.parse_args()
+
+audio_path = args.audio_path
+
 pipeline = Pipeline.from_pretrained(
-    "pyannote/speaker-diarization-community-1",
-    token=os.getenv("HF_TOKEN"))
-
-# send pipeline to GPU (when available)
-pipeline.to(torch.device("cuda"))
-
-# === PRELOAD AUDIO (this is the fix) ===
-waveform_np, sample_rate = sf.read(
-    audio_path,
-    always_2d=True,      # ensures (time, channels) shape even for mono
-    dtype="float32"
+  "pyannote/speech-separation-ami-1.0",
 )
-waveform = torch.from_numpy(waveform_np.T)  # convert to (channels, time) torch.Tensor
 
-preloaded_audio = {
-    "waveform": waveform,      # must be (channel, time) tensor
-    "sample_rate": sample_rate
-}
+# run the pipeline on an audio file
+diarization, sources = pipeline(audio_path)
 
-# apply pretrained pipeline (with optional progress hook)
-with ProgressHook() as hook:
-    output = pipeline(preloaded_audio, hook=hook)  # <-- pass dict instead of str path
+# dump the diarization output to disk using RTTM format
+rttm_output_path = os.path.abspath("audio.rttm")
+with open(rttm_output_path, "w") as rttm:
+    diarization.write_rttm(rttm)
+print(f"RTTM file saved to: {rttm_output_path}")
 
-# print the result
-for turn, speaker in output.speaker_diarization:
-    print(f"start={turn.start:.1f}s stop={turn.end:.1f}s speaker_{speaker}")
+# dump sources to disk as SPEAKER_XX.wav files
+import scipy.io.wavfile
+for s, speaker in enumerate(diarization.labels()):
+    wav_output_path = os.path.abspath(f'{speaker}.wav')
+    scipy.io.wavfile.write(wav_output_path, 16000, sources.data[:,s])
+    print(f"WAV for {speaker} saved to: {wav_output_path}")

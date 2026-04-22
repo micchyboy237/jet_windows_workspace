@@ -1,150 +1,44 @@
-# example_backends.py
-"""
-Using Each Embedding Backend Directly
-======================================
-Goal: Show how to instantiate each of the 4 backends explicitly,
-      rather than using the auto-detecting factory function.
-
-When to use each backend:
-  - PyannoteAudio  → Best default; works out of the box with HuggingFace models
-  - SpeechBrain    → Great accuracy; large model zoo on HuggingFace
-  - NeMo           → NVIDIA's toolkit; good for production on GPU clusters
-  - WeSpeaker/ONNX → Lightweight & fast; no GPU required; good for edge devices
-"""
-
-import numpy as np
+import os
 import torch
+import soundfile as sf  # <-- ADD THIS
+from pyannote.audio import Pipeline
+from pyannote.audio.pipelines.utils.hook import ProgressHook
+import argparse
 
-# ------------------------------------------------------------------
-# Shared test audio: (batch=2, channels=1, 2 seconds of audio)
-# Two clips in one batch — demonstrating batch processing
-# ------------------------------------------------------------------
-SAMPLE_RATE = 16_000
-audio_batch = torch.randn(2, 1, 2 * SAMPLE_RATE)
+DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
 
-# Optional: a mask that says "only use the first 1.5 seconds of each clip"
-# Shape: (batch_size, num_samples) — values between 0.0 and 1.0
-# 1.0 = "this region has speech", 0.0 = "this is silence/noise"
-mask = torch.zeros(2, 2 * SAMPLE_RATE)
-mask[:, : int(1.5 * SAMPLE_RATE)] = 1.0  # first 1.5 sec is speech
+parser = argparse.ArgumentParser(description="Speaker diarization with pyannote.audio")
+parser.add_argument("audio_path", nargs="?", default=DEFAULT_AUDIO,
+                    help="Path to the audio file (default: use hardcoded path)")
+args = parser.parse_args()
 
+audio_path = args.audio_path
 
-# ==================================================================
-# BACKEND 1: PyannoteAudio (default — recommended starting point)
-# ==================================================================
-print("=" * 60)
-print("Backend 1: PyannoteAudio")
-print("=" * 60)
+# Community-1 open-source speaker diarization pipeline
+pipeline = Pipeline.from_pretrained(
+    "pyannote/speaker-diarization-community-1",
+    token=os.getenv("HF_TOKEN"))
 
-from pyannote.audio.pipelines.speaker_verification import (
-    PyannoteAudioPretrainedSpeakerEmbedding,
+# send pipeline to GPU (when available)
+pipeline.to(torch.device("cuda"))
+
+# === PRELOAD AUDIO (this is the fix) ===
+waveform_np, sample_rate = sf.read(
+    audio_path,
+    always_2d=True,      # ensures (time, channels) shape even for mono
+    dtype="float32"
 )
+waveform = torch.from_numpy(waveform_np.T)  # convert to (channels, time) torch.Tensor
 
-# Requires: pip install pyannote.audio
-# Requires HuggingFace token for gated models — pass token="hf_..."
-pyannote_model = PyannoteAudioPretrainedSpeakerEmbedding(
-    embedding="pyannote/embedding",
-    device=torch.device("cpu"),
-    # token="hf_your_token_here",   # needed for gated HF models
-    # cache_dir="/path/to/cache",   # optional local cache
-)
+preloaded_audio = {
+    "waveform": waveform,      # must be (channel, time) tensor
+    "sample_rate": sample_rate
+}
 
-embeddings = pyannote_model(audio_batch)
-print(f"Output shape (no mask) : {embeddings.shape}")  # (2, 512)
+# apply pretrained pipeline (with optional progress hook)
+with ProgressHook() as hook:
+    output = pipeline(preloaded_audio, hook=hook)  # <-- pass dict instead of str path
 
-embeddings_masked = pyannote_model(audio_batch, masks=mask)
-print(f"Output shape (masked)  : {embeddings_masked.shape}")  # (2, 512)
-print()
-
-
-# ==================================================================
-# BACKEND 2: SpeechBrain
-# ==================================================================
-print("=" * 60)
-print("Backend 2: SpeechBrain")
-print("=" * 60)
-
-from pyannote.audio.pipelines.speaker_verification import (
-    SpeechBrainPretrainedSpeakerEmbedding,
-)
-
-# Requires: pip install speechbrain
-# Supports model versioning with "@": "model_name@main"
-speechbrain_model = SpeechBrainPretrainedSpeakerEmbedding(
-    embedding="speechbrain/spkrec-ecapa-voxceleb",
-    device=torch.device("cpu"),
-    # token="hf_your_token_here",
-    cache_dir=r"C:\Users\druiv\.cache\pretrained_models\spkrec-ecapa-voxceleb",
-)
-
-embeddings = speechbrain_model(audio_batch)
-print(f"Output shape (no mask): {embeddings.shape}")
-
-# Key difference vs pyannote: wav_lens is normalized (0.0–1.0 range)
-# Short clips get NaN embeddings so downstream code knows to skip them
-embeddings_masked = speechbrain_model(audio_batch, masks=mask)
-nan_mask = np.isnan(embeddings_masked[:, 0])
-print(f"Any NaN embeddings (too-short clips)? {nan_mask.any()}")
-print()
-
-
-# ==================================================================
-# BACKEND 3: NVIDIA NeMo
-# ==================================================================
-print("=" * 60)
-print("Backend 3: NeMo (NVIDIA)")
-print("=" * 60)
-
-from pyannote.audio.pipelines.speaker_verification import (
-    NeMoPretrainedSpeakerEmbedding,
-)
-
-# Requires: pip install nemo_toolkit[asr]
-# Note: NeMo does NOT support cache_dir or token parameters
-nemo_model = NeMoPretrainedSpeakerEmbedding(
-    embedding="nvidia/speakerverification_en_titanet_large",
-    device=torch.device("cpu"),
-)
-
-embeddings = nemo_model(audio_batch)
-print(f"Output shape (no mask): {embeddings.shape}")
-
-# NeMo uses absolute wav_lens (number of samples), not normalized
-embeddings_masked = nemo_model(audio_batch, masks=mask)
-print(f"Output shape (masked) : {embeddings_masked.shape}")
-print()
-
-
-# ==================================================================
-# BACKEND 4: WeSpeaker via ONNX (lightweight, no GPU needed)
-# ==================================================================
-print("=" * 60)
-print("Backend 4: WeSpeaker/ONNX")
-print("=" * 60)
-
-from pyannote.audio.pipelines.speaker_verification import (
-    ONNXWeSpeakerPretrainedSpeakerEmbedding,
-)
-
-# Requires: pip install onnxruntime
-# Downloads a .onnx file from HuggingFace Hub automatically
-# You can also pass a local path to an .onnx file
-wespeaker_model = ONNXWeSpeakerPretrainedSpeakerEmbedding(
-    embedding="hbredin/wespeaker-voxceleb-resnet34-LM",
-    device=torch.device("cpu"),
-    # token="hf_your_token_here",
-    # cache_dir="/tmp/onnx_cache",
-)
-
-# Key difference: WeSpeaker first converts audio → fbank features
-# then feeds those features into the ONNX session
-embeddings = wespeaker_model(audio_batch)
-print(f"Output shape (no mask): {embeddings.shape}")
-
-# With masks: processes each clip individually (not batched)
-embeddings_masked = wespeaker_model(audio_batch, masks=mask)
-print(f"Output shape (masked) : {embeddings_masked.shape}")
-
-# WeSpeaker also exposes fbank features directly if needed
-fbank = wespeaker_model.compute_fbank(audio_batch)
-print(f"Fbank feature shape   : {fbank.shape}")  # (2, num_frames, 80)
+# print the result
+for turn, speaker in output.speaker_diarization:
+    print(f"start={turn.start:.1f}s stop={turn.end:.1f}s speaker_{speaker}")
