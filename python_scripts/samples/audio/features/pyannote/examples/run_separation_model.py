@@ -9,9 +9,19 @@ import numpy as np
 from pyannote.audio import Model
 from pathlib import Path
 import shutil
+import argparse
 
-# ── CONFIG ──────────────────────────────────────────────────────────────────
-AUDIO_PATH    = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+# ── CONFIG & ARGPARSE ──────────────────────────────────────────────────────
+DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+
+parser = argparse.ArgumentParser(description="Run speech separation model.")
+parser.add_argument("audio_path",
+                    nargs="?",
+                    default=DEFAULT_AUDIO,
+                    help="Path to input .wav audio file")
+args = parser.parse_args()
+
+AUDIO_PATH = args.audio_path
 HF_TOKEN      = os.getenv("HF_TOKEN")
 SAMPLE_RATE   = 16_000
 CHUNK_SECONDS = 5.0
@@ -153,7 +163,7 @@ for chunk_idx, chunk_diар in enumerate(all_diarization):
             # ── folder name uses milliseconds for readability ──────────────
             start_ms = int(abs_start_s * 1000)
             end_ms   = int(abs_end_s   * 1000)
-            seg_name = f"speaker_{spk}_{start_ms}_{end_ms}"
+            seg_name = f"seg_{seg_count + 1}_speaker_{spk}_{start_ms}_{end_ms}"
             seg_dir  = SEGMENTS_DIR / seg_name
             seg_dir.mkdir(parents=True, exist_ok=True)
 
