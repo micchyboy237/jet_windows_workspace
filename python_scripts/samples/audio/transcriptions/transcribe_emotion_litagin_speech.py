@@ -1,50 +1,96 @@
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 import torch
 import torchaudio
 from silero_vad import load_silero_vad, VADIterator
-from transformers import pipeline
+from transformers import AutoModelForAudioClassification, AutoFeatureExtractor
 from rich.console import Console
 from rich.table import Table
 import matplotlib.pyplot as plt
 import numpy as np
 import soundfile as sf
-import torch
 from pathlib import Path
 import argparse
 
 DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
 
-parser = argparse.ArgumentParser(description="Run speech separation model.")
-parser.add_argument("audio_path",
-                    nargs="?",
-                    default=DEFAULT_AUDIO,
-                    help="Path to input .wav audio file")
+parser = argparse.ArgumentParser(description="Run speech emotion + VAD segmentation.")
+parser.add_argument(
+    "audio_path",
+    nargs="?",
+    default=DEFAULT_AUDIO,
+    help="Path to input .wav audio file",
+)
 args = parser.parse_args()
 
 AUDIO_PATH = args.audio_path
 
-# Config
+# ──── Config ────────────────────────────────────────────────────────────────
 REPO_ID = "litagin/anime_speech_emotion_classification"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-SAMPLE_RATE = 16000  # Model expects 16kHz
-VAD_CHUNK_SIZE = 512  # required by Silero for 16kHz
-
-# Load models
-print(f"Loading VAD and classifier on {DEVICE}...")
-vad_model = load_silero_vad()
-classifier = pipeline(
-    "audio-classification",
-    model=REPO_ID,
-    feature_extractor=REPO_ID,
-    trust_remote_code=True,
-    device=DEVICE,
-)
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+SAMPLE_RATE = 16000
+VAD_CHUNK_SIZE = 512  # required by Silero
 
 console = Console()
 
+# ──── Load Models ───────────────────────────────────────────────────────────
+print(f"Loading VAD and classifier on {DEVICE}...")
 
+vad_model = load_silero_vad()
+
+
+class EmotionClassifier:
+    """TorchCodec-free classifier"""
+
+    def __init__(self, model_name: str, device: torch.device):
+        self.feature_extractor = AutoFeatureExtractor.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+        )
+
+        self.model = AutoModelForAudioClassification.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+        )
+
+        self.model.to(device)
+        self.model.eval()
+
+        self.device = device
+        self.id2label = self.model.config.id2label
+
+    def classify(self, audio: np.ndarray, sr: int) -> List[Dict[str, Any]]:
+        inputs = self.feature_extractor(
+            audio,
+            sampling_rate=sr,
+            return_tensors="pt",
+        )
+
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        logits = outputs.logits
+        probs = torch.nn.functional.softmax(logits, dim=-1)
+
+        values, indices = torch.topk(probs, k=probs.shape[-1])
+
+        return [
+            {
+                "label": self.id2label[idx.item()],
+                "score": val.item(),
+            }
+            for val, idx in zip(values[0], indices[0])
+        ]
+
+
+classifier = EmotionClassifier(REPO_ID, DEVICE)
+
+
+# ──── Audio Loading ─────────────────────────────────────────────────────────
 def load_audio(path: str, target_sr: int) -> torch.Tensor:
     audio, sr = sf.read(path, dtype="float32")
+
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
 
@@ -56,6 +102,7 @@ def load_audio(path: str, target_sr: int) -> torch.Tensor:
     return wave
 
 
+# ──── VAD Segmentation ──────────────────────────────────────────────────────
 def extract_segments(audio_path: str) -> List[Tuple[float, float, torch.Tensor]]:
     waveform = load_audio(audio_path, SAMPLE_RATE)
 
@@ -64,13 +111,18 @@ def extract_segments(audio_path: str) -> List[Tuple[float, float, torch.Tensor]]
         sampling_rate=SAMPLE_RATE,
     )
 
-    VAD_CHUNK_SIZE = 512  # REQUIRED for 16kHz
-    segments = []
+    segments: List[Tuple[float, float, torch.Tensor]] = []
     start_time = None
-    buffer = []
+    buffer: List[torch.Tensor] = []
 
     for i, chunk in enumerate(waveform.split(VAD_CHUNK_SIZE)):
+        # Pad last chunk if it's shorter than required size
+        if chunk.shape[0] < VAD_CHUNK_SIZE:
+            pad_size = VAD_CHUNK_SIZE - chunk.shape[0]
+            chunk = torch.nn.functional.pad(chunk, (0, pad_size))
+
         chunk_time = i * (VAD_CHUNK_SIZE / SAMPLE_RATE)
+   
 
         if vad_iter(chunk, return_seconds=True):
             if start_time is None:
@@ -86,51 +138,57 @@ def extract_segments(audio_path: str) -> List[Tuple[float, float, torch.Tensor]]
 
     if start_time is not None:
         segment_wave = torch.cat(buffer)
-        segments.append(
-            (start_time, len(waveform) / SAMPLE_RATE, segment_wave)
-        )
+        segments.append((start_time, len(waveform) / SAMPLE_RATE, segment_wave))
 
     return segments
 
 
+# ──── Classification ────────────────────────────────────────────────────────
 def classify_segment(segment_wave: torch.Tensor) -> List[Dict[str, float]]:
-    """Run classifier on a segment."""
     audio_np = segment_wave.cpu().numpy()
-    results = classifier(audio_np)
-    return results  # list of {'label': str, 'score': float}
+    return classifier.classify(audio_np, SAMPLE_RATE)
 
-# Run
+
+# ──── Run ───────────────────────────────────────────────────────────────────
 segments = extract_segments(AUDIO_PATH)
 console.print(f"[bold green]Found {len(segments)} speech segments[/bold green]")
 
 results_per_segment: List[List[Dict[str, float]]] = []
+
 for i, (start, end, wave) in enumerate(segments, 1):
     result = classify_segment(wave)
     results_per_segment.append(result)
-    
+
     table = Table(title=f"Segment {i}: {start:.1f}s – {end:.1f}s")
     table.add_column("Rank", justify="right")
     table.add_column("Emotion", style="cyan")
     table.add_column("Score", justify="right")
+
     for rank, item in enumerate(result, 1):
-        table.add_row(str(rank), item['label'], f"{item['score']:.3f}")
+        table.add_row(str(rank), item["label"], f"{item['score']:.3f}")
+
     console.print(table)
 
-# Visualization: Bar chart of top emotions per segment
-emotions = [r[0]['label'] for r in results_per_segment]  # Top emotion per segment
-scores = [r[0]['score'] for r in results_per_segment]
+
+# ──── Visualization ─────────────────────────────────────────────────────────
+emotions = [r[0]["label"] for r in results_per_segment]
+scores = [r[0]["score"] for r in results_per_segment]
 
 fig, ax = plt.subplots(figsize=(10, 6))
 x = np.arange(len(segments))
-ax.bar(x, scores, color='skyblue')
+
+ax.bar(x, scores)
 ax.set_xticks(x)
-ax.set_xticklabels([f"{s[0]:.1f}-{s[1]:.1f}s" for s in segments], rotation=45)
+ax.set_xticklabels(
+    [f"{s[0]:.1f}-{s[1]:.1f}s" for s in segments],
+    rotation=45,
+)
 ax.set_ylabel("Confidence Score")
 ax.set_title("Top Emotion per Segment (Highest Score)")
 ax.set_ylim(0, 1)
 
 for i, emotion in enumerate(emotions):
-    ax.text(i, scores[i] + 0.02, emotion, ha='center', va='bottom', fontsize=10)
+    ax.text(i, scores[i] + 0.02, emotion, ha="center", va="bottom", fontsize=10)
 
 plt.tight_layout()
 plt.show()
