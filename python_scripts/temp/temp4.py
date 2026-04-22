@@ -14,6 +14,7 @@ audio_path = args.audio_path
 
 pipeline = Pipeline.from_pretrained(
   "pyannote/speech-separation-ami-1.0",
+#   "pyannote/separation-ami-1.0",
 )
 
 # run the pipeline on an audio file

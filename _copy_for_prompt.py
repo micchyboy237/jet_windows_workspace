@@ -80,13 +80,16 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp4.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered2.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp4.py",
+    r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--separation-ami-1.0\snapshots\4d38e95cfd067c894b8b60b00761831fb01e4a8c\README.md",
+    r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9\README.md",
+    r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9\config.yaml",
     r"",
 ]
 
 structure_include = [
-    # "/Users/jethroestrada/Desktop/External_Projects/Jet_Projects/JetScripts/libs/context_engineering/self_refinement_lab/practical_examples/",
-    # "/Users/jethroestrada/Desktop/External_Projects/AI/repo-libs/letta/alembic/",
+    r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--separation-ami-1.0\snapshots\4d38e95cfd067c894b8b60b00761831fb01e4a8c",
+    r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9",
 ]
 structure_exclude = []
 
@@ -95,10 +98,11 @@ exclude_content = []
 
 # Args defaults
 SHORTEN_FUNCTS = False 
-INCLUDE_FILE_STRUCTURE = False
+INCLUDE_FILE_STRUCTURE = True
 
 DEFAULT_QUERY_MESSAGE = r"""
-Browse HF datasets or free speaker wav sources where I can download the sample inputs for the examples.
+Write working code examples for both models on this audio path
+r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
