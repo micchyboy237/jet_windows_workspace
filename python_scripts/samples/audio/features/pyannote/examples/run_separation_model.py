@@ -1,6 +1,7 @@
 # run_separation_model.py
 
 import os
+import json
 import torch
 import torchaudio
 import scipy.io.wavfile
@@ -15,12 +16,45 @@ HF_TOKEN      = os.getenv("HF_TOKEN")
 SAMPLE_RATE   = 16_000
 CHUNK_SECONDS = 5.0
 CHUNK_SAMPLES = int(CHUNK_SECONDS * SAMPLE_RATE)   # 80 000 samples per chunk
+FRAMES_PER_CHUNK   = 624                            # model always outputs 624 frames per 5 s chunk
+SECONDS_PER_FRAME  = CHUNK_SECONDS / FRAMES_PER_CHUNK  # ≈ 0.00801 s per frame
+ACTIVITY_THRESHOLD = 0.5                            # probability cutoff: above = speaker active
 MAX_SPEAKERS  = 3
 OUTPUT_DIR    = Path(__file__).parent / "generated" / Path(__file__).stem
+SEGMENTS_DIR  = OUTPUT_DIR / "segments"
 # ────────────────────────────────────────────────────────────────────────────
 
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
 Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+# ── HELPER: convert a boolean activity array into (start_s, end_s) runs ─────
+def frames_to_segments(activity: np.ndarray, chunk_offset_s: float) -> list[tuple[float, float]]:
+    """
+    activity       : 1-D boolean array of length FRAMES_PER_CHUNK
+    chunk_offset_s : time (seconds) at which this chunk starts in the full recording
+
+    Returns a list of (abs_start_s, abs_end_s) tuples for every contiguous
+    run of True values.  Empty list when the speaker is silent the whole chunk.
+    """
+    if not activity.any():
+        return []
+
+    segments = []
+    # Pad with False at both ends so np.diff catches edges cleanly
+    padded = np.concatenate(([False], activity, [False]))
+    diff   = np.diff(padded.astype(np.int8))
+    starts = np.where(diff ==  1)[0]   # frame indices where speaker turns ON
+    ends   = np.where(diff == -1)[0]   # frame indices where speaker turns OFF
+
+    for s, e in zip(starts, ends):
+        abs_start = chunk_offset_s + s * SECONDS_PER_FRAME
+        abs_end   = chunk_offset_s + e * SECONDS_PER_FRAME
+        if abs_end > abs_start:          # skip zero-length artefacts
+            segments.append((abs_start, abs_end))
+
+    return segments
 
 # ── STEP 1: Load audio ───────────────────────────────────────────────────────
 print("Loading audio …")
@@ -92,7 +126,73 @@ diarization_full = np.concatenate(all_diarization, axis=0)   # (N*624,   3)
 # Trim back to original length (remove the padding we added)
 sources_full = sources_full[:total_samples, :]
 
-# ── STEP 7: Save per-speaker WAV files ───────────────────────────────────────
+# ── STEP 7: Save per-segment WAVs + metadata ─────────────────────────────────
+# Each folder:  segments/speaker_<spk>_<start_ms>_<end_ms>/
+#   sound.wav   – the isolated speaker audio for that segment
+#   meta.json   – timing, speaker id, chunk index, activity stats
+print("Saving segments …")
+seg_count = 0
+for chunk_idx, chunk_diар in enumerate(all_diarization):
+    # chunk_diар shape: (624, 3)  – raw probability floats
+    chunk_offset_s = chunk_idx * CHUNK_SECONDS          # where this chunk starts in the full file
+    chunk_start_sample = chunk_idx * CHUNK_SAMPLES
+
+    for spk in range(MAX_SPEAKERS):
+        activity_probs  = chunk_diар[:, spk]            # (624,) floats 0..1
+        activity_bool   = activity_probs >= ACTIVITY_THRESHOLD
+
+        segs = frames_to_segments(activity_bool, chunk_offset_s)
+        for abs_start_s, abs_end_s in segs:
+            # Convert absolute times → sample indices in sources_full
+            seg_start_sample = int(abs_start_s * SAMPLE_RATE)
+            seg_end_sample   = min(int(abs_end_s   * SAMPLE_RATE), total_samples)
+
+            if seg_end_sample <= seg_start_sample:      # skip empty slices
+                continue
+
+            # ── folder name uses milliseconds for readability ──────────────
+            start_ms = int(abs_start_s * 1000)
+            end_ms   = int(abs_end_s   * 1000)
+            seg_name = f"speaker_{spk}_{start_ms}_{end_ms}"
+            seg_dir  = SEGMENTS_DIR / seg_name
+            seg_dir.mkdir(parents=True, exist_ok=True)
+
+            # ── sound.wav ──────────────────────────────────────────────────
+            seg_audio = sources_full[seg_start_sample:seg_end_sample, spk]
+            # Normalise to [-1, 1] then convert to 16-bit PCM
+            max_val = np.abs(seg_audio).max()
+            if max_val > 1e-6:                          # avoid divide-by-zero on silence
+                seg_audio = seg_audio / max_val
+            seg_audio_i16 = (seg_audio * 32767).astype(np.int16)
+            scipy.io.wavfile.write(seg_dir / "sound.wav", SAMPLE_RATE, seg_audio_i16)
+
+            # ── meta.json ──────────────────────────────────────────────────
+            mean_prob = float(activity_probs.mean())
+            peak_prob = float(activity_probs.max())
+            meta = {
+                "speaker_id":          spk,
+                "start_s":             round(abs_start_s, 4),
+                "end_s":               round(abs_end_s,   4),
+                "duration_s":          round(abs_end_s - abs_start_s, 4),
+                "start_ms":            start_ms,
+                "end_ms":              end_ms,
+                "chunk_index":         chunk_idx,
+                "chunk_offset_s":      chunk_offset_s,
+                "sample_rate":         SAMPLE_RATE,
+                "num_samples":         int(seg_end_sample - seg_start_sample),
+                "activity_threshold":  ACTIVITY_THRESHOLD,
+                "mean_activity_prob":  round(mean_prob, 4),
+                "peak_activity_prob":  round(peak_prob, 4),
+                "segment_dir":         str(seg_dir),
+            }
+            with open(seg_dir / "meta.json", "w") as f:
+                json.dump(meta, f, indent=2)
+
+            seg_count += 1
+
+print(f"  Saved {seg_count} segment(s) → {SEGMENTS_DIR}")
+
+# ── STEP 8: Save full per-speaker WAV files ───────────────────────────────────
 print("Saving speaker WAVs …")
 for spk in range(MAX_SPEAKERS):
     spk_audio = sources_full[:, spk]                   # (total_samples,)
@@ -101,7 +201,7 @@ for spk in range(MAX_SPEAKERS):
     scipy.io.wavfile.write(out_path, SAMPLE_RATE, spk_audio)
     print(f"  Saved {out_path}")
 
-# ── STEP 8: Print a quick activity summary ───────────────────────────────────
+# ── STEP 9: Print a quick activity summary ────────────────────────────────────
 print("\nSpeaker activity summary (fraction of frames active):")
 for spk in range(MAX_SPEAKERS):
     activity = diarization_full[:, spk].mean()
