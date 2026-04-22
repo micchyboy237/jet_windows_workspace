@@ -1,5 +1,5 @@
 from loader import load_audio
-from pyannote.speaker_verification_utils import load_embedding_model, load_audio_tensor, extract_embedding, is_same_speaker
+from pyannote.speaker_verification_utils import load_embedding_model, load_audio_tensor, verify_speakers
 
 
 if __name__ == "__main__":
@@ -22,7 +22,5 @@ if __name__ == "__main__":
     model = load_embedding_model()
     wav1, _ = load_audio_tensor(args.audio1, target_sample_rate=model.sample_rate)
     wav2, _ = load_audio_tensor(args.audio2, target_sample_rate=model.sample_rate)
-    emb1 = extract_embedding(model, wav1)
-    emb2 = extract_embedding(model, wav2)
-    is_same = is_same_speaker(emb1, emb2, threshold=args.threshold)
-    print(f"Same speaker: {is_same}")
+    same, dist = verify_speakers(model, wav1, wav2, threshold=args.threshold)
+    print(f"Same: {same}, Distance: {dist:.4f}")
