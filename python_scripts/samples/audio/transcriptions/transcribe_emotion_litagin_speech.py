@@ -10,10 +10,21 @@ import numpy as np
 import soundfile as sf
 import torch
 from pathlib import Path
+import argparse
+
+DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+
+parser = argparse.ArgumentParser(description="Run speech separation model.")
+parser.add_argument("audio_path",
+                    nargs="?",
+                    default=DEFAULT_AUDIO,
+                    help="Path to input .wav audio file")
+args = parser.parse_args()
+
+AUDIO_PATH = args.audio_path
 
 # Config
 REPO_ID = "litagin/anime_speech_emotion_classification"
-AUDIO_PATH = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 SAMPLE_RATE = 16000  # Model expects 16kHz
 VAD_CHUNK_SIZE = 512  # required by Silero for 16kHz

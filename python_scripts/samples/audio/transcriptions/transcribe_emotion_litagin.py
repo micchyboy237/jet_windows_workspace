@@ -1,5 +1,17 @@
 import json
 from transformers import pipeline
+import argparse
+
+DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+
+parser = argparse.ArgumentParser(description="Run speech separation model.")
+parser.add_argument("audio_path",
+                    nargs="?",
+                    default=DEFAULT_AUDIO,
+                    help="Path to input .wav audio file")
+args = parser.parse_args()
+
+AUDIO_PATH = args.audio_path
 
 REPO_ID = "litagin/anime_speech_emotion_classification"
 pipe = pipeline(
@@ -10,8 +22,7 @@ pipe = pipeline(
     device="cpu",
 )
 
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
 top_k = 5
-results = pipe(audio_path, top_k=top_k)
+results = pipe(AUDIO_PATH, top_k=top_k)
 print(f"Results ({len(results)})")
 print(json.dumps(results, indent=2))

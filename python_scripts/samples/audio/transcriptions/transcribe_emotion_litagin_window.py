@@ -8,6 +8,19 @@ from typing import List, Dict, Tuple
 from rich.console import Console
 from rich.table import Table
 import logging
+import argparse
+
+DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+
+parser = argparse.ArgumentParser(description="Run speech separation model.")
+parser.add_argument("audio_path",
+                    nargs="?",
+                    type=Path,
+                    default=DEFAULT_AUDIO,
+                    help="Path to input .wav audio file")
+args = parser.parse_args()
+
+AUDIO_PATH = args.audio_path
 
 # Better logging instead of just prints
 logging.basicConfig(level=logging.INFO)
@@ -17,15 +30,12 @@ console = Console()
 
 # ──── Config ────────────────────────────────────────────────────────────────
 CONFIG = {
-    "window_sec": 3.0,
-    "step_sec": 1.0,
+    "window_sec": 6.0,
+    "step_sec": 2.0,
     "model_name": "litagin/anime_speech_emotion_classification",
     "top_k": 5,
     "sample_rate_target": 16000,   # most speech emotion models like 16kHz
 }
-
-AUDIO_PATH = Path(r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav")
-
 
 def load_audio(path: Path) -> Tuple[int, np.ndarray]:
     """Load audio, convert to mono float32, normalize peak"""
