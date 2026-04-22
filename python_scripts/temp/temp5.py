@@ -1,121 +1,150 @@
-from __future__ import annotations
+# example_backends.py
+"""
+Using Each Embedding Backend Directly
+======================================
+Goal: Show how to instantiate each of the 4 backends explicitly,
+      rather than using the auto-detecting factory function.
 
-from typing import List
+When to use each backend:
+  - PyannoteAudio  → Best default; works out of the box with HuggingFace models
+  - SpeechBrain    → Great accuracy; large model zoo on HuggingFace
+  - NeMo           → NVIDIA's toolkit; good for production on GPU clusters
+  - WeSpeaker/ONNX → Lightweight & fast; no GPU required; good for edge devices
+"""
 
-from rich.console import Console
-from rich.progress import track
-import re
-from fast_bunkai import FastBunkai
-import jaconv
+import numpy as np
+import torch
 
-# SudachiPy imports
-from sudachipy import tokenizer, dictionary
+# ------------------------------------------------------------------
+# Shared test audio: (batch=2, channels=1, 2 seconds of audio)
+# Two clips in one batch — demonstrating batch processing
+# ------------------------------------------------------------------
+SAMPLE_RATE = 16_000
+audio_batch = torch.randn(2, 1, 2 * SAMPLE_RATE)
 
-console = Console()
-
-# ── Global SudachiPy initialization (do once) ──
-_SUDACHI_TOKENIZER = dictionary.Dictionary().create()
-
-
-def split_sentences_ja(text: str) -> List[str]:
-    """
-    Split Japanese text into sentences with basic space-to-period heuristic.
-    """
-    text = re.sub(
-        r'([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F])[ ]+([\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F])',
-        r'\1。\2',
-        text,
-    )
-    splitter = FastBunkai()
-    sentences = list(splitter(text))
-    return [s.strip() for s in sentences if s.strip()]
+# Optional: a mask that says "only use the first 1.5 seconds of each clip"
+# Shape: (batch_size, num_samples) — values between 0.0 and 1.0
+# 1.0 = "this region has speech", 0.0 = "this is silence/noise"
+mask = torch.zeros(2, 2 * SAMPLE_RATE)
+mask[:, : int(1.5 * SAMPLE_RATE)] = 1.0  # first 1.5 sec is speech
 
 
-def tokenize_japanese(
-    text: str,
-    mode: tokenizer.Tokenizer.SplitMode = tokenizer.Tokenizer.SplitMode.B,
-    use_dictionary_form: bool = False
-) -> List[str]:
-    """
-    Tokenize Japanese text using SudachiPy.
-    """
-    tokens = _SUDACHI_TOKENIZER.tokenize(text, mode)
+# ==================================================================
+# BACKEND 1: PyannoteAudio (default — recommended starting point)
+# ==================================================================
+print("=" * 60)
+print("Backend 1: PyannoteAudio")
+print("=" * 60)
 
-    if use_dictionary_form:
-        return [t.dictionary_form() for t in tokens if t.dictionary_form() != "*"]
-    else:
-        return [t.surface() for t in tokens]
+from pyannote.audio.pipelines.speaker_verification import (
+    PyannoteAudioPretrainedSpeakerEmbedding,
+)
 
+# Requires: pip install pyannote.audio
+# Requires HuggingFace token for gated models — pass token="hf_..."
+pyannote_model = PyannoteAudioPretrainedSpeakerEmbedding(
+    embedding="pyannote/embedding",
+    device=torch.device("cpu"),
+    # token="hf_your_token_here",   # needed for gated HF models
+    # cache_dir="/path/to/cache",   # optional local cache
+)
 
-def clean_asr_text(
-    text: str,
-    *,
-    split_mode: tokenizer.Tokenizer.SplitMode = tokenizer.Tokenizer.SplitMode.B,
-    use_lemma: bool = False,
-    show_progress: bool = True
-) -> str:
-    """
-    Clean ASR-generated Japanese text for better translation quality.
-    """
-    # 1. Basic normalization
-    text = jaconv.normalize(text)
+embeddings = pyannote_model(audio_batch)
+print(f"Output shape (no mask) : {embeddings.shape}")  # (2, 512)
 
-    # 2. Remove common fillers & reduce repetitions
-    text = re.sub(r'(えっと|あのー|あのね|えー|まぁ|そのー|じゃなくて|っていうか)\s*', '', text)
-    text = re.sub(r'(.)\1{3,}', r'\1\1', text)
-
-    # 3. Sentence boundary recovery
-    sentences = split_sentences_ja(text)
-
-    # 4. Tokenization & cleaning
-    cleaned_sentences: List[str] = []
-
-    iterator = track(
-        sentences,
-        description="Cleaning sentences...",
-        disable=not show_progress
-    )
-
-    for sent in iterator:
-        # Debug line - remove when confident it's working
-        # console.print(f"[dim]Tokenizing with mode: {split_mode}[/dim]")
-
-        tokens = tokenize_japanese(
-            sent,
-            mode=split_mode,
-            use_dictionary_form=use_lemma
-        )
-
-        cleaned = jaconv.h2z(' '.join(tokens))
-        cleaned = jaconv.normalize(cleaned)
-        cleaned_sentences.append(cleaned)
-
-    # 5. Final output format
-    final_text = ' '.join(cleaned_sentences)
-
-    # Visual feedback
-    preview_len = 200
-    console.print("[bold green]Before:[/]", text[:preview_len] + ("..." if len(text) > preview_len else ""))
-    console.print("[bold cyan]After :[/]", final_text[:preview_len] + ("..." if len(final_text) > preview_len else ""))
-
-    return final_text
+embeddings_masked = pyannote_model(audio_batch, masks=mask)
+print(f"Output shape (masked)  : {embeddings_masked.shape}")  # (2, 512)
+print()
 
 
-# ── Example usage ──
-if __name__ == "__main__":
-    raw_asr = (
-        "あのーえっと今日はですねえー晴れてますあのー昨日じゃなくて一昨日は雨だったんですけど"
-    )
+# ==================================================================
+# BACKEND 2: SpeechBrain
+# ==================================================================
+print("=" * 60)
+print("Backend 2: SpeechBrain")
+print("=" * 60)
 
-    modes = [
-        ("A", tokenizer.Tokenizer.SplitMode.A),
-        ("B", tokenizer.Tokenizer.SplitMode.B),
-        ("C", tokenizer.Tokenizer.SplitMode.C),
-    ]
+from pyannote.audio.pipelines.speaker_verification import (
+    SpeechBrainPretrainedSpeakerEmbedding,
+)
 
-    for mode_name, mode in modes:
-        console.rule(f"SplitMode.{mode_name} ＋ Surface form")
-        clean_asr_text(raw_asr, split_mode=mode, use_lemma=False)
-        
-        console.rule(f"SplitMode.{mode_name} ＋ Dictionary form (lemma)")
-        clean_asr_text(raw_asr, split_mode=mode, use_lemma=True)
+# Requires: pip install speechbrain
+# Supports model versioning with "@": "model_name@main"
+speechbrain_model = SpeechBrainPretrainedSpeakerEmbedding(
+    embedding="speechbrain/spkrec-ecapa-voxceleb",
+    device=torch.device("cpu"),
+    # token="hf_your_token_here",
+    cache_dir=r"C:\Users\druiv\.cache\pretrained_models\spkrec-ecapa-voxceleb",
+)
+
+embeddings = speechbrain_model(audio_batch)
+print(f"Output shape (no mask): {embeddings.shape}")
+
+# Key difference vs pyannote: wav_lens is normalized (0.0–1.0 range)
+# Short clips get NaN embeddings so downstream code knows to skip them
+embeddings_masked = speechbrain_model(audio_batch, masks=mask)
+nan_mask = np.isnan(embeddings_masked[:, 0])
+print(f"Any NaN embeddings (too-short clips)? {nan_mask.any()}")
+print()
+
+
+# ==================================================================
+# BACKEND 3: NVIDIA NeMo
+# ==================================================================
+print("=" * 60)
+print("Backend 3: NeMo (NVIDIA)")
+print("=" * 60)
+
+from pyannote.audio.pipelines.speaker_verification import (
+    NeMoPretrainedSpeakerEmbedding,
+)
+
+# Requires: pip install nemo_toolkit[asr]
+# Note: NeMo does NOT support cache_dir or token parameters
+nemo_model = NeMoPretrainedSpeakerEmbedding(
+    embedding="nvidia/speakerverification_en_titanet_large",
+    device=torch.device("cpu"),
+)
+
+embeddings = nemo_model(audio_batch)
+print(f"Output shape (no mask): {embeddings.shape}")
+
+# NeMo uses absolute wav_lens (number of samples), not normalized
+embeddings_masked = nemo_model(audio_batch, masks=mask)
+print(f"Output shape (masked) : {embeddings_masked.shape}")
+print()
+
+
+# ==================================================================
+# BACKEND 4: WeSpeaker via ONNX (lightweight, no GPU needed)
+# ==================================================================
+print("=" * 60)
+print("Backend 4: WeSpeaker/ONNX")
+print("=" * 60)
+
+from pyannote.audio.pipelines.speaker_verification import (
+    ONNXWeSpeakerPretrainedSpeakerEmbedding,
+)
+
+# Requires: pip install onnxruntime
+# Downloads a .onnx file from HuggingFace Hub automatically
+# You can also pass a local path to an .onnx file
+wespeaker_model = ONNXWeSpeakerPretrainedSpeakerEmbedding(
+    embedding="hbredin/wespeaker-voxceleb-resnet34-LM",
+    device=torch.device("cpu"),
+    # token="hf_your_token_here",
+    # cache_dir="/tmp/onnx_cache",
+)
+
+# Key difference: WeSpeaker first converts audio → fbank features
+# then feeds those features into the ONNX session
+embeddings = wespeaker_model(audio_batch)
+print(f"Output shape (no mask): {embeddings.shape}")
+
+# With masks: processes each clip individually (not batched)
+embeddings_masked = wespeaker_model(audio_batch, masks=mask)
+print(f"Output shape (masked) : {embeddings_masked.shape}")
+
+# WeSpeaker also exposes fbank features directly if needed
+fbank = wespeaker_model.compute_fbank(audio_batch)
+print(f"Fbank feature shape   : {fbank.shape}")  # (2, num_frames, 80)

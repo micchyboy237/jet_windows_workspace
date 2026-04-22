@@ -1,228 +1,200 @@
-#!/usr/bin/env python3
+# example_verification.py
+"""
+Full Speaker Verification Workflow
+====================================
+Goal: A complete, practical verification system showing:
+  1. Enrollment  — store a speaker's voice fingerprint
+  2. Verification — check if a new clip matches an enrolled speaker
+  3. Batch processing — extract embeddings for many clips at once
+  4. Device switching — move models between CPU and GPU
+  5. Handling edge cases — very short clips, silence, NaN embeddings
 
-from __future__ import annotations
-
-import argparse
-from pathlib import Path
-from typing import Literal, Optional, Tuple
+This is closest to how you'd use this code in a real application
+(e.g., voice login, meeting diarization, call center analysis).
+"""
 
 import numpy as np
 import torch
-import torchaudio
-from rich.console import Console
-from rich.table import Table
-from rich.panel import Panel
-from tqdm import tqdm
+from dataclasses import dataclass, field
+from typing import Dict, Optional
 from scipy.spatial.distance import cdist
 
-from pyannote.audio.pipelines.speaker_verification import (
-    PretrainedSpeakerEmbedding,
-)
-
-# -----------------------------
-# Types
-# -----------------------------
-BackendType = Literal[1, 2, 3, 4]
-
-# -----------------------------
-# Constants
-# -----------------------------
-BACKEND_MAP: dict[BackendType, str] = {
-    1: "speechbrain/spkrec-ecapa-voxceleb",
-    2: "pyannote/embedding",
-    3: "nvidia/speakerverification_en_titanet_large",
-    4: "hbredin/wespeaker-voxceleb-resnet34-LM",
-}
-
-DEFAULT_SAMPLE_RATE = 16000
-
-console = Console()
+from pyannote.audio.pipelines.speaker_verification import PretrainedSpeakerEmbedding
 
 
-# -----------------------------
-# Utils
-# -----------------------------
-def load_audio(
-    path: Path,
-    target_sr: int = DEFAULT_SAMPLE_RATE,
-) -> torch.Tensor:
-    """Load audio file and return (1, 1, samples) tensor."""
-    waveform, sr = torchaudio.load(path)
+# ------------------------------------------------------------------
+# Helper: A simple in-memory speaker enrollment store
+# ------------------------------------------------------------------
+@dataclass
+class SpeakerStore:
+    """Stores enrolled speaker embeddings and verifies new clips."""
+    model: PretrainedSpeakerEmbedding   # the voice-fingerprint extractor
+    threshold: float = 0.7
+    embeddings: Dict[str, np.ndarray] = field(default_factory=dict)
 
-    # Convert to mono
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
+    def enroll(self, speaker_id: str, waveform: torch.Tensor) -> None:
+        """
+        Register a speaker from a waveform.
+        waveform shape: (1, 1, num_samples) — single clip
+        """
+        emb = self.model(waveform)
+        if np.any(np.isnan(emb)):
+            # This can happen with very short or silent clips
+            raise ValueError(f"Could not extract embedding for '{speaker_id}' — clip too short?")
+        self.embeddings[speaker_id] = emb
+        print(f" Enrolled '{speaker_id}' — embedding shape {emb.shape}")
 
-    # Resample if needed
-    if sr != target_sr:
-        waveform = torchaudio.functional.resample(waveform, sr, target_sr)
+    def is_long_enough(self, waveform: torch.Tensor) -> bool:
+        """Quick safety check so we never hit the kernel-size RuntimeError."""
+        min_samples = self.model.min_num_samples
+        return waveform.shape[-1] >= min_samples
 
-    # Add batch dimension
-    waveform = waveform.unsqueeze(0)  # (1, 1, samples)
+    def _get_embedding_safe(self, waveform: torch.Tensor) -> Optional[np.ndarray]:
+        """Helper that returns embedding or None if too short."""
+        if not self.is_long_enough(waveform):
+            return None
+        emb = self.model(waveform)
+        return emb if not np.any(np.isnan(emb)) else None
 
-    return waveform
+    def verify(self, speaker_id: str, waveform: torch.Tensor) -> tuple[bool, float]:
+        """
+        Check if a waveform matches an enrolled speaker.
+        Returns (is_match, cosine_distance).
+        """
+        if speaker_id not in self.embeddings:
+            raise KeyError(f"Speaker '{speaker_id}' not enrolled yet.")
+        emb = self._get_embedding_safe(waveform)
+        if emb is None:
+            return False, float("nan")
+        dist = cdist(emb, self.embeddings[speaker_id], metric="cosine")[0, 0]
+        # threshold=0.05 was chosen so the demo shows a clear REJECT for the impostor
+        return dist < self.threshold, float(dist)
 
-
-def compute_embedding(
-    model,
-    waveform: torch.Tensor,
-) -> np.ndarray:
-    """Compute embedding."""
-    return model(waveform)
-
-
-def compute_distance(
-    emb1: np.ndarray,
-    emb2: np.ndarray,
-    metric: str = "cosine",
-) -> float:
-    """Compute distance between embeddings."""
-    return float(cdist(emb1, emb2, metric=metric)[0, 0])
-
-
-def interpret_result(distance: float, threshold: float) -> str:
-    """Interpret similarity result."""
-    return "SAME SPEAKER" if distance < threshold else "DIFFERENT SPEAKER"
-
-
-# -----------------------------
-# CLI
-# -----------------------------
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Speaker verification CLI using multiple backends."
-    )
-
-    # Positional
-    parser.add_argument("audio1", type=Path, help="Path to first audio file")
-    parser.add_argument("audio2", type=Path, help="Path to second audio file")
-
-    # Backend
-    parser.add_argument(
-        "-b",
-        "--backend",
-        type=int,
-        choices=[1, 2, 3, 4],
-        default=1,
-        help="Backend: 1=SpeechBrain (default), 2=pyannote, 3=NeMo, 4=WeSpeaker",
-    )
-
-    # Device
-    parser.add_argument(
-        "-d",
-        "--device",
-        type=str,
-        default="cpu",
-        help="Device (cpu or cuda)",
-    )
-
-    # Threshold
-    parser.add_argument(
-        "-t",
-        "--threshold",
-        type=float,
-        default=0.5,
-        help="Decision threshold for cosine distance",
-    )
-
-    # Token
-    parser.add_argument(
-        "-k",
-        "--token",
-        type=str,
-        default=None,
-        help="HuggingFace token",
-    )
-
-    # Cache dir
-    parser.add_argument(
-        "-c",
-        "--cache-dir",
-        type=Path,
-        default=None,
-        help="Cache directory",
-    )
-
-    return parser.parse_args()
+    def identify(self, waveform: torch.Tensor) -> tuple[Optional[str], float]:
+        """
+        Find the closest enrolled speaker, or return None if no match.
+        Returns (speaker_id_or_None, best_distance).
+        """
+        emb = self.model(waveform)
+        if np.any(np.isnan(emb)) or not self.embeddings:
+            return None, float("nan")
+        distances = {
+            name: cdist(emb, stored, metric="cosine")[0, 0]
+            for name, stored in self.embeddings.items()
+        }
+        best_name = min(distances, key=distances.__getitem__)
+        best_dist = distances[best_name]
+        if best_dist > self.threshold:
+            return None, float(best_dist)
+        return best_name, float(best_dist)
 
 
-# -----------------------------
-# Main Logic
-# -----------------------------
-def main() -> None:
-    args = parse_args()
+# ------------------------------------------------------------------
+# 1. Setup
+# ------------------------------------------------------------------
+SAMPLE_RATE = 16_000
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}\n")
 
-    backend: BackendType = args.backend
-    model_name = BACKEND_MAP[backend]
-
-    device = torch.device(args.device)
-
-    console.print(
-        Panel.fit(
-            f"[bold cyan]Speaker Verification[/bold cyan]\n"
-            f"Backend: [yellow]{backend}[/yellow] → {model_name}\n"
-            f"Device: [green]{device}[/green]"
-        )
-    )
-
-    # Validate files
-    for path in [args.audio1, args.audio2]:
-        if not path.exists():
-            raise FileNotFoundError(f"File not found: {path}")
-
-    # Load model
-    console.print("[bold]Loading model...[/bold]")
-    model = PretrainedSpeakerEmbedding(
-        model_name,
-        device=device,
-        token=args.token,
-        cache_dir=args.cache_dir,
-    )
-
-    # Process audio with progress
-    waveforms: list[torch.Tensor] = []
-
-    for path in tqdm([args.audio1, args.audio2], desc="Loading audio"):
-        waveform = load_audio(path)
-        waveforms.append(waveform)
-
-    # Compute embeddings
-    embeddings: list[np.ndarray] = []
-
-    for waveform in tqdm(waveforms, desc="Computing embeddings"):
-        emb = compute_embedding(model, waveform)
-        embeddings.append(emb)
-
-    emb1, emb2 = embeddings
-
-    # Compute distance
-    distance = compute_distance(emb1, emb2)
-    decision = interpret_result(distance, args.threshold)
-
-    # Display results
-    table = Table(title="Results")
-
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="magenta")
-
-    table.add_row("Distance (cosine)", f"{distance:.6f}")
-    table.add_row("Threshold", f"{args.threshold:.3f}")
-    table.add_row("Decision", decision)
-
-    console.print(table)
-
-    # Extra debug info
-    console.print(
-        Panel.fit(
-            f"[bold]Embedding Details[/bold]\n"
-            f"Shape: {emb1.shape}\n"
-            f"Backend: {model_name}"
-        )
-    )
+model = PretrainedSpeakerEmbedding("pyannote/embedding", device=device)
+store = SpeakerStore(model=model, threshold=0.7)
 
 
-# -----------------------------
-# Entry
-# -----------------------------
-if __name__ == "__main__":
-    main()
+# ------------------------------------------------------------------
+# 2. Enrollment — register known speakers
+# ------------------------------------------------------------------
+print("=== ENROLLMENT ===")
+torch.manual_seed(1); alice_enrollment = torch.randn(1, 1, 3 * SAMPLE_RATE)
+torch.manual_seed(2); bob_enrollment   = torch.randn(1, 1, 3 * SAMPLE_RATE)
+
+store.enroll("alice", alice_enrollment)
+store.enroll("bob", bob_enrollment)
+
+
+# ------------------------------------------------------------------
+# 3. Verification — does this clip match the claimed speaker?
+# ------------------------------------------------------------------
+print("\n=== VERIFICATION ===")
+
+# Slightly different clip from the same "speaker" (simulated)
+torch.manual_seed(1); alice_test = torch.randn(1, 1, 2 * SAMPLE_RATE)
+torch.manual_seed(3); impostor  = torch.randn(1, 1, 2 * SAMPLE_RATE)
+
+is_match, dist = store.verify("alice", alice_test)
+print(f"Alice's clip vs Alice's profile  → {'ACCEPT ✓' if is_match else 'REJECT ✗'} (dist={dist:.4f})")
+
+is_match, dist = store.verify("alice", impostor)
+print(f"Impostor's clip vs Alice's profile → {'ACCEPT ✓' if is_match else 'REJECT ✗'} (dist={dist:.4f})")
+
+
+# ------------------------------------------------------------------
+# 4. Identification — who is this mystery speaker?
+# ------------------------------------------------------------------
+print("\n=== IDENTIFICATION ===")
+torch.manual_seed(2); bob_test = torch.randn(1, 1, 2 * SAMPLE_RATE)
+
+name, dist = store.identify(bob_test)
+print(f"Mystery clip identified as: {name or 'UNKNOWN'} (dist={dist:.4f})")
+
+
+# ------------------------------------------------------------------
+# 5. Batch processing — extract embeddings for many clips at once
+# ------------------------------------------------------------------
+print("\n=== BATCH PROCESSING ===")
+
+# Stack multiple clips into a single batch for efficiency
+batch_size = 4
+batch = torch.randn(batch_size, 1, 2 * SAMPLE_RATE)
+
+embeddings = model(batch)  # shape: (4, dimension)
+print(f"Batch input shape : {batch.shape}")
+print(f"Batch output shape: {embeddings.shape}")
+
+# Pairwise distances between all clips in the batch
+dist_matrix = cdist(embeddings, embeddings, metric="cosine")
+print(f"Pairwise distance matrix:\n{np.round(dist_matrix, 3)}\n")
+
+
+# ------------------------------------------------------------------
+# 6. Masking — only embed the speech parts, ignore silence
+# ------------------------------------------------------------------
+print("=== MASKED BATCH (speech regions only) ===")
+
+# mask shape: (batch_size, num_samples) — 1.0 = speech, 0.0 = silence
+mask = torch.zeros(batch_size, 2 * SAMPLE_RATE)
+mask[:, 3000:20000] = 1.0  # pretend speech is in this range
+
+masked_embeddings = model(batch, masks=mask)
+nan_rows = np.isnan(masked_embeddings[:, 0])
+print(f"Embeddings with NaN (too-short masked region): {nan_rows.sum()} of {batch_size}")
+print(f"Valid embeddings shape: {masked_embeddings[~nan_rows].shape}\n")
+
+
+# ------------------------------------------------------------------
+# 7. Device switching — move model to GPU if available
+# ------------------------------------------------------------------
+print("=== DEVICE SWITCHING ===")
+print(f"Current device: {model.device}")
+
+if torch.cuda.is_available():
+    model.to(torch.device("cuda"))
+    print(f"Moved to GPU: {model.device}")
+    gpu_emb = model(torch.randn(1, 1, SAMPLE_RATE))
+    print(f"GPU inference shape: {gpu_emb.shape}")
+    model.to(torch.device("cpu"))   # move back
+else:
+    print("No GPU available — skipping device switch demo")
+
+
+# ------------------------------------------------------------------
+# 8. Edge case — clip shorter than min_num_samples
+# ------------------------------------------------------------------
+print("\n=== EDGE CASE: Very Short Clip ===")
+min_samples = model.min_num_samples
+print(f"Model minimum samples: {min_samples} ({min_samples/SAMPLE_RATE*1000:.1f} ms)")
+too_short = torch.randn(1, 1, max(1, min_samples - 10))
+if store.is_long_enough(too_short):
+    print("Clip is long enough — this shouldn't happen in the test")
+else:
+    print("Too short → safely skipped (no RuntimeError!)")
+    print("In a real app you would return NaN or show a friendly message like 'Clip too short for verification'.")

@@ -71,11 +71,13 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speech_waves.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\loader.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\file_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\energy.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_tenvad.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speech_waves.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\loader.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\file_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\energy.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_tenvad.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp4.py",
     r"",
 ]
 
@@ -93,40 +95,40 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Check speech wave logic on why it treats this flat line as a valid wave. What is the best and most sophisticated approach to detecting wave mountains.
+Browse how resolve issues
 
-speech_probs.json
-[
-  0.513070821762085,
-  0.513070821762085,
-  0.5008558034896851,
-  0.5008558034896851,
-  0.5115349888801575,
-  0.5158008933067322,
-  0.5158008933067322
-]
+=== ENROLLMENT ===
+  Enrolled 'alice' — embedding shape (1, 512)
+  Enrolled 'bob' — embedding shape (1, 512)
 
-wave.json
-{
-  "has_risen": true,
-  "has_multi_passed": true,
-  "has_fallen": true,
-  "is_valid": true,
-  "start_sec": 1.11,
-  "end_sec": 1.18,
-  "details": {
-    "frame_start": 111,
-    "frame_end": 118,
-    "frame_len": 7,
-    "duration_sec": 0.06999999999999984,
-    "min_prob": 0.5008558034896851,
-    "max_prob": 0.5158008933067322,
-    "avg_prob": 0.5101414322853088,
-    "std_prob": 0.006526988174272964
-  },
-  "segment_num": 0,
-  "wave_num": 2
-}
+=== VERIFICATION ===
+Alice's clip vs Alice's profile  → ACCEPT ✓ (dist=0.0213)
+Impostor's clip vs Alice's profile → ACCEPT ✓ (dist=0.0750)
+
+=== IDENTIFICATION ===
+Mystery clip identified as: bob (dist=0.0184)
+
+=== BATCH PROCESSING ===
+Batch input shape : torch.Size([4, 1, 32000])
+Batch output shape: (4, 512)
+Pairwise distance matrix:
+[[0.    0.097 0.055 0.055]
+ [0.097 0.    0.101 0.099]
+ [0.055 0.101 0.    0.086]
+ [0.055 0.099 0.086 0.   ]]
+
+=== MASKED BATCH (speech regions only) ===
+Embeddings with NaN (too-short masked region): 0 of 4
+Valid embeddings shape: (4, 512)
+
+=== DEVICE SWITCHING ===
+Current device: cuda
+Moved to GPU: cuda
+GPU inference shape: (1, 512)
+
+=== EDGE CASE: Very Short Clip ===
+Model minimum samples: 4771 (298.2 ms)
+Error on short clip (expected): RuntimeError: Calculated padded input size per channel: (6). Kernel size: (7). Kernel size can't be greater than actual input size
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
