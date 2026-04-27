@@ -13,8 +13,8 @@ from energy import has_sound
 
 # ====================== CLONED-REPO PATH SETUP (must be first) ======================
 PROJECT_ROOT = Path(__file__).parent.parent.parent
-FIRE_RED_VAD_PATH = str((PROJECT_ROOT / "Cloned_Repos" / "FireRedVAD").resolve())
-REAZON_ASR_PATH = str((PROJECT_ROOT / "Cloned_Repos" / "ReazonSpeech" / "pkg" / "espnet-asr" / "src").resolve())
+FIRE_RED_VAD_PATH = "/Users/jethroestrada/Desktop/External_Projects/AI/repo-libs/audio/FireRedVAD"
+REAZON_ASR_PATH = "/Users/jethroestrada/Desktop/External_Projects/AI/repo-libs/audio/ReazonSpeech/pkg/espnet-asr/src"
 
 sys.path.insert(0, FIRE_RED_VAD_PATH)
 sys.path.insert(0, REAZON_ASR_PATH)
@@ -153,6 +153,16 @@ class SubtitleServer:
         print(f"✅ All models ready – audio buffer: {self.audio_buffer} – waiting for clients")
 
     async def handler(self, websocket):
+        # Get path from request (websockets >= 13)
+        path = websocket.request.path
+
+        # Enforce WebSocket path
+        if path != "/ws/live-subtitles":
+            print(f"❌ Rejected connection on invalid path: {path}")
+            await websocket.close()
+            return
+ 
+
         print("🎤 Client connected – starting live subtitle stream")
         try:
             async for message in websocket:
@@ -211,13 +221,13 @@ class SubtitleServer:
     async def start(self):
         self._load_models()
         async with websockets.serve(self.handler, self.host, self.port):
-            print(f"🚀 SubtitleServer listening on ws://{self.host}:{self.port}")
+            print(f"🚀 SubtitleServer listening on ws://{self.host}:{self.port}/ws/live-subtitles")
             await asyncio.Future()  # run forever
 
 
 if __name__ == "__main__":
     host = "0.0.0.0"
-    port = 8765
+    port = 8000
     vad_model_dir = str(
         Path("~/.cache/pretrained_models/FireRedVAD/Stream-VAD")
         .expanduser()

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
 import tempfile
-import torch
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,10 +10,11 @@ from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import numpy as np
 import scipy.io.wavfile as wavfile
+import torch
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
-from sentence_utils import SYMBOL_RANGE, split_sentences_ja
 from ja_punctuator import add_punctuation
+from sentence_utils import SYMBOL_RANGE, split_sentences_ja
 
 TimestampPair = Tuple[int, int]
 
@@ -45,7 +46,7 @@ class TranscriptionMetadata(TypedDict, total=False):
 
 
 class TranscriptionResult(TypedDict):
-    text_ja: str
+    text: str
     confidence: float
     quality_label: str
     avg_logprob: Optional[float]
@@ -54,12 +55,35 @@ class TranscriptionResult(TypedDict):
     metadata: TranscriptionMetadata
 
 
+# Automatic device selection with detailed prints: CUDA > MPS > CPU; fixes for some MPS OOM issues
+if torch.cuda.is_available():
+    device = "cuda:0"
+    print("✅ CUDA is available. Using NVIDIA GPU (cuda:0)")
+# elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+#     device = "mps"
+#     print("✅ MPS (Metal) is available. Using Apple Silicon GPU on your Mac")
+#     # Keep default memory safety limits (prevents system freeze)
+else:
+    device = "cpu"
+    print("⚠️  No GPU detected (neither CUDA nor MPS). Falling back to CPU")
+
+print(f"Final selected device: {device}\n")
+
 model = AutoModel(
     model="FunAudioLLM/SenseVoiceSmall",
     disable_update=True,
-    device="cuda:0",
+    device=device,      # Dynamically chosen
     hub="hf",
 )
+
+# Optional: extra confirmation after model loading
+print(f"Model successfully loaded on: {device}")
+if device == "mps":
+    print("🎉 Metal GPU acceleration (MPS) is active — good for your Mac M1!")
+elif device == "cuda:0":
+    print("🎉 CUDA GPU acceleration is active.")
+else:
+    print("Running on CPU (slower but always stable).")
 
 
 # =========================
@@ -233,29 +257,62 @@ def _transcribe_file(
     *,
     hotwords: str | list[str] | None = None,
 ) -> List[Dict[str, Any]]:
-    # Clear GPU cache before every inference (prevents fragmentation after silence resets)
+    """Transcribe with MPS OOM protection and automatic CPU fallback."""
+    # Clear GPU cache (prevents fragmentation after silence resets)
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    elif device == "mps":
+        torch.mps.empty_cache()
 
     try:
-        results = model.generate(
-            input=str(audio_path),
-            cache={},
-            language="ja",
-            use_itn=True,
-            batch_size=1,                  # critical for live short chunks
-            output_timestamp=True,
-            hotwords=hotwords,
-            merge_vad=False,
-        )
+        with torch.inference_mode():
+            results = model.generate(
+                input=str(audio_path),
+                cache=None,
+                language="ja",
+                use_itn=True,
+                batch_size=1,                  # critical for live short chunks
+                output_timestamp=True,
+                hotwords=hotwords,
+                merge_vad=False,
+            )
         return results
-    except (torch.AcceleratorError, torch.cuda.CudaError, RuntimeError, AttributeError) as e:
+ 
+    except Exception as e:
+        error_str = str(e).lower()
+        if device == "mps" and ("mps backend out of memory" in error_str or "out of memory" in error_str):
+            from rich.console import Console
+            console = Console()
+            console.print("[bold red]MPS Out of Memory detected during CTC alignment.[/bold red]")
+            console.print("[yellow]Retrying automatically on CPU...[/yellow]")
+
+            torch.mps.empty_cache()  # clear before fallback
+
+            try:
+                # Retry on CPU (one-time)
+                with torch.inference_mode():
+                    results = model.generate(
+                        input=str(audio_path),
+                        cache=None,
+                        language="ja",
+                        use_itn=True,
+                        batch_size=1,
+                        output_timestamp=True,
+                        hotwords=hotwords,
+                        merge_vad=False,
+                    )
+         
+                console.print("[green]✅ Retry on CPU succeeded.[/green]")
+                return results
+            except Exception as fallback_e:
+                console.print(f"[bold red]CPU fallback failed:[/bold red] {fallback_e}")
+
+        # Log any other error
         from rich.console import Console
         console = Console()
-        console.print(f"[bold red]CUDA / FunASR error during transcription:[/bold red] {e}")
+        console.print(f"[bold red]Transcription error on {device}:[/bold red] {e}")
         console.print("[dim]Full traceback:[/dim]")
         console.print(traceback.format_exc())
-        # Return safe empty result so the server does NOT crash the websocket handler
         return []
 
 
@@ -284,7 +341,7 @@ def transcribe_japanese_llm_from_file(
 
     if not raw_results:
         return TranscriptionResult(
-            text_ja="",
+            text="",
             confidence=None,
             quality_label="N/A",
             avg_logprob=None,
@@ -357,11 +414,17 @@ def transcribe_japanese_llm_from_file(
     if segments and ja_text.strip():
         ja_text = add_punctuation(ja_text, space_replacement='、')
         phrases = split_sentences_ja(ja_text)
+
+        # Update: result in empty text if transcribed text only contains punctuation
+        if ja_text and re.fullmatch(rf"[{re.escape('。、！？.,!? \n\t')}]+\s*", ja_text):
+            ja_text = ""
+
         phrase_segments = _build_phrase_segments(phrases, segments)
         ja_text = "".join(phrases)
+ 
 
     return {
-        "text_ja": ja_text,
+        "text": ja_text,
         "confidence": None,
         "quality_label": None,
         "avg_logprob": None,
@@ -414,8 +477,8 @@ if __name__ == "__main__":
     from rich.console import Console
     from rich.pretty import pprint
     from scipy.io import wavfile
-
     from translate_jp_en_llm import translate_japanese_to_english
+    # from translate_jp_en_openai import translate_japanese_to_english
 
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
@@ -440,7 +503,7 @@ if __name__ == "__main__":
         audio_path,
     )
 
-    ja_text = result.pop("text_ja")
+    ja_text = result.pop("text")
     word_segments = result.pop("word_segments")
     phrase_segments = result.pop("phrase_segments")
     metadata = result.pop("metadata")

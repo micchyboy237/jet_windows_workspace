@@ -1,6 +1,6 @@
 import re
-from typing import Union, Sequence, List
-from pathlib import Path
+from typing import List
+
 from fast_bunkai import FastBunkai
 
 # Unicode ranges
@@ -14,7 +14,7 @@ SYMBOL_RANGE = (
 
 def split_sentences_ja(
     text: str,
-    punctuations: str = ",、…",
+    punctuations: str = ",、…。！？.!?",
 ) -> List[str]:
     """
     Split Japanese text into sentences.
@@ -103,10 +103,10 @@ def split_symbols_ja(text: str) -> List[str]:
     for block in blocks:
         # Optional: normalize internal whitespace if needed
         block = re.sub(r"\s+", " ", block).strip()
-        
+
         if not block:
             continue
-            
+
         # Split this block into proper sentences
         block_sentences = [s.strip() for s in splitter(block) if s.strip()]
         sentences.extend(block_sentences)
@@ -135,10 +135,11 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        "-m", "--mode",
+        "-m",
+        "--mode",
         choices=["sentences", "symbols"],
         default="sentences",
-        help="Splitting mode: 'sentences' = split_sentences_ja (default), 'symbols' = split_symbols_ja"
+        help="Splitting mode: 'sentences' = split_sentences_ja (default), 'symbols' = split_symbols_ja",
     )
 
     args = parser.parse_args()

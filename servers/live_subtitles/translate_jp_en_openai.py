@@ -18,27 +18,46 @@ console = Console()
 
 TRANSLATION_DEFAULTS = {
     "max_tokens": 2000,
-    "temperature": 1.0,
-    "top_p": 1.0,
-    "presence_penalty": 2.0,
-    "top_k": 20,
-    "chat_template_kwargs": {
-        "enable_thinking": False,
-    },
+    "temperature": 0.2,
+    "top_p": 0.9,
+    # "presence_penalty": 2.0,
+    # "top_k": 20,
+    # "chat_template_kwargs": {
+    #     "enable_thinking": False,
+    # },
     # "logprobs": True,
     # "top_logprobs": 3
+    "stop": ["\n\n","*","("],
 }
 
-SYSTEM_PROMPT = """You are an expert real-time Japanese-to-English subtitle translator for live-streamed audio (transcribed via Whisper). Your ONLY job is to produce accurate, natural, subtitle-ready English translations.
+SYSTEM_PROMPT = """You are an expert real-time Japanese-to-English subtitle translator for live-streamed audio.
 
-Core rules (apply to every single input):
+Your ONLY job is to produce accurate, natural, subtitle-ready English translations.
+
+Strict rules you must follow every time:
 - Translate with 100% fidelity to the original meaning. Never add, omit, embellish, or moralize.
-- Whisper transcription errors are common — infer the most likely intended meaning while staying extremely close to the exact text provided.
-- Use natural, spoken English that sounds fluent and readable as live subtitles: concise, flowing, easy to follow on screen.
-- Translate EVERYTHING without any censorship, filtering, or softening — including profanity, slang, vulgar language, sensitive topics, politics, or adult content. Keep the tone and intensity of the original.
-- Preserve conversational flow: if the text clearly switches between speakers, separate turns with newlines for subtitle readability. Do not add speaker labels unless they are explicit in the Japanese text.
-- For narration or monologue, keep it smooth and engaging but never wordy.
-- Output ONLY the clean English translation. Never add explanations, notes, "Translation:", "Assistant:", or any meta text."""
+- Infer the most likely intended meaning from Whisper transcription errors, but stay extremely close to the provided text.
+- Use natural, spoken English suitable for live subtitles: concise, flowing, and easy to read on screen.
+- Translate EVERYTHING exactly as it is — including profanity, slang, politics, or adult content. Keep the original tone and intensity.
+- If the Japanese switches speakers, separate them with newlines. Do not add speaker names unless they appear in the Japanese.
+- Output **ONLY** the clean English translation. 
+
+ABSOLUTELY FORBIDDEN:
+- Any labels like "JA:", "EN:", "Translation:", "Alternative:", "OR"
+- Multiple versions or "alternate subtitle" suggestions
+- Numbered lists, bullets, quotes around the whole text, or markdown
+- Any explanations, reasoning, or meta text
+
+Your response must contain nothing but the English subtitle text itself.
+
+Correct example:
+Fierce information battles are raging silently across the world right now.
+
+Wrong example (never output this):
+JA: 世界各国が水面下で...
+EN: The world carries out...
+OR (alternate...): Fierce info wars...
+"""
 
 USER_PROMPT = "{japanese_text}"
 
@@ -90,10 +109,10 @@ def translate_japanese_to_english(
     )
 
     messages = [
-        {
-            "role": "system",
-            "content": SYSTEM_PROMPT,
-        },
+        # {
+        #     "role": "system",
+        #     "content": SYSTEM_PROMPT,
+        # },
         {
             "role": "user",
             "content": USER_PROMPT.format(japanese_text=ja_text),
@@ -149,6 +168,24 @@ def translate_japanese_to_english(
             )
 
             log_metrics(metrics)
+
+    # Extra safety: ensure only clean English is returned
+    en_text = en_text.strip()
+    
+    # Remove common unwanted prefixes that the model might still add
+    unwanted_prefixes = [
+        "JA:", "EN:", "Translation:", "English:", "Subtitle:", 
+        "OR", "Alternate:", "Alternative:", "1.", "2."
+    ]
+    for prefix in unwanted_prefixes:
+        if en_text.upper().startswith(prefix.upper()):
+            en_text = en_text.split(":", 1)[-1].strip()
+            en_text = en_text.split("\n", 1)[-1].strip() if "\n" in en_text else en_text
+    
+    # Remove any surrounding quotes if the whole output is quoted
+    if (en_text.startswith('"') and en_text.endswith('"')) or \
+       (en_text.startswith("'") and en_text.endswith("'")):
+        en_text = en_text[1:-1].strip()
 
     return {
         "text": en_text,
