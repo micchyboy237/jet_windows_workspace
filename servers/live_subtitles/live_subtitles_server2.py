@@ -14,14 +14,7 @@ import uvicorn
 from audio_context_buffer import AudioContextBuffer
 from audio_search import search_audio
 from diff_utils import console_diff_highlight, extract_new_ja_text
-from fastapi import (
-    FastAPI,
-    File,
-    HTTPException,
-    UploadFile,
-    WebSocket,
-    WebSocketDisconnect,
-)
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.logging import RichHandler
@@ -613,37 +606,43 @@ class TranslateResponse(BaseModel):
 
 # ====================== NEW: REST Endpoints ======================
 
-@app.post("/transcribe", response_model=TranscribeResponse)
+@app.post("/transcribe")
 async def transcribe_endpoint(
-    request: TranscribeRequest,
-    audio_file: Optional[UploadFile] = File(None)
+    audio_file: UploadFile = File(..., description="Japanese audio file (WAV, PCM int16 recommended)"),
+    sample_rate: int = Form(16000, description="Sample rate of the audio"),
+    hotwords: Optional[str] = Form(None, description="Optional hotwords for better recognition"),
 ):
-    """Transcribe Japanese audio only (REST API)."""
+    """Transcribe Japanese audio → Japanese text (REST API)"""
     try:
-        if audio_file:
-            audio_bytes = await audio_file.read()
-        elif request.audio_base64:
-            import base64
-            audio_bytes = base64.b64decode(request.audio_base64)
-        else:
-            raise HTTPException(status_code=400, detail="Either audio_file or audio_base64 must be provided")
+        console.print(f"[info]Received file upload: {audio_file.filename} ({audio_file.content_type})[/info]")
+        
+        audio_bytes = await audio_file.read()
+        
+        if len(audio_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Uploaded audio file is empty")
 
+        console.print(f"[info]Audio size: {len(audio_bytes)/1024:.1f} KB | Sample rate: {sample_rate} Hz[/info]")
+
+        # Call existing transcription function
         result: TranscriptionResult = transcribe_japanese(
             audio_bytes=audio_bytes,
-            sample_rate=request.sample_rate,
-            hotwords=request.hotwords,
+            sample_rate=sample_rate,
+            hotwords=hotwords,
         )
 
         return {
             "success": True,
-            "transcription_ja": result["text"],
+            "transcription_ja": result.get("text", ""),
             "metadata": result.get("metadata", {}),
             "word_segments": result.get("word_segments", []),
             "phrase_segments": result.get("phrase_segments", []),
         }
+
     except Exception as e:
-        console.print(f"[error]Transcription endpoint error: {e}[/error]")
-        raise HTTPException(status_code=500, detail=str(e))
+        console.print(f"[error]Transcription endpoint failed: {e}[/error]")
+        import traceback
+        console.print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Transcription error: {str(e)}")
 
 
 @app.post("/translate", response_model=TranslateResponse)
