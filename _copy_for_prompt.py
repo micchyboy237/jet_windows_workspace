@@ -91,8 +91,10 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_emotion_litagin_window.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_emotion_litagin.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server_mac.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server_mac.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
     r"",
 ]
 
@@ -110,12 +112,13 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze how @app.websocket("/ws/live-subtitles") is used in live_subtitles_server_mac.
-Then apply in live_subtitles_server2.
+Add these endpoints:
+/transcribe
+/translate
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
-Provide step by step analysis and outline blueprint first.
+Provide step by step analysis and outline architecture flow first.
 Show unified diff for updated files, while show language code block for new files.
 Use easy to understand terms when explaining.
 """.strip()

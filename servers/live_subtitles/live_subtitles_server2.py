@@ -1,22 +1,50 @@
 import asyncio
 import json
 import logging
+import shutil
 import uuid as uuid_module
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from rich.console import Console
-from rich.theme import Theme
-from rich.logging import RichHandler
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-console = Console(theme=Theme({
-    "info": "cyan",
-    "success": "green bold",
-    "warning": "yellow",
-    "error": "red bold",
-    "value": "white bold",
-    "time": "magenta bold",
-    "number": "bright_white",
-    "uuid": "bright_blue",
-}))
+import numpy as np
+import scipy.io.wavfile as wavfile
+import uvicorn
+from audio_context_buffer import AudioContextBuffer
+from audio_search import search_audio
+from diff_utils import console_diff_highlight, extract_new_ja_text
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from pydantic import BaseModel, Field
+from rich.console import Console
+from rich.logging import RichHandler
+from rich.theme import Theme
+from sentence_matcher_ja import fuzzy_shortest_best_match
+from sentence_utils import split_sentences_ja
+from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
+from translate_jp_en_llm import translate_japanese_to_english
+
+console = Console(
+    theme=Theme(
+        {
+            "info": "cyan",
+            "success": "green bold",
+            "warning": "yellow",
+            "error": "red bold",
+            "value": "white bold",
+            "time": "magenta bold",
+            "number": "bright_white",
+            "uuid": "bright_blue",
+        }
+    )
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,20 +56,6 @@ for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(name).handlers = []
     logging.getLogger(name).propagate = True
 
-import numpy as np
-import scipy.io.wavfile as wavfile
-from concurrent.futures import ThreadPoolExecutor
-import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from transcribe_jp_funasr import transcribe_japanese, TranscriptionResult
-from translate_jp_en_llm import translate_japanese_to_english
-from audio_context_buffer import AudioContextBuffer
-from audio_search import search_audio
-from sentence_utils import split_sentences_ja
-from sentence_matcher_ja import fuzzy_shortest_best_match
-from diff_utils import console_diff_highlight, extract_new_ja_text
-import shutil
-from pathlib import Path
 
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
@@ -572,10 +586,98 @@ async def websocket_endpoint(websocket: WebSocket):
             f" — total [bright_blue]{len(active_connections)}[/bright_blue]"
         )
 
+# ====================== NEW: Pydantic Models for REST APIs ======================
+class TranscribeRequest(BaseModel):
+    audio_base64: Optional[str] = Field(None, description="Base64 encoded PCM int16 audio (optional if file uploaded)")
+    sample_rate: int = Field(16000, description="Sample rate of the audio")
+    hotwords: Optional[str] = Field(None, description="Hotwords for ASR")
+
+class TranscribeResponse(BaseModel):
+    success: bool
+    transcription_ja: str
+    metadata: Dict[str, Any]
+    word_segments: list = []
+    phrase_segments: list = []
+
+class TranslateRequest(BaseModel):
+    japanese_text: str = Field(..., description="Japanese text to translate")
+    history: Optional[list] = Field(default=None, description="Conversation history for context")
+    temperature: Optional[float] = Field(0.35, ge=0.0, le=1.0)
+
+class TranslateResponse(BaseModel):
+    success: bool
+    translation_en: str
+    quality: str = "N/A"
+    log_prob: Optional[float] = None
+    confidence: Optional[float] = None
+
+# ====================== NEW: REST Endpoints ======================
+
+@app.post("/transcribe", response_model=TranscribeResponse)
+async def transcribe_endpoint(
+    request: TranscribeRequest,
+    audio_file: Optional[UploadFile] = File(None)
+):
+    """Transcribe Japanese audio only (REST API)."""
+    try:
+        if audio_file:
+            audio_bytes = await audio_file.read()
+        elif request.audio_base64:
+            import base64
+            audio_bytes = base64.b64decode(request.audio_base64)
+        else:
+            raise HTTPException(status_code=400, detail="Either audio_file or audio_base64 must be provided")
+
+        result: TranscriptionResult = transcribe_japanese(
+            audio_bytes=audio_bytes,
+            sample_rate=request.sample_rate,
+            hotwords=request.hotwords,
+        )
+
+        return {
+            "success": True,
+            "transcription_ja": result["text"],
+            "metadata": result.get("metadata", {}),
+            "word_segments": result.get("word_segments", []),
+            "phrase_segments": result.get("phrase_segments", []),
+        }
+    except Exception as e:
+        console.print(f"[error]Transcription endpoint error: {e}[/error]")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/translate", response_model=TranslateResponse)
+async def translate_endpoint(request: TranslateRequest):
+    """Translate Japanese text to English only (REST API)."""
+    try:
+        if not request.japanese_text or not request.japanese_text.strip():
+            raise HTTPException(status_code=400, detail="japanese_text is required and cannot be empty")
+
+        result = translate_japanese_to_english(
+            ja_text=request.japanese_text.strip(),
+            history=request.history,
+            temperature=request.temperature or 0.35,
+            enable_scoring=True,   # Enable scoring for REST calls
+        )
+
+        return {
+            "success": True,
+            "translation_en": result["text"],
+            "quality": result.get("quality", "N/A"),
+            "log_prob": result.get("log_prob"),
+            "confidence": result.get("confidence"),
+        }
+    except Exception as e:
+        console.print(f"[error]Translation endpoint error: {e}[/error]")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     logger.info("🚀 Starting [bold cyan]Live Japanese Subtitles Server 2[/]")
     logger.info("WebSocket endpoint → [bold]ws://0.0.0.0:8000/ws/live-subtitles[/]")
+    logger.info("New REST endpoints:")
+    logger.info("   POST /transcribe")
+    logger.info("   POST /translate")
     logger.info("Press Ctrl+C to stop\n")
     uvicorn.run(
         app="live_subtitles_server2:app",
