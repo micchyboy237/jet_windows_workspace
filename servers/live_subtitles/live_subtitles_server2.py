@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.theme import Theme
-from sentence_matcher_ja import fuzzy_shortest_best_match_contains
+from sentence_matcher_ja import fuzzy_shortest_best_match_contains, fuzzy_match_prefix_texts
 from sentence_utils import split_sentences_ja
 from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
 from translate_jp_en_llm import translate_japanese_to_english
@@ -336,6 +336,7 @@ def blocking_process_audio(
 
     search_audio(full_audio_bytes, audio_bytes)
 
+    # Log previous and current diffs
     if prev_full_ja_text and full_ja_text != prev_full_ja_text:
         console.print("[info]Diff (previous full JA → current full JA):[/info]")
         console_diff_highlight(
@@ -353,6 +354,16 @@ def blocking_process_audio(
             "Prev EN",
             "Curr EN",
         )
+
+    prefix_result = fuzzy_match_prefix_texts({
+        "prev_ja": prev_full_ja_text,
+        "prev_en": prev_full_en_text,
+        "full_ja": full_ja_text,
+        "full_en": full_en_text,
+    })
+    console.print(
+        f"[info]Prefix match is_continuation:[/info] [value]{prefix_result["is_continuation"]}[/value]"
+    )
 
     new_en_sents = split_sentences_ja(full_en_text)
 

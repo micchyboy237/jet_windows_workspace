@@ -1,0 +1,57 @@
+sentence_matcher_ja.py CLI Examples — sentence level
+======================================================
+Each command is independent. Copy and paste any one into your terminal.
+
+
+──────────────────────────────────────────────────────────────
+Example 1 — Basic JA: single sentence found in a transcript
+──────────────────────────────────────────────────────────────
+python sentence_matcher_ja.py "彼の任務は家族を作ること。" "作戦を担うエージェント黄昏。彼の任務は家族を作ること。父ロイドは精神科医だ。" --level sentence --score-cutoff 80
+
+
+──────────────────────────────────────────────────────────────
+Example 2 — Fuzzy JA: query has ASR/OCR noise
+──────────────────────────────────────────────────────────────
+python sentence_matcher_ja.py "父ロイドフォジャーは精神科医だ。" "父ロイドフォージャーは精神科医だ。母ヨルは市役所職員だ。娘アーニャはエスパーだ。" --level sentence --score-cutoff 75
+
+
+──────────────────────────────────────────────────────────────
+Example 3 — Multi-sentence JA query (window spans 2 sentences)
+──────────────────────────────────────────────────────────────
+python sentence_matcher_ja.py "彼の任務は家族を作ること。父ロイドフォージャーは精神科医だ。" "作戦を担うエージェント黄昏。彼の任務は家族を作ること。父ロイドフォージャーは精神科医だ。母ヨルは市役所職員だ。" --level sentence --max-extra-words 1 --score-cutoff 80
+
+
+──────────────────────────────────────────────────────────────
+Example 4 — English subtitle continuation
+──────────────────────────────────────────────────────────────
+python sentence_matcher_ja.py "His mission is to build a family." "His mission is to build a family. Father Loid Forger is a psychiatrist. Mother Yor works at city hall." --level sentence --score-cutoff 80
+
+
+──────────────────────────────────────────────────────────────
+Example 5 — English fuzzy: wording drift across MT passes
+──────────────────────────────────────────────────────────────
+python sentence_matcher_ja.py "Loid Forger is working undercover as a psychiatrist." "Loid Forger works undercover as a psychiatrist. Yor Forger is employed at city hall. Anya can read minds." --level sentence --score-cutoff 75
+
+
+──────────────────────────────────────────────────────────────
+Example 6 — No match: query absent from text (should FAIL)
+──────────────────────────────────────────────────────────────
+python sentence_matcher_ja.py "This sentence is completely unrelated." "作戦を担うエージェント黄昏。彼の任務は家族を作ること。" --level sentence --score-cutoff 80
+
+
+──────────────────────────────────────────────────────────────
+Example 7 — Multiple text candidates: best-scoring one wins
+──────────────────────────────────────────────────────────────
+python sentence_matcher_ja.py "母ヨルフォージャーは市役所職員だ。" "全く関係のない文章。これも違う。" "作戦を担うエージェント黄昏。母ヨルフォージャーは市役所職員だ。娘アーニャはエスパーだ。" --level sentence --score-cutoff 80
+
+
+──────────────────────────────────────────────────────────────
+Example 8a — word level (for comparison with 8b)
+──────────────────────────────────────────────────────────────
+python sentence_matcher_ja.py "Anya Forger can read minds." "Loid Forger works as a psychiatrist. Yor Forger works at city hall. Anya Forger can read minds. She is an Esper." --level word --score-cutoff 80
+
+
+──────────────────────────────────────────────────────────────
+Example 8b — sentence level (same query+text as 8a)
+──────────────────────────────────────────────────────────────
+python sentence_matcher_ja.py "Anya Forger can read minds." "Loid Forger works as a psychiatrist. Yor Forger works at city hall. Anya Forger can read minds. She is an Esper." --level sentence --score-cutoff 80

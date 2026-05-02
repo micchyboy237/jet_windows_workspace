@@ -5,6 +5,8 @@ from typing import List, Optional, TypedDict
 
 from rapidfuzz import fuzz, process, utils
 
+from sentence_utils import split_sentences_ja
+
 
 class FuzzyMatchInput(TypedDict):
     """Input parameters used for the fuzzy matching operation."""
@@ -59,11 +61,11 @@ def _split_words(text: str) -> List[str]:
     """Smart word splitter with CJK support."""
     if not text:
         return []
-    
+
     # Detect CJK
     if re.search(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', text):
         return list(text)  # character level for Japanese
-    
+
     return text.split()
 
 
@@ -71,6 +73,299 @@ def _preprocess(text: str) -> str:
     """Consistent preprocessing for better matching."""
     return utils.default_process(text)  # lower + strip punctuation etc.
 
+
+def _is_cjk(text: str) -> bool:
+    """Return True if text contains CJK / kana characters."""
+    return bool(re.search(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]', text))
+
+
+def _join_sentences(sentences: List[str]) -> str:
+    """Join a list of sentences.
+
+    Uses no separator for CJK text (Japanese etc.) and a single space for
+    everything else — consistent with how the word-level branch joins tokens.
+    """
+    if not sentences:
+        return ""
+    combined = "".join(sentences)
+    if _is_cjk(combined):
+        return combined
+    return " ".join(sentences)
+
+
+def fuzzy_shortest_best_match(
+    query: str,
+    text: str | List[str],
+    score_cutoff: int = 80,           # raised a bit
+    max_extra_chars: int = 25,
+    max_extra_words: int = 4,         # tightened (also used as max_extra_sentences)
+    level: str = "word",
+) -> FuzzyMatchResult:
+    """
+    Improved fuzzy sentence matcher.
+    Better suited for live subtitles / sentence alignment.
+
+    ``level`` can be one of:
+    - ``"word"``     – sliding window over word/character tokens (original)
+    - ``"char"``     – sliding window over individual characters (original)
+    - ``"sentence"`` – sliding window over sentences produced by
+                       ``split_sentences_ja`` (new).  ``max_extra_words``
+                       controls how many *extra sentences* beyond the query
+                       sentence-count are tried.
+    """
+    if not query:
+        return _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words)
+
+    # Normalize input
+    if isinstance(text, str):
+        text_list = [text]
+    else:
+        text_list = [t for t in text if t]
+
+    if not text_list:
+        return _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words)
+
+    best_result: Optional[FuzzyMatchResult] = None
+    best_score: float = -1.0
+
+    processed_query = _preprocess(query)
+
+    for t in text_list:
+        if not t:
+            continue
+
+        if level == "sentence":
+            # ----------------------------------------------------------------
+            # Sentence-level sliding window
+            # ----------------------------------------------------------------
+            query_sentences = split_sentences_ja(query)
+            text_sentences = split_sentences_ja(t)
+
+            q_sent_len = len(query_sentences)
+
+            if q_sent_len == 0:
+                continue
+
+            local_best_score = -1.0
+            local_best_start = -1
+            local_best_end = -1
+            local_best_match = ""
+            local_best_length = float("inf")  # prefer shorter windows on ties
+
+            # max_extra_words doubles as max_extra_sentences here
+            max_s_len = q_sent_len + max_extra_words
+
+            for s_len in range(q_sent_len, max_s_len + 1):
+                for i in range(len(text_sentences) - s_len + 1):
+                    window_sentences = text_sentences[i : i + s_len]
+                    window = _join_sentences(window_sentences)
+
+                    score = fuzz.token_set_ratio(processed_query, _preprocess(window))
+
+                    win_len = len(window)
+                    if score > local_best_score or (
+                        abs(score - local_best_score) < 0.01 and win_len < local_best_length
+                    ):
+                        local_best_score = score
+                        local_best_match = window
+                        local_best_start = t.find(window)
+                        local_best_end = (
+                            local_best_start + len(window)
+                            if local_best_start != -1
+                            else -1
+                        )
+                        local_best_length = win_len
+
+            # Fallback: if we still can't clear the cutoff, try the full text
+            if local_best_score < score_cutoff and t:
+                candidates = process.extract(
+                    processed_query,
+                    [t],
+                    scorer=fuzz.token_set_ratio,
+                    limit=3,
+                    score_cutoff=score_cutoff - 10,
+                )
+                if candidates:
+                    best_cand = candidates[0]
+                    local_best_match = best_cand[0]
+                    local_best_score = float(best_cand[1])
+                    local_best_start = t.find(local_best_match)
+                    local_best_end = (
+                        local_best_start + len(local_best_match)
+                        if local_best_start != -1
+                        else -1
+                    )
+
+        elif level == "word":
+            query_tokens = _split_words(query)
+            text_tokens = _split_words(t)
+            q_word_len = len(query_tokens)
+
+            if q_word_len == 0:
+                continue
+
+            local_best_score = -1.0
+            local_best_start = -1
+            local_best_end = -1
+            local_best_match = ""
+            local_best_length = float("inf")
+
+            max_w_len = q_word_len + max_extra_words
+
+            for w_len in range(q_word_len, max_w_len + 1):
+                for i in range(len(text_tokens) - w_len + 1):
+                    window_tokens = text_tokens[i : i + w_len]
+
+                    # Join properly (no spaces for Japanese)
+                    if re.search(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]', "".join(window_tokens)):
+                        window = "".join(window_tokens)
+                    else:
+                        window = " ".join(window_tokens)
+
+                    # Use stricter + preprocessed scoring
+                    score = fuzz.token_set_ratio(processed_query, _preprocess(window))
+
+                    win_len = len(window)
+                    if (score > local_best_score or
+                        (abs(score - local_best_score) < 0.01 and win_len < local_best_length)):
+                        local_best_score = score
+                        local_best_match = window
+                        local_best_start = t.find(window)
+                        local_best_end = local_best_start + len(window) if local_best_start != -1 else -1
+                        local_best_length = win_len
+
+            # Strong fallback only if needed
+            if local_best_score < score_cutoff and t:
+                candidates = process.extract(
+                    processed_query,
+                    [t],
+                    scorer=fuzz.token_set_ratio,
+                    limit=3,
+                    score_cutoff=score_cutoff - 10
+                )
+                if candidates:
+                    best_cand = candidates[0]
+                    local_best_match = best_cand[0]
+                    local_best_score = float(best_cand[1])
+                    local_best_start = t.find(local_best_match)
+                    local_best_end = local_best_start + len(local_best_match) if local_best_start != -1 else -1
+
+        else:
+            # Character level (mostly unchanged but improved scoring)
+            local_best_score = -1.0
+            local_best_start = -1
+            local_best_end = -1
+            local_best_match = ""
+            local_best_length = float("inf")
+
+            query_len = len(query)
+            max_len = query_len + max_extra_chars
+
+            for length in range(query_len, max_len + 1):
+                for i in range(len(t) - length + 1):
+                    window = t[i : i + length]
+                    score = fuzz.token_set_ratio(processed_query, _preprocess(window))
+
+                    if (score > local_best_score or
+                        (abs(score - local_best_score) < 0.01 and length < local_best_length)):
+                        local_best_score = score
+                        local_best_start = i
+                        local_best_end = i + length
+                        local_best_match = window
+                        local_best_length = length
+
+            if local_best_score < score_cutoff and t:
+                candidates = process.extract(
+                    processed_query, [t],
+                    scorer=fuzz.token_set_ratio,
+                    limit=3,
+                    score_cutoff=score_cutoff - 10
+                )
+                if candidates:
+                    best_cand = candidates[0]
+                    local_best_match = best_cand[0]
+                    local_best_score = float(best_cand[1])
+                    local_best_start = t.find(local_best_match)
+                    local_best_end = local_best_start + len(local_best_match)
+
+        # Update global best
+        if local_best_score > best_score:
+            best_score = local_best_score
+            best_result = {
+                "input": {
+                    "query": query,
+                    "text": t,
+                    "level": level,
+                    "score_cutoff": score_cutoff,
+                    "max_extra_chars": max_extra_chars,
+                    "max_extra_words": max_extra_words,
+                },
+                "match": local_best_match,
+                "score": local_best_score,
+                "start": local_best_start,
+                "end": local_best_end,
+                "text": t,
+                "remaining": t[local_best_end:] if local_best_end != -1 else "",
+                "passed": local_best_score >= score_cutoff,
+            }
+
+    return best_result or _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words)
+
+
+def _empty_result(query: str, text: str, level: str, score_cutoff: int,
+                  max_extra_chars: int, max_extra_words: int) -> FuzzyMatchResult:
+    return {
+        "input": {
+            "query": query, "text": text, "level": level,
+            "score_cutoff": score_cutoff, "max_extra_chars": max_extra_chars,
+            "max_extra_words": max_extra_words
+        },
+        "match": "", "score": 0.0, "start": -1, "end": -1,
+        "text": "", "remaining": "", "passed": False
+    }
+
+
+def fuzzy_match_prefix_texts(texts_dict: PrefixTexts) -> FuzzyPrefixMatchResult:
+    prev_ja = texts_dict["prev_ja"]
+    prev_en = texts_dict["prev_en"]
+    full_ja = texts_dict["full_ja"]
+    full_en = texts_dict["full_en"]
+
+    # === Incremental "New" parts using fuzzy matching ===
+    is_continuation = False
+    new_ja = full_ja
+    if prev_ja:
+        result: FuzzyMatchResult = fuzzy_shortest_best_match(
+            query=prev_ja, text=full_ja
+        )
+        print("\nFuzzy Result JA:")
+        log_fuzzy_result(result)
+        if result["passed"]:
+            new_ja = result["remaining"]
+
+
+    new_en = full_en
+    if prev_en:
+        result: FuzzyMatchResult = fuzzy_shortest_best_match(
+            query=prev_en, text=full_en   # ← Fixed: use the new translation
+        )
+        print("\nFuzzy Result EN:")
+        log_fuzzy_result(result)
+        if result["passed"]:
+            new_en = result["remaining"]
+            if new_en:
+                is_continuation = True
+
+
+    return {
+        "prev_en": prev_en,
+        "new_en": new_en,
+        "prev_ja": prev_ja,
+        "new_ja": new_ja,
+        "full_ja": full_ja,
+        "full_en": full_en,
+        "is_continuation": is_continuation,
+    }
 
 
 def fuzzy_shortest_best_match_contains(
@@ -164,212 +459,6 @@ def fuzzy_shortest_best_match_contains(
     return best_result
 
 
-def fuzzy_shortest_best_match(
-    query: str,
-    text: str | List[str],
-    score_cutoff: int = 80,           # raised a bit
-    max_extra_chars: int = 25,
-    max_extra_words: int = 4,         # tightened
-    level: str = "word",
-) -> FuzzyMatchResult:
-    """
-    Improved fuzzy sentence matcher.
-    Better suited for live subtitles / sentence alignment.
-    """
-    if not query:
-        return _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words)
-
-    # Normalize input
-    if isinstance(text, str):
-        text_list = [text]
-    else:
-        text_list = [t for t in text if t]
-
-    if not text_list:
-        return _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words)
-
-    best_result: Optional[FuzzyMatchResult] = None
-    best_score: float = -1.0
-
-    processed_query = _preprocess(query)
-    q_len = len(query)
-
-    for t in text_list:
-        if not t:
-            continue
-
-        if level == "word":
-            query_tokens = _split_words(query)
-            text_tokens = _split_words(t)
-            q_word_len = len(query_tokens)
-
-            if q_word_len == 0:
-                continue
-
-            local_best_score = -1.0
-            local_best_start = -1
-            local_best_end = -1
-            local_best_match = ""
-            local_best_length = float("inf")
-
-            max_w_len = q_word_len + max_extra_words
-
-            for w_len in range(q_word_len, max_w_len + 1):
-                for i in range(len(text_tokens) - w_len + 1):
-                    window_tokens = text_tokens[i : i + w_len]
-
-                    # Join properly (no spaces for Japanese)
-                    if re.search(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]', "".join(window_tokens)):
-                        window = "".join(window_tokens)
-                    else:
-                        window = " ".join(window_tokens)
-
-                    # Use stricter + preprocessed scoring
-                    score = fuzz.token_set_ratio(processed_query, _preprocess(window))
-
-                    win_len = len(window)
-                    if (score > local_best_score or 
-                        (abs(score - local_best_score) < 0.01 and win_len < local_best_length)):
-                        local_best_score = score
-                        local_best_match = window
-                        local_best_start = t.find(window)
-                        local_best_end = local_best_start + len(window) if local_best_start != -1 else -1
-                        local_best_length = win_len
-
-            # Strong fallback only if needed
-            if local_best_score < score_cutoff and t:
-                candidates = process.extract(
-                    processed_query,
-                    [t],
-                    scorer=fuzz.token_set_ratio,
-                    limit=3,
-                    score_cutoff=score_cutoff - 10
-                )
-                if candidates:
-                    best_cand = candidates[0]
-                    local_best_match = best_cand[0]
-                    local_best_score = float(best_cand[1])
-                    local_best_start = t.find(local_best_match)
-                    local_best_end = local_best_start + len(local_best_match) if local_best_start != -1 else -1
-
-        else:
-            # Character level (mostly unchanged but improved scoring)
-            local_best_score = -1.0
-            local_best_start = -1
-            local_best_end = -1
-            local_best_match = ""
-            local_best_length = float("inf")
-
-            query_len = len(query)
-            max_len = query_len + max_extra_chars
-
-            for length in range(query_len, max_len + 1):
-                for i in range(len(t) - length + 1):
-                    window = t[i : i + length]
-                    score = fuzz.token_set_ratio(processed_query, _preprocess(window))
-
-                    if (score > local_best_score or 
-                        (abs(score - local_best_score) < 0.01 and length < local_best_length)):
-                        local_best_score = score
-                        local_best_start = i
-                        local_best_end = i + length
-                        local_best_match = window
-                        local_best_length = length
-
-            if local_best_score < score_cutoff and t:
-                candidates = process.extract(
-                    processed_query, [t],
-                    scorer=fuzz.token_set_ratio,
-                    limit=3,
-                    score_cutoff=score_cutoff - 10
-                )
-                if candidates:
-                    best_cand = candidates[0]
-                    local_best_match = best_cand[0]
-                    local_best_score = float(best_cand[1])
-                    local_best_start = t.find(local_best_match)
-                    local_best_end = local_best_start + len(local_best_match)
-
-        # Update global best
-        if local_best_score > best_score:
-            best_score = local_best_score
-            best_result = {
-                "input": {
-                    "query": query,
-                    "text": t,
-                    "level": level,
-                    "score_cutoff": score_cutoff,
-                    "max_extra_chars": max_extra_chars,
-                    "max_extra_words": max_extra_words,
-                },
-                "match": local_best_match,
-                "score": local_best_score,
-                "start": local_best_start,
-                "end": local_best_end,
-                "text": t,
-                "remaining": t[local_best_end:] if local_best_end != -1 else "",
-                "passed": local_best_score >= score_cutoff,
-            }
-
-    return best_result or _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words)
-
-
-def _empty_result(query: str, text: str, level: str, score_cutoff: int,
-                  max_extra_chars: int, max_extra_words: int) -> FuzzyMatchResult:
-    return {
-        "input": {
-            "query": query, "text": text, "level": level,
-            "score_cutoff": score_cutoff, "max_extra_chars": max_extra_chars,
-            "max_extra_words": max_extra_words
-        },
-        "match": "", "score": 0.0, "start": -1, "end": -1,
-        "text": "", "remaining": "", "passed": False
-    }
-
-
-def fuzzy_match_prefix_texts(texts_dict: PrefixTexts) -> FuzzyPrefixMatchResult:
-    prev_ja = texts_dict["prev_ja"]
-    prev_en = texts_dict["prev_en"]
-    full_ja = texts_dict["full_ja"]
-    full_en = texts_dict["full_en"]
-
-    # === Incremental "New" parts using fuzzy matching ===
-    is_continuation = False
-    new_ja = full_ja
-    if prev_ja:
-        result: FuzzyMatchResult = fuzzy_shortest_best_match(
-            query=prev_ja, text=full_ja
-        )
-        print("\nFuzzy Result JA:")
-        log_fuzzy_result(result)
-        if result["passed"]:
-            new_ja = result["remaining"]
-
-
-    new_en = full_en
-    if prev_en:
-        result: FuzzyMatchResult = fuzzy_shortest_best_match(
-            query=prev_en, text=full_en   # ← Fixed: use the new translation
-        )
-        print("\nFuzzy Result EN:")
-        log_fuzzy_result(result)
-        if result["passed"]:
-            new_en = result["remaining"]
-            is_continuation = True
-
-
-    return {
-        "prev_en": prev_en,
-        "new_en": new_en,
-        "prev_ja": prev_ja,
-        "new_ja": new_ja,
-        "full_ja": full_ja,
-        "full_en": full_en,
-        "is_continuation": is_continuation,
-    }
-
-
-
 def log_fuzzy_result(result: FuzzyMatchResult):
     inp = result["input"]
     print(f"Query     : {inp['query']}")
@@ -402,9 +491,10 @@ def main() -> None:
     parser.add_argument("text", nargs="+", type=str, help="Text(s) to search in")
     parser.add_argument("-c", "--score-cutoff", type=int, default=82, help="Minimum score")
     parser.add_argument("-e", "--max-extra-chars", type=int, default=25, help="Max extra chars")
-    parser.add_argument("--max-extra-words", type=int, default=4, help="Max extra words")
-    parser.add_argument("-l", "--level", type=str, choices=["char", "word"], default="word",
-                        help="Matching level")
+    parser.add_argument("--max-extra-words", type=int, default=4,
+                        help="Max extra words (or extra sentences when --level=sentence)")
+    parser.add_argument("-l", "--level", type=str, choices=["char", "word", "sentence"],
+                        default="word", help="Matching level")
     args = parser.parse_args()
 
     result: FuzzyMatchResult = fuzzy_shortest_best_match(
