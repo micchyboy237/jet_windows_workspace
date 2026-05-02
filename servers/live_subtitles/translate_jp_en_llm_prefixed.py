@@ -127,7 +127,8 @@ def translate_japanese_to_english(
     tokens_cached: int = getattr(llm, "_n_past_cached", 0)
 
     # === Incremental "New" parts using fuzzy matching ===
-    new_ja = ""
+    is_continuation = False
+    new_ja = text
     if prev_ja:
         result: FuzzyMatchResult = fuzzy_shortest_best_match(
             query=prev_ja, text=text
@@ -136,7 +137,7 @@ def translate_japanese_to_english(
             new_ja = result["remaining"]
 
 
-    new_en = ""
+    new_en = translation
     if prev_en:
         result: FuzzyMatchResult = fuzzy_shortest_best_match(
             query=prev_en, text=translation   # ← Fixed: use the new translation
@@ -145,6 +146,7 @@ def translate_japanese_to_english(
         _log_fuzzy_result(result)
         if result["passed"]:
             new_en = result["remaining"]
+            is_continuation = True
 
     return {
         "text": translation,
@@ -156,6 +158,7 @@ def translate_japanese_to_english(
         "tokens_cached": tokens_cached,
         "tokens_generated": tokens_generated,
         "latency_ms": latency_ms,
+        "is_continuation": is_continuation,
     }
 
 
@@ -230,13 +233,14 @@ if __name__ == "__main__":
         
         en_text = result["text"]
         new_en  = result.get("new_en", "")
+        is_continuation = result.get("is_continuation", False)
 
         console.print(f" [green]↳ EN:[/green] [italic]{en_text}[/italic]")
         if new_en:
             console.print(f" [bright_green]   Δ New:[/bright_green] [bold]{new_en}[/bold]")
         console.print()
 
-        results.append((i, growing_text, en_text, new_en))
+        results.append((i, growing_text, en_text, new_en, is_continuation))
 
         # Update history and previous state
         history.append({"role": "user", "content": growing_text})
@@ -259,13 +263,15 @@ if __name__ == "__main__":
     table.add_column("Japanese Input", style="cyan", ratio=2)
     table.add_column("English Translation", style="green", ratio=3)
     table.add_column("New EN (incremental)", style="bright_green", ratio=3)
+    table.add_column("Is Continuation", style="yellow", width=16, justify="center")
 
-    for step, jp, en, new_en in results:
+    for step, jp, en, new_en, is_continuation in results:
         table.add_row(
             str(step),
             jp,
             en,
-            new_en if new_en else "[dim]— (first sentence)[/dim]"
+            new_en if new_en else "[dim]— (first sentence)[/dim]",
+            "✅" if is_continuation else "❌",
         )
 
     console.print(table)

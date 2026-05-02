@@ -24,7 +24,7 @@ from sentence_utils import split_sentences_ja
 from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
 # from translate_jp_en_llm import translate_japanese_to_english
 # from translate_jp_en_llm_cached import translate_japanese_to_english
-from translate_jp_en_llm_prefixed import PrefixTranslationState, translate_with_prefix
+from translate_jp_en_llm_prefixed import translate_japanese_to_english
 
 console = Console(
     theme=Theme(
@@ -171,9 +171,9 @@ def blocking_process_audio(
         MATCH_SCORE_CUTOFF = 75
         match_result = fuzzy_shortest_best_match(
             query=new_ja_text,
-            texts=full_ja_text,
+            text=full_ja_text,
             score_cutoff=MATCH_SCORE_CUTOFF,
-            max_extra_chars=30,
+            max_extra_words=30,
         )
 
         if match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
@@ -215,6 +215,8 @@ def blocking_process_audio(
             trans_en = translate_japanese_to_english(
                 text=ja_text,
                 history=history,
+                prev_ja=prev_full_ja_text, 
+                prev_en=prev_full_en_text
             )
             en_text = trans_en["text"].strip()
         else:
