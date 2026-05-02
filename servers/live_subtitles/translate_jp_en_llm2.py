@@ -3,31 +3,23 @@ translate_jp_en_llm.py
 ──────────────────────
 Japanese → English translator using llama-cpp-python and the
 shisa-v2.1-llama3.2-3b Q4_K_M GGUF model.
-
 The Llama class is loaded once at module level (singleton) so the KV
 cache persists across calls within a single process — ideal for the
 progressive-subtitle demo.
 """
-
 from __future__ import annotations
-
 import time
+import os
+import sys
 from functools import lru_cache
 from typing import Any
-
 from llama_cpp import Llama
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Model path & generation defaults
-# ──────────────────────────────────────────────────────────────────────────────
 
 MODEL_PATH = (
     r"C:\Users\druiv\.cache\llama.cpp\translators"
     r"\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
 )
 
-# Shisa docs recommend temp=0.6, top_p=0.9 for this model family.
-# Context of 8192 is plenty for subtitle translation; raise if needed.
 DEFAULT_MAX_TOKENS = 256
 DEFAULT_TEMPERATURE = 0.6
 DEFAULT_TOP_P = 0.9
@@ -43,10 +35,6 @@ SYSTEM_PROMPT = (
 )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Singleton model loader
-# ──────────────────────────────────────────────────────────────────────────────
-
 @lru_cache(maxsize=1)
 def _get_llm() -> Llama:
     """
@@ -54,18 +42,21 @@ def _get_llm() -> Llama:
     llama-cpp-python auto-detects the Llama-3.2 chat template from GGUF
     metadata, so we don't need to pass chat_format explicitly.
     """
-    return Llama(
-        model_path=MODEL_PATH,
-        n_ctx=N_CTX,
-        n_gpu_layers=-1,       # offload all layers to GPU if available
-        offload_kqv=True,      # keep KV cache on GPU for faster re-use
-        verbose=False,         # suppress llama.cpp startup noise
-    )
+    # Suppress stderr temporarily to hide the llama.cpp context warning
+    old_stderr = sys.stderr
+    sys.stderr = open(os.devnull, 'w')
+    try:
+        llm = Llama(
+            model_path=MODEL_PATH,
+            n_ctx=N_CTX,
+            n_gpu_layers=-1,       # offload all layers to GPU if available
+            offload_kqv=True,      # keep KV cache on GPU for faster re-use
+            verbose=False,         # suppress llama.cpp startup noise
+        )
+    finally:
+        sys.stderr = old_stderr
+    return llm
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Public API
-# ──────────────────────────────────────────────────────────────────────────────
 
 def translate_japanese_to_english(
     text: str,
@@ -102,7 +93,6 @@ def translate_japanese_to_english(
     """
     llm = _get_llm()
 
-    # Build the full message list: system + history + new user turn
     messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages.extend(history)
@@ -121,14 +111,9 @@ def translate_japanese_to_english(
     latency_ms = (time.perf_counter() - t0) * 1000
 
     translation: str = response["choices"][0]["message"]["content"].strip()
-
     usage = response.get("usage", {})
     tokens_evaluated: int = usage.get("prompt_tokens", 0)
     tokens_generated: int = usage.get("completion_tokens", 0)
-
-    # llama-cpp-python exposes cache hits via llm.n_tokens / eval stats;
-    # the simplest reliable proxy is reading the model's last eval counters.
-    # If the field isn't present we fall back to 0.
     tokens_cached: int = getattr(llm, "_n_past_cached", 0)
 
     return {
