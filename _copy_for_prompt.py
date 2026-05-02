@@ -92,9 +92,12 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_emotion_litagin.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server_mac.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm2.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\demo_translate_jp_en_llm.py",
     r"",
 ]
 
@@ -112,9 +115,52 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Add these endpoints:
-/transcribe
-/translate
+How to prevent this log from breaking my logs order
+llama_context: n_ctx_per_seq (8192) < n_ctx_train (131072) -- the full capacity of the model will not be utilized
+
+python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\demo_translate_jp_en_llm.py
+C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\demo_translate_jp_en_llm.py:34: SyntaxWarning: invalid escape sequence '\['
+  console.print(f"[bold yellow]\[Step {i}][/bold yellow] [white]{growing_text}[/white]")
+╭─────────────────────────────────╮
+│ llama-server KV Cache Demo      │
+│ Progressive / Growing Subtitles │
+╰─────────────────────────────────╯
+───────────────────────────────────────── Progressive Growing Input Test ──────────────────────────────────────────
+
+[Step 1] 今日は
+llama_context: n_ctx_per_seq (8192) < n_ctx_train (131072) -- the full capacity of the model will not be utilized
+  ↳ EN: Today.
+
+[Step 2] 今日はとても
+  ↳ EN: Today is very...
+
+[Step 3] 今日はとても疲れた。
+  ↳ EN: Today is very tired.
+
+[Step 4] あなたのことが好きだよ。
+  ↳ EN: I like you very much.
+
+[Step 5] 早く行かないと電車に乗り遅れる！
+  ↳ EN: I have to hurry—I’m going to miss my train!
+
+────────────────────────────────────────────────── Final Results ──────────────────────────────────────────────────
+
+╭──────┬──────────────────────────────────────────┬───────────────────────────────────────────────────────────────╮
+│  #   │ Japanese Input                           │ English Translation                                           │
+├──────┼──────────────────────────────────────────┼───────────────────────────────────────────────────────────────┤
+│  1   │ 今日は                                   │ Today.                                                        │
+│  2   │ 今日はとても                             │ Today is very...                                              │
+│  3   │ 今日はとても疲れた。                     │ Today is very tired.                                          │
+│  4   │ あなたのことが好きだよ。                 │ I like you very much.                                         │
+│  5   │ 早く行かないと電車に乗り遅れる！         │ I have to hurry—I’m going to miss my train!                   │
+╰──────┴──────────────────────────────────────────┴───────────────────────────────────────────────────────────────╯
+
+╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Progressive test completed.                                                                                     │
+│ Watch how cached tokens increase as history grows.                                                              │
+│ Only the latest growing user message needs re-evaluation.                                                       │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
