@@ -23,7 +23,8 @@ from sentence_matcher_ja import fuzzy_shortest_best_match
 from sentence_utils import split_sentences_ja
 from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
 # from translate_jp_en_llm import translate_japanese_to_english
-from translate_jp_en_llm_cached import translate_japanese_to_english
+# from translate_jp_en_llm_cached import translate_japanese_to_english
+from translate_jp_en_llm_prefixed import PrefixTranslationState, translate_with_prefix
 
 console = Console(
     theme=Theme(

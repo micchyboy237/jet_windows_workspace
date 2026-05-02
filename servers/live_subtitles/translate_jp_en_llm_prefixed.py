@@ -1,5 +1,5 @@
 """
-translate_jp_en_llm_cached.py
+translate_jp_en_llm_prefixed.py
 ──────────────────────
 Japanese → English translator using llama-cpp-python and the
 shisa-v2.1-llama3.2-3b Q4_K_M GGUF model.
@@ -14,6 +14,7 @@ import sys
 from functools import lru_cache
 from typing import Any
 from llama_cpp import Llama
+from sentence_matcher_ja import FuzzyMatchResult, fuzzy_shortest_best_match
 
 MODEL_PATH = (
     r"C:\Users\druiv\.cache\llama.cpp\translators"
@@ -71,6 +72,8 @@ def translate_japanese_to_english(
     text: str,
     history: list[dict[str, str]] | None = None,
     *,
+    prev_ja: str | None = None,
+    prev_en: str | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = DEFAULT_TEMPERATURE,
     top_p: float = DEFAULT_TOP_P,
@@ -123,13 +126,60 @@ def translate_japanese_to_english(
     tokens_generated: int = usage.get("completion_tokens", 0)
     tokens_cached: int = getattr(llm, "_n_past_cached", 0)
 
+    # === Incremental "New" parts using fuzzy matching ===
+    new_ja = ""
+    if prev_ja:
+        result: FuzzyMatchResult = fuzzy_shortest_best_match(
+            query=prev_ja, text=text
+        )
+        if result["passed"]:
+            new_ja = result["remaining"]
+
+
+    new_en = ""
+    if prev_en:
+        result: FuzzyMatchResult = fuzzy_shortest_best_match(
+            query=prev_en, text=translation   # ← Fixed: use the new translation
+        )
+        print("\nFuzzy Result EN:")
+        _log_fuzzy_result(result)
+        if result["passed"]:
+            new_en = result["remaining"]
+
     return {
         "text": translation,
+        "prev_en": prev_en,
+        "new_en": new_en,
+        "prev_ja": prev_ja,
+        "new_ja": new_ja,
         "tokens_evaluated": tokens_evaluated,
         "tokens_cached": tokens_cached,
         "tokens_generated": tokens_generated,
         "latency_ms": latency_ms,
     }
+
+
+def _log_fuzzy_result(result: FuzzyMatchResult):
+    inp = result["input"]
+    print(f"Query     : {inp['query']}")
+    print(f"Text      : {inp['text'][:120]}{'...' if len(inp['text']) > 120 else ''}")
+    print(f"Level     : {inp['level']}")
+    print(f"Score     : {result['score']:.1f}")
+    print(f"Cutoff    : {inp['score_cutoff']}")
+    print(f"Passed    : {result['passed']}")
+    print(f"Match     : {result['match']}")
+    print(f"Slice     : [{result['start']}:{result['end']}]")
+    print(f"Remaining : {result['remaining']}")
+
+    highlighted = (
+        result["text"][: result["start"]]
+        + f"\033[1;33m{result['text'][result['start'] : result['end']]}\033[0m"
+        + result["text"][result["end"] :]
+    )
+    print("\nHighlighted in text:")
+    print(highlighted)
+
+    print("✅ Accepted" if result["passed"] else "❌ Below threshold")
 
 
 if __name__ == "__main__":
@@ -161,33 +211,40 @@ if __name__ == "__main__":
     console.print(Rule("[bold]Progressive Growing Input Test[/bold]"))
     console.print()
 
-    results_en = []
-    table_rows = []
+    results = []  # store full data
+    prev_ja = None
+    prev_en = None
 
     for i, growing_text in enumerate(progressive_subtitles, start=1):
         console.print(f"[bold yellow]\[Step {i}][/bold yellow] [white]{growing_text}[/white]")
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[dim]Translating...[/dim]"),
-            console=console,
-            transient=True,
-        ) as progress:
+        
+        with Progress(SpinnerColumn(), TextColumn("[dim]Translating...[/dim]"), console=console, transient=True) as progress:
             progress.add_task("", total=None)
-            result = translate_japanese_to_english(growing_text, history=history)
-
+            
+            result = translate_japanese_to_english(
+                growing_text, 
+                history=history, 
+                prev_ja=prev_ja, 
+                prev_en=prev_en
+            )
+        
         en_text = result["text"]
-        results_en.append(en_text)
+        new_en  = result.get("new_en", "")
 
-        console.print(f"  [green]↳ EN:[/green] [italic]{en_text}[/italic]")
+        console.print(f" [green]↳ EN:[/green] [italic]{en_text}[/italic]")
+        if new_en:
+            console.print(f" [bright_green]   Δ New:[/bright_green] [bold]{new_en}[/bold]")
         console.print()
 
-        table_rows.append((i, growing_text, en_text))
+        results.append((i, growing_text, en_text, new_en))
 
+        # Update history and previous state
         history.append({"role": "user", "content": growing_text})
         history.append({"role": "assistant", "content": en_text})
+        prev_ja = growing_text
+        prev_en = en_text
 
-    # Final results table
+    # === Final Results Table ===
     console.print(Rule("[bold]Final Results[/bold]"))
     console.print()
 
@@ -201,15 +258,14 @@ if __name__ == "__main__":
     table.add_column("#", style="dim", width=4, justify="center")
     table.add_column("Japanese Input", style="cyan", ratio=2)
     table.add_column("English Translation", style="green", ratio=3)
+    table.add_column("New EN (incremental)", style="bright_green", ratio=3)
 
-    for step, jp, en in table_rows:
-        table.add_row(str(step), jp, en)
+    for step, jp, en, new_en in results:
+        table.add_row(
+            str(step),
+            jp,
+            en,
+            new_en if new_en else "[dim]— (first sentence)[/dim]"
+        )
 
     console.print(table)
-    console.print()
-    console.print(Panel(
-        "[dim]Progressive test completed.\n"
-        "Watch how [cyan]cached[/cyan] tokens increase as history grows.\n"
-        "Only the latest growing user message needs re-evaluation.[/dim]",
-        border_style="dim"
-    ))

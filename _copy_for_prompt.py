@@ -96,8 +96,8 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm2.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\demo_translate_jp_en_llm.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_cached.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_prefixed.py",
     r"",
 ]
 
@@ -115,51 +115,53 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-How to prevent this log from breaking my logs order
-llama_context: n_ctx_per_seq (8192) < n_ctx_train (131072) -- the full capacity of the model will not be utilized
+Check 3rd step again. Include debug logs so we can pinpoint root cause correctly.
 
-python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\demo_translate_jp_en_llm.py
-C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\demo_translate_jp_en_llm.py:34: SyntaxWarning: invalid escape sequence '\['
-  console.print(f"[bold yellow]\[Step {i}][/bold yellow] [white]{growing_text}[/white]")
-╭─────────────────────────────────╮
-│ llama-server KV Cache Demo      │
-│ Progressive / Growing Subtitles │
-╰─────────────────────────────────╯
-───────────────────────────────────────── Progressive Growing Input Test ──────────────────────────────────────────
+ython C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_prefixed.py
+[translate_llm_prefixed] Loading model from C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf ...
+[translate_llm_prefixed] Model loaded in 1617 ms
+╭────────────────────────────────────────────────╮
+│ Prefix-Aware Translation Demo                  │
+│ Only NEW English tokens are generated per step │
+╰────────────────────────────────────────────────╯
+─────────────────────────────────────────────── Progressive Prefix Test ────────────────────────────────────────────────
 
 [Step 1] 今日は
-llama_context: n_ctx_per_seq (8192) < n_ctx_train (131072) -- the full capacity of the model will not be utilized
-  ↳ EN: Today.
+  ↳ EN (full): Today.
+  ↳ EN (new): Today.
+    2 tokens | 421 ms
 
 [Step 2] 今日はとても
-  ↳ EN: Today is very...
+  ↳ EN (full): Today. is a beautiful day.
+  ↳ EN (new): is a beautiful day.
+    5 tokens | 394 ms
 
 [Step 3] 今日はとても疲れた。
-  ↳ EN: Today is very tired.
+  ↳ EN (full): Today. is a beautiful day. Today is a beautiful day, but I’m extremely tired.
+  ↳ EN (new): Today is a beautiful day, but I’m extremely tired.
+    12 tokens | 332 ms
 
 [Step 4] あなたのことが好きだよ。
-  ↳ EN: I like you very much.
+  ↳ EN (full): I really like you.
+  ↳ EN (new): I really like you.
+    5 tokens | 290 ms
 
 [Step 5] 早く行かないと電車に乗り遅れる！
-  ↳ EN: I have to hurry—I’m going to miss my train!
+  ↳ EN (full): Gotta hurry—I’m gonna miss my train!
+  ↳ EN (new): Gotta hurry—I’m gonna miss my train!
+    10 tokens | 267 ms
 
-────────────────────────────────────────────────── Final Results ──────────────────────────────────────────────────
-
-╭──────┬──────────────────────────────────────────┬───────────────────────────────────────────────────────────────╮
-│  #   │ Japanese Input                           │ English Translation                                           │
-├──────┼──────────────────────────────────────────┼───────────────────────────────────────────────────────────────┤
-│  1   │ 今日は                                   │ Today.                                                        │
-│  2   │ 今日はとても                             │ Today is very...                                              │
-│  3   │ 今日はとても疲れた。                     │ Today is very tired.                                          │
-│  4   │ あなたのことが好きだよ。                 │ I like you very much.                                         │
-│  5   │ 早く行かないと電車に乗り遅れる！         │ I have to hurry—I’m going to miss my train!                   │
-╰──────┴──────────────────────────────────────────┴───────────────────────────────────────────────────────────────╯
-
-╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Progressive test completed.                                                                                     │
-│ Watch how cached tokens increase as history grows.                                                              │
-│ Only the latest growing user message needs re-evaluation.                                                       │
-╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+─────────────────────────────────────────────────────── Summary ────────────────────────────────────────────────────────
+╭─────┬────────────────────────────┬─────────────────────────────────────────┬─────────────────────────────────────────╮
+│  #  │ Japanese                   │ Full EN                                 │ New EN                                  │
+├─────┼────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
+│  1  │ 今日は                     │ Today.                                  │ Today.                                  │
+│  2  │ 今日はとても               │ Today. is a beautiful day.              │ is a beautiful day.                     │
+│  3  │ 今日はとても疲れた。       │ Today. is a beautiful day. Today is a   │ Today is a beautiful day, but I’m       │
+│     │                            │ beautiful day, but I’m extremely tired. │ extremely tired.                        │
+│  4  │ あなたのことが好きだよ。   │ I really like you.                      │ I really like you.                      │
+│  5  │ 早く行かないと電車に乗り … │ Gotta hurry—I’m gonna miss my train!    │ Gotta hurry—I’m gonna miss my train!    │
+╰─────┴────────────────────────────┴─────────────────────────────────────────┴─────────────────────────────────────────╯
 (jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
 """.strip()
 
