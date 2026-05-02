@@ -153,16 +153,16 @@ def blocking_process_audio(
         f"[info]VAD Reason:[/info] [value]{header['vad_reason']}[/value]"
     )
     console.print(
-        f"[info]Context:[/info] [time]{actual_context_sec:.2f}s[/time] used "
+        f"[info]Context Duration:[/info] [time]{actual_context_sec:.2f}s[/time] used "
         f"/ [time]{context_duration_sec:.2f}s[/time] buffered "
         f"({segments_used}/{len(context_buffer.segments)} segments)"
     )
     console.print(
-        f"[info]Full transcription input:[/info] "
-        f"[time]{actual_full_duration_sec:.2f}s[/time] / [time]{max_duration_sec:.2f}s[/time] max"
+        f"[info]New Audio Duration:[/info] [time]{header['duration_sec']:.2f}s[/time]"
     )
     console.print(
-        f"[info]Audio duration:[/info] [time]{header['duration_sec']:.2f}s[/time]"
+        f"[info]Full Duration:[/info] "
+        f"[time]{actual_full_duration_sec:.2f}s[/time] / [time]{max_duration_sec:.2f}s[/time] max"
     )
 
     full_trans_result = transcribe_japanese(
@@ -217,9 +217,15 @@ def blocking_process_audio(
                 f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}).[/warning]"
             )
             console.print(
-                f"[warning]Translating the full text.[/warning]"
+                f"[warning]No new text.[/warning]"
             )
-            new_text = full_ja_text.strip()
+            return {
+                "uuid": uuid_,
+                "transcription_ja": "",
+                "translation_en": "",
+                "success": False,
+                "message": "No new text",
+            }
 
         new_clean = new_text.rstrip('.。！？、…・「」『』').rstrip()
         if not new_clean:
