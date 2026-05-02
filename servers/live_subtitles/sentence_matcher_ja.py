@@ -16,6 +16,16 @@ class FuzzyMatchInput(TypedDict):
     max_extra_words: int
 
 
+class FuzzyMatchContainsResult(TypedDict):
+    """TypedDict for the return value of fuzzy_shortest_best_match."""
+
+    match: str
+    score: float
+    start: int
+    end: int
+    text: str  # the original text from which this match was taken
+
+
 class FuzzyMatchResult(TypedDict):
     """Complete fuzzy match result."""
     input: FuzzyMatchInput
@@ -60,6 +70,98 @@ def _split_words(text: str) -> List[str]:
 def _preprocess(text: str) -> str:
     """Consistent preprocessing for better matching."""
     return utils.default_process(text)  # lower + strip punctuation etc.
+
+
+
+def fuzzy_shortest_best_match_contains(
+    query: str,
+    texts: str | List[str],
+    score_cutoff: int = 75,
+    max_extra_chars: int = 20,
+) -> FuzzyMatchContainsResult:
+    """
+    Find the shortest contiguous substring with the highest score across one or more texts.
+    When multiple texts are provided, only the best result (highest score) is returned.
+    using fuzzy matching (WRatio), preferring higher score then shorter length.
+
+    Args:
+        query: The string to search for.
+        texts: A single string or list of strings to search within.
+        score_cutoff: Minimum acceptable score (default: 75).
+        max_extra_chars: Maximum extra characters allowed in the match window.
+
+    Returns:
+        FuzzyMatchContainsResult containing match, score, start, end, and the original text.
+    """
+    if not query:
+        return {"match": "", "score": 0.0, "start": -1, "end": -1, "text": ""}
+
+    # Normalize input to list
+    if isinstance(texts, str):
+        text_list: List[str] = [texts]
+    else:
+        text_list = [t for t in texts if t]  # remove empty strings
+
+    if not text_list:
+        return {"match": "", "score": 0.0, "start": -1, "end": -1, "text": ""}
+
+    best_result: Optional[FuzzyMatchResult] = None
+    best_score: float = -1.0
+
+    for text in text_list:
+        # Quick candidate search per text
+        candidates = process.extract(
+            query, [text], scorer=fuzz.partial_ratio, limit=3, score_cutoff=score_cutoff
+        )
+        if not candidates:
+            continue
+
+        # Detailed search for shortest best window in this text
+        local_best_score: float = -1.0
+        local_best_start: int = -1
+        local_best_end: int = -1
+        local_best_match: str = ""
+        local_best_length: int = float("inf")
+
+        query_len = len(query)
+        max_len = query_len + max_extra_chars
+
+        for length in range(query_len, max_len + 1):
+            for i in range(len(text) - length + 1):
+                window = text[i : i + length]
+                score = fuzz.WRatio(query, window)
+
+                if score > local_best_score or (
+                    score == local_best_score and length < local_best_length
+                ):
+                    local_best_score = score
+                    local_best_start = i
+                    local_best_end = i + length
+                    local_best_match = window
+                    local_best_length = length
+
+        # Fallback for this text
+        if local_best_score < score_cutoff and candidates:
+            local_best_match = candidates[0][0]
+            local_best_score = float(candidates[0][1])
+            local_best_start = text.find(local_best_match)
+            local_best_end = local_best_start + len(local_best_match)
+
+        # Compare with global best
+        if local_best_score > best_score:
+            best_score = local_best_score
+            best_result = {
+                "match": local_best_match,
+                "score": local_best_score,
+                "start": local_best_start,
+                "end": local_best_end,
+                "text": text,
+            }
+
+    if best_result is None:
+        return {"match": "", "score": 0.0, "start": -1, "end": -1, "text": ""}
+
+    return best_result
 
 
 def fuzzy_shortest_best_match(

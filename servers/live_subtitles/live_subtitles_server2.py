@@ -19,11 +19,10 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.theme import Theme
-from sentence_matcher_ja import fuzzy_shortest_best_match
+from sentence_matcher_ja import fuzzy_shortest_best_match_contains
 from sentence_utils import split_sentences_ja
 from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
-# from translate_jp_en_llm import translate_japanese_to_english
-from translate_jp_en_llm_cached import translate_japanese_to_english
+from translate_jp_en_llm import translate_japanese_to_english
 
 console = Console(
     theme=Theme(
@@ -168,11 +167,11 @@ def blocking_process_audio(
         last_ja_sentence, last_en_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
 
         MATCH_SCORE_CUTOFF = 75
-        match_result = fuzzy_shortest_best_match(
+        match_result = fuzzy_shortest_best_match_contains(
             query=new_ja_text,
-            text=full_ja_text,
+            texts=full_ja_text,
             score_cutoff=MATCH_SCORE_CUTOFF,
-            max_extra_words=30,
+            max_extra_chars=30,
         )
 
         if match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
@@ -213,6 +212,7 @@ def blocking_process_audio(
             history = context_buffer.get_context_history()
             trans_en = translate_japanese_to_english(
                 text=ja_text,
+                enable_scoring=False,
                 history=history,
             )
             en_text = trans_en["text"].strip()
@@ -237,6 +237,7 @@ def blocking_process_audio(
             history = context_buffer.get_context_history()
             full_trans_en = translate_japanese_to_english(
                 text=ja_text,
+                enable_scoring=False,
                 history=history,
             )
             new_ja_sents = ja_sents
@@ -655,6 +656,7 @@ async def translate_endpoint(request: TranslateRequest):
             text=request.japanese_text.strip(),
             history=request.history,
             temperature=request.temperature or 0.35,
+            enable_scoring=True,   # Enable scoring for REST calls
         )
 
         return {
