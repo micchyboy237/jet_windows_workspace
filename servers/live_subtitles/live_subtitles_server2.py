@@ -170,9 +170,9 @@ def blocking_process_audio(
         MATCH_SCORE_CUTOFF = 75
         match_result = fuzzy_shortest_best_match(
             query=new_ja_text,
-            texts=full_ja_text,
+            text=full_ja_text,
             score_cutoff=MATCH_SCORE_CUTOFF,
-            max_extra_chars=30,
+            max_extra_words=30,
         )
 
         if match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
