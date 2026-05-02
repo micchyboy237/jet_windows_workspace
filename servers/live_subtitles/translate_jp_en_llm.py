@@ -327,13 +327,14 @@ class TranslationResult(TypedDict):
 
 
 def translate_japanese_to_english(
-    ja_text: str,
+    text: str,
     enable_scoring: bool = False,
     history: Optional[List[ChatCompletionRequestMessage]] = None,
     temperature: float = TRANSLATION_DEFAULTS["temperature"],
     max_tokens: int = TRANSLATION_DEFAULTS["max_tokens"],
     **kwargs,
 ) -> TranslationResult:
+    ja_text = text
     if not ja_text or not ja_text.strip():
         return {"text": "", "log_prob": None, "confidence": None, "quality": "N/A"}
 

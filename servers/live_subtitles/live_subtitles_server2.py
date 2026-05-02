@@ -22,7 +22,8 @@ from rich.theme import Theme
 from sentence_matcher_ja import fuzzy_shortest_best_match
 from sentence_utils import split_sentences_ja
 from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
-from translate_jp_en_llm import translate_japanese_to_english
+# from translate_jp_en_llm import translate_japanese_to_english
+from translate_jp_en_llm_cached import translate_japanese_to_english
 
 console = Console(
     theme=Theme(
@@ -211,8 +212,7 @@ def blocking_process_audio(
         if ja_text:
             history = context_buffer.get_context_history()
             trans_en = translate_japanese_to_english(
-                ja_text=ja_text,
-                enable_scoring=False,
+                text=ja_text,
                 history=history,
             )
             en_text = trans_en["text"].strip()
@@ -236,8 +236,7 @@ def blocking_process_audio(
         if curr_clean:
             history = context_buffer.get_context_history()
             full_trans_en = translate_japanese_to_english(
-                ja_text=ja_text,
-                enable_scoring=False,
+                text=ja_text,
                 history=history,
             )
             new_ja_sents = ja_sents
@@ -653,10 +652,9 @@ async def translate_endpoint(request: TranslateRequest):
             raise HTTPException(status_code=400, detail="japanese_text is required and cannot be empty")
 
         result = translate_japanese_to_english(
-            ja_text=request.japanese_text.strip(),
+            text=request.japanese_text.strip(),
             history=request.history,
             temperature=request.temperature or 0.35,
-            enable_scoring=True,   # Enable scoring for REST calls
         )
 
         return {

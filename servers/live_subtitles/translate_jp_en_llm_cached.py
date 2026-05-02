@@ -1,5 +1,5 @@
 """
-translate_jp_en_llm.py
+translate_jp_en_llm_cached.py
 ──────────────────────
 Japanese → English translator using llama-cpp-python and the
 shisa-v2.1-llama3.2-3b Q4_K_M GGUF model.
@@ -42,6 +42,9 @@ def _get_llm() -> Llama:
     llama-cpp-python auto-detects the Llama-3.2 chat template from GGUF
     metadata, so we don't need to pass chat_format explicitly.
     """
+    print(f"[translate_llm] Loading translator model from {MODEL_PATH} ...", flush=True)
+    t0 = time.perf_counter()
+
     # Suppress stderr temporarily to hide the llama.cpp context warning
     old_stderr = sys.stderr
     sys.stderr = open(os.devnull, 'w')
@@ -55,7 +58,13 @@ def _get_llm() -> Llama:
         )
     finally:
         sys.stderr = old_stderr
+
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    print(f"[translate_llm] Model loaded in {elapsed_ms:.0f} ms", flush=True)
     return llm
+
+
+llm = _get_llm()
 
 
 def translate_japanese_to_english(
@@ -91,8 +100,6 @@ def translate_japanese_to_english(
         tokens_generated  – new tokens generated (int)
         latency_ms        – wall-clock time in ms (float)
     """
-    llm = _get_llm()
-
     messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
         messages.extend(history)

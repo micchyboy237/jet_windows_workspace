@@ -13,7 +13,6 @@ import scipy.io.wavfile as wavfile
 import torch
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
-from ja_punctuator import add_punctuation
 from sentence_utils import SYMBOL_RANGE, split_sentences_ja
 
 TimestampPair = Tuple[int, int]
@@ -412,7 +411,8 @@ def transcribe_japanese_llm_from_file(
     phrase_segments: list[PhraseSegment] = []
 
     if segments and ja_text.strip():
-        ja_text = add_punctuation(ja_text, space_replacement='、')
+        # Replace spaces with commas
+        ja_text = ja_text.replace(" ", '、')
         phrases = split_sentences_ja(ja_text)
 
         # Update: result in empty text if transcribed text only contains punctuation
