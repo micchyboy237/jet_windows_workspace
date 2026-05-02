@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Deque, List, Optional, TypedDict, Literal
+from typing import Deque, List, Optional, TypedDict, Literal, Tuple
 import numpy as np
 
 
@@ -27,6 +27,16 @@ class TranslationHistoryItem(TypedDict):
     """Structured history item for LLM chat completion."""
     role: Literal["user", "assistant"]
     content: str
+
+
+class HistoryResult(TypedDict):
+    history: List[TranslationHistoryItem]
+    included_indices: set[int]
+    included_duration_sec: float
+    excluded_duration_sec: float
+    total_segments: int
+    included_segments: int
+    excluded_segments: int
 
 
 class AudioContextBuffer:
@@ -225,47 +235,98 @@ class AudioContextBuffer:
         _, meta = self.segments[0]
         return meta["uuid"]
 
-    def get_context_history(
+    def get_context_history_by_duration(
         self,
-        max_segments: int = 5,
-    ) -> List[TranslationHistoryItem]:
+        max_duration_sec: float = 30.0,
+        reserved_duration_sec: float = 0.0,
+    ) -> HistoryResult:
         """
-        Build translation history from buffered segments.
+        Build translation history from buffered segments, filtered by total
+        duration instead of segment count.
+
+        Walks segments from NEWEST to OLDEST, accumulating each segment's
+        ``duration_sec`` field.  Stops adding segments the moment the running
+        total would exceed the effective time budget
+        (max_duration_sec - reserved_duration_sec). The accepted segments are
+        then reversed so the result is in chronological (oldest-first) order,
+        matching what the LLM expects as a conversation history.
+
+        Duration is accumulated for ALL segments in the walk (including those
+        with empty text), so the time budget stays consistent with the actual
+        audio buffer regardless of which segments have usable text.
+
+        Args:
+            max_duration_sec: Maximum total audio duration (in seconds) of
+                segments to include.  Defaults to 30.0 s.
+            reserved_duration_sec: Duration (in seconds) to reserve from the
+                budget before walking segments — e.g. the incoming new audio
+                chunk duration. The effective budget becomes
+                (max_duration_sec - reserved_duration_sec).
 
         Returns:
-            List[TranslationHistoryItem]:
-                Alternating user (JA) and assistant (EN) messages.
-
-        Notes:
-            - Uses only segments with both JA and EN text.
-            - Returns last N segments only (bounded context).
-            - Preserves chronological order.
+            HistoryResult with history messages, included indices, and
+            duration accounting for both included and excluded segments.
         """
+        effective_max = max(0.0, max_duration_sec - reserved_duration_sec)
         if not self.segments:
-            return []
+            return HistoryResult(
+                history=[],
+                included_indices=set(),
+                included_duration_sec=0.0,
+                excluded_duration_sec=0.0,
+                total_segments=0,
+                included_segments=0,
+                excluded_segments=0,
+            )
 
-        history: List[TranslationHistoryItem] = []
+        selected: List[Tuple[int, str, str]] = []  # (index, ja_text, en_text)
+        # Snapshot once — consistent view, safe from concurrent prune calls.
+        accumulated_sec = 0.0
+        segments_list = list(self.segments)
 
-        # Take last N segments
-        selected_segments = list(self.segments)[-max_segments:]
-
-        for _, meta in selected_segments:
+        # Walk newest → oldest so we always keep the most recent context.
+        for i, (_, meta) in reversed(list(enumerate(segments_list))):
             ja = (meta.get("ja_text") or "").strip()
             en = (meta.get("en_text") or "").strip()
+            seg_duration = float(meta.get("duration_sec") or 0.0)
 
-            if not ja or not en:
-                continue
+            # Stop once adding this segment would exceed the time budget.
+            if accumulated_sec + seg_duration > effective_max:
+                break
 
-            history.append({
-                "role": "user",
-                "content": ja,
-            })
-            history.append({
-                "role": "assistant",
-                "content": en,
-            })
+            # Always accumulate duration — even for text-empty segments —
+            # so the budget matches the real audio window.
+            accumulated_sec += seg_duration
 
-        return history
+            # Only include segments that have usable text for history.
+            if ja and en:
+                selected.append((i, ja, en))
+
+        # Restore chronological order before building the message list.
+        selected.reverse()
+
+        included_indices = {i for i, _, _ in selected}
+        excluded_indices = set(range(len(segments_list))) - included_indices
+        excluded_duration_sec = sum(
+            float((segments_list[i][1].get("duration_sec") or 0.0))
+            for i in excluded_indices
+        )
+
+        history: List[TranslationHistoryItem] = []
+        for _, ja, en in selected:
+            history.append({"role": "user",      "content": ja})
+            history.append({"role": "assistant", "content": en})
+
+        return HistoryResult(
+            history=history,
+            included_indices=included_indices,
+            included_duration_sec=accumulated_sec,
+            excluded_duration_sec=excluded_duration_sec,
+            total_segments=len(segments_list),
+            included_segments=len(included_indices),
+            excluded_segments=len(excluded_indices),
+        )
+   
 
     def reset(self) -> None:
         """Clear all buffered audio and metadata, reset total ample count to 0."""

@@ -248,18 +248,59 @@ def blocking_process_audio(
         last_sentence_clean = match_result["match"].strip() if match_result["score"] >= MATCH_SCORE_CUTOFF else None
 
         if ja_text:
-            history = context_buffer.get_context_history(max_segments=len(context_buffer.segments))
-            print(f"History ({len(history)}) | Segments ({len(context_buffer.segments)})")
-            print(json.dumps(history, indent=1, ensure_ascii=False))
+            # Reserve the new audio duration sec buffer to avoid exceeding max transcription context length.
+            hist_result = context_buffer.get_context_history_by_duration(
+                max_duration_sec=context_buffer.max_duration_sec,
+                reserved_duration_sec=new_audio_duration_sec,
+            )
+            history          = hist_result["history"]
+            included_indices = hist_result["included_indices"]
+
+            history_pairs      = len(history) // 2
+            max_dur            = context_buffer.max_duration_sec
+            inc_dur            = hist_result["included_duration_sec"]
+            total_history_dur  = inc_dur + new_audio_duration_sec
+            over_budget        = total_history_dur > max_dur
+
+            console.print(
+                f"[info]History:[/info] "
+                f"[number]{history_pairs}[/number] pairs "
+                f"([number]{hist_result['included_segments']}[/number] included / "
+                f"[number]{hist_result['excluded_segments']}[/number] excluded / "
+                f"[number]{hist_result['total_segments']}[/number] total segments)"
+            )
+            console.print(
+                f"[info]Combined Duration:[/info] "
+                f"[time]{inc_dur:.2f}s[/time] history"
+                f"  +  [time]{new_audio_duration_sec:.2f}s[/time] new"
+                f"  =  [{'error' if over_budget else 'time'}]{total_history_dur:.2f}s[/{'error' if over_budget else 'time'}] total"
+                f"  /  [time]{max_dur:.2f}s[/time] max"
+                + (" [error]⚠ EXCEEDS BUDGET[/error]" if over_budget else "")
+            )
+       
+            for i, (_, meta) in enumerate(list(context_buffer.segments)):
+                seg_en = (meta.get("en_text") or "").strip()[:60]
+                seg_dur = float(meta.get("duration_sec") or 0.0)
+                has_text = bool((meta.get("en_text") or "").strip())
+                tag = "success" if i in included_indices else "dim"
+                text_tag = "white" if has_text else "yellow"
+                console.print(
+                    f"  [{tag}]seg[{i}][/{tag}] "
+                    f"[time]{meta.get('duration_sec', 0):.2f}s[/time] "
+                    f"[uuid]{meta.get('uuid', '')[-6:]}[/uuid] "
+                    f"[{text_tag}]{seg_en}{'…' if seg_en else '(no text)'}[/{text_tag}]"
+                    + (f"  [dim]+{seg_dur:.2f}s[/dim]" if i in included_indices else "")
+                )
             trans_en = translate_japanese_to_english(
                 text=ja_text,
                 enable_scoring=False,
                 history=history,
             )
             en_text = trans_en["text"].strip()
+   
         else:
             en_text = ""
-
+       
         if prev_full_en_text:
             if new_ja_text_res["start_index"] == 0:
                 full_en_text = en_text.strip()
