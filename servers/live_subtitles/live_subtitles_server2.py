@@ -114,11 +114,38 @@ def blocking_process_audio(
     else:
         prev_vad_reason = header["vad_reason"]
 
-    context_audio_int16 = context_buffer.get_context_audio()
+    new_audio_duration_sec = len(audio_np) / sample_rate
+    context_duration_sec = context_buffer.get_total_duration()
+    max_duration_sec = context_buffer.max_duration_sec
+    combined_naive_sec = context_duration_sec + new_audio_duration_sec
+
+    context_audio_int16, actual_context_sec, segments_used = (
+        context_buffer.get_context_audio_within_limit(new_audio_duration_sec)
+    )
+
+    if combined_naive_sec > max_duration_sec:
+        dropped_segments = len(context_buffer.segments) - segments_used
+        console.print(
+            f"[warning]⚠️  Combined audio ({combined_naive_sec:.2f}s) would exceed "
+            f"max_duration_sec ({max_duration_sec:.2f}s). "
+            f"Dropped {dropped_segments} oldest segment(s) to stay within limit. "
+            f"Using {segments_used} segment(s) = {actual_context_sec:.2f}s context.[/warning]"
+        )
+
     if context_audio_int16.size > 0:
         full_audio_int16 = np.concatenate([context_audio_int16, audio_np])
     else:
         full_audio_int16 = audio_np
+
+    actual_full_duration_sec = len(full_audio_int16) / sample_rate
+
+    # Hard safety guard — should never trigger, but catches bugs immediately.
+    if actual_full_duration_sec > max_duration_sec + 1e-3:
+        raise RuntimeError(
+            f"BUG: full_audio duration {actual_full_duration_sec:.3f}s "
+            f"exceeds max_duration_sec {max_duration_sec:.2f}s after trimming. "
+            "This should never happen — check get_context_audio_within_limit()."
+        )
 
     full_audio_bytes = full_audio_int16.tobytes()
 
@@ -126,7 +153,13 @@ def blocking_process_audio(
         f"[info]VAD Reason:[/info] [value]{header['vad_reason']}[/value]"
     )
     console.print(
-        f"[info]Context duration:[/info] [time]{context_buffer.get_total_duration():.2f}s[/time]"
+        f"[info]Context:[/info] [time]{actual_context_sec:.2f}s[/time] used "
+        f"/ [time]{context_duration_sec:.2f}s[/time] buffered "
+        f"({segments_used}/{len(context_buffer.segments)} segments)"
+    )
+    console.print(
+        f"[info]Full transcription input:[/info] "
+        f"[time]{actual_full_duration_sec:.2f}s[/time] / [time]{max_duration_sec:.2f}s[/time] max"
     )
     console.print(
         f"[info]Audio duration:[/info] [time]{header['duration_sec']:.2f}s[/time]"
@@ -209,7 +242,9 @@ def blocking_process_audio(
         last_sentence_clean = match_result["match"].strip() if match_result["score"] >= MATCH_SCORE_CUTOFF else None
 
         if ja_text:
-            history = context_buffer.get_context_history()
+            history = context_buffer.get_context_history(max_segments=len(context_buffer.segments))
+            print(f"History ({len(history)}) | Segments ({len(context_buffer.segments)})")
+            print(json.dumps(history, indent=1, ensure_ascii=False))
             trans_en = translate_japanese_to_english(
                 text=ja_text,
                 enable_scoring=False,
@@ -234,11 +269,9 @@ def blocking_process_audio(
         curr_clean = ja_text.rstrip('.。！？、…・「」『』').rstrip()
 
         if curr_clean:
-            history = context_buffer.get_context_history()
             full_trans_en = translate_japanese_to_english(
                 text=ja_text,
                 enable_scoring=False,
-                history=history,
             )
             new_ja_sents = ja_sents
             full_en_text = full_trans_en["text"].strip()

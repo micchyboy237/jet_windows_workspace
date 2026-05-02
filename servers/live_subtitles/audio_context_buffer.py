@@ -79,13 +79,70 @@ class AudioContextBuffer:
             oldest_audio, _ = self.segments.popleft()
             self.total_samples -= len(oldest_audio)
 
-    def get_context_audio(self) -> np.ndarray:
-        """Return the last N seconds as int16 PCM (exactly what FunASR expects)."""
+    def get_context_audio(self, max_segments: Optional[int] = None) -> np.ndarray:
+        """Return the last N seconds as int16 PCM (exactly what FunASR expects).
+
+        Args:
+            max_segments: If provided, only include audio from the last N segments.
+                        If None, includes all buffered segments.
+        """
         if not self.segments:
             return np.array([], dtype=np.int16)
 
-        # All segments are already int16 → just concatenate
-        return np.concatenate([audio for audio, _ in self.segments]).astype(np.int16)
+        segments = (
+            list(self.segments)[-max_segments:]
+            if max_segments is not None
+            else self.segments
+        )
+
+        return np.concatenate([audio for audio, _ in segments]).astype(np.int16)
+
+    def get_context_audio_within_limit(
+        self,
+        new_audio_duration_sec: float,
+    ) -> tuple[np.ndarray, float, int]:
+        """Return context audio trimmed at SEGMENT boundaries so (context + new) fits
+        within max_duration_sec. Never slices mid-segment audio to avoid word/sentence cutoff.
+
+        Trimming strategy:
+        - Drop WHOLE oldest segments until the remaining context + new chunk fits.
+        - This means we may use slightly less than the maximum allowed context,
+          but we never cut audio mid-word.
+
+        Args:
+            new_audio_duration_sec: Duration in seconds of the incoming new audio chunk.
+
+        Returns:
+            tuple:
+                context_audio (np.ndarray int16): Safe context audio to prepend.
+                actual_context_sec (float): Duration of returned context audio.
+                segments_used (int): How many buffer segments were included.
+        """
+        if not self.segments:
+            return np.array([], dtype=np.int16), 0.0, 0
+
+        allowed_context_sec = max(0.0, self.max_duration_sec - new_audio_duration_sec)
+
+        # Walk newest → oldest, accumulate WHOLE segments only.
+        segments_list = list(self.segments)
+        selected: list[np.ndarray] = []
+        accumulated_sec = 0.0
+
+        for audio, _ in reversed(segments_list):
+            seg_duration = len(audio) / self.sample_rate
+            if accumulated_sec + seg_duration > allowed_context_sec:
+                # This whole segment would overflow — skip it (don't slice).
+                break
+            selected.append(audio)
+            accumulated_sec += seg_duration
+
+        if not selected:
+            return np.array([], dtype=np.int16), 0.0, 0
+
+        selected.reverse()  # restore chronological order (oldest → newest)
+        context_audio = np.concatenate(selected).astype(np.int16)
+        actual_context_sec = len(context_audio) / self.sample_rate
+        return context_audio, actual_context_sec, len(selected)
 
     def get_total_duration(self) -> float:
         """Returns current buffered duration (will always be ≤ max_duration_sec)."""
