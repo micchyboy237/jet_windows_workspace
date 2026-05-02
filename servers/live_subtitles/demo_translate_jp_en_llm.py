@@ -1,4 +1,4 @@
-from translate_jp_en_llm2 import translate_japanese_to_english
+from translate_jp_en_llm_cached import translate_japanese_to_english
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
