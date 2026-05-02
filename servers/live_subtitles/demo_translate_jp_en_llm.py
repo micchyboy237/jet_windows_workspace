@@ -17,11 +17,11 @@ if __name__ == "__main__":
 
     history = []
     progressive_subtitles = [
-        "今日は",                            # Expected: "Today," or "It's today." (incomplete)
-        "今日はとても",                      # Expected: "Today is very" (still incomplete)
-        "今日はとても疲れた。",              # Expected: "I'm so tired today."
-        "あなたのことが好きだよ。",          # Expected: "I like you."
-        "早く行かないと電車に乗り遅れる！",  # Expected: "Hurry up or we'll miss the train!"
+        "今日は",  #  "Today," or "It's today." (incomplete)
+        "今日はとても",  #  "Today is very" (still incomplete)
+        "今日はとても疲れた。",  #  "I'm so tired today."
+        "あなたのことが好きだよ。",  #  "I like you."
+        "早く行かないと電車に乗り遅れる！",  #  "Hurry up or we'll miss the train!"
     ]
 
     console.print(Rule("[bold]Progressive Growing Input Test[/bold]"))
