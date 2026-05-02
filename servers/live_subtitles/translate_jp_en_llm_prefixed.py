@@ -8,13 +8,14 @@ cache persists across calls within a single process — ideal for the
 progressive-subtitle demo.
 """
 from __future__ import annotations
+import json
 import time
 import os
 import sys
 from functools import lru_cache
 from typing import Any
 from llama_cpp import Llama
-from sentence_matcher_ja import FuzzyMatchResult, fuzzy_shortest_best_match
+from sentence_matcher_ja import fuzzy_match_prefix_texts
 
 MODEL_PATH = (
     r"C:\Users\druiv\.cache\llama.cpp\translators"
@@ -72,8 +73,6 @@ def translate_japanese_to_english(
     text: str,
     history: list[dict[str, str]] | None = None,
     *,
-    prev_ja: str | None = None,
-    prev_en: str | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = DEFAULT_TEMPERATURE,
     top_p: float = DEFAULT_TOP_P,
@@ -126,63 +125,13 @@ def translate_japanese_to_english(
     tokens_generated: int = usage.get("completion_tokens", 0)
     tokens_cached: int = getattr(llm, "_n_past_cached", 0)
 
-    # === Incremental "New" parts using fuzzy matching ===
-    is_continuation = False
-    new_ja = text
-    if prev_ja:
-        result: FuzzyMatchResult = fuzzy_shortest_best_match(
-            query=prev_ja, text=text
-        )
-        if result["passed"]:
-            new_ja = result["remaining"]
-
-
-    new_en = translation
-    if prev_en:
-        result: FuzzyMatchResult = fuzzy_shortest_best_match(
-            query=prev_en, text=translation   # ← Fixed: use the new translation
-        )
-        print("\nFuzzy Result EN:")
-        _log_fuzzy_result(result)
-        if result["passed"]:
-            new_en = result["remaining"]
-            is_continuation = True
-
     return {
         "text": translation,
-        "prev_en": prev_en,
-        "new_en": new_en,
-        "prev_ja": prev_ja,
-        "new_ja": new_ja,
         "tokens_evaluated": tokens_evaluated,
         "tokens_cached": tokens_cached,
         "tokens_generated": tokens_generated,
         "latency_ms": latency_ms,
-        "is_continuation": is_continuation,
     }
-
-
-def _log_fuzzy_result(result: FuzzyMatchResult):
-    inp = result["input"]
-    print(f"Query     : {inp['query']}")
-    print(f"Text      : {inp['text'][:120]}{'...' if len(inp['text']) > 120 else ''}")
-    print(f"Level     : {inp['level']}")
-    print(f"Score     : {result['score']:.1f}")
-    print(f"Cutoff    : {inp['score_cutoff']}")
-    print(f"Passed    : {result['passed']}")
-    print(f"Match     : {result['match']}")
-    print(f"Slice     : [{result['start']}:{result['end']}]")
-    print(f"Remaining : {result['remaining']}")
-
-    highlighted = (
-        result["text"][: result["start"]]
-        + f"\033[1;33m{result['text'][result['start'] : result['end']]}\033[0m"
-        + result["text"][result["end"] :]
-    )
-    print("\nHighlighted in text:")
-    print(highlighted)
-
-    print("✅ Accepted" if result["passed"] else "❌ Below threshold")
 
 
 if __name__ == "__main__":
@@ -219,33 +168,52 @@ if __name__ == "__main__":
     prev_en = None
 
     for i, growing_text in enumerate(progressive_subtitles, start=1):
-        console.print(f"[bold yellow]\[Step {i}][/bold yellow] [white]{growing_text}[/white]")
+        ja_text = growing_text
+
+        console.print(f"[bold yellow]\[Step {i}][/bold yellow] [white]{ja_text}[/white]")
         
         with Progress(SpinnerColumn(), TextColumn("[dim]Translating...[/dim]"), console=console, transient=True) as progress:
             progress.add_task("", total=None)
             
             result = translate_japanese_to_english(
-                growing_text, 
+                ja_text, 
                 history=history, 
-                prev_ja=prev_ja, 
-                prev_en=prev_en
             )
+
+            en_text = result["text"]
+
+            fuzzy_texts_result = fuzzy_match_prefix_texts({
+                "full_ja": ja_text,
+                "full_en": result["text"],
+                "prev_ja": prev_ja,
+                "prev_en": prev_en,
+            })
+
+            new_ja = fuzzy_texts_result["new_ja"]
+            new_en = fuzzy_texts_result["new_en"]
         
-        en_text = result["text"]
-        new_en  = result.get("new_en", "")
-        is_continuation = result.get("is_continuation", False)
+        en_text = fuzzy_texts_result["full_en"]
+        is_continuation = fuzzy_texts_result["is_continuation"]
 
         console.print(f" [green]↳ EN:[/green] [italic]{en_text}[/italic]")
         if new_en:
             console.print(f" [bright_green]   Δ New:[/bright_green] [bold]{new_en}[/bold]")
         console.print()
 
-        results.append((i, growing_text, en_text, new_en, is_continuation))
+        results.append((i, ja_text, en_text, new_en, is_continuation))
 
         # Update history and previous state
-        history.append({"role": "user", "content": growing_text})
+        history.append({"role": "user", "content": ja_text})
         history.append({"role": "assistant", "content": en_text})
-        prev_ja = growing_text
+
+        console.print(f"[bold magenta]History ({len(history)}):[/bold magenta]")
+        console.print(
+            json.dumps(history, indent=1, ensure_ascii=False),
+            style="bright_blue on grey11",
+        )
+        console.print("\n")
+
+        prev_ja = ja_text
         prev_en = en_text
 
     # === Final Results Table ===

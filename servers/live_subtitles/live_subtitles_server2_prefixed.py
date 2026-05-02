@@ -19,11 +19,12 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.theme import Theme
-from sentence_matcher_ja import fuzzy_shortest_best_match
+from sentence_matcher_ja import fuzzy_match_prefix_texts
 from sentence_utils import split_sentences_ja
 from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
 # from translate_jp_en_llm import translate_japanese_to_english
-from translate_jp_en_llm_cached import translate_japanese_to_english
+# from translate_jp_en_llm_cached import translate_japanese_to_english
+from translate_jp_en_llm_prefixed import translate_japanese_to_english
 
 console = Console(
     theme=Theme(
@@ -101,6 +102,7 @@ def blocking_process_audio(
     Runs in thread pool — contains the blocking CPU/GPU heavy work.
     """
     global prev_vad_reason, prev_end_sec
+
     uuid_ = header.get("uuid")
     if not uuid_:
         console.print("[error]Missing UUID in header[/error]")
@@ -108,6 +110,7 @@ def blocking_process_audio(
 
     sample_rate = header.get("sample_rate", 16000)
     full_trans_result = None
+
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
 
     if should_reset_context(header):
@@ -123,15 +126,9 @@ def blocking_process_audio(
 
     full_audio_bytes = full_audio_int16.tobytes()
 
-    console.print(
-        f"[info]VAD Reason:[/info] [value]{header['vad_reason']}[/value]"
-    )
-    console.print(
-        f"[info]Context duration:[/info] [time]{context_buffer.get_total_duration():.2f}s[/time]"
-    )
-    console.print(
-        f"[info]Audio duration:[/info] [time]{header['duration_sec']:.2f}s[/time]"
-    )
+    console.print(f"[info]VAD Reason:[/info] [value]{header['vad_reason']}[/value]")
+    console.print(f"[info]Context duration:[/info] [time]{context_buffer.get_total_duration():.2f}s[/time]")
+    console.print(f"[info]Audio duration:[/info] [time]{header['duration_sec']:.2f}s[/time]")
 
     full_trans_result = transcribe_japanese(
         audio_bytes=full_audio_bytes,
@@ -146,102 +143,109 @@ def blocking_process_audio(
     full_ja_text = full_word_segments_text
     full_ja_sents = split_sentences_ja(full_ja_text)
 
+    history = None
     prev_full_ja_text = None
     prev_full_en_text = None
-    unchanged_text = None
-    new_ja_text = full_ja_text
-    new_ja_start_index = None
-    new_ja_similarity = None
-    history = None
 
     if context_buffer.segments:
         _, last_meta = context_buffer.get_last_segment()
         prev_full_ja_text = last_meta.get("full_ja_text", "")
         prev_full_en_text = last_meta.get("full_en_text", "")
 
-        new_ja_text_res = extract_new_ja_text(prev_full_ja_text, full_ja_text)
-        unchanged_text = new_ja_text_res["unchanged_text"]
-        new_ja_text = new_ja_text_res["new_text"]
-        new_ja_start_index = new_ja_text_res["start_index"]
-        new_ja_similarity = new_ja_text_res["similarity"]
-
-        last_ja_sentence, last_en_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
-
-        MATCH_SCORE_CUTOFF = 75
-        match_result = fuzzy_shortest_best_match(
-            query=new_ja_text,
-            texts=full_ja_text,
-            score_cutoff=MATCH_SCORE_CUTOFF,
-            max_extra_chars=30,
-        )
-
-        if match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
-            console.print("[success bold]✅ Accepted[/success bold]")
-            new_text_start = match_result["end"]
-            new_text = new_ja_text
-        else:
-            console.print("[error]❌ Below threshold[/error]")
-            console.print(
-                f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}).[/warning]"
-            )
-            console.print(
-                f"[warning]Translating the full text.[/warning]"
-            )
-            new_text = full_ja_text.strip()
-
-        new_clean = new_text.rstrip('.。！？、…・「」『』').rstrip()
-        if not new_clean:
+        # Guard: skip if full transcription is empty after cleaning
+        full_ja_clean = full_ja_text.rstrip('.。！？、…・「」『』').rstrip()
+        if not full_ja_clean:
             return {
                 "uuid": uuid_,
                 "transcription_ja": "",
                 "translation_en": "",
                 "success": False,
-                "message": "Same text as previous",
+                "message": "Empty transcription after cleaning",
             }
 
-        old_ja_sents = split_sentences_ja(prev_full_ja_text)
-        old_ja_text = prev_full_ja_text
-        old_en_sents = split_sentences_ja(prev_full_en_text)
-        old_en_text = prev_full_en_text
-        new_ja_sents = split_sentences_ja(new_text)
-        ja_text = "".join(new_ja_sents).strip()
+        # history = context_buffer.get_context_history()
 
-        last_sentence_pos = match_result["start"] if match_result["score"] >= MATCH_SCORE_CUTOFF else -1
-        last_sentence_clean = match_result["match"].strip() if match_result["score"] >= MATCH_SCORE_CUTOFF else None
+        # Build history from context buffer segments, mirroring
+        # the progressive accumulation in translate_jp_en_llm_prefixed __main__
+        history = []
+        for _, seg_meta in context_buffer.segments:
+            ja = seg_meta.get("full_ja_text", "")
+            en = seg_meta.get("full_en_text", "")
+            if ja and en:
+                history.append({"role": "user", "content": ja})
+                history.append({"role": "assistant", "content": en})
 
-        if ja_text:
-            history = context_buffer.get_context_history()
-            trans_en = translate_japanese_to_english(
-                text=ja_text,
-                history=history,
+        # Step 1: Translate the full current Japanese text
+        trans_result = translate_japanese_to_english(
+            text=full_ja_text,
+            history=history,
+        )
+        full_en_translated = trans_result["text"].strip()
+
+        # Step 2: Use fuzzy_match_prefix_texts to strip the already-shown
+        # prefix and compute only the new/incremental JA and EN parts
+        prefix_result = fuzzy_match_prefix_texts({
+            "prev_ja": prev_full_ja_text,
+            "prev_en": prev_full_en_text,
+            "full_ja": full_ja_text,
+            "full_en": full_en_translated,
+        })
+
+        new_ja_text = prefix_result["new_ja"].strip()
+        new_en_text = prefix_result["new_en"].strip()
+        is_continuation = prefix_result["is_continuation"]
+
+        console.print(
+            f"[info]Prefix match is_continuation:[/info] [value]{is_continuation}[/value]"
+        )
+
+        # Step 3: Assemble full_en_text based on whether this is a continuation
+        if is_continuation:
+            full_en_text = (
+                (prev_full_en_text + "\n" + new_en_text).strip()
+                if new_en_text else prev_full_en_text
             )
-            en_text = trans_en["text"].strip()
         else:
-            en_text = ""
+            # Not a continuation — correction or restart, use full translation
+            full_en_text = full_en_translated
+            console.print(
+                "[success]Not a continuation → using full translation as full_en_text[/success]"
+            )
 
-        if prev_full_en_text:
-            if new_ja_text_res["start_index"] == 0:
-                full_en_text = en_text.strip()
-                console.print("[success]Early correction detected → full_en_text reset to clean latest translation (no duplication)[/success]")
-            else:
-                full_en_text = (prev_full_en_text + "\n" + en_text).strip() if en_text else prev_full_en_text
-        else:
-            full_en_text = en_text
+        en_text = new_en_text
+        ja_text = new_ja_text
+
+        old_ja_sents = split_sentences_ja(prev_full_ja_text)
+        old_en_sents = split_sentences_ja(prev_full_en_text)
+        old_ja_text = prev_full_ja_text
+        old_en_text = prev_full_en_text
+        new_ja_sents = split_sentences_ja(new_ja_text)
+        new_en_sents = split_sentences_ja(new_en_text)
+        last_sentence_clean = None
+        last_sentence_pos = -1
 
     else:
+        # No previous context — translate everything fresh
         ja_sents = full_ja_sents
         ja_text = full_ja_text
         curr_clean = ja_text.rstrip('.。！？、…・「」『』').rstrip()
-
         if curr_clean:
-            history = context_buffer.get_context_history()
+            # history = context_buffer.get_context_history()
+
+
+            # No prior segments yet — history starts empty,
+            # same as step 1 in translate_jp_en_llm_prefixed __main__
+            history = []
             full_trans_en = translate_japanese_to_english(
                 text=ja_text,
                 history=history,
             )
-            new_ja_sents = ja_sents
+            new_ja_text = ja_text
+            new_ja_sents = full_ja_sents
             full_en_text = full_trans_en["text"].strip()
             en_text = full_en_text
+            new_en_text = en_text
+            new_en_sents = split_sentences_ja(new_en_text)
         else:
             return {
                 "uuid": uuid_,
@@ -253,20 +257,18 @@ def blocking_process_audio(
 
         old_ja_sents = []
         old_en_sents = []
+        old_ja_text = ""
+        old_en_text = ""
         last_sentence_clean = None
         last_sentence_pos = -1
 
     if history:
-        console.print(f"[bold yellow]History ({len(history)}):[/bold yellow]")
-        console.print(f"[bold cyan]{history!r}[/bold cyan]")
-
-    if last_sentence_clean:
-        console.print(f"[success]Last Sentence (utt_id={last_utt_id[-6:]} | sent_idx={last_sent_idx}):[/success]")
-        console.print(f"[bright_white]{last_sentence_clean}[/bright_white]")
-
-    if last_sentence_pos != -1:
-        console.print(f"[success]New Text (utt_id={header['uuid'][-6:]} | pos={last_sentence_pos} | start={new_text_start}):[/success]")
-        console.print(f"[bright_white]{new_text}[/bright_white]")
+        console.print(f"[bold magenta]History ({len(history)}):[/bold magenta]")
+        console.print(
+            json.dumps(history, indent=1, ensure_ascii=False),
+            style="bright_blue on grey11",
+        )
+        console.print("\n")
 
     if old_ja_sents:
         console.print(f"[success]Old JA ({len(old_ja_sents)} sents):[/success]")
@@ -282,21 +284,12 @@ def blocking_process_audio(
     console.print(f"[success]New EN ({len(en_text)} chars):[/success]")
     console.print(f"[bold cyan]{en_text}[/bold cyan]")
 
-    if new_ja_text:
-        if unchanged_text is not None:
-            console.print(f"[success]Unchanged JA ({len(unchanged_text)} chars):[/success]")
-            console.print(f"[white]{unchanged_text}[/white]")
-        if new_ja_start_index is not None:
-            console.print(f"[success]Start index:[/success] [bold cyan]{new_ja_start_index}[/bold cyan]")
-        if new_ja_similarity is not None:
-            console.print(f"[success]Matched Similarity:[/success] [bold cyan]{new_ja_similarity}[/bold cyan]")
-
     console.print(f"[success]Full JA ({len(full_ja_sents)} sents):[/success]")
     console.print(f"[bright_white]{full_ja_text}[/bright_white]")
 
     if en_text.strip():
         console.print("[success]Full EN:[/success]")
-        console.print(f"[bold white]{en_text}[/bold white]")
+        console.print(f"[bold white]{full_en_text}[/bold white]")
     else:
         console.print("[dim italic]No new translation[/dim italic]")
 
@@ -394,8 +387,6 @@ def blocking_process_audio(
         "end_sec": header["end_sec"],
         "duration_sec": header["duration_sec"],
         "started_at": header["started_at"],
-        "matched_pos": last_sentence_pos,
-        "matched_sent": last_sentence_clean,
         "old_ja_sents": old_ja_sents,
         "new_ja_sents": new_ja_sents,
         "old_en_sents": old_en_sents,
@@ -462,8 +453,6 @@ def blocking_process_audio(
         "context_uuid": context_uuid,
         "context_duration": context_duration,
         "success": bool(ja_text and en_text),
-        "new_ja_similarity": new_ja_similarity,
-        "new_ja_start_index": new_ja_start_index,
         "transcription_ja": new_ja_text,
         "translation_en": en_text,
         "transcribed_duration_sec": full_metadata["transcribed_duration_sec"],

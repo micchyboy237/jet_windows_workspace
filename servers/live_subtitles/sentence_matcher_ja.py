@@ -28,6 +28,23 @@ class FuzzyMatchResult(TypedDict):
     passed: bool
 
 
+class PrefixTexts(TypedDict):
+    prev_ja: str
+    prev_en: str
+    full_ja: str
+    full_en: str
+
+
+class FuzzyPrefixMatchResult(TypedDict):
+    new_ja: str
+    prev_ja: str
+    new_en: str
+    prev_en: str
+    full_ja: str
+    full_en: str
+    is_continuation: bool
+
+
 def _split_words(text: str) -> List[str]:
     """Smart word splitter with CJK support."""
     if not text:
@@ -206,6 +223,72 @@ def _empty_result(query: str, text: str, level: str, score_cutoff: int,
         "match": "", "score": 0.0, "start": -1, "end": -1,
         "text": "", "remaining": "", "passed": False
     }
+
+
+def fuzzy_match_prefix_texts(texts_dict: PrefixTexts) -> FuzzyPrefixMatchResult:
+    prev_ja = texts_dict["prev_ja"]
+    prev_en = texts_dict["prev_en"]
+    full_ja = texts_dict["full_ja"]
+    full_en = texts_dict["full_en"]
+
+    # === Incremental "New" parts using fuzzy matching ===
+    is_continuation = False
+    new_ja = full_ja
+    if prev_ja:
+        result: FuzzyMatchResult = fuzzy_shortest_best_match(
+            query=prev_ja, text=full_ja
+        )
+        print("\nFuzzy Result JA:")
+        log_fuzzy_result(result)
+        if result["passed"]:
+            new_ja = result["remaining"]
+
+
+    new_en = full_en
+    if prev_en:
+        result: FuzzyMatchResult = fuzzy_shortest_best_match(
+            query=prev_en, text=full_en   # ← Fixed: use the new translation
+        )
+        print("\nFuzzy Result EN:")
+        log_fuzzy_result(result)
+        if result["passed"]:
+            new_en = result["remaining"]
+            is_continuation = True
+
+
+    return {
+        "prev_en": prev_en,
+        "new_en": new_en,
+        "prev_ja": prev_ja,
+        "new_ja": new_ja,
+        "full_ja": full_ja,
+        "full_en": full_en,
+        "is_continuation": is_continuation,
+    }
+
+
+
+def log_fuzzy_result(result: FuzzyMatchResult):
+    inp = result["input"]
+    print(f"Query     : {inp['query']}")
+    print(f"Text      : {inp['text']}")
+    print(f"Level     : {inp['level']}")
+    print(f"Score     : {result['score']:.1f}")
+    print(f"Cutoff    : {inp['score_cutoff']}")
+    print(f"Passed    : {result['passed']}")
+    print(f"Match     : {result['match']}")
+    print(f"Slice     : [{result['start']}:{result['end']}]")
+    print(f"Remaining : {result['remaining']}")
+
+    highlighted = (
+        result["text"][: result["start"]]
+        + f"\033[1;33m{result['text'][result['start'] : result['end']]}\033[0m"
+        + result["text"][result["end"] :]
+    )
+    print("\nHighlighted in text:")
+    print(highlighted)
+
+    print("✅ Accepted" if result["passed"] else "❌ Below threshold")
 
 
 def main() -> None:

@@ -96,8 +96,11 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_cached.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_cached.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_prefixed.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
     r"",
 ]
 
@@ -115,54 +118,9 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Check 3rd step again. Include debug logs so we can pinpoint root cause correctly.
+Analyze translate_jp_en_llm_prefixed usage example in its __main__
 
-ython C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_prefixed.py
-[translate_llm_prefixed] Loading model from C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf ...
-[translate_llm_prefixed] Model loaded in 1617 ms
-╭────────────────────────────────────────────────╮
-│ Prefix-Aware Translation Demo                  │
-│ Only NEW English tokens are generated per step │
-╰────────────────────────────────────────────────╯
-─────────────────────────────────────────────── Progressive Prefix Test ────────────────────────────────────────────────
-
-[Step 1] 今日は
-  ↳ EN (full): Today.
-  ↳ EN (new): Today.
-    2 tokens | 421 ms
-
-[Step 2] 今日はとても
-  ↳ EN (full): Today. is a beautiful day.
-  ↳ EN (new): is a beautiful day.
-    5 tokens | 394 ms
-
-[Step 3] 今日はとても疲れた。
-  ↳ EN (full): Today. is a beautiful day. Today is a beautiful day, but I’m extremely tired.
-  ↳ EN (new): Today is a beautiful day, but I’m extremely tired.
-    12 tokens | 332 ms
-
-[Step 4] あなたのことが好きだよ。
-  ↳ EN (full): I really like you.
-  ↳ EN (new): I really like you.
-    5 tokens | 290 ms
-
-[Step 5] 早く行かないと電車に乗り遅れる！
-  ↳ EN (full): Gotta hurry—I’m gonna miss my train!
-  ↳ EN (new): Gotta hurry—I’m gonna miss my train!
-    10 tokens | 267 ms
-
-─────────────────────────────────────────────────────── Summary ────────────────────────────────────────────────────────
-╭─────┬────────────────────────────┬─────────────────────────────────────────┬─────────────────────────────────────────╮
-│  #  │ Japanese                   │ Full EN                                 │ New EN                                  │
-├─────┼────────────────────────────┼─────────────────────────────────────────┼─────────────────────────────────────────┤
-│  1  │ 今日は                     │ Today.                                  │ Today.                                  │
-│  2  │ 今日はとても               │ Today. is a beautiful day.              │ is a beautiful day.                     │
-│  3  │ 今日はとても疲れた。       │ Today. is a beautiful day. Today is a   │ Today is a beautiful day, but I’m       │
-│     │                            │ beautiful day, but I’m extremely tired. │ extremely tired.                        │
-│  4  │ あなたのことが好きだよ。   │ I really like you.                      │ I really like you.                      │
-│  5  │ 早く行かないと電車に乗り … │ Gotta hurry—I’m gonna miss my train!    │ Gotta hurry—I’m gonna miss my train!    │
-╰─────┴────────────────────────────┴─────────────────────────────────────────┴─────────────────────────────────────────╯
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
+Update live_subtitles_server2 to properly use translate_japanese_to_english and fuzzy_match_prefix_texts
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
