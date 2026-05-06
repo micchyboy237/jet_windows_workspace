@@ -22,7 +22,9 @@ from rich.theme import Theme
 from sentence_matcher_ja import fuzzy_shortest_best_match_contains, fuzzy_match_prefix_texts
 from sentence_utils import split_sentences_ja
 from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
-from translate_jp_en_llm import translate_japanese_to_english
+# from translate_jp_en_llm import translate_japanese_to_english
+# from translate_jp_en_llm_cached import translate_japanese_to_english
+from translate_jp_en_llm_prefixed import translate_japanese_to_english
 
 console = Console(
     theme=Theme(
@@ -293,7 +295,6 @@ def blocking_process_audio(
                 )
             trans_en = translate_japanese_to_english(
                 text=ja_text,
-                enable_scoring=False,
                 history=history,
             )
             en_text = trans_en["text"].strip()
@@ -318,7 +319,6 @@ def blocking_process_audio(
         if curr_clean:
             full_trans_en = translate_japanese_to_english(
                 text=ja_text,
-                enable_scoring=False,
             )
             new_ja_sents = ja_sents
             full_en_text = full_trans_en["text"].strip()
@@ -747,7 +747,6 @@ async def translate_endpoint(request: TranslateRequest):
             text=request.japanese_text.strip(),
             history=request.history,
             temperature=request.temperature or 0.35,
-            enable_scoring=True,   # Enable scoring for REST calls
         )
 
         return {
