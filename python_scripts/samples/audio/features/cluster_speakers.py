@@ -16,6 +16,7 @@ from pyannote.audio import Inference, Model
 from rich.console import Console
 from rich.table import Table
 from sklearn.cluster import AgglomerativeClustering as SklearnAHC
+from sklearn.metrics.pairwise import cosine_similarity
 
 console = Console(record=True)
 
@@ -155,16 +156,62 @@ def cluster_speakers(
     )
 
 
-def display_clustering(result: ClusteringResult) -> None:
-    """Print a Rich table summarising the clustering result."""
-    table = Table(title=f"Speaker Clusters ({result.n_clusters} found)")
+def display_clustering(
+    result: ClusteringResult, embeddings: Dict[str, np.ndarray]
+) -> None:
+    """Enhanced Rich table with Duration, Size, Cluster Count, and Similarity to Centroid."""
+    table = Table(
+        title=f"Speaker Clusters ({result.n_clusters} found)", show_lines=True
+    )
     table.add_column("Cluster", style="yellow", justify="center")
-    table.add_column("Files", style="white")
+    table.add_column("Files", style="white", no_wrap=True)
+    table.add_column("Duration", style="cyan", justify="right")
+    table.add_column("Size", style="magenta", justify="right")
+    table.add_column("Similarity", style="green", justify="right")
 
     for label, members in sorted(result.clusters.items()):
-        for i, m in enumerate(members):
-            cluster_cell = f"Cluster {label}" if i == 0 else ""
-            table.add_row(cluster_cell, str(m))
+        cluster_size = len(members)
+
+        # Compute cluster centroid
+        cluster_embeddings = np.vstack([embeddings[p] for p in members])
+        centroid = np.mean(cluster_embeddings, axis=0, keepdims=True)
+
+        for i, full_path in enumerate(members):
+            p = Path(full_path)
+            short_name = f"{p.parent.name}/{p.name}"
+            file_link = f"file://{full_path}"
+            linked_text = f"[link={file_link}]{short_name}[/link]"
+
+            # === Duration ===
+            try:
+                waveform, sr = torchaudio.load(full_path)
+                duration = waveform.shape[1] / sr
+                duration_str = f"{duration:.2f}s"
+            except:
+                duration_str = "—"
+
+            # === File Size ===
+            try:
+                size_mb = p.stat().st_size / (1024 * 1024)
+                size_str = f"{size_mb:.1f} MB"
+            except:
+                size_str = "—"
+
+            # === Similarity to Centroid ===
+            try:
+                emb = embeddings[full_path]
+                sim = cosine_similarity(emb, centroid)[0][0]
+                sim_str = f"{sim:.3f}"
+            except:
+                sim_str = "—"
+
+            # Cluster column (only on first row)
+            if i == 0:
+                cluster_cell = f"Cluster {label}\n[dim]({cluster_size})[/dim]"
+            else:
+                cluster_cell = ""
+
+            table.add_row(cluster_cell, linked_text, duration_str, size_str, sim_str)
 
     console.print("\n")
     console.print(table)
@@ -204,8 +251,7 @@ def save_results(
                 "n_clusters": result.n_clusters,
                 "labels": {str(k): v for k, v in result.labels.items()},
                 "clusters": {
-                    str(label): paths
-                    for label, paths in result.clusters.items()
+                    str(label): paths for label, paths in result.clusters.items()
                 },
             },
             indent=2,
@@ -290,7 +336,7 @@ def main() -> None:
             n_clusters=args.n_clusters,
         )
 
-    display_clustering(result)
+    display_clustering(result, embeddings)
     save_results(args.output_dir, embeddings, result)
 
 
