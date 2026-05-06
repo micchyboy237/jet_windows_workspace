@@ -120,7 +120,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Please complete the manual history logic. Write standalone filtering logic to filter history by max duration sec of 30.0.
+Update to add to context buffer if gap is minimal
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

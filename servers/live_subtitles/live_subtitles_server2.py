@@ -69,21 +69,38 @@ prev_end_sec: float | None = None
 prev_vad_reason = None
 
 
+# Gap thresholds for context reset decisions.
+# Gaps ≤ GAP_IGNORE_SEC          → treated as normal continuation (no action).
+# Gaps in (GAP_IGNORE_SEC, GAP_RESET_SEC] → small gap: keep buffer, log a notice.
+# Gaps > GAP_RESET_SEC           → large gap: full context reset.
+GAP_IGNORE_SEC: float = 3.0
+GAP_RESET_SEC: float = 8.0
+
 def should_reset_context(header: dict) -> bool:
     """Determine if we should reset the context buffer based on time gap or silence."""
     global prev_vad_reason, prev_end_sec
     current_start_sec = float(header.get("start_sec", 0.0))
     current_end_sec = float(header.get("end_sec", 0.0))
     vad_reason = header.get("vad_reason")
+
     if prev_end_sec is not None:
         gap = current_start_sec - prev_end_sec
-        if gap > 3.0:
+        if gap > GAP_RESET_SEC:
             console.print(
-                f"[warning]Large time gap detected: {gap:.2f}s > 3.0s → Resetting context[/warning]"
+                f"[warning]Large time gap detected: {gap:.2f}s > {GAP_RESET_SEC:.1f}s → Resetting context[/warning]"
             )
             prev_end_sec = current_end_sec
             prev_vad_reason = vad_reason
             return True
+        elif gap > GAP_IGNORE_SEC:
+            console.print(
+                f"[info]Small gap detected: {gap:.2f}s "
+                f"({GAP_IGNORE_SEC:.1f}s < gap ≤ {GAP_RESET_SEC:.1f}s) "
+                f"→ Keeping context buffer[/info]"
+            )
+            # Fall through — no reset, no special action. The segment will be
+            # added to the buffer normally at the end of blocking_process_audio.
+
     if context_buffer.segments and prev_vad_reason == "silence":
         console.print("[info]Silence detected via VAD → Resetting context[/info]")
         prev_end_sec = current_end_sec
