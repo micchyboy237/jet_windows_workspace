@@ -288,12 +288,14 @@ def main() -> None:
         help=f"Output directory (default: '{OUTPUT_DIR}')",
     )
     parser.add_argument(
+        "-t",
         "--threshold",
         type=float,
         default=0.5,
         help="Cosine distance threshold for merging clusters (default: 0.5). Ignored if --n-clusters is set.",
     )
     parser.add_argument(
+        "-l",
         "--linkage",
         type=str,
         default="average",
@@ -301,6 +303,7 @@ def main() -> None:
         help="Linkage criterion for AHC (default: average).",
     )
     parser.add_argument(
+        "-n",
         "--n-clusters",
         type=int,
         default=None,
