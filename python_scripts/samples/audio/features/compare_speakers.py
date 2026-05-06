@@ -105,7 +105,7 @@ def interpret_similarity(similarity: float) -> str:
     """
     if similarity >= 0.7:
         return "[green]SAME speaker (high confidence)[/]"
-    elif similarity >= 0.5:
+    elif similarity >= 0.3:
         return "[yellow]POSSIBLY same speaker[/]"
     else:
         return "[red]DIFFERENT speakers[/]"
