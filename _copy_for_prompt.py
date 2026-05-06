@@ -100,9 +100,10 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_cached.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_prefixed.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py"
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py"
     r"",
 ]
 
@@ -120,7 +121,47 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update to add to context buffer if gap is minimal
+Add new arg preserve_sentence that makes sure the match always ends with a full sentence. Utilize split_sentences_ja.
+
+
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py `
+>> "Seriously, I’m screwed—my underwear shoot’s deadline’s today too. Not sure what to do..." `
+>> "Ugh, I’m in a tough spot—my underwear shoot’s due today too. Not sure what to do... Hold on a sec!" `
+>> -l char
+
+Match : I’m in a tough spot—my underwear shoot’s due today too. Not sure what to do... Hold on a se
+Remaining : c!
+
+Expected Match : Ugh, I’m in a tough spot—my underwear shoot’s due today too. Not sure what to do...
+Expected Remaining :  Hold on a sec!
+
+
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py `
+>> "Seriously, I’m screwed—my underwear shoot’s deadline’s today too. Not sure what to do..." `
+>> "Ugh, I’m in a tough spot—my underwear shoot’s due today too. Not sure what to do... Hold on a sec!" `
+>> -l word
+
+Match : underwear shoot’s due today too. Not sure what to do... Hold on a
+Remaining :  sec!
+
+Expected Match : Ugh, I’m in a tough spot—my underwear shoot’s due today too. Not sure what to do...
+Expected Remaining :  Hold on a sec!
+
+
+Highlighted:
+Ugh, I’m in a tough spot—my underwear shoot’s due today too. Not sure what to do... Hold on a sec!
+✅ Accepted
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py `
+>> "Seriously, I’m screwed—my underwear shoot’s deadline’s today too. Not sure what to do..." `
+>> "Ugh, I’m in a tough spot—my underwear shoot’s due today too. Not sure what to do... Hold on a sec!" `
+>> -l sentence
+
+Match : Ugh, I’m in a tough spot—my underwear shoot’s due today too. Not sure what to do...
+Remaining :  Hold on a sec!
+
+Correct match and remaining
+
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

@@ -38,6 +38,7 @@ class FuzzyMatchResult(TypedDict):
     text: str
     remaining: str
     passed: bool
+    is_continuation: bool
 
 
 class PrefixTexts(TypedDict):
@@ -92,37 +93,77 @@ def _join_sentences(sentences: List[str]) -> str:
         return combined
     return " ".join(sentences)
 
-def _token_span(text: str, tokens: List[str], start_idx: int, end_idx: int) -> tuple[int, int]:
+
+def _snap_to_sentence_boundary(text: str, raw_end: int) -> int:
+    """Return the character index of the end of the last *complete* sentence
+    that fits entirely within ``text[:raw_end]``.
+
+    Algorithm
+    ---------
+    1. Call ``split_sentences_ja`` on the whole ``text``.
+    2. Walk the sentence list, tracking where each sentence ends inside the
+       original string (using ``str.find`` with a running search offset so
+       we always find the *next* occurrence, not an earlier duplicate).
+    3. Keep the latest sentence-end position that is <= ``raw_end``.
+    4. Return that position (or ``raw_end`` unchanged if none found).
     """
-    Given a list of tokens and a [start_idx, end_idx) window, find the
-    character start/end in the original text by scanning forward.
-    Preserves any whitespace/newlines between tokens.
-    """
-    pos = 0
-    char_start = 0
-    for i, token in enumerate(tokens):
-        # Advance past any whitespace before this token
-        while pos < len(text) and text[pos] not in token and text[pos] != token[0]:
-            pos += 1
-        # Find the token at or after pos
-        idx = text.find(token, pos)
-        if idx == -1:
-            idx = pos  # fallback
-        if i == start_idx:
-            char_start = idx
-        if i == end_idx - 1:
-            char_end = idx + len(token)
-            return char_start, char_end
-        pos = idx + len(token)
-    return char_start, len(text)
+    sentences = split_sentences_ja(text)
+    if not sentences:
+        return raw_end
+
+    best_end = -1
+    search_from = 0                        # never re-match an earlier copy
+    for sent in sentences:
+        pos = text.find(sent, search_from)
+        if pos == -1:
+            continue
+        sent_end = pos + len(sent)
+        search_from = pos + 1              # advance cursor past this match
+        if sent_end <= raw_end:
+            best_end = sent_end            # this sentence fits — remember it
+        else:
+            break                          # sentences are in order; stop early
+
+    return best_end if best_end != -1 else raw_end
+
+
+def _empty_result(
+    query: str,
+    text: str,
+    level: str,
+    score_cutoff: int,
+    max_extra_chars: int,
+    max_extra_words: int,
+    preserve_sentence: bool = False
+) -> FuzzyMatchResult:
+    return {
+        "input": {
+            "query": query,
+            "text": text,
+            "level": level,
+            "score_cutoff": score_cutoff,
+            "max_extra_chars": max_extra_chars,
+            "max_extra_words": max_extra_words,
+            "preserve_sentence": preserve_sentence,
+        },
+        "match": "",
+        "score": 0.0,
+        "start": -1,
+        "end": -1,
+        "text": "",
+        "remaining": "",
+        "passed": False,
+    }
+
 
 def fuzzy_shortest_best_match(
     query: str,
-    text: str | list[str],
-    score_cutoff: int = 80,           # raised a bit
+    text: str | List[str],
+    score_cutoff: int = 75,
     max_extra_chars: int = 25,
-    max_extra_words: int = 4,         # tightened (also used as max_extra_sentences)
+    max_extra_words: int = 4,
     level: str = "word",
+    preserve_sentence: bool = False,
 ) -> FuzzyMatchResult:
     """
     Improved fuzzy sentence matcher.
@@ -135,9 +176,15 @@ def fuzzy_shortest_best_match(
                        ``split_sentences_ja`` (new).  ``max_extra_words``
                        controls how many *extra sentences* beyond the query
                        sentence-count are tried.
+
+    ``preserve_sentence`` – when ``True``, the raw character/word match is
+                            post-processed so that ``match`` always ends on a
+                            full sentence boundary (using ``split_sentences_ja``).
+                            Has no effect when ``level="sentence"`` (already
+                            sentence-aligned).
     """
     if not query:
-        return _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words)
+        return _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words, preserve_sentence)
 
     # Normalize input
     if isinstance(text, str):
@@ -146,7 +193,7 @@ def fuzzy_shortest_best_match(
         text_list = [t for t in text if t]
 
     if not text_list:
-        return _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words)
+        return _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words, preserve_sentence)
 
     best_result: Optional[FuzzyMatchResult] = None
     best_score: float = -1.0
@@ -181,22 +228,22 @@ def fuzzy_shortest_best_match(
             for s_len in range(q_sent_len, max_s_len + 1):
                 for i in range(len(text_sentences) - s_len + 1):
                     window_sentences = text_sentences[i : i + s_len]
-                    window_joined = _join_sentences(window_sentences)
+                    window = _join_sentences(window_sentences)
 
-                    score = fuzz.token_set_ratio(processed_query, _preprocess(window_joined))
+                    score = fuzz.token_set_ratio(processed_query, _preprocess(window))
 
-                    # Use _token_span for accurate span preservation
-                    span_start, span_end = _token_span(t, text_sentences, i, i + s_len)
-                    window_original = t[span_start:span_end]
-                    win_len = len(window_original)
-
+                    win_len = len(window)
                     if score > local_best_score or (
                         abs(score - local_best_score) < 0.01 and win_len < local_best_length
                     ):
                         local_best_score = score
-                        local_best_match = window_original
-                        local_best_start = span_start
-                        local_best_end = span_end
+                        local_best_match = window
+                        local_best_start = t.find(window)
+                        local_best_end = (
+                            local_best_start + len(window)
+                            if local_best_start != -1
+                            else -1
+                        )
                         local_best_length = win_len
 
             # Fallback: if we still can't clear the cutoff, try the full text
@@ -241,26 +288,20 @@ def fuzzy_shortest_best_match(
 
                     # Join properly (no spaces for Japanese)
                     if re.search(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]', "".join(window_tokens)):
-                        window_joined = "".join(window_tokens)
+                        window = "".join(window_tokens)
                     else:
-                        window_joined = " ".join(window_tokens)
+                        window = " ".join(window_tokens)
 
                     # Use stricter + preprocessed scoring
-                    score = fuzz.token_set_ratio(processed_query, _preprocess(window_joined))
+                    score = fuzz.token_set_ratio(processed_query, _preprocess(window))
 
-                    # Use _token_span for accurate span preservation
-                    span_start, span_end = _token_span(t, text_tokens, i, i + w_len)
-                    window_original = t[span_start:span_end]
-                    win_len = len(window_original)
-
-                    if (
-                        score > local_best_score or
-                        (abs(score - local_best_score) < 0.01 and win_len < local_best_length)
-                    ):
+                    win_len = len(window)
+                    if (score > local_best_score or
+                        (abs(score - local_best_score) < 0.01 and win_len < local_best_length)):
                         local_best_score = score
-                        local_best_match = window_original
-                        local_best_start = span_start
-                        local_best_end = span_end
+                        local_best_match = window
+                        local_best_start = t.find(window)
+                        local_best_end = local_best_start + len(window) if local_best_start != -1 else -1
                         local_best_length = win_len
 
             # Strong fallback only if needed
@@ -295,10 +336,8 @@ def fuzzy_shortest_best_match(
                     window = t[i : i + length]
                     score = fuzz.token_set_ratio(processed_query, _preprocess(window))
 
-                    if (
-                        score > local_best_score or
-                        (abs(score - local_best_score) < 0.01 and length < local_best_length)
-                    ):
+                    if (score > local_best_score or
+                        (abs(score - local_best_score) < 0.01 and length < local_best_length)):
                         local_best_score = score
                         local_best_start = i
                         local_best_end = i + length
@@ -319,9 +358,31 @@ def fuzzy_shortest_best_match(
                     local_best_start = t.find(local_best_match)
                     local_best_end = local_best_start + len(local_best_match)
 
-        # Update global best
+        # Update global best with preserve_sentence post-processing
         if local_best_score > best_score:
             best_score = local_best_score
+
+            # ── preserve_sentence post-processing ──────────────────────────
+            # Snap the raw end index back to the nearest sentence boundary
+            # so the match always ends on a complete sentence.
+            # Skip when level="sentence" (already aligned) or no valid end.
+            snapped_start = local_best_start
+            snapped_end   = local_best_end
+            snapped_match = local_best_match
+            if (
+                preserve_sentence
+                and level != "sentence"
+                and local_best_end != -1
+            ):
+                snapped_end = _snap_to_sentence_boundary(t, local_best_end)
+                if snapped_end > local_best_start:
+                    snapped_match = t[local_best_start:snapped_end]
+                else:
+                    # No complete sentence found before raw end — keep raw
+                    snapped_end   = local_best_end
+                    snapped_match = local_best_match
+
+            remaining = t[snapped_end:] if snapped_end != -1 else ""
             best_result = {
                 "input": {
                     "query": query,
@@ -330,30 +391,19 @@ def fuzzy_shortest_best_match(
                     "score_cutoff": score_cutoff,
                     "max_extra_chars": max_extra_chars,
                     "max_extra_words": max_extra_words,
+                    "preserve_sentence": preserve_sentence,
                 },
-                "match": local_best_match,
+                "match": snapped_match,
                 "score": local_best_score,
-                "start": local_best_start,
-                "end": local_best_end,
+                "start": snapped_start,
+                "end": snapped_end,
                 "text": t,
-                "remaining": t[local_best_end:] if local_best_end != -1 else "",
+                "remaining": remaining,
                 "passed": local_best_score >= score_cutoff,
+                "is_continuation": bool(remaining),
             }
 
-    return best_result or _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words)
-
-
-def _empty_result(query: str, text: str, level: str, score_cutoff: int,
-                  max_extra_chars: int, max_extra_words: int) -> FuzzyMatchResult:
-    return {
-        "input": {
-            "query": query, "text": text, "level": level,
-            "score_cutoff": score_cutoff, "max_extra_chars": max_extra_chars,
-            "max_extra_words": max_extra_words
-        },
-        "match": "", "score": 0.0, "start": -1, "end": -1,
-        "text": "", "remaining": "", "passed": False
-    }
+    return best_result or _empty_result(query, "", level, score_cutoff, max_extra_chars, max_extra_words, preserve_sentence)
 
 
 def fuzzy_match_prefix_texts(texts_dict: PrefixTexts) -> FuzzyPrefixMatchResult:
@@ -367,9 +417,7 @@ def fuzzy_match_prefix_texts(texts_dict: PrefixTexts) -> FuzzyPrefixMatchResult:
     new_ja = full_ja
     if prev_ja:
         result: FuzzyMatchResult = fuzzy_shortest_best_match(
-            query=prev_ja,
-            text=full_ja,
-            level="word",
+            query=prev_ja, text=full_ja, preserve_sentence=True,
         )
         print("\nFuzzy Result JA:")
         log_fuzzy_result(result)
@@ -380,16 +428,13 @@ def fuzzy_match_prefix_texts(texts_dict: PrefixTexts) -> FuzzyPrefixMatchResult:
     new_en = full_en
     if prev_en:
         result: FuzzyMatchResult = fuzzy_shortest_best_match(
-            query=prev_en,
-            text=full_en,
-            level="sentence",
+            query=prev_en, text=full_en, preserve_sentence=True,   # ← Fixed: use the new translation
         )
         print("\nFuzzy Result EN:")
         log_fuzzy_result(result)
         if result["passed"]:
             new_en = result["remaining"]
-            if new_en:
-                is_continuation = True
+            is_continuation = result["is_continuation"]
 
 
     return {
@@ -401,6 +446,29 @@ def fuzzy_match_prefix_texts(texts_dict: PrefixTexts) -> FuzzyPrefixMatchResult:
         "full_en": full_en,
         "is_continuation": is_continuation,
     }
+
+
+def log_fuzzy_result(result: FuzzyMatchResult):
+    inp = result["input"]
+    print(f"Query     : {inp['query']}")
+    print(f"Text      : {inp['text']}")
+    print(f"Level     : {inp['level']}")
+    print(f"Score     : {result['score']:.1f}")
+    print(f"Cutoff    : {inp['score_cutoff']}")
+    print(f"Passed    : {result['passed']}")
+    print(f"Match     : {result['match']}")
+    print(f"Slice     : [{result['start']}:{result['end']}]")
+    print(f"Remaining : {result['remaining']}")
+
+    highlighted = (
+        result["text"][: result["start"]]
+        + f"\033[1;33m{result['text'][result['start'] : result['end']]}\033[0m"
+        + result["text"][result["end"] :]
+    )
+    print("\nHighlighted in text:")
+    print(highlighted)
+
+    print("✅ Accepted" if result["passed"] else "❌ Below threshold")
 
 
 def fuzzy_shortest_best_match_contains(
@@ -494,29 +562,6 @@ def fuzzy_shortest_best_match_contains(
     return best_result
 
 
-def log_fuzzy_result(result: FuzzyMatchResult):
-    inp = result["input"]
-    print(f"Query     : {inp['query']}")
-    print(f"Text      : {inp['text']}")
-    print(f"Level     : {inp['level']}")
-    print(f"Score     : {result['score']:.1f}")
-    print(f"Cutoff    : {inp['score_cutoff']}")
-    print(f"Passed    : {result['passed']}")
-    print(f"Match     : {result['match']}")
-    print(f"Slice     : [{result['start']}:{result['end']}]")
-    print(f"Remaining : {result['remaining']}")
-
-    highlighted = (
-        result["text"][: result["start"]]
-        + f"\033[1;33m{result['text'][result['start'] : result['end']]}\033[0m"
-        + result["text"][result["end"] :]
-    )
-    print("\nHighlighted in text:")
-    print(highlighted)
-
-    print("✅ Accepted" if result["passed"] else "❌ Below threshold")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Improved Fuzzy sentence matcher",
@@ -524,12 +569,14 @@ def main() -> None:
     )
     parser.add_argument("query", type=str, help="Query string")
     parser.add_argument("text", nargs="+", type=str, help="Text(s) to search in")
-    parser.add_argument("-c", "--score-cutoff", type=int, default=82, help="Minimum score")
+    parser.add_argument("-c", "--score-cutoff", type=int, default=75, help="Minimum score")
     parser.add_argument("-e", "--max-extra-chars", type=int, default=25, help="Max extra chars")
     parser.add_argument("--max-extra-words", type=int, default=4,
                         help="Max extra words (or extra sentences when --level=sentence)")
     parser.add_argument("-l", "--level", type=str, choices=["char", "word", "sentence"],
                         default="word", help="Matching level")
+    parser.add_argument("-p", "--preserve-sentence", action="store_true",
+                        help="Snap match end to the nearest complete sentence boundary")
     args = parser.parse_args()
 
     result: FuzzyMatchResult = fuzzy_shortest_best_match(
@@ -539,6 +586,7 @@ def main() -> None:
         max_extra_chars=args.max_extra_chars,
         max_extra_words=args.max_extra_words,
         level=args.level,
+        preserve_sentence=args.preserve_sentence,
     )
 
     inp = result["input"]
