@@ -92,10 +92,33 @@ def _join_sentences(sentences: List[str]) -> str:
         return combined
     return " ".join(sentences)
 
+def _token_span(text: str, tokens: List[str], start_idx: int, end_idx: int) -> tuple[int, int]:
+    """
+    Given a list of tokens and a [start_idx, end_idx) window, find the
+    character start/end in the original text by scanning forward.
+    Preserves any whitespace/newlines between tokens.
+    """
+    pos = 0
+    char_start = 0
+    for i, token in enumerate(tokens):
+        # Advance past any whitespace before this token
+        while pos < len(text) and text[pos] not in token and text[pos] != token[0]:
+            pos += 1
+        # Find the token at or after pos
+        idx = text.find(token, pos)
+        if idx == -1:
+            idx = pos  # fallback
+        if i == start_idx:
+            char_start = idx
+        if i == end_idx - 1:
+            char_end = idx + len(token)
+            return char_start, char_end
+        pos = idx + len(token)
+    return char_start, len(text)
 
 def fuzzy_shortest_best_match(
     query: str,
-    text: str | List[str],
+    text: str | list[str],
     score_cutoff: int = 80,           # raised a bit
     max_extra_chars: int = 25,
     max_extra_words: int = 4,         # tightened (also used as max_extra_sentences)
@@ -158,22 +181,22 @@ def fuzzy_shortest_best_match(
             for s_len in range(q_sent_len, max_s_len + 1):
                 for i in range(len(text_sentences) - s_len + 1):
                     window_sentences = text_sentences[i : i + s_len]
-                    window = _join_sentences(window_sentences)
+                    window_joined = _join_sentences(window_sentences)
 
-                    score = fuzz.token_set_ratio(processed_query, _preprocess(window))
+                    score = fuzz.token_set_ratio(processed_query, _preprocess(window_joined))
 
-                    win_len = len(window)
+                    # Use _token_span for accurate span preservation
+                    span_start, span_end = _token_span(t, text_sentences, i, i + s_len)
+                    window_original = t[span_start:span_end]
+                    win_len = len(window_original)
+
                     if score > local_best_score or (
                         abs(score - local_best_score) < 0.01 and win_len < local_best_length
                     ):
                         local_best_score = score
-                        local_best_match = window
-                        local_best_start = t.find(window)
-                        local_best_end = (
-                            local_best_start + len(window)
-                            if local_best_start != -1
-                            else -1
-                        )
+                        local_best_match = window_original
+                        local_best_start = span_start
+                        local_best_end = span_end
                         local_best_length = win_len
 
             # Fallback: if we still can't clear the cutoff, try the full text
@@ -218,20 +241,26 @@ def fuzzy_shortest_best_match(
 
                     # Join properly (no spaces for Japanese)
                     if re.search(r'[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]', "".join(window_tokens)):
-                        window = "".join(window_tokens)
+                        window_joined = "".join(window_tokens)
                     else:
-                        window = " ".join(window_tokens)
+                        window_joined = " ".join(window_tokens)
 
                     # Use stricter + preprocessed scoring
-                    score = fuzz.token_set_ratio(processed_query, _preprocess(window))
+                    score = fuzz.token_set_ratio(processed_query, _preprocess(window_joined))
 
-                    win_len = len(window)
-                    if (score > local_best_score or
-                        (abs(score - local_best_score) < 0.01 and win_len < local_best_length)):
+                    # Use _token_span for accurate span preservation
+                    span_start, span_end = _token_span(t, text_tokens, i, i + w_len)
+                    window_original = t[span_start:span_end]
+                    win_len = len(window_original)
+
+                    if (
+                        score > local_best_score or
+                        (abs(score - local_best_score) < 0.01 and win_len < local_best_length)
+                    ):
                         local_best_score = score
-                        local_best_match = window
-                        local_best_start = t.find(window)
-                        local_best_end = local_best_start + len(window) if local_best_start != -1 else -1
+                        local_best_match = window_original
+                        local_best_start = span_start
+                        local_best_end = span_end
                         local_best_length = win_len
 
             # Strong fallback only if needed
@@ -266,8 +295,10 @@ def fuzzy_shortest_best_match(
                     window = t[i : i + length]
                     score = fuzz.token_set_ratio(processed_query, _preprocess(window))
 
-                    if (score > local_best_score or
-                        (abs(score - local_best_score) < 0.01 and length < local_best_length)):
+                    if (
+                        score > local_best_score or
+                        (abs(score - local_best_score) < 0.01 and length < local_best_length)
+                    ):
                         local_best_score = score
                         local_best_start = i
                         local_best_end = i + length
@@ -336,7 +367,9 @@ def fuzzy_match_prefix_texts(texts_dict: PrefixTexts) -> FuzzyPrefixMatchResult:
     new_ja = full_ja
     if prev_ja:
         result: FuzzyMatchResult = fuzzy_shortest_best_match(
-            query=prev_ja, text=full_ja
+            query=prev_ja,
+            text=full_ja,
+            level="word",
         )
         print("\nFuzzy Result JA:")
         log_fuzzy_result(result)
@@ -347,7 +380,9 @@ def fuzzy_match_prefix_texts(texts_dict: PrefixTexts) -> FuzzyPrefixMatchResult:
     new_en = full_en
     if prev_en:
         result: FuzzyMatchResult = fuzzy_shortest_best_match(
-            query=prev_en, text=full_en   # ← Fixed: use the new translation
+            query=prev_en,
+            text=full_en,
+            level="sentence",
         )
         print("\nFuzzy Result EN:")
         log_fuzzy_result(result)

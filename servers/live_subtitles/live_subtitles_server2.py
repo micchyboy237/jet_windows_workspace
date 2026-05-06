@@ -412,6 +412,9 @@ def blocking_process_audio(
         f"[info]Prefix match is_continuation:[/info] [value]{prefix_result["is_continuation"]}[/value]"
     )
 
+    ja_text = prefix_result["new_ja"]
+    en_text = prefix_result["new_en"]
+
     new_en_sents = split_sentences_ja(full_en_text)
 
     started_at_iso = header.get("started_at")
