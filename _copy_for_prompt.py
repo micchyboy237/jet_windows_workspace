@@ -106,6 +106,7 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py"
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\compare_speakers.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_utils.py",
     r"",
 ]
 
@@ -123,124 +124,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Browse how to resolve
-
-(jet_venv) PS C:\Users\druiv> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\compare_speakers.py `
->> C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\vad_firered2\segments\segment_001\sound.wav `
->> C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\generated\extract_audio_segment\extracted_audio_16k_mono.wav
-C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.5.0) or chardet (7.0.1)/charset_normalizer (3.4.4) doesn't match a supported version!
-  warnings.warn(
-C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\io.py:47: UserWarning:
-torchcodec is not installed correctly so built-in audio decoding will fail. Solutions are:
-* use audio preloaded in-memory as a {'waveform': (channel, time) torch.Tensor, 'sample_rate': int} dictionary;
-* fix torchcodec installation. Error message was:
-
-Could not load libtorchcodec. Likely causes:
-          1. FFmpeg is not properly installed in your environment. We support
-             versions 4, 5, 6, 7, and 8, and we attempt to load libtorchcodec
-             for each of those versions. Errors for versions not installed on
-             your system are expected; only the error for your installed FFmpeg
-             version is relevant. On Windows, ensure you've installed the
-             "full-shared" version which ships DLLs.
-          2. The PyTorch version (2.8.0+cu128) is not compatible with
-             this version of TorchCodec. Refer to the version compatibility
-             table:
-             https://github.com/pytorch/torchcodec?tab=readme-ov-file#installing-torchcodec.
-          3. Another runtime dependency; see exceptions below.
-
-        The following exceptions were raised as we tried to load libtorchcodec:
-
-[start of libtorchcodec loading traceback]
-FFmpeg version 8:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1478, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: Could not find module 'C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core8.dll' (or one of its dependencies). Try using the full path with constructor syntax.
-
-FFmpeg version 7:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1478, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: Could not find module 'C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core7.dll' (or one of its dependencies). Try using the full path with constructor syntax.
-
-FFmpeg version 6:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1478, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: Could not find module 'C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core6.dll' (or one of its dependencies). Try using the full path with constructor syntax.
-
-FFmpeg version 5:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1478, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: Could not find module 'C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core5.dll' (or one of its dependencies). Try using the full path with constructor syntax.
-
-FFmpeg version 4:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1478, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: Could not find module 'C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core4.dll' (or one of its dependencies). Try using the full path with constructor syntax.
-[end of libtorchcodec loading traceback].
-  warnings.warn(
-Traceback (most recent call last):
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\compare_speakers.py", line 47, in <module>
-    main()
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\compare_speakers.py", line 26, in main
-    model = Model.from_pretrained("pyannote/embedding")
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\model.py", line 602, in from_pretrained
-    loaded_checkpoint = pl_load(
-                        ^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\lightning\fabric\utilities\cloud_io.py", line 60, in _load
-    return torch.load(
-           ^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\serialization.py", line 1530, in load
-    return _load(
-           ^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\serialization.py", line 2119, in _load
-    result = unpickler.load()
-             ^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\serialization.py", line 2108, in find_class
-    return super().find_class(mod_name, name)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\pytorch_lightning\__init__.py", line 20, in <module>
-    from pytorch_lightning import metrics  # noqa: E402
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\pytorch_lightning\metrics\__init__.py", line 15, in <module>
-    from pytorch_lightning.metrics.classification import (  # noqa: F401
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\pytorch_lightning\metrics\classification\__init__.py", line 14, in <module>
-    from pytorch_lightning.metrics.classification.accuracy import Accuracy  # noqa: F401
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\pytorch_lightning\metrics\classification\accuracy.py", line 18, in <module>
-    from pytorch_lightning.metrics.utils import deprecated_metrics, void
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\pytorch_lightning\metrics\utils.py", line 22, in <module>
-    from torchmetrics.utilities.data import get_num_classes as _get_num_classes
-ImportError: cannot import name 'get_num_classes' from 'torchmetrics.utilities.data' (C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchmetrics\utilities\data.py)
+Update compare_speakers args.speakers logic to now also allow directories.
+Make sure to check each with is_dir, if true use resolve_audio_paths as recursive.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
