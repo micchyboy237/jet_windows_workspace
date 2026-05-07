@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import shutil
 import sys
 import types
 from dataclasses import dataclass, field
@@ -233,6 +234,7 @@ def save_results(
       - clustering.json
       - report.html
     """
+    shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. embeddings.npz

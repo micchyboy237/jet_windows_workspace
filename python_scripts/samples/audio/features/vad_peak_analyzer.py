@@ -412,6 +412,33 @@ def save_segments_to_subdirs(
             label=category.replace("_", " ").title(),
         )
 
+        # Overlay attached troughs (if any)
+        seg_troughs = seg.get("details", {}).get("troughs", [])
+        visible_troughs = [
+            t for t in seg_troughs if f_start <= t["frame_start"] < f_end
+        ]
+        if visible_troughs:
+            t_frames = [t["frame_start"] for t in visible_troughs]
+            t_probs  = [x[t["frame_start"]] for t in visible_troughs]
+            ax.plot(
+                t_frames,
+                t_probs,
+                "rv",          # red downward-pointing triangle
+                markersize=9,
+                label="Troughs",
+                zorder=5,
+            )
+            for tf, tp in zip(t_frames, t_probs):
+                ax.annotate(
+                    f"{tp:.2f}",
+                    xy=(tf, tp),
+                    xytext=(0, -18),
+                    textcoords="offset points",
+                    ha="center",
+                    fontsize=8,
+                    color="red",
+                )
+
         # Annotate start / end times
         ax.set_title(
             f"{category} · segment {idx:03d}  "
@@ -665,6 +692,7 @@ class VADPeakAnalyzer:
         threshold: float = 0.3,
         min_duration_s: float = 0.0,
         min_duration_frames: Optional[int] = None,
+        troughs: Optional[List[VADSegment]] = None,
     ) -> List[VADSegment]:
         """
         Extract contiguous active (speech) regions where probability >= threshold.
@@ -677,6 +705,10 @@ class VADPeakAnalyzer:
             threshold: Minimum probability to count as active (default 0.3).
             min_duration_s: Minimum duration in seconds for an active region to be kept.
             min_duration_frames: Alternative minimum frame count (overrides min_duration_s if provided).
+            troughs: Optional pre-extracted trough VADSegments (from
+                     extract_troughs()).  Each trough whose frame index falls
+                     within an active region's [frame_start, frame_end] boundary
+                     is attached to that region's details["troughs"] list.
 
         Returns:
             List of VADSegment dicts, one per contiguous active region.
@@ -705,8 +737,26 @@ class VADPeakAnalyzer:
         if in_region:
             self._append_active_segment(segments, x, region_start, len(x), threshold)
 
+        # ── Attach troughs that fall within each active region's frame boundaries ──
+        if troughs and segments:
+            for segment in segments:
+                r_start = segment["frame_start"]
+                r_end   = segment["frame_end"]
+                contained = [
+                    t for t in troughs if r_start <= t["frame_start"] <= r_end
+                ]
+                segment["details"]["troughs"] = contained
+                if contained:
+                    self._log_debug(
+                        f"extract_active_regions: region [{r_start}, {r_end}] "
+                        f"contains {len(contained)} trough(s) at frames "
+                        f"{[t['frame_start'] for t in contained]}"
+                    )
+        # ──────────────────────────────────────────────────────────────────────────
+
         self._log_debug(f"Returning {len(segments)} active region segments")
         return segments
+   
 
     def _append_active_segment(
         self,
@@ -1403,6 +1453,7 @@ if __name__ == "__main__":
         threshold=args.active_threshold,
         # min_duration_s=args.min_active_duration,
         # min_duration_frames=args.min_active_frames,
+        troughs=troughs,
     )
 
     # Depth-based merging

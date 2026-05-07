@@ -32,6 +32,19 @@ SAVE_DIR = str(
     Path("~/.cache/pretrained_models/FireRedVAD/Stream-VAD").expanduser().resolve()
 )
 
+DEFAULT_THRESHOLD = 0.5
+DEFAULT_MIN_SILENCE_SEC = 0.250
+DEFAULT_MIN_SPEECH_SEC = 0.250
+DEFAULT_MAX_SPEECH_SEC = 15.0
+DEFAULT_SAMPLING_RATE = 16000
+DEFAULT_RETURN_SECONDS = False
+DEFAULT_WITH_SCORES = False
+DEFAULT_INCLUDE_NON_SPEECH = False
+
+DEFAULT_SMOOTH_WINDOW_SIZE = 5
+DEFAULT_PAD_START_FRAME = 5
+DEFAULT_MAX_BUFFER_SEC = 1.2
+
 
 class FireRedVAD:
     """Wrapper for FireRedVAD with simple streaming-like API."""
@@ -40,12 +53,13 @@ class FireRedVAD:
         self,
         model_dir: str = SAVE_DIR,
         device: str | None = None,
-        threshold: float = 0.65,
-        min_silence_duration_sec: float = 0.20,
-        min_speech_duration_sec: float = 0.15,
-        max_speech_duration_sec: float = 12.0,
-        smooth_window_size: int = 5,
-        pad_start_frame: int = 5,
+        threshold: float = DEFAULT_THRESHOLD,
+        min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_SEC,
+        min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_SEC,
+        max_speech_duration_sec: float = DEFAULT_MAX_SPEECH_SEC,
+        smooth_window_size: int = DEFAULT_SMOOTH_WINDOW_SIZE,
+        pad_start_frame: int = DEFAULT_PAD_START_FRAME,
+        max_buffer_sec: float = DEFAULT_MAX_BUFFER_SEC,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -68,7 +82,7 @@ class FireRedVAD:
         self.sample_rate = SAMPLE_RATE
         self.audio_buffer: np.ndarray = np.array([], dtype=np.float32)
         self.last_prob: float = 0.0
-        self.max_buffer_samples = int(1.2 * self.sample_rate)
+        self.max_buffer_samples = int(max_buffer_sec * self.sample_rate)
 
     def reset(self) -> None:
         """Reset internal VAD state and clear audio buffer."""
@@ -131,13 +145,16 @@ class FireRedVAD:
 
 def extract_speech_timestamps(
     audio: Union[str, Path, np.ndarray, torch.Tensor, list[np.ndarray]],
-    threshold: float = 0.5,
-    min_silence_duration_sec: float = 0.250,
-    min_speech_duration_sec: float = 0.250,
+    threshold: float = DEFAULT_THRESHOLD,
+    min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_SEC,
+    min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_SEC,
     max_speech_duration_sec: float | None = None,
-    return_seconds: bool = False,
-    with_scores: bool = False,
-    include_non_speech: bool = False,
+    return_seconds: bool = DEFAULT_RETURN_SECONDS,
+    with_scores: bool = DEFAULT_WITH_SCORES,
+    include_non_speech: bool = DEFAULT_INCLUDE_NON_SPEECH,
+    smooth_window_size: int = DEFAULT_SMOOTH_WINDOW_SIZE,
+    pad_start_frame: int = DEFAULT_PAD_START_FRAME,
+    max_buffer_sec: float = DEFAULT_MAX_BUFFER_SEC,
     **kwargs,
 ) -> Union[List[SpeechSegment], tuple[List[SpeechSegment], List[float]]]:
     """
@@ -145,7 +162,7 @@ def extract_speech_timestamps(
     When include_non_speech=True, returns both speech and non-speech (silence) segments.
     """
     if max_speech_duration_sec is None:
-        max_speech_duration_sec = 15.0
+        max_speech_duration_sec = DEFAULT_MAX_SPEECH_SEC
 
     audio_np, sr = load_audio(audio, sr=16000, mono=True)
     if sr != 16000:
@@ -157,6 +174,9 @@ def extract_speech_timestamps(
         min_silence_duration_sec=min_silence_duration_sec,
         min_speech_duration_sec=min_speech_duration_sec,
         max_speech_duration_sec=max_speech_duration_sec,
+        smooth_window_size=smooth_window_size,
+        pad_start_frame=pad_start_frame,
+        max_buffer_sec=max_buffer_sec,
     )
 
     with console.status("[bold blue]Running FireRedVAD inference...[/bold blue]"):
@@ -226,11 +246,14 @@ def extract_speech_timestamps(
 
 def extract_speech_audio(
     audio: Union[str, Path, np.ndarray, torch.Tensor, list[np.ndarray]],
-    sampling_rate: int = 16000,
-    threshold: float = 0.5,
-    min_silence_duration_sec: float = 0.250,
-    min_speech_duration_sec: float = 0.250,
+    sampling_rate: int = DEFAULT_SAMPLING_RATE,
+    threshold: float = DEFAULT_THRESHOLD,
+    min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_SEC,
+    min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_SEC,
     max_speech_duration_sec: float | None = None,
+    smooth_window_size: int = DEFAULT_SMOOTH_WINDOW_SIZE,
+    pad_start_frame: int = DEFAULT_PAD_START_FRAME,
+    max_buffer_sec: float = DEFAULT_MAX_BUFFER_SEC,
 ) -> List[np.ndarray]:
     """
     Extract contiguous speech segments from the input audio using FireRedVAD.
@@ -248,6 +271,9 @@ def extract_speech_audio(
         max_speech_duration_sec=max_speech_duration_sec,
         return_seconds=True,
         include_non_speech=False,
+        smooth_window_size=smooth_window_size,
+        pad_start_frame=pad_start_frame,
+        max_buffer_sec=max_buffer_sec,
     )
 
     audio_np, sr = load_audio(audio=audio, sr=sampling_rate, mono=True)
@@ -551,6 +577,55 @@ if __name__ == "__main__":
         type=str,
         help=f"output directory (default: '{OUTPUT_DIR}')",
     )
+    parser.add_argument(
+        "-t",
+        "--threshold",
+        type=float,
+        default=DEFAULT_THRESHOLD,
+        help=f"speech threshold (default: {DEFAULT_THRESHOLD})",
+    )
+    parser.add_argument(
+        "-ms",
+        "--min-silence",
+        type=float,
+        default=DEFAULT_MIN_SILENCE_SEC,
+        help=f"minimum silence duration in seconds (default: {DEFAULT_MIN_SILENCE_SEC})",
+    )
+    parser.add_argument(
+        "-mp",
+        "--min-speech",
+        type=float,
+        default=DEFAULT_MIN_SPEECH_SEC,
+        help=f"minimum speech duration in seconds (default: {DEFAULT_MIN_SPEECH_SEC})",
+    )
+    parser.add_argument(
+        "-mx",
+        "--max-speech",
+        type=float,
+        default=8.0,
+        help="maximum speech duration in seconds",
+    )
+    parser.add_argument(
+        "-sw",
+        "--smooth-window",
+        type=int,
+        default=DEFAULT_SMOOTH_WINDOW_SIZE,
+        help=f"smoothing window size (default: {DEFAULT_SMOOTH_WINDOW_SIZE})",
+    )
+    parser.add_argument(
+        "-ps",
+        "--pad-start",
+        type=int,
+        default=DEFAULT_PAD_START_FRAME,
+        help=f"pad start frames (default: {DEFAULT_PAD_START_FRAME})",
+    )
+    parser.add_argument(
+        "-mb",
+        "--max-buffer-sec",
+        type=float,
+        default=DEFAULT_MAX_BUFFER_SEC,
+        help=f"stream buffer duration in seconds (default: {DEFAULT_MAX_BUFFER_SEC})",
+    )
     args = parser.parse_args()
     audio_path = args.audio_path
     output_dir = Path(args.output_dir)
@@ -562,10 +637,16 @@ if __name__ == "__main__":
     # ── Step 1: detect segments (with per-frame probabilities) ────────────
     segments, speech_probs = extract_speech_timestamps(
         audio_path,
-        max_speech_duration_sec=8.0,
+        threshold=args.threshold,
+        min_silence_duration_sec=args.min_silence,
+        min_speech_duration_sec=args.min_speech,
+        max_speech_duration_sec=args.max_speech,
         return_seconds=True,
         with_scores=True,
         include_non_speech=False,
+        smooth_window_size=args.smooth_window,
+        pad_start_frame=args.pad_start,
+        max_buffer_sec=args.max_buffer_sec,
     )
 
     console.print(f"\n[bold green]Segments found:[/bold green] {len(segments)}\n")
@@ -587,8 +668,14 @@ if __name__ == "__main__":
     # ── Step 2: extract raw audio for each speech segment ─────────────────
     audio_chunks = extract_speech_audio(
         audio_path,
-        sampling_rate=16000,
-        max_speech_duration_sec=8.0,
+        sampling_rate=DEFAULT_SAMPLING_RATE,
+        threshold=args.threshold,
+        min_silence_duration_sec=args.min_silence,
+        min_speech_duration_sec=args.min_speech,
+        max_speech_duration_sec=args.max_speech,
+        smooth_window_size=args.smooth_window,
+        pad_start_frame=args.pad_start,
+        max_buffer_sec=args.max_buffer_sec,
     )
 
     # ── Step 3: save everything to disk ───────────────────────────────────

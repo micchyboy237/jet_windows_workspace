@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import shutil
 import sys
 import types
 from pathlib import Path
@@ -166,6 +167,12 @@ def create_similarity_matrix(
     console.print(table)
 
 
+def _path_label(path: str) -> str:
+    """Return '<parent_dir> / <filename.ext>' for display."""
+    p = Path(path)
+    return f"{p.parent.name} / {p.name}"
+
+
 def display_pairwise_analysis(
     speaker_paths: list,
     embeddings: Dict[str, torch.Tensor],
@@ -175,6 +182,7 @@ def display_pairwise_analysis(
 ) -> None:
     """
     Display detailed pairwise analysis for all speaker combinations.
+    Skips pairs that belong to the same cluster (redundant same-speaker pairs).
     """
     console.print("\n[bold]Pairwise Analysis:[/]\n")
 
@@ -182,6 +190,10 @@ def display_pairwise_analysis(
         for j in range(i + 1, len(speaker_paths)):
             path1 = speaker_paths[i]
             path2 = speaker_paths[j]
+
+            # Skip redundant comparisons within the same cluster
+            if labels[path1] == labels[path2]:
+                continue
 
             distance = float(
                 cdist(embeddings[path1], embeddings[path2], metric="cosine")[0, 0]
@@ -193,12 +205,76 @@ def display_pairwise_analysis(
                 threshold_possible=threshold_possible,
             )
 
-            console.print(f"[bold]{labels[path1]}[/] vs [bold]{labels[path2]}[/]:")
+            title1 = _path_label(path1)
+            title2 = _path_label(path2)
+            console.print(f"[bold]{title1}[/] vs [bold]{title2}[/]:")
             console.print(
                 f"  Cosine similarity: [white]{similarity:.4f}[/] "
                 f"(distance: [white]{distance:.4f}[/])"
             )
             console.print(f"  Result: {interpretation}\n")
+
+
+def display_cluster_summary(
+    speaker_paths: List[str],
+    labels: Dict[str, str],
+    embeddings: Dict[str, np.ndarray],
+) -> None:
+    """
+    Display a Rich table with Cluster, Files (linked), Duration, Size, and
+    Similarity to centroid for each detected speaker cluster.
+    """
+    cluster_members: Dict[str, List[str]] = {}
+    for path in speaker_paths:
+        cluster_members.setdefault(labels[path], []).append(path)
+
+    n_clusters = len(cluster_members)
+
+    table = Table(title=f"Speaker Clusters ({n_clusters} found)", show_lines=True)
+    table.add_column("Cluster",    style="yellow", justify="center")
+    table.add_column("Files",      style="white",  no_wrap=True)
+    table.add_column("Duration",   style="cyan",   justify="right")
+    table.add_column("Size",       style="magenta", justify="right")
+    table.add_column("Similarity", style="green",  justify="right")
+
+    for cluster_label, members in sorted(cluster_members.items()):
+        cluster_size = len(members)
+
+        cluster_embeddings = np.vstack([embeddings[p] for p in members])
+        centroid = np.mean(cluster_embeddings, axis=0, keepdims=True)
+
+        for i, full_path in enumerate(members):
+            p = Path(full_path)
+            linked_text = f"[link=file://{full_path}]{_path_label(full_path)}[/link]"
+
+            try:
+                waveform, sr = torchaudio.load(full_path)
+                duration_str = f"{waveform.shape[1] / sr:.2f}s"
+            except Exception:
+                duration_str = "—"
+
+            try:
+                size_str = f"{p.stat().st_size / (1024 * 1024):.1f} MB"
+            except Exception:
+                size_str = "—"
+
+            try:
+                emb = embeddings[full_path]
+                dist = float(cdist(emb, centroid, metric="cosine")[0, 0])
+                sim_str = f"{1.0 - dist:.3f}"
+            except Exception:
+                sim_str = "—"
+
+            cluster_cell = (
+                f"{cluster_label}\n[dim]({cluster_size} file{'s' if cluster_size != 1 else ''})[/dim]"
+                if i == 0
+                else ""
+            )
+
+            table.add_row(cluster_cell, linked_text, duration_str, size_str, sim_str)
+
+    console.print("\n")
+    console.print(table)
 
 
 def derive_speaker_labels(speaker_paths: List[str]) -> Dict[str, str]:
@@ -323,6 +399,7 @@ def save_results(
     embeddings (NPZ), speakers (JSON), and rich console report (HTML)
     to output_dir.
     """
+    shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. speakers.json
@@ -415,7 +492,7 @@ def main() -> None:
         help=f"output directory (default: '{OUTPUT_DIR}')",
     )
     parser.add_argument(
-        "-ts",
+        "-t",
         "--threshold-same",
         default=THRESHOLD_SAME,
         type=float,
@@ -522,6 +599,12 @@ def main() -> None:
             threshold_same=args.threshold_same,
             threshold_possible=args.threshold_possible,
         )
+
+    display_cluster_summary(
+        speaker_paths=speaker_paths,
+        labels=labels,
+        embeddings=embeddings,
+    )
 
     save_results(
         output_dir=args.output_dir,

@@ -498,8 +498,6 @@ if __name__ == "__main__":
     console = Console()
 
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-    Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
     DEFAULT_AUDIO = (
         r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
@@ -516,8 +514,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-o",
-        "--output",
-        default=str(OUTPUT_DIR),
+        "--output-dir",
+        default=OUTPUT_DIR,
+        type=Path,
         help=f"Output results dir (default: {OUTPUT_DIR})",
     )
     parser.add_argument(
@@ -548,6 +547,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    shutil.rmtree(args.output_dir, ignore_errors=True)
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+
     # segments, scores = extract_speech_timestamps(
     #     audio=args.input,
     #     include_non_speech=args.include_non_speech,
@@ -573,12 +575,12 @@ if __name__ == "__main__":
     speech_waves = get_speech_waves(args.input, scores, threshold=args.threshold)
 
     # Save main JSON files
-    save_file(segments, OUTPUT_DIR / "segments.json")
-    save_file(scores, OUTPUT_DIR / "speech_probs.json")
-    save_file(speech_waves, OUTPUT_DIR / "speech_waves.json")
+    save_file(segments, args.output_dir / "segments.json")
+    save_file(scores, args.output_dir / "speech_probs.json")
+    save_file(speech_waves, args.output_dir / "speech_waves.json")
 
     # Create waves directory and save individual wave files
-    waves_dir = OUTPUT_DIR / "waves"
+    waves_dir = args.output_dir / "waves"
     waves_dir.mkdir(parents=True, exist_ok=True)
 
     console.print(
@@ -607,11 +609,11 @@ if __name__ == "__main__":
 
     # ── summary table & JSON ──────────────────────────────────────────────────
     rows = build_summary_rows(speech_waves, waves_dir, segments)
-    save_file(rows, OUTPUT_DIR / "summary.json")
+    save_file(rows, args.output_dir / "summary.json")
 
     # ── top-5 waves (built after waves_dir exists and dirs are known) ─────────
     top5 = _top5_reports(speech_waves, waves_dir, segments)
-    save_file(top5, OUTPUT_DIR / "top_5_waves.json")
+    save_file(top5, args.output_dir / "top_5_waves.json")
 
     table = Table(
         title=f"Speech Waves Summary  ({len(rows)} valid waves)",
@@ -657,8 +659,8 @@ if __name__ == "__main__":
         f"[bold green]✓[/bold green] All wave files saved under : [cyan]{waves_dir}[/cyan]"
     )
     console.print(
-        f"[bold green]✓[/bold green] summary.json              : [cyan][link=file://{(OUTPUT_DIR / 'summary.json').resolve()}]{(OUTPUT_DIR / 'summary.json').resolve()}[/link][/cyan]"
+        f"[bold green]✓[/bold green] summary.json              : [cyan][link=file://{(args.output_dir / 'summary.json').resolve()}]{(args.output_dir / 'summary.json').resolve()}[/link][/cyan]"
     )
     console.print(
-        f"[bold green]✓[/bold green] top_5_waves.json          : [cyan][link=file://{(OUTPUT_DIR / 'top_5_waves.json').resolve()}]{(OUTPUT_DIR / 'top_5_waves.json').resolve()}[/link][/cyan]"
+        f"[bold green]✓[/bold green] top_5_waves.json          : [cyan][link=file://{(args.output_dir / 'top_5_waves.json').resolve()}]{(args.output_dir / 'top_5_waves.json').resolve()}[/link][/cyan]"
     )
