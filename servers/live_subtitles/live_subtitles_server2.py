@@ -219,15 +219,9 @@ def blocking_process_audio(
                 f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}).[/warning]"
             )
             console.print(
-                f"[warning]No new text.[/warning]"
+                f"[warning]Translating the full text.[/warning]"
             )
-            return {
-                "uuid": uuid_,
-                "transcription_ja": "",
-                "translation_en": "",
-                "success": False,
-                "message": "No new text",
-            }
+            new_text = full_ja_text.strip()
 
         new_clean = new_text.rstrip('.。！？、…・「」『』').rstrip()
         if not new_clean:
