@@ -1,25 +1,28 @@
-from wtpsplit import SaT
+from pyannote.audio import Pipeline
 
-sat = SaT("sat-3l")
-# optionally run on GPU for better performance
-# also supports TPUs via e.g. sat.to("xla:0"), in that case pass `pad_last_batch=True` to sat.split
-sat.half().to("cuda")
+pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1",
+                                    use_auth_token="YOUR_HF_TOKEN")
+pipeline.to(device)
 
-sat.split("This is a test This is another test.")
-# returns ["This is a test ", "This is another test."]
+diarization = pipeline("meeting.wav")
 
-# do this instead of calling sat.split on every text individually for much better performance
-sat.split(["This is a test This is another test.", "And some more texts..."])
-# returns an iterator yielding lists of sentences for every text
+inference = Inference(model, window="whole")
+inference.to(device)
 
-# use our '-sm' models for general sentence segmentation tasks
-sat_sm = SaT("sat-3l-sm")
-sat_sm.half().to("cuda") # optional, see above
-sat_sm.split("this is a test this is another test")
-# returns ["this is a test ", "this is another test"]
+speaker_embeddings = {}
 
-# use trained lora modules for strong adaptation to language & domain/style
-sat_adapted = SaT("sat-3l", style_or_domain="ud", language="en")
-sat_adapted.half().to("cuda") # optional, see above
-sat_adapted.split("This is a test This is another test.")
-# returns ['This is a test ', 'This is another test']
+for turn, _, speaker in diarization.itertracks(yield_label=True):
+    if turn.duration < 2.0:          # skip very short segments
+        continue
+    seg = Segment(turn.start, turn.end)
+    emb = inference.crop("meeting.wav", seg)
+    emb = emb.reshape(1, -1)
+    
+    if speaker not in speaker_embeddings:
+        speaker_embeddings[speaker] = []
+    speaker_embeddings[speaker].append(emb)
+
+# Average embeddings per speaker
+for spk, embs in speaker_embeddings.items():
+    avg_emb = np.mean(np.vstack(embs), axis=0, keepdims=True)
+    print(f"Speaker {spk}: averaged embedding shape {avg_emb.shape}")

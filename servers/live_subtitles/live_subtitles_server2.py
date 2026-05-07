@@ -77,9 +77,9 @@ def should_reset_context(header: dict) -> bool:
     vad_reason = header.get("vad_reason")
     if prev_end_sec is not None:
         gap = current_start_sec - prev_end_sec
-        if gap > 3.0:
+        if gap > 8.0:
             console.print(
-                f"[warning]Large time gap detected: {gap:.2f}s > 3.0s → Resetting context[/warning]"
+                f"[warning]Large time gap detected: {gap:.2f}s > 8.0s → Resetting context[/warning]"
             )
             prev_end_sec = current_end_sec
             prev_vad_reason = vad_reason
