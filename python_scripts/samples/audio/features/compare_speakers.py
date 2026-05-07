@@ -19,7 +19,7 @@ from scipy.spatial.distance import cdist
 console = Console(record=True)
 
 THRESHOLD_SAME: float = 0.3
-THRESHOLD_POSSIBLE: float = 0.2
+THRESHOLD_POSSIBLE: float = 0.15
 THRESHOLD_MATRIX_WARN: float = 0.5
 
 
