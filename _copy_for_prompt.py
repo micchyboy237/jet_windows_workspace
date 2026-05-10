@@ -125,8 +125,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Is it possible to use vad_firered_hybrid for capturing speech segments during live streaming using sounddevice?
-Create a new file for this. You may import from vad_firered_hybrid.
+Browse latest usage examples of transcribing with "FunAudioLLM/SenseVoiceSmall". Given it can only handle up to 30.0s audio, analyze the best steps that transcribes each segment returned by extract_speech_timestamps without losing context. Audio may exceed 30.0s.
+Create new file for the transcription logic but you may reuse from vad_firered_hybrid.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
