@@ -2,22 +2,22 @@
 Usage examples:
 
     # Process full video with default settings
-    python convert-video-to-srt.py
+    python convert_video_to_srt.py
 
     # Process a specific time range
-    python convert-video-to-srt.py video.mp4 --start 60 --end 180
+    python convert_video_to_srt.py video.mp4 --start 60 --end 180
 
     # More frequent OCR, stricter text change detection
-    python convert-video-to-srt.py myvideo.mkv --ocr-every 1.0 --min-change 6 --min-duration 1.2
+    python convert_video_to_srt.py myvideo.mkv --ocr-every 1.0 --min-change 6 --min-duration 1.2
 
     # Custom crop (lower value = larger subtitle area)
-    python convert-video-to-srt.py --crop-bottom 0.70 --start 300
+    python convert_video_to_srt.py --crop-bottom 0.70 --start 300
 
     # Custom output folder name
-    python convert-video-to-srt.py video.mp4 --output-dir-name "episode-03-subs"
+    python convert_video_to_srt.py video.mp4 --output-dir-name "episode-03-subs"
 
     # Show help
-    python convert-video-to-srt.py --help
+    python convert_video_to_srt.py --help
 """
 
 import argparse

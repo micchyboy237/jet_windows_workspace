@@ -1,13 +1,13 @@
 """
 Usage Examples:
     # Auto-detect method (soft if available, else OCR)
-    python extract-subtitles.py video.mp4
+    python extract_subtitles.py video.mp4
     # Save both .srt and segments.json into a custom directory
-    python extract-subtitles.py video.mp4 -o my_results --method ocr
+    python extract_subtitles.py video.mp4 -o my_results --method ocr
     # Process only from 2:30 to 10:00, stricter bottom filtering
-    python extract-subtitles.py video.mp4 --start 150 --end 600 --bottom-threshold 0.70
+    python extract_subtitles.py video.mp4 --start 150 --end 600 --bottom-threshold 0.70
     # Show help
-    python extract-subtitles.py --help
+    python extract_subtitles.py --help
 """
 
 import argparse
@@ -94,6 +94,44 @@ def extract_soft_subtitles(
         raise RuntimeError("ffmpeg not found. Please install FFmpeg.")
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Failed to extract soft subtitles: {e}")
+
+
+def save_audio_segments(
+    video_path: Union[str, Path],
+    segments: List[Dict[str, Union[int, float, str]]],
+    output_dir: Union[str, Path],
+) -> None:
+    """Extract each subtitle segment's audio as a WAV file.
+
+    Output files are written to <output_dir>/segments/segment_<num>.wav
+    """
+    video_path = str(Path(video_path).resolve())
+    segments_dir = Path(output_dir) / "segments"
+    segments_dir.mkdir(parents=True, exist_ok=True)
+
+    for seg in tqdm(segments, desc="Saving audio segments"):
+        num = seg["segment_num"]
+        start = seg["start"]
+        duration = seg["end"] - seg["start"]
+        out_wav = segments_dir / f"segment_{num}.wav"
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", video_path,
+            "-ss", str(start),
+            "-t", str(duration),
+            "-vn",                   # drop video stream
+            "-acodec", "pcm_s16le",  # standard WAV encoding
+            str(out_wav),
+        ]
+
+        try:
+            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            raise RuntimeError("ffmpeg not found. Please install FFmpeg.")
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Failed to extract audio for segment {num}: {e}")
 
 
 def get_bottom_middle_texts(
@@ -249,12 +287,15 @@ def extract_with_ocr(
                 }
             )
 
+    cap.release()
+
     # Save segments.json in the same directory as .srt
     json_path = output_srt.with_name("segments.json")
     with open(json_path, "w", encoding="utf-8") as f_json:
         json.dump(segments, f_json, ensure_ascii=False, indent=2)
 
-    cap.release()
+    # Save audio for every segment as WAV
+    save_audio_segments(video_path, segments, output_srt.parent)
 
 
 def extract_subtitles(
@@ -367,6 +408,7 @@ if __name__ == "__main__":
 
     srt_path = output_dir / "subtitles.srt"
     segments_path = srt_path.with_name("segments.json")
+    segments_audio_dir = output_dir / "segments"
 
     try:
         extract_subtitles(
@@ -387,6 +429,7 @@ if __name__ == "__main__":
 
         if args.method in ("auto", "ocr"):
             print(f"[green]Segments saved to {segments_path}[/green]")
+            print(f"[green]Audio segments saved to {segments_audio_dir}/[/green]")
 
     except Exception as e:
         print(f"[red]Error: {str(e)}[/red]")

@@ -2,25 +2,25 @@
 Usage Examples:
 
     # Extract frames at specific timestamps (in seconds)
-    python extract-video-frames.py video.mp4 --at-seconds 1.5 5.0 12.3 --output-dir shots
+    python extract_video_frames.py video.mp4 --at-seconds 1.5 5.0 12.3 --output-dir shots
 
     # Extract a frame every 3 seconds, limit to 30 frames, lower quality
-    python extract-video-frames.py input.mov --every-seconds 3 --max-frames 30 --quality 80 -o keyframes
+    python extract_video_frames.py input.mov --every-seconds 3 --max-frames 30 --quality 80 -o keyframes
 
     # Extract specific frame numbers
-    python extract-video-frames.py clip.mp4 --at-frames 0 100 250 500 1200 --output-dir frames
+    python extract_video_frames.py clip.mp4 --at-frames 0 100 250 500 1200 --output-dir frames
 
     # Extract one frame every 200 frames
-    python extract-video-frames.py movie.mkv --every-frames 200
+    python extract_video_frames.py movie.mkv --every-frames 200
 
     # Just save the very first frame
-    python extract-video-frames.py video.mp4 --first --output-dir thumbs
+    python extract_video_frames.py video.mp4 --first --output-dir thumbs
 
     # Extract frames at 10%, 30%, 50%, 70%, 90% of the video (manual calculation)
-    python extract-video-frames.py demo.mp4 --at-seconds 12.4 37.2 62.0 86.8 --output-dir percent
+    python extract_video_frames.py demo.mp4 --at-seconds 12.4 37.2 62.0 86.8 --output-dir percent
 
     # Show help
-    python extract-video-frames.py --help
+    python extract_video_frames.py --help
 
 Note: Exactly one of these modes is required:
   --at-seconds    --at-frames    --every-seconds    --every-frames    --first
