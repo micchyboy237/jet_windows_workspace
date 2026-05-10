@@ -314,6 +314,12 @@ if __name__ == "__main__":
         help=f"Base directory for output files (default: {DEFAULT_OUTPUT_DIR})",
     )
     parser.add_argument(
+        "-s", "--start", type=float, default=None, help="Start time in seconds (optional)"
+    )
+    parser.add_argument(
+        "-e", "--end", type=float, default=None, help="End time in seconds (optional)"
+    )
+    parser.add_argument(
         "--method",
         type=str,
         choices=["auto", "ocr", "soft"],
@@ -334,12 +340,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--lang", type=str, default="en", help="Language code for OCR (default: en)"
-    )
-    parser.add_argument(
-        "--start", type=float, default=None, help="Start time in seconds (optional)"
-    )
-    parser.add_argument(
-        "--end", type=float, default=None, help="End time in seconds (optional)"
     )
     parser.add_argument(
         "--bottom-threshold",
