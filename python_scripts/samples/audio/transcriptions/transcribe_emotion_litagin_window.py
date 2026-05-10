@@ -20,6 +20,24 @@ parser.add_argument(
     default=DEFAULT_AUDIO,
     help="Path to input .wav audio file",
 )
+parser.add_argument(
+    "-w", "--window-sec",
+    type=float,
+    default=6.0,
+    help="Window length in seconds (default: 6.0)",
+)
+parser.add_argument(
+    "-s", "--step-sec",
+    type=float,
+    default=2.0,
+    help="Step size in seconds (default: 2.0)",
+)
+parser.add_argument(
+    "-k", "--top-k",
+    type=int,
+    default=5,
+    help="Number of top predictions to show (default: 5)",
+)
 args = parser.parse_args()
 
 AUDIO_PATH = args.audio_path
@@ -31,10 +49,10 @@ console = Console()
 
 # ──── Config ────────────────────────────────────────────────────────────────
 CONFIG = {
-    "window_sec": 6.0,
-    "step_sec": 2.0,
+    "window_sec": args.window_sec,
+    "step_sec": args.step_sec,
     "model_name": "litagin/anime_speech_emotion_classification",
-    "top_k": 5,
+    "top_k": args.top_k,
     "sample_rate_target": 16000,
 }
 
