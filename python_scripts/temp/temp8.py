@@ -1,27 +1,14 @@
-from llama_cpp.llama_tokenizer import LlamaHFTokenizer
-from rich import print
-from rich.pretty import pprint
+# Get Python processes with their parent process
+Get-WmiObject Win32_Process -Filter "Name='python.exe'" | 
+  Select-Object ProcessId, CommandLine, ParentProcessId |
+  Format-Table -AutoSize
 
-# model_path = r"C:\Users\druiv\.cache\llama.cpp\translators\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
-model_path = "shisa-ai/shisa-v2.1-llama3.2-3b"
-add_special_tokens = False
+# Kill by specific PID (replace 1234 with the actual PID)
+taskkill /F /PID 1234
 
-text = """\
-<|begin_of_text|><|start_header_id|>system<|end_header_id>
 
-You are a helpful AI assistant.<|eot_id|><|start_header_id|>user<|end_header_id>
 
-Hello! Tell me a short joke about programming.<|eot_id|><|start_header_id|>assistant<|end_header_id>"""
-
-tokenizer = LlamaHFTokenizer.from_pretrained(model_path)
-
-tokens = tokenizer.tokenize(
-    text.encode("utf-8", "ignore"),
-    special=add_special_tokens  # llama.cpp special handling
-)
-count = len(tokens)
-
-print(f"Detokenized tokens: {tokenizer.detokenize(tokens, special=add_special_tokens)}")
-print(f"Decoded text: {tokenizer.decode(tokens)}")
-print(f"Token ids:\n{tokens}")
-print(f"Count: {count}")
+Get-Process python | Stop-Process -Force -PassThru | 
+  ForEach-Object { 
+    Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue | Stop-Process -Force 
+  }

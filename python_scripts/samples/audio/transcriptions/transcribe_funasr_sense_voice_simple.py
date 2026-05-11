@@ -1,44 +1,77 @@
+import argparse
+from rich.console import Console
+from rich.pretty import pprint
+from rich.panel import Panel
+from rich.syntax import Syntax
+import json
+
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
-from translators.translate_jp_en_lfm2 import translate_text
+from translators.translate_jp_en_shisa_llama import translate_japanese_to_english
 
-# Load the model (automatically downloads from HF or ModelScope)
-model_dir = "FunAudioLLM/SenseVoiceSmall"   # or "iic/SenseVoiceSmall"
+console = Console()
 
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_missav_20s.wav"
+def main():
+    DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_2_speakers.wav"
 
-model = AutoModel(
-    model=model_dir,
-    disable_update=True,
-    vad_model="fsmn-vad",      # optional: voice activity detection
-    vad_kwargs={"max_single_segment_time": 30000},
-    device="cuda:0",           # or "cpu"
-    hub="hf",                   # or "ms" for ModelScope
-    # trust_remote_code=True,
-    # remote_code="./model.py",  # usually not needed if using latest FunASR
-)
+    parser = argparse.ArgumentParser(
+        description="Transcribe Japanese audio using SenseVoiceSmall + translation"
+    )
+    parser.add_argument(
+        "audio_path",
+        nargs="?",  # Makes it optional (positional but can be omitted)
+        default=DEFAULT_AUDIO,
+        help="Path to the audio file (default: recording_missav_20s.wav)"
+    )
+    
+    args = parser.parse_args()
 
-# Generate transcription + emotion + events
-res = model.generate(
-    input=audio_path,   # or local path: "audio.mp3", "audio.wav", etc.
-    cache={},
-    language="ja",           # "auto" / "zh" / "en" / "yue" / "ja" / "ko" / "nospeech"
-    use_itn=False,              # inverse text normalization (e.g. numbers → digits)
-    batch_size=32,            # adjust based on GPU memory
-    output_timestamp=True,
-    merge_vad=True,
-    merge_length_s=15,
-)
+    # ====================== MODEL SETUP ======================
+    model_dir = "FunAudioLLM/SenseVoiceSmall"
 
-# Example output structure:
-# [{'text': '<|en|><|NEUTRAL|> Hello this is a test.', 'timestamp': ..., 'emo': 'NEUTRAL', ...}]
+    model = AutoModel(
+        model=model_dir,
+        disable_update=True,
+        vad_model="fsmn-vad",
+        vad_kwargs={"max_single_segment_time": 30000},
+        device="cuda:0",
+        hub="hf",
+    )
 
+    console.print(f"[bold cyan]Processing:[/] {args.audio_path}")
 
+    # ====================== INFERENCE ======================
+    res = model.generate(
+        input=args.audio_path,
+        cache={},
+        language="ja",
+        use_itn=False,
+        batch_size=32,
+        output_timestamp=True,
+        merge_vad=True,
+        merge_length_s=15,
+    )
 
-ja_text = rich_transcription_postprocess(res[0]["text"])
-en_text = translate_text(ja_text)
+    # ====================== RICH INSPECTION ======================
+    console.rule("[bold cyan]Full Result Structure")
+    console.print(f"Type of res: [bold yellow]{type(res)}[/]")
+    console.print(f"Length of res: [bold yellow]{len(res)}[/]")
 
-print("\n")
-print(f"JA: {ja_text}")
-print(f"EN: {en_text}")
-# Output: どうしたっけ？食べにくいじゃん。今日ね。担任の先生から電話があった。現地。
+    if res:
+        for i, item in enumerate(res):
+            console.rule(f"[bold magenta]Item {i}")
+            console.print(f"Keys: {list(item.keys())}")
+            
+            console.print("\n[bold]Full Content:[/]")
+            print(f"{item!r}")
+
+    # ====================== TRANSCRIPTION & TRANSLATION ======================
+    ja_text = rich_transcription_postprocess(res[0]["text"])
+    en_text = translate_japanese_to_english(ja_text)["text"]
+
+    console.rule("[bold green]Final Result")
+    console.print(f"JA: [bold white]{ja_text}[/]")
+    console.print(f"EN: [bold white]{en_text}[/]")
+
+if __name__ == "__main__":
+    main()

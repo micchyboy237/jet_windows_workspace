@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 import numpy as np
 from config import (
     FRAME_LENGTH_MS,
-    HOP_LENGTH_MS,
+    FRAME_SHIFT_MS,
     LOUD_MAX,
     NORMAL_MAX,
     SAMPLE_RATE,
@@ -113,7 +113,7 @@ def trim_silent(
     samples: np.ndarray,
     sample_rate: int = SAMPLE_RATE,
     frame_length_ms: float = FRAME_LENGTH_MS,
-    hop_length_ms: float = HOP_LENGTH_MS,
+    hop_length_ms: float = FRAME_SHIFT_MS,
 ) -> np.ndarray:
     """
     Remove leading and trailing silent portions from audio samples.

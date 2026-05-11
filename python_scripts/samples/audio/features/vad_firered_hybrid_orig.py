@@ -1,18 +1,19 @@
+import io
 import json
+import os
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import List, Literal, Optional, Tuple, TypedDict, Union
 
 import matplotlib
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import librosa
 import numpy as np
+import numpy.typing as npt
 import torch
 import torchaudio
-from _types import SpeechSegment
 from fireredvad.core.constants import SAMPLE_RATE
 from fireredvad.stream_vad import FireRedStreamVad, FireRedStreamVadConfig
-from loader import load_audio
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -22,7 +23,8 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
-from vad_extractors import get_best_valley_trough
+from loader import load_audio
+from _types import AudioInput, SpeechSegment, WordSegment
 
 console = Console()
 
@@ -43,28 +45,21 @@ DEFAULT_SMOOTH_WINDOW_SIZE = 5
 DEFAULT_MAX_BUFFER_SEC = 1.2
 
 # Pre-roll defaults (head extension — looks backward from onset)
-DEFAULT_PREROLL_MAX_SEC = 0.300  # maximum look-back window
+DEFAULT_PREROLL_MAX_SEC = 0.300          # maximum look-back window
 DEFAULT_PREROLL_HYBRID_THRESHOLD = 0.15  # hybrid score below which we stop extending
-DEFAULT_PREROLL_PROB_WEIGHT = 0.5  # weight for speech probability
-DEFAULT_PREROLL_RMS_WEIGHT = 0.5  # weight for normalised RMS energy
+DEFAULT_PREROLL_PROB_WEIGHT = 0.5        # weight for speech probability
+DEFAULT_PREROLL_RMS_WEIGHT = 0.5         # weight for normalised RMS energy
 
 # Post-roll defaults (tail extension — looks forward from detected end)
-DEFAULT_POSTROLL_MAX_SEC = 0.300  # maximum look-forward window
-DEFAULT_POSTROLL_HYBRID_THRESHOLD = 0.15  # hybrid score below which we stop extending
-DEFAULT_POSTROLL_PROB_WEIGHT = 0.5  # weight for speech probability
-DEFAULT_POSTROLL_RMS_WEIGHT = 0.5  # weight for normalised RMS energy
+DEFAULT_POSTROLL_MAX_SEC = 0.300         # maximum look-forward window
+DEFAULT_POSTROLL_HYBRID_THRESHOLD = 0.15 # hybrid score below which we stop extending
+DEFAULT_POSTROLL_PROB_WEIGHT = 0.5       # weight for speech probability
+DEFAULT_POSTROLL_RMS_WEIGHT = 0.5        # weight for normalised RMS energy
 
-# Soft-limit split defaults
-DEFAULT_SOFT_LIMIT_SEC = 6.0
-DEFAULT_SOFT_LIMIT_MIN_VALLEY_DURATION_S = 0.25
-DEFAULT_SOFT_LIMIT_SMOOTHING_WINDOW = 20
-DEFAULT_SOFT_LIMIT_TROUGH_PROMINENCE = 0.15
-DEFAULT_SOFT_LIMIT_MIN_TROUGH_OFFSET_S = 0.4
 
 # ---------------------------------------------------------------------------
 # FireRedVAD wrapper
 # ---------------------------------------------------------------------------
-
 
 class FireRedVAD:
     """Wrapper for FireRedVAD with simple streaming-like API."""
@@ -161,7 +156,6 @@ class FireRedVAD:
 # Pre-roll computation helper
 # ---------------------------------------------------------------------------
 
-
 def _compute_preroll(
     onset_sample: int,
     audio_np: np.ndarray,
@@ -188,7 +182,7 @@ def _compute_preroll(
 
     RMS is normalised using the 99th-percentile of the look-back window.
     """
-    FRAME_SAMPLES = 160  # 10 ms @ 16 kHz
+    FRAME_SAMPLES = 160   # 10 ms @ 16 kHz
     hop_sec = 0.010
     max_preroll_samples = int(max_preroll_sec * sample_rate)
 
@@ -208,7 +202,7 @@ def _compute_preroll(
 
     # Per-frame RMS
     frames = lookback_audio.reshape(n_frames, FRAME_SAMPLES)
-    rms_arr = np.sqrt(np.mean(frames**2, axis=1))
+    rms_arr = np.sqrt(np.mean(frames ** 2, axis=1))
     rms_ceil = np.percentile(rms_arr, 99) + 1e-10
     rms_norm = np.clip(rms_arr / rms_ceil, 0.0, 1.0)
 
@@ -237,7 +231,6 @@ def _compute_preroll(
 # Post-roll computation helper  (symmetric tail extension)
 # ---------------------------------------------------------------------------
 
-
 def _compute_postroll(
     end_sample: int,
     audio_np: np.ndarray,
@@ -264,7 +257,7 @@ def _compute_postroll(
 
     RMS is normalised using the 99th-percentile of the look-forward window.
     """
-    FRAME_SAMPLES = 160  # 10 ms @ 16 kHz
+    FRAME_SAMPLES = 160   # 10 ms @ 16 kHz
     hop_sec = 0.010
     max_postroll_samples = int(max_postroll_sec * sample_rate)
 
@@ -283,7 +276,7 @@ def _compute_postroll(
 
     # Per-frame RMS
     frames = lookahead_audio.reshape(n_frames, FRAME_SAMPLES)
-    rms_arr = np.sqrt(np.mean(frames**2, axis=1))
+    rms_arr = np.sqrt(np.mean(frames ** 2, axis=1))
     rms_ceil = np.percentile(rms_arr, 99) + 1e-10
     rms_norm = np.clip(rms_arr / rms_ceil, 0.0, 1.0)
 
@@ -300,133 +293,12 @@ def _compute_postroll(
     keep_frames = 0
     for i in range(n_frames):
         if hybrid[i] >= hybrid_threshold:
-            keep_frames = i + 1  # extend at least through this frame
+            keep_frames = i + 1   # extend at least through this frame
         else:
-            break  # stop at first sub-threshold frame
+            break                 # stop at first sub-threshold frame
 
     return keep_frames * FRAME_SAMPLES
 
-
-def _apply_soft_limit_splits(
-    segments: List[SpeechSegment],
-    probs: List[float],
-    sample_rate: int,
-    hop_sec: float,
-    soft_limit_sec: float,
-    min_valley_duration_s: float,
-    smoothing_window: int,
-    trough_prominence: float,
-    min_trough_offset_s: float,
-    return_seconds: bool,
-    with_scores: bool,
-) -> List[SpeechSegment]:
-    """
-    Recursively split speech segments that exceed *soft_limit_sec* by finding
-    the best valley trough in the segment's probability slice and splitting there.
-
-    Args:
-        segments:              The current list of SpeechSegment dicts.
-        probs:                 Full-audio framewise speech probabilities.
-        sample_rate:           Audio sample rate (Hz).
-        hop_sec:               Seconds per probability frame (typically 0.010).
-        soft_limit_sec:        Maximum preferred segment duration before splitting.
-        min_valley_duration_s: Min silence width to qualify as a split candidate.
-        smoothing_window:      Smoothing window passed to get_best_valley_trough.
-        trough_prominence:     Min trough prominence for detection.
-        min_trough_offset_s:   Trough must be >= this many seconds from segment start.
-        return_seconds:        Whether segment start/end are in seconds or samples.
-        with_scores:           Whether segment_probs should be populated.
-
-    Returns:
-        New (possibly longer) list of SpeechSegment dicts with renumbered ``num``
-        fields, long segments replaced by their split children.
-    """
-    result: List[SpeechSegment] = []
-    seg_num = 1
-
-    def _split_recursive(seg: SpeechSegment) -> List[SpeechSegment]:
-        """Return one or more segments produced from *seg*, splitting if needed."""
-        duration = seg["duration"]
-        if duration <= soft_limit_sec:
-            return [seg]
-
-        # Extract the probability slice for this segment
-        frame_start: int = seg["frame_start"]
-        frame_end: int = seg["frame_end"]
-        seg_probs: List[float] = probs[frame_start : frame_end + 1]
-
-        if not seg_probs:
-            return [seg]
-
-        # Find the best valley trough inside this segment
-        best_trough = get_best_valley_trough(
-            probs=seg_probs,
-            smoothing_window=smoothing_window,
-            trough_prominence=trough_prominence,
-            min_valley_duration_s=min_valley_duration_s,
-            min_trough_offset_s=min_trough_offset_s,
-        )
-
-        if best_trough is None:
-            # No suitable silence found — return the long segment as-is
-            console.print(
-                f"[yellow]Soft limit: segment {seg['num']} is {duration:.1f}s "
-                f"(>{soft_limit_sec}s) but no valley trough found — keeping intact.[/yellow]"
-            )
-            return [seg]
-
-        # Trough frame is local to seg_probs; convert to global frame index
-        local_trough_frame: int = best_trough["frame"]
-        global_trough_frame: int = frame_start + local_trough_frame
-        split_time_s: float = global_trough_frame * hop_sec
-
-        # Build left and right child segments
-        def _make_child(
-            child_frame_start: int,
-            child_frame_end: int,
-        ) -> SpeechSegment:
-            child_start_s = child_frame_start * hop_sec
-            child_end_s = child_frame_end * hop_sec
-            child_probs_slice = probs[child_frame_start : child_frame_end + 1]
-            avg_prob = float(np.mean(child_probs_slice)) if child_probs_slice else 0.0
-            duration_s = child_end_s - child_start_s
-            start_val = (
-                child_start_s if return_seconds else int(child_start_s * sample_rate)
-            )
-            end_val = child_end_s if return_seconds else int(child_end_s * sample_rate)
-            return SpeechSegment(
-                num=0,  # renumbered after recursion
-                start=start_val,
-                end=end_val,
-                prob=avg_prob,
-                duration=duration_s,
-                frames_length=len(child_probs_slice),
-                frame_start=child_frame_start,
-                frame_end=child_frame_end,
-                type=seg["type"],
-                segment_probs=child_probs_slice if with_scores else [],
-            )
-
-        left = _make_child(frame_start, global_trough_frame)
-        right = _make_child(global_trough_frame, frame_end)
-
-        console.print(
-            f"[cyan]Soft limit: split segment {seg['num']} "
-            f"({duration:.1f}s) at {split_time_s:.2f}s "
-            f"→ {left['duration']:.1f}s + {right['duration']:.1f}s[/cyan]"
-        )
-
-        # Recurse on each half independently
-        return _split_recursive(left) + _split_recursive(right)
-
-    for seg in segments:
-        children = _split_recursive(seg)
-        for child in children:
-            child["num"] = seg_num
-            seg_num += 1
-            result.append(child)
-
-    return result
 
 
 def extract_speech_timestamps(
@@ -448,21 +320,11 @@ def extract_speech_timestamps(
     postroll_hybrid_threshold: float = DEFAULT_POSTROLL_HYBRID_THRESHOLD,
     postroll_prob_weight: float = DEFAULT_POSTROLL_PROB_WEIGHT,
     postroll_rms_weight: float = DEFAULT_POSTROLL_RMS_WEIGHT,
-    soft_limit_sec: float = DEFAULT_SOFT_LIMIT_SEC,
-    soft_limit_min_valley_duration_s: float = DEFAULT_SOFT_LIMIT_MIN_VALLEY_DURATION_S,
-    soft_limit_smoothing_window: int = DEFAULT_SOFT_LIMIT_SMOOTHING_WINDOW,
-    soft_limit_trough_prominence: float = DEFAULT_SOFT_LIMIT_TROUGH_PROMINENCE,
-    soft_limit_min_trough_offset_s: float = DEFAULT_SOFT_LIMIT_MIN_TROUGH_OFFSET_S,
     **kwargs,
 ) -> Union[List[SpeechSegment], tuple[List[SpeechSegment], List[float]]]:
     """
     Extract speech timestamps using FireRedVAD with symmetric hybrid
     pre-roll (head) and post-roll (tail) boundary extension.
-
-    When a speech segment exceeds *soft_limit_sec*, valley trough detection
-    is used to find the best natural silence and split the segment there.
-    Splitting is recursive: each half is re-checked until no segment exceeds
-    the soft limit or no trough can be found.
 
     Both boundaries are extended by a variable amount computed from a
     weighted combination of smoothed speech probability and normalised RMS
@@ -550,7 +412,7 @@ def extract_speech_timestamps(
         end_sample = int(end_sec * sr)
         frame_start = int(start_sec / hop_sec)
         frame_end = int(end_sec / hop_sec)
-        segment_probs_slice = probs[frame_start : frame_end + 1]
+        segment_probs_slice = probs[frame_start: frame_end + 1]
         avg_prob = float(np.mean(segment_probs_slice)) if segment_probs_slice else 0.0
         duration_sec = end_sec - start_sec
         start_val = start_sec if return_seconds else start_sample
@@ -593,24 +455,6 @@ def extract_speech_timestamps(
             make_segment(seg_num, current_time, total_duration, "non-speech")
         )
 
-    # ------------------------------------------------------------------
-    # Soft-limit: split long segments at valley troughs
-    # ------------------------------------------------------------------
-    if soft_limit_sec > 0:
-        enhanced = _apply_soft_limit_splits(
-            segments=enhanced,
-            probs=probs,
-            sample_rate=sr,
-            hop_sec=hop_sec,
-            soft_limit_sec=soft_limit_sec,
-            min_valley_duration_s=soft_limit_min_valley_duration_s,
-            smoothing_window=soft_limit_smoothing_window,
-            trough_prominence=soft_limit_trough_prominence,
-            min_trough_offset_s=soft_limit_min_trough_offset_s,
-            return_seconds=return_seconds,
-            with_scores=with_scores,
-        )
-
     if with_scores:
         return enhanced, probs
     return enhanced
@@ -619,7 +463,6 @@ def extract_speech_timestamps(
 # ---------------------------------------------------------------------------
 # extract_speech_audio
 # ---------------------------------------------------------------------------
-
 
 def extract_speech_audio(
     audio: Union[str, Path, np.ndarray, torch.Tensor, list[np.ndarray]],
@@ -695,7 +538,6 @@ def extract_speech_audio(
 # Helpers used by save_segments
 # ---------------------------------------------------------------------------
 
-
 def _frames_from_seconds(sec: float) -> int:
     """Convert seconds to a 10 ms frame index (100 frames per second)."""
     return int(round(sec * 100.0))
@@ -716,9 +558,9 @@ def _compute_rms(
     rms = np.zeros(num_frames, dtype=np.float32)
     for i in range(num_frames):
         start = i * hop_length
-        frame = signal[start : start + frame_length]
+        frame = signal[start: start + frame_length]
         if frame.size:
-            rms[i] = float(np.sqrt(np.mean(frame**2)))
+            rms[i] = float(np.sqrt(np.mean(frame ** 2)))
     return rms
 
 
@@ -750,12 +592,8 @@ def _generate_plot(
     ax.plot(probs, color=color, linewidth=1.8, label=label)
     ax.fill_between(range(num_frames), probs, color=color, alpha=0.14)
     ax.axhline(
-        y=0.4,
-        linestyle="--",
-        color="#d62728",
-        alpha=0.65,
-        linewidth=1.2,
-        label="threshold ≈ 0.4",
+        y=0.4, linestyle="--", color="#d62728", alpha=0.65,
+        linewidth=1.2, label="threshold ≈ 0.4",
     )
     ax.set_ylim(-0.03, 1.03)
     ax.set_xlim(0, num_frames - 1)
@@ -766,8 +604,7 @@ def _generate_plot(
     )
     ax.set_title(
         f"Segment {segment_idx:03d} — {'Dummy ' if is_dummy else ''}Model Probabilities",
-        fontsize=12,
-        pad=12,
+        fontsize=12, pad=12,
     )
     ax.grid(True, alpha=0.28, linestyle="--", zorder=0)
     ax.legend(loc="upper right", fontsize=9.5, framealpha=0.92)
@@ -787,20 +624,11 @@ def _generate_plot(
     if has_hybrid:
         ax_hyb = axes[ax_idx]
         n_hyb = len(hybrid)
-        ax_hyb.plot(
-            hybrid,
-            color="#9467bd",
-            linewidth=1.8,
-            label="Hybrid score (0.5·prob + 0.5·RMS)",
-        )
+        ax_hyb.plot(hybrid, color="#9467bd", linewidth=1.8, label="Hybrid score (0.5·prob + 0.5·RMS)")
         ax_hyb.fill_between(range(n_hyb), hybrid, color="#9467bd", alpha=0.14)
         ax_hyb.axhline(
-            y=hybrid_threshold,
-            linestyle="--",
-            color="#d62728",
-            alpha=0.65,
-            linewidth=1.2,
-            label=f"threshold = {hybrid_threshold}",
+            y=hybrid_threshold, linestyle="--", color="#d62728", alpha=0.65,
+            linewidth=1.2, label=f"threshold = {hybrid_threshold}",
         )
         ax_hyb.set_ylim(-0.03, 1.03)
         ax_hyb.set_xlim(0, n_hyb - 1)
@@ -817,7 +645,6 @@ def _generate_plot(
 # ---------------------------------------------------------------------------
 # save_segments
 # ---------------------------------------------------------------------------
-
 
 def save_segments(
     segments: List[SpeechSegment],
@@ -902,17 +729,19 @@ def save_segments(
             # ── 3. probs_info summary stats ───────────────────────────────
             probs_info = {
                 "num_frames": int(len(seg_probs_arr)),
-                "mean": float(np.mean(seg_probs_arr)),
-                "max": float(np.max(seg_probs_arr)),
-                "min": float(np.min(seg_probs_arr)),
-                "std": float(np.std(seg_probs_arr)),
-                "median": float(np.median(seg_probs_arr)),
+                "mean":       float(np.mean(seg_probs_arr)),
+                "max":        float(np.max(seg_probs_arr)),
+                "min":        float(np.min(seg_probs_arr)),
+                "std":        float(np.std(seg_probs_arr)),
+                "median":     float(np.median(seg_probs_arr)),
                 "frame_rate_hz": 100,
             }
 
             # ── 4. meta.json ──────────────────────────────────────────────
             meta_to_save = dict(meta)
-            meta_to_save["output_path"] = str(wav_path.relative_to(output_base_dir))
+            meta_to_save["output_path"] = str(
+                wav_path.relative_to(output_base_dir)
+            )
             meta_to_save["probs_info"] = probs_info
             meta_to_save.pop("segment_probs", None)
             with open(seg_dir / "meta.json", "w", encoding="utf-8") as fh:
@@ -949,14 +778,12 @@ def save_segments(
             # Align rms to the same frame count as probs for the hybrid score.
             # Both are 10 ms frames; length may differ slightly at boundaries.
             n_prob = len(seg_probs_arr)
-            n_rms = len(rms)
-            n_min = min(n_prob, n_rms)
+            n_rms  = len(rms)
+            n_min  = min(n_prob, n_rms)
             if n_min > 0:
                 rms_ceil = np.percentile(rms[:n_min], 99) + 1e-10
                 rms_norm = np.clip(rms[:n_min] / rms_ceil, 0.0, 1.0)
-                hybrid_arr = (0.5 * seg_probs_arr[:n_min] + 0.5 * rms_norm).astype(
-                    np.float32
-                )
+                hybrid_arr = (0.5 * seg_probs_arr[:n_min] + 0.5 * rms_norm).astype(np.float32)
             else:
                 hybrid_arr = np.array([], dtype=np.float32)
 
@@ -990,9 +817,7 @@ if __name__ == "__main__":
     import argparse
     import shutil
 
-    DEFAULT_AUDIO = (
-        r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
-    )
+    DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_1_speaker.wav"
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 
     parser = argparse.ArgumentParser(
@@ -1005,50 +830,43 @@ if __name__ == "__main__":
         help="input audio file",
     )
     parser.add_argument(
-        "-o",
-        "--output-dir",
+        "-o", "--output-dir",
         default=str(OUTPUT_DIR),
         type=str,
         help=f"output directory (default: '{OUTPUT_DIR}')",
     )
     parser.add_argument(
-        "-t",
-        "--threshold",
+        "-t", "--threshold",
         type=float,
         default=DEFAULT_THRESHOLD,
         help=f"speech threshold (default: {DEFAULT_THRESHOLD})",
     )
     parser.add_argument(
-        "-ms",
-        "--min-silence",
+        "-ms", "--min-silence",
         type=float,
         default=DEFAULT_MIN_SILENCE_SEC,
         help=f"minimum silence duration in seconds (default: {DEFAULT_MIN_SILENCE_SEC})",
     )
     parser.add_argument(
-        "-mp",
-        "--min-speech",
+        "-mp", "--min-speech",
         type=float,
         default=DEFAULT_MIN_SPEECH_SEC,
         help=f"minimum speech duration in seconds (default: {DEFAULT_MIN_SPEECH_SEC})",
     )
     parser.add_argument(
-        "-mx",
-        "--max-speech",
+        "-mx", "--max-speech",
         type=float,
         default=8.0,
         help="maximum speech duration in seconds",
     )
     parser.add_argument(
-        "-sw",
-        "--smooth-window",
+        "-sw", "--smooth-window",
         type=int,
         default=DEFAULT_SMOOTH_WINDOW_SIZE,
         help=f"smoothing window size (default: {DEFAULT_SMOOTH_WINDOW_SIZE})",
     )
     parser.add_argument(
-        "-mb",
-        "--max-buffer-sec",
+        "-mb", "--max-buffer-sec",
         type=float,
         default=DEFAULT_MAX_BUFFER_SEC,
         help=f"stream buffer duration in seconds (default: {DEFAULT_MAX_BUFFER_SEC})",
@@ -1102,36 +920,6 @@ if __name__ == "__main__":
         type=float,
         default=DEFAULT_POSTROLL_RMS_WEIGHT,
         help=f"weight for RMS energy in hybrid score (default: {DEFAULT_POSTROLL_RMS_WEIGHT})",
-    )
-    parser.add_argument(
-        "--soft-limit",
-        type=float,
-        default=DEFAULT_SOFT_LIMIT_SEC,
-        help=f"Soft max segment duration before valley-trough splitting (default: {DEFAULT_SOFT_LIMIT_SEC}s; 0 = disabled)",
-    )
-    parser.add_argument(
-        "--soft-limit-min-valley",
-        type=float,
-        default=DEFAULT_SOFT_LIMIT_MIN_VALLEY_DURATION_S,
-        help="Min silence duration for a split-candidate valley (default: %(default)ss)",
-    )
-    parser.add_argument(
-        "--soft-limit-smoothing",
-        type=int,
-        default=DEFAULT_SOFT_LIMIT_SMOOTHING_WINDOW,
-        help="Smoothing window for soft-limit trough detection (default: %(default)s frames)",
-    )
-    parser.add_argument(
-        "--soft-limit-prominence",
-        type=float,
-        default=DEFAULT_SOFT_LIMIT_TROUGH_PROMINENCE,
-        help="Min trough prominence for soft-limit splitting (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--soft-limit-offset",
-        type=float,
-        default=DEFAULT_SOFT_LIMIT_MIN_TROUGH_OFFSET_S,
-        help="Trough must be >= this many seconds into the segment (default: %(default)ss)",
     )
 
     args = parser.parse_args()
@@ -1221,7 +1009,8 @@ if __name__ == "__main__":
     summary_path = output_dir / "all_speech_segments.json"
     with open(summary_path, "w", encoding="utf-8") as fh:
         slim = [
-            {k: v for k, v in m.items() if k != "segment_probs"} for m in saved_metas
+            {k: v for k, v in m.items() if k != "segment_probs"}
+            for m in saved_metas
         ]
         json.dump(slim, fh, ensure_ascii=False, indent=2)
     console.print(

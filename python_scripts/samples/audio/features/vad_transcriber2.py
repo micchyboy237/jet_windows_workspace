@@ -58,6 +58,7 @@ from rich.progress import (
 from loader import load_audio
 from _types import SpeechSegment
 from vad_firered_hybrid import extract_speech_timestamps
+from audio_segments_buffer import AudioSegmentsBuffer, SegmentContext, MAX_CONTEXT_AUDIO
 
 console = Console()
 
@@ -164,8 +165,10 @@ class SenseVoiceTranscriber:
             language=self.language,
             use_itn=self.use_itn,
             ban_emo_unk=self.ban_emo_unk,
+            output_timestamp=True,
             **self._kwargs,
         )
+
         raw_text: str = res[0][0]["text"]
         clean_text: str = rich_transcription_postprocess(raw_text)
         return clean_text, raw_text
@@ -216,43 +219,46 @@ class SenseVoiceTranscriber:
     # Core transcription
     # ------------------------------------------------------------------
 
-    def transcribe_segment(
+    def transcribe_with_context(
         self,
-        audio_np: np.ndarray,
-        segment: SpeechSegment,
-    ) -> TranscribedSegment:
+        context,  # SegmentContext type hint omitted for symmetry with import-less style
+    ) -> "TranscribedSegment":
         """
-        Transcribe one VAD ``SpeechSegment``.
+        Transcribe one VAD segment using its pre-built context window.
 
         Parameters
         ----------
-        audio_np:
-            Full original audio at 16 kHz (float32).  The segment's
-            start/end times are used to slice it — do **not** pre-slice.
-        segment:
-            A ``SpeechSegment`` dict from ``extract_speech_timestamps``
-            called with ``return_seconds=True``.
+        context : SegmentContext
+            Produced by AudioSegmentsBuffer.get_context(i).
+            context.audio  — speech-only audio for [context_segs…, target_seg]
+                             (silent gaps are NOT included in the audio, but
+                              they were counted toward the N-s budget).
+            context.segments[-1]  — the target segment being transcribed.
 
         Returns
         -------
         TranscribedSegment
-            If the segment is ≤ MAX_CHUNK_SEC (28 s) it is transcribed
-            in a single call.  Longer segments are split into overlapping
-            28-s windows and the results joined with estimated-overlap
-            trimming to avoid duplicated words at chunk boundaries.
+            The target segment's transcription.  The full context audio is
+            fed to SenseVoice so earlier speech acts as acoustic context,
+            but only the text that corresponds to the *target* segment's
+            portion is returned.
+
+            If context.audio exceeds MAX_CHUNK_SEC (28 s) the audio is split
+            into overlapping windows as before; overlap words are dropped from
+            every non-first chunk.
         """
+        # Target segment is always the last in context.segments.
+        segment = context.segments[-1]
         start_sec: float = float(segment["start"])
-        end_sec: float = float(segment["end"])
-        duration: float = end_sec - start_sec
+        end_sec: float   = float(segment["end"])
+        duration: float  = end_sec - start_sec
 
-        start_sample = int(round(start_sec * SAMPLE_RATE))
-        end_sample = int(round(end_sec * SAMPLE_RATE))
-        seg_audio = audio_np[start_sample:end_sample].astype(np.float32)
+        # context.audio already contains speech-only float32 for window
+        seg_audio = context.audio
 
-        chunks_meta: List[ChunkMeta] = []
+        chunks_meta: list = []
 
         if duration <= MAX_CHUNK_SEC:
-            # ── Fast path: single inference call ──────────────────────
             text, raw = self._infer_chunk(seg_audio)
             self._warn_if_wrong_language(raw, segment["num"])
             chunks_meta.append(ChunkMeta(
@@ -263,18 +269,11 @@ class SenseVoiceTranscriber:
                 is_overlap_trimmed=False,
             ))
             joined_text = text
-
         else:
-            # ── Slow path: sliding window with overlap ─────────────────
-            #
-            # Window layout (samples within the segment):
-            #   chunk 0: [0,           MAX_CHUNK_SAMPLES]
-            #   chunk 1: [STEP_SAMPLES, STEP+MAX_CHUNK]   (4 s overlap)
-            #   ...
             max_chunk_samples = int(MAX_CHUNK_SEC * SAMPLE_RATE)
             step_samples = int((MAX_CHUNK_SEC - OVERLAP_SEC) * SAMPLE_RATE)
 
-            text_parts: List[str] = []
+            text_parts: list = []
             chunk_start_sample = 0
             chunk_index = 0
 
@@ -334,15 +333,34 @@ class SenseVoiceTranscriber:
             chunks_meta=chunks_meta,
         )
 
-    # ------------------------------------------------------------------
-    # Batch helpers
-    # ------------------------------------------------------------------
+    def transcribe_segment(
+        self,
+        audio_np: np.ndarray,
+        segment,
+    ) -> "TranscribedSegment":
+        """
+        Backward-compatible single-segment transcription (no context).
+
+        Wraps the segment in a minimal one-entry SegmentContext and
+        delegates to transcribe_with_context().
+        """
+        start_sample = int(round(float(segment["start"]) * SAMPLE_RATE))
+        end_sample   = int(round(float(segment["end"])   * SAMPLE_RATE))
+        seg_audio    = audio_np[start_sample:end_sample].astype(np.float32)
+        ctx = SegmentContext(
+            current_index=0,
+            segments=[segment],
+            audio=seg_audio,
+            total_duration_sec=float(segment["duration"]),
+            speech_duration_sec=float(len(seg_audio)) / SAMPLE_RATE,
+        )
+        return self.transcribe_with_context(ctx)
 
     def transcribe_all(
         self,
         audio_np: np.ndarray,
-        segments: List[SpeechSegment],
-    ) -> List[TranscribedSegment]:
+        segments,
+    ) -> list:
         """
         Transcribe every speech segment and return a flat list.
 
@@ -354,23 +372,28 @@ class SenseVoiceTranscriber:
     def stream_transcribe_all(
         self,
         audio_np: np.ndarray,
-        segments: List[SpeechSegment],
-    ) -> Generator[TranscribedSegment, None, None]:
-        """
+        segments,
+    ):
+        """  # noqa: D401
         Generator that yields one ``TranscribedSegment`` as soon as it is
         ready, allowing a downstream consumer (e.g. a translator) to start
         working on segment N while segment N+1 is still being transcribed.
-
-        Non-speech segments are silently skipped.
 
         Usage
         -----
         >>> for seg in transcriber.stream_transcribe_all(audio_np, vad_segs):
         ...     translation = translator.translate(seg.text)
         ...     print(f"[{seg.start:.1f}s] {translation}")
+
+        Uses AudioSegmentsBuffer internally so every segment gets up to
+        MAX_CONTEXT_AUDIO seconds of preceding speech as acoustic context.
         """
-        speech_segs = [s for s in segments if s["type"] == "speech"]
-        total = len(speech_segs)
+        buffer = AudioSegmentsBuffer(
+            audio_np=audio_np,
+            segments=segments,
+            max_context_sec=MAX_CONTEXT_AUDIO,
+        )
+        total = len(buffer)
 
         progress = Progress(
             SpinnerColumn(),
@@ -381,25 +404,36 @@ class SenseVoiceTranscriber:
             TimeRemainingColumn(),
             console=console,
         )
-        with progress:
-            task = progress.add_task(
-                "[cyan]Transcribing segments…", total=total
+
+        task = progress.add_task(
+            "[cyan]Transcribing segments…", total=total
+        )
+
+        for ctx in buffer.iter_contexts():
+            seg = ctx.segments[-1]
+            n_ctx = len(ctx.segments)
+            ctx_tag = (
+                f"[dim](ctx: {n_ctx} segs, "
+                f"{ctx.total_duration_sec:.1f}s / {MAX_CONTEXT_AUDIO:.0f}s)[/dim]"
             )
-            for seg in speech_segs:
-                result = self.transcribe_segment(audio_np, seg)
 
-                n_chunks = len(result.chunks_meta)
-                chunk_tag = (
-                    f"[dim]({n_chunks} chunks)[/dim]" if n_chunks > 1 else ""
-                )
-                console.print(
-                    f"[yellow][{result.start:.2f}–{result.end:.2f}s][/yellow] "
-                    f"[magenta]{result.duration:.1f}s[/magenta] {chunk_tag}\n"
-                    f"  [white]{result.text or '[no speech detected]'}[/white]"
-                )
+            # Show the bar while transcription is running
+            progress.start()
+            result = self.transcribe_with_context(ctx)
 
-                progress.advance(task)
-                yield result
+            # Advance, then freeze the bar before yielding so JP/EN
+            # lines from the caller print on clean lines with no bar
+            progress.advance(task)
+            progress.stop()
+
+            console.print(
+                f"\n[yellow][{result.start:.2f}–{result.end:.2f}s][/yellow] "
+                f"[magenta]{result.duration:.1f}s[/magenta] {ctx_tag}"
+            )
+            yield result
+
+        # Final stop is a no-op if already stopped, but ensures cleanup
+        progress.stop()
 
 
 # ---------------------------------------------------------------------------

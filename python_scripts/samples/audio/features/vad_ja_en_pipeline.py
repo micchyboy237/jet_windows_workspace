@@ -217,6 +217,7 @@ class ShisaTranslator:
             n_ctx=n_ctx,
             logits_all=False,   # CRITICAL: prevents ~1 GB scores allocation
             verbose=verbose,
+            seed=42,
         )
    
         console.print("[cyan]Building English-only logits processor…[/cyan]")
@@ -369,14 +370,15 @@ def run_pipeline(
             continue
 
         console.print(
-            f"\n[bold yellow]Segment {transcribed.num:03d} "
+            f"[bold yellow]Segment {transcribed.num:03d} "
             f"[{transcribed.start:.2f}–{transcribed.end:.2f}s][/bold yellow]"
         )
-        console.print(f"  [cyan]JP:[/cyan] {transcribed.text}")
+        console.print(f"  [cyan]JP:[/cyan] {transcribed.text}\n")
 
         english = translator.translate(transcribed.text)
 
-        console.print(f"  [green]EN:[/green] {english}")
+        console.print(f"  [green]EN:[/green] {english}\n")
+   
 
         results.append(TranslatedSegment(
             num=transcribed.num,
