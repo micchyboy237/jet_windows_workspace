@@ -1,0 +1,242 @@
+api:
+  name: Live Japanese Subtitles WebSocket API
+  base_url: ws://localhost:8000
+
+endpoint:
+
+  path: /ws/live-subtitles
+  method: WS
+
+  summary: |
+    Real-time Japanese subtitle streaming API.
+    Client sends binary audio chunks with metadata.
+    Server returns incremental Japanese transcription
+    and English translation results.
+
+transport:
+
+  protocol: websocket
+
+  client_message:
+
+    type: binary
+
+    format: |
+      <json_header_utf8>\x00<audio_bytes>
+
+    description: |
+      Message consists of:
+        1. UTF-8 JSON header
+        2. Null byte separator (\x00)
+        3. Raw PCM int16 audio bytes
+
+  header_schema:
+
+    type: object
+
+    required:
+      - uuid
+      - sample_rate
+      - duration_sec
+      - start_sec
+      - end_sec
+      - vad_reason
+      - forced
+
+    properties:
+
+      uuid:
+        type: string
+        description: Unique segment ID
+
+      sample_rate:
+        type: integer
+        default: 16000
+        description: Audio sample rate in Hz
+
+      duration_sec:
+        type: float
+        description: Audio chunk duration
+
+      start_sec:
+        type: float
+        description: Segment start timestamp
+
+      end_sec:
+        type: float
+        description: Segment end timestamp
+
+      vad_reason:
+        type: string
+        enum:
+          - silence
+          - forced
+          - partial
+          - manual
+        description: Reason why VAD emitted segment
+
+      forced:
+        type: boolean
+        description: Whether segment was force flushed
+
+      started_at:
+        type: string
+        format: iso8601
+        nullable: true
+        description: Recording start timestamp
+
+  audio_schema:
+
+    encoding: PCM int16
+    channels: 1
+    sample_format: signed_int16
+    endian: little_endian
+
+server_response:
+
+  success_response:
+
+    type: object
+
+    properties:
+
+      uuid:
+        type: string
+
+      success:
+        type: boolean
+
+      transcription_ja:
+        type: string
+        description: Newly detected Japanese text
+
+      translation_en:
+        type: string
+        description: Newly translated English text
+
+      context_uuid:
+        type: string
+        description: Shared rolling context ID
+
+      context_duration:
+        type: float
+        description: Current rolling audio context duration
+
+      new_duration:
+        type: float
+        description: Duration of current segment
+
+      new_ja_similarity:
+        type: float
+        nullable: true
+        description: Similarity score against previous transcript
+
+      new_ja_start_index:
+        type: integer
+        nullable: true
+        description: Start position of newly detected text
+
+      transcribed_duration_sec:
+        type: float
+
+      transcribed_duration_pctg:
+        type: float
+
+      coverage_label:
+        type: string
+
+      old_ja_sents:
+        type: array[string]
+
+      new_ja_sents:
+        type: array[string]
+
+      old_en_sents:
+        type: array[string]
+
+      new_en_sents:
+        type: array[string]
+
+      phrase_segments:
+        type: array
+
+        items:
+
+          type: object
+
+          properties:
+
+            phrase:
+              type: string
+
+            start:
+              type: float
+
+            end:
+              type: float
+
+  error_response:
+
+    type: object
+
+    properties:
+
+      uuid:
+        type: string
+
+      error:
+        type: string
+
+      transcription_ja:
+        type: string
+
+      translation_en:
+        type: string
+
+examples:
+
+  client_header:
+
+    uuid: seg_0001
+    sample_rate: 16000
+    duration_sec: 2.5
+    start_sec: 10.0
+    end_sec: 12.5
+    vad_reason: silence
+    forced: false
+    started_at: 2026-05-15T04:00:00Z
+
+  websocket_binary_layout: |
+    {"uuid":"seg_0001","sample_rate":16000,...}\x00<pcm_audio_bytes>
+
+  success_response:
+
+    uuid: seg_0001
+    success: true
+    transcription_ja: おはようございます
+    translation_en: Good morning
+    context_uuid: ctx_001
+    context_duration: 18.2
+    new_duration: 2.5
+    new_ja_similarity: 91.4
+    new_ja_start_index: 42
+    transcribed_duration_sec: 20.7
+    transcribed_duration_pctg: 98.2
+    coverage_label: high
+    old_ja_sents:
+      - おはよう
+    new_ja_sents:
+      - おはようございます
+    old_en_sents:
+      - Morning
+    new_en_sents:
+      - Good morning
+
+notes:
+
+  - Audio chunks should be mono PCM int16
+  - Recommended sample_rate is 16000 Hz
+  - Messages must contain a null byte separator
+  - Server maintains rolling audio/text context
+  - Responses are incremental, not full transcript replacements
+  - Empty or duplicate segments may return success=false
