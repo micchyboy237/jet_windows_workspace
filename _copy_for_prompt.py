@@ -151,7 +151,7 @@ DEFAULT_INSTRUCTIONS_MESSAGE = """
 Provide step-by-step analysis and explain the flow first.
 Use visuals, diagrams, or tables when helpful.
 
-Show unified diffs for updated files and code blocks for new files.
+Show full code for new files, then show full function code for updated functions.
 Keep explanations simple and clear.
 
 Write flexible, reusable, and maintainable code.

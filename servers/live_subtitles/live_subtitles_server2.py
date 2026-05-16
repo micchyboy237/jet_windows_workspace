@@ -71,27 +71,28 @@ prev_vad_reason = None
 
 def should_reset_context(header: dict) -> bool:
     """Determine if we should reset the context buffer based on time gap or silence."""
-    global prev_vad_reason, prev_end_sec
-    current_start_sec = float(header.get("start_sec", 0.0))
-    current_end_sec = float(header.get("end_sec", 0.0))
-    vad_reason = header.get("vad_reason")
-    if prev_end_sec is not None:
-        gap = current_start_sec - prev_end_sec
-        if gap > 3.0:
-            console.print(
-                f"[warning]Large time gap detected: {gap:.2f}s > 8.0s → Resetting context[/warning]"
-            )
-            prev_end_sec = current_end_sec
-            prev_vad_reason = vad_reason
-            return True
-    if context_buffer.segments and prev_vad_reason == "silence":
-        console.print("[info]Silence detected via VAD → Resetting context[/info]")
-        prev_end_sec = current_end_sec
-        prev_vad_reason = vad_reason
-        return True
-    prev_end_sec = current_end_sec
-    prev_vad_reason = vad_reason
-    return False
+    # global prev_vad_reason, prev_end_sec
+    # current_start_sec = float(header.get("start_sec", 0.0))
+    # current_end_sec = float(header.get("end_sec", 0.0))
+    # vad_reason = header.get("vad_reason")
+    # if prev_end_sec is not None:
+    #     gap = current_start_sec - prev_end_sec
+    #     if gap > 3.0:
+    #         console.print(
+    #             f"[warning]Large time gap detected: {gap:.2f}s > 8.0s → Resetting context[/warning]"
+    #         )
+    #         prev_end_sec = current_end_sec
+    #         prev_vad_reason = vad_reason
+    #         return True
+    # if context_buffer.segments and prev_vad_reason == "silence":
+    #     console.print("[info]Silence detected via VAD → Resetting context[/info]")
+    #     prev_end_sec = current_end_sec
+    #     prev_vad_reason = vad_reason
+    #     return True
+    # prev_end_sec = current_end_sec
+    # prev_vad_reason = vad_reason
+    # return False
+    return True
 
 
 def blocking_process_audio(
