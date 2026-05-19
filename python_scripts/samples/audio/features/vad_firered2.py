@@ -557,6 +557,8 @@ def save_segments(
 if __name__ == "__main__":
     import argparse
     import shutil
+    import subprocess
+    import platform
 
     DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
@@ -592,7 +594,7 @@ if __name__ == "__main__":
         help=f"minimum silence duration in seconds (default: {DEFAULT_MIN_SILENCE_SEC})",
     )
     parser.add_argument(
-        "-mp",
+        "-mc",
         "--min-speech",
         type=float,
         default=DEFAULT_MIN_SPEECH_SEC,
@@ -604,6 +606,21 @@ if __name__ == "__main__":
         type=float,
         default=8.0,
         help="maximum speech duration in seconds",
+    )
+    # === NEW ARGUMENTS ===
+    parser.add_argument(
+        "-mp",
+        "--min-prob",
+        type=float,
+        default=0.0,
+        help="minimum average speech probability to keep a segment (default: 0.0 = no filter)",
+    )
+    parser.add_argument(
+        "-md",
+        "--min-duration",
+        type=float,
+        default=0.0,
+        help="minimum duration in seconds to keep a segment (default: 0.0 = no filter)",
     )
     parser.add_argument(
         "-sw",
@@ -626,7 +643,9 @@ if __name__ == "__main__":
         default=DEFAULT_MAX_BUFFER_SEC,
         help=f"stream buffer duration in seconds (default: {DEFAULT_MAX_BUFFER_SEC})",
     )
+
     args = parser.parse_args()
+
     audio_path = args.audio_path
     output_dir = Path(args.output_dir)
     shutil.rmtree(output_dir, ignore_errors=True)
@@ -634,7 +653,7 @@ if __name__ == "__main__":
     console.rule("Audio Segmenter – FireRedVAD2", style="blue")
     console.print(f"[bold cyan]Processing:[/bold cyan] {Path(audio_path).name}\n")
 
-    # ── Step 1: detect segments (with per-frame probabilities) ────────────
+    # ── Step 1: detect segments ───────────────────────────────────────────
     segments, speech_probs = extract_speech_timestamps(
         audio_path,
         threshold=args.threshold,
@@ -649,23 +668,28 @@ if __name__ == "__main__":
         max_buffer_sec=args.max_buffer_sec,
     )
 
-    console.print(f"\n[bold green]Segments found:[/bold green] {len(segments)}\n")
-    for seg in segments:
-        seg_type = seg["type"]
-        type_color = "bold green" if seg_type == "speech" else "bold red"
+    # === NEW: Apply filters (min-prob and min-duration) ===
+    original_count = len(segments)
+    filtered = []
+
+    for s in segments:
+        if s.get("prob", 0.0) < args.min_prob:
+            continue
+        if s.get("duration", 0.0) < args.min_duration:
+            continue
+        filtered.append(s)
+
+    segments = filtered
+
+    if original_count != len(segments):
         console.print(
-            f"[yellow][[/yellow] [bold white]{seg['start']:.2f}[/bold white]"
-            f" - [bold white]{seg['end']:.2f}[/bold white] [yellow]][/yellow] "
-            f"dur=[bold magenta]{seg['duration']:.2f}s[/bold magenta] "
-            f"prob=[bold cyan]{seg['prob']:.3f}[/bold cyan] "
-            f"type=[{type_color}]{seg_type}[/{type_color}]"
+            f"[yellow]Filtered: {len(segments)}/{original_count} segments kept "
+            f"(min-prob={args.min_prob:.3f}, min-duration={args.min_duration:.2f}s)[/yellow]"
         )
 
-    if not any(s["type"] == "speech" for s in segments):
-        console.print("[red]No speech segments found.[/red]")
-        raise SystemExit(0)
+    console.print(f"\n[bold green]Segments found:[/bold green] {len(segments)}\n")
 
-    # ── Step 2: extract raw audio for each speech segment ─────────────────
+    # ── Step 2: extract audio chunks for filtered segments ───────────────
     audio_chunks = extract_speech_audio(
         audio_path,
         sampling_rate=DEFAULT_SAMPLING_RATE,
@@ -678,12 +702,47 @@ if __name__ == "__main__":
         max_buffer_sec=args.max_buffer_sec,
     )
 
-    # ── Step 3: save everything to disk ───────────────────────────────────
+    # Safety: align audio chunks with filtered segments
+    speech_segments = [s for s in segments if s["type"] == "speech"]
+    audio_chunks = audio_chunks[: len(speech_segments)]
+
+    # ── Step 3: save everything ───────────────────────────────────────────
     saved_metas = save_segments(segments, audio_chunks, output_dir)
 
-    # ── Step 4: write summary JSON files ──────────────────────────────────
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Helper to play sound
+    def play_segment(wav_path: Path):
+        try:
+            if platform.system() == "Darwin":      # macOS
+                subprocess.run(["afplay", str(wav_path)], check=False)
+            elif platform.system() == "Windows":
+                subprocess.run(["powershell", "-c", f"(New-Object Media.SoundPlayer '{wav_path}').PlaySync()"], check=False)
+            else:  # Linux
+                subprocess.run(["aplay", str(wav_path)], check=False)
+        except Exception:
+            pass  # silent fail
 
+    # ── Step 4: display summary with Play buttons ────────────────────────
+    for seg in saved_metas:
+        seg_type = seg["type"]
+        type_color = "bold green" if seg_type == "speech" else "bold red"
+        wav_rel = seg.get("output_path")
+        wav_full = output_dir / wav_rel if wav_rel else None
+
+        console.print(
+            f"[yellow][[/yellow] [bold white]{seg['start']:.2f}[/bold white]"
+            f" - [bold white]{seg['end']:.2f}[/bold white] [yellow]][/yellow] "
+            f"dur=[bold magenta]{seg['duration']:.2f}s[/bold magenta] "
+            f"prob=[bold cyan]{seg['prob']:.3f}[/bold cyan] "
+            f"type=[{type_color}]{seg_type}[/{type_color}]"
+            f"   [bold blue][link=file://{wav_full}]▶ Play[/link][/bold blue]"
+        )
+
+    if not any(s["type"] == "speech" for s in saved_metas):
+        console.print("[red]No speech segments found after filtering.[/red]")
+        raise SystemExit(0)
+
+    # ── Step 5: write summary JSONs ───────────────────────────────────────
+    output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = output_dir / "all_speech_segments.json"
     with open(summary_path, "w", encoding="utf-8") as fh:
         slim = [
@@ -691,21 +750,10 @@ if __name__ == "__main__":
             for m in saved_metas
         ]
         json.dump(slim, fh, ensure_ascii=False, indent=2)
+
     console.print(
         f"[bold green]✓ Summary saved to:[/bold green] "
         f"[link=file://{summary_path.resolve()}]{summary_path}[/link]"
-    )
-
-    all_probs_path = output_dir / "speech_probs.json"
-    with open(all_probs_path, "w", encoding="utf-8") as fh:
-        json.dump(
-            speech_probs if isinstance(speech_probs, list) else [],
-            fh,
-            indent=2,
-        )
-    console.print(
-        f"[bold green]✓ Full probs saved to:[/bold green] "
-        f"[link=file://{all_probs_path.resolve()}]{all_probs_path}[/link]"
     )
 
     console.rule("Done", style="green")

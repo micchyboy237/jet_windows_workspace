@@ -1,4 +1,4 @@
-from typing import Any, Dict, TypedDict
+from typing import Any, Dict, Optional, TypedDict
 
 
 class VADSegment(TypedDict):
@@ -45,3 +45,17 @@ class ValleyTrough(TypedDict):
     time_s: float
     global_time_s: float
     valley: ValleyInfo
+
+
+class StreamVadFrame(TypedDict):
+    """Typed structure for accumulated VAD probability frame."""
+
+    frame_idx: int
+    raw_prob: float
+    smoothed_prob: float
+    is_speech: bool
+    is_speech_start: bool
+    is_speech_end: bool
+    # Optional extended fields (can be added later)
+    speech_start_frame: Optional[int]
+    speech_end_frame: Optional[int]

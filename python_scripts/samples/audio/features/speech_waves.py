@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import shutil
 import statistics
 from pathlib import Path
 from typing import List, Literal, Optional
 
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import numpy as np
 import scipy.io.wavfile as wavfile
 from _types import AudioInput, SpeechWave
@@ -315,41 +317,194 @@ def save_wave_audio(
     wavfile.write(output_path, sampling_rate, wave_audio)
 
 
+def _compute_composite_score(wave: SpeechWave) -> float:
+    """
+    Composite quality score for ranking speech waves.
+
+    Formula:
+        score = avg_prob * prominence * log1p(duration_sec) * (1 + 0.3 * excursion)
+
+    Rationale for each term:
+    - avg_prob: rewards sustained confidence across the whole wave, not just
+      a single spike; a wave hovering at 0.95 outranks one that spikes once
+      and sits at 0.55.
+    - prominence: the mountain height above the noise floor (peak minus
+      baseline); guards against flat plateaus that happen to be above threshold.
+    - log1p(duration_sec): duration reward with diminishing returns so long
+      but featureless segments don't dominate short, sharp utterances.
+      log1p(1 s) ≈ 0.69, log1p(3 s) ≈ 1.39, log1p(10 s) ≈ 2.40.
+    - (1 + 0.3 * excursion): small multiplicative bonus for shape sharpness;
+      high excursion means the wave truly rises and falls rather than
+      lingering as a flat plateau. Coefficient 0.3 caps the bonus at ×1.3
+      (when excursion = 1.0) so it modulates rather than dominates.
+    """
+    d = wave["details"]
+    avg_prob = d.get("avg_prob", 0.0)
+    prominence = d.get("prominence", d["max_prob"])
+    duration_sec = d.get("duration_sec", 0.0)
+    excursion = d.get("excursion", 0.0)
+    return avg_prob * prominence * math.log1p(duration_sec) * (1.0 + 0.3 * excursion)
+
+
 def save_wave_plot(
     probs: List[float],
     rms_values: List[float],
     output_path: Path,
     wave_num: int,
     seg_num: int,
+    wave: Optional[SpeechWave] = None,
+    threshold: float = 0.5,
+    hop_size: int = HOP_SIZE,
+    sampling_rate: int = SAMPLE_RATE,
 ) -> None:
-    """Create visualization plot for wave probabilities and energy.
-    Handles potential length mismatches between probs and rms_values."""
+    """
+    Create a two-panel visualization for a single speech wave.
 
-    # Ensure arrays have the same length by taking the minimum length
+    Top panel — VAD probability:
+    - X-axis in milliseconds (real time, not frame index)
+    - Above-threshold region shaded in light blue
+    - Vertical dashed markers at wave start and end
+    - Baseline shown as a horizontal dashed line with label
+    - Peak annotated with a dot and probability label
+    - Metric text-box: peak, avg, prominence, excursion, baseline, composite,
+      duration (drawn in the upper-right corner so it never overlaps the curve)
+
+    Bottom panel — RMS energy:
+    - Normalised to [0, 1] within the plot window for readability at any
+      absolute amplitude; annotated with "(normalised)" on the y-axis
+    - Same x-axis and time markers as the top panel
+    """
+    # --- align arrays --------------------------------------------------------
     min_length = min(len(probs), len(rms_values))
     probs_aligned = probs[:min_length]
     rms_aligned = rms_values[:min_length]
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-
+    # Convert frame indices to milliseconds
+    ms_per_frame = hop_size / sampling_rate * 1000.0
     frames = np.arange(min_length)
+    times_ms = frames * ms_per_frame
 
-    # Plot probabilities
-    ax1.plot(frames, probs_aligned, color="blue", linewidth=1)
-    ax1.axhline(y=0.5, color="red", linestyle="--", alpha=0.5, label="Threshold")
-    ax1.set_ylabel("VAD Probability")
-    ax1.set_ylim(0, 1)
-    ax1.grid(True, alpha=0.3)
-    ax1.set_title(f"Segment {seg_num:03d} - Wave {wave_num:03d} (Valid: {wave_num})")
-    ax1.legend()
+    # --- pull wave metadata --------------------------------------------------
+    d = wave["details"] if wave is not None else {}
+    peak_prob   = d.get("max_prob",    max(probs_aligned) if probs_aligned else 0.0)
+    avg_prob    = d.get("avg_prob",    0.0)
+    prominence  = d.get("prominence",  0.0)
+    excursion   = d.get("excursion",   0.0)
+    baseline    = d.get("baseline",    0.0)
+    duration_s  = d.get("duration_sec", min_length * hop_size / sampling_rate)
+    composite   = _compute_composite_score(wave) if wave is not None else 0.0
 
-    # Plot RMS energy
-    ax2.plot(frames, rms_aligned, color="green", linewidth=1)
-    ax2.set_xlabel("Frame Index (relative to wave)")
-    ax2.set_ylabel("RMS Energy")
-    ax2.grid(True, alpha=0.3)
+    # Wave start/end in milliseconds relative to the wave window origin
+    # (frame_start is absolute; the slice already starts there, so t=0 in
+    # the plot is the wave's own first frame)
+    wave_start_ms = 0.0
+    wave_end_ms   = duration_s * 1000.0
 
-    plt.tight_layout()
+    # --- normalise RMS -------------------------------------------------------
+    rms_arr = np.array(rms_aligned, dtype=float)
+    rms_max = rms_arr.max() if rms_arr.size and rms_arr.max() > 0 else 1.0
+    rms_norm = rms_arr / rms_max
+
+    # --- figure setup --------------------------------------------------------
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1, figsize=(11, 6), sharex=True,
+        gridspec_kw={"height_ratios": [3, 1.6]},
+    )
+    fig.subplots_adjust(hspace=0.08, left=0.09, right=0.97, top=0.92, bottom=0.11)
+
+    # ── TOP PANEL: VAD probability ──────────────────────────────────────────
+    # Above-threshold shading
+    ax1.fill_between(
+        times_ms, probs_aligned, threshold,
+        where=[p >= threshold for p in probs_aligned],
+        alpha=0.18, color="#2196F3", interpolate=True, label=None,
+    )
+
+    # Probability curve
+    ax1.plot(times_ms, probs_aligned, color="#1565C0", linewidth=1.4, zorder=3)
+
+    # Threshold line (actual value, not hardcoded 0.5)
+    ax1.axhline(
+        y=threshold, color="#E53935", linestyle="--", linewidth=0.9,
+        alpha=0.7, label=f"Threshold ({threshold:.2f})",
+    )
+
+    # Baseline line
+    if wave is not None and baseline > 0.0:
+        ax1.axhline(
+            y=baseline, color="#6D4C41", linestyle=":", linewidth=1.0,
+            alpha=0.8, label=f"Baseline ({baseline:.3f})",
+        )
+
+    # Wave start / end vertical markers
+    ax1.axvline(wave_start_ms, color="#4CAF50", linestyle="--", linewidth=1.0,
+                alpha=0.7, label="Wave start")
+    ax1.axvline(wave_end_ms,   color="#FF7043", linestyle="--", linewidth=1.0,
+                alpha=0.7, label="Wave end")
+
+    # Peak annotation
+    if probs_aligned:
+        peak_frame = int(np.argmax(probs_aligned))
+        peak_ms    = times_ms[peak_frame]
+        ax1.plot(peak_ms, probs_aligned[peak_frame], "o",
+                 color="#E53935", markersize=5, zorder=5)
+        ax1.annotate(
+            f"{probs_aligned[peak_frame]:.3f}",
+            xy=(peak_ms, probs_aligned[peak_frame]),
+            xytext=(4, 4), textcoords="offset points",
+            fontsize=8, color="#E53935", zorder=6,
+        )
+
+    # Metric text-box (upper-right corner)
+    metrics_text = (
+        f"peak:        {peak_prob:.3f}\n"
+        f"avg:         {avg_prob:.3f}\n"
+        f"prominence:  {prominence:.3f}\n"
+        f"excursion:   {excursion:.3f}\n"
+        f"baseline:    {baseline:.3f}\n"
+        f"duration:    {duration_s:.2f} s\n"
+        f"composite:   {composite:.4f}"
+    )
+    ax1.text(
+        0.985, 0.97, metrics_text,
+        transform=ax1.transAxes,
+        fontsize=7.5, family="monospace",
+        verticalalignment="top", horizontalalignment="right",
+        bbox=dict(
+            boxstyle="round,pad=0.4", facecolor="white",
+            edgecolor="#BDBDBD", alpha=0.88, linewidth=0.6,
+        ),
+        zorder=7,
+    )
+
+    ax1.set_ylabel("VAD probability", fontsize=9)
+    ax1.set_ylim(-0.05, 1.08)
+    ax1.set_yticks([0.0, 0.25, 0.5, 0.75, 1.0])
+    ax1.grid(True, alpha=0.25, linewidth=0.5)
+    ax1.legend(fontsize=7.5, loc="upper left", framealpha=0.85, edgecolor="#BDBDBD")
+    ax1.set_title(
+        f"Segment {seg_num:03d}  ·  Wave {wave_num:03d}  ·  "
+        f"{duration_s*1000:.0f} ms",
+        fontsize=10, pad=6,
+    )
+
+    # ── BOTTOM PANEL: normalised RMS energy ─────────────────────────────────
+    ax2.fill_between(times_ms[:len(rms_norm)], rms_norm,
+                     alpha=0.25, color="#388E3C")
+    ax2.plot(times_ms[:len(rms_norm)], rms_norm,
+             color="#2E7D32", linewidth=1.2)
+
+    ax2.axvline(wave_start_ms, color="#4CAF50", linestyle="--",
+                linewidth=1.0, alpha=0.7)
+    ax2.axvline(wave_end_ms,   color="#FF7043", linestyle="--",
+                linewidth=1.0, alpha=0.7)
+
+    ax2.set_xlabel("Time (ms)", fontsize=9)
+    ax2.set_ylabel("RMS energy\n(normalised)", fontsize=8)
+    ax2.set_ylim(-0.05, 1.15)
+    ax2.set_yticks([0.0, 0.5, 1.0])
+    ax2.grid(True, alpha=0.25, linewidth=0.5)
+
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -363,6 +518,7 @@ def save_wave_data(
     seg_num: int,
     wave_num: int,
     hop_size: int = HOP_SIZE,
+    threshold: float = 0.5,
 ) -> None:
     """Save all wave-related data to the specified directory."""
     wave_dir = output_dir / f"segment_{seg_num:03d}_wave_{wave_num:03d}"
@@ -396,9 +552,19 @@ def save_wave_data(
     with open(wave_json_path, "w") as f:
         json.dump(wave_copy, f, indent=2)
 
-    # Create and save visualization
+    # Create and save visualization (pass full wave context)
     plot_path = wave_dir / "wave_plot.png"
-    save_wave_plot(wave_probs, rms_values, plot_path, wave_num, seg_num)
+    save_wave_plot(
+        probs=wave_probs,
+        rms_values=rms_values,
+        output_path=plot_path,
+        wave_num=wave_num,
+        seg_num=seg_num,
+        wave=wave,
+        threshold=threshold,
+        hop_size=hop_size,
+        sampling_rate=sampling_rate,
+    )
 
 
 # ── Reporting helpers ──
@@ -424,7 +590,6 @@ def _build_wave_report(
     dir_name = f"segment_{parent_seg_num:03d}_wave_{wave_idx:03d}"
     wav_abs = (waves_dir / dir_name / "sound.wav").resolve()
     plot_abs = (waves_dir / dir_name / "wave_plot.png").resolve()
-    short = wav_abs.name
 
     d = wave["details"]
     return {
@@ -438,17 +603,17 @@ def _build_wave_report(
         # ── Plot file ────────────────────────────────────────────────
         "plot_path": str(plot_abs),
         # ── audio file ────────────────────────────────────────────────
-        "sound_short": short,
         "sound_path": str(wav_abs),
         # ── probability scores ────────────────────────────────────────
         "scores": {
-            "min_prob": round(d["min_prob"], 6),
-            "max_prob": round(d["max_prob"], 6),
-            "avg_prob": round(d["avg_prob"], 6),
-            "std_prob": round(d["std_prob"], 6),
-            "baseline": round(d.get("baseline", 0.0), 6),
+            "min_prob":   round(d["min_prob"],             6),
+            "max_prob":   round(d["max_prob"],             6),
+            "avg_prob":   round(d["avg_prob"],             6),
+            "std_prob":   round(d["std_prob"],             6),
+            "baseline":   round(d.get("baseline",  0.0),  6),
             "prominence": round(d.get("prominence", 0.0), 6),
-            "excursion": round(d.get("excursion", 0.0), 6),
+            "excursion":  round(d.get("excursion",  0.0), 6),
+            "composite":  round(_compute_composite_score(wave), 6),
         },
     }
 
@@ -457,24 +622,23 @@ def _top5_reports(
     speech_waves: List[SpeechWave],
     waves_dir: Path,
     segments: list,
-    duration_weight: float = 0.5,
 ) -> list[dict]:
     """
     Return the 5 waves with the highest composite score, already serialised
     as report dicts (not raw SpeechWave objects).
-    Composite score = prominence * log(1 + duration_sec * duration_weight)
-    This rewards waves that are both prominent and long, while the log scale
-    prevents very long but flat waves from dominating short, sharp ones.
-    Set duration_weight=0 to rank by prominence only (legacy behaviour).
+
+    Composite score (see _compute_composite_score for full rationale):
+        avg_prob * prominence * log1p(duration_sec) * (1 + 0.3 * excursion)
+
+    - avg_prob rewards sustained confidence across the whole wave (not just
+      a single spike).
+    - prominence measures mountain height above the noise floor.
+    - log1p(duration_sec) applies a duration bonus with diminishing returns.
+    - (1 + 0.3 * excursion) gives a small multiplicative bonus for waves
+      that genuinely rise and fall rather than sitting as flat plateaus.
     """
-    import math
     indexed = list(enumerate(speech_waves, 1))  # [(1, wave), (2, wave), …]
-    def _composite(wave):
-        d = wave["details"]
-        prominence = d.get("prominence", d["max_prob"])
-        duration_sec = d.get("duration_sec", 0.0)
-        return prominence * math.log1p(duration_sec * duration_weight)
-    ranked = sorted(indexed, key=lambda iv: _composite(iv[1]), reverse=True)
+    ranked = sorted(indexed, key=lambda iv: _compute_composite_score(iv[1]), reverse=True)
     return [
         _build_wave_report(wave, idx, waves_dir, segments) for idx, wave in ranked[:5]
     ]
@@ -688,6 +852,7 @@ if __name__ == "__main__":
             seg_num=parent_seg_num,
             wave_num=wave_idx,
             hop_size=args.hop_size,
+            threshold=args.threshold,  # pass through so plots reflect the actual threshold
         )
 
     # ── Summary table & JSON ──────────────────────────────────────────────────
@@ -710,6 +875,8 @@ if __name__ == "__main__":
     table.add_column("End (s)",    style="white",       justify="right", no_wrap=True)
     table.add_column("Dur (s)",    style="yellow",      justify="right", no_wrap=True)
     table.add_column("Prominence", style="magenta",     justify="right", no_wrap=True)
+    table.add_column("Composite",  style="bright_cyan", justify="right", no_wrap=True)
+    table.add_column("Baseline",   style="blue",        justify="right", no_wrap=True)
     table.add_column("Peak prob",  style="green",       justify="right", no_wrap=True)
     table.add_column("Sound",      style="bright_black",justify="left")
 
@@ -721,7 +888,7 @@ if __name__ == "__main__":
         star = "★ " if is_top5 else "  "
 
         dir_cell   = f"[link=file://{r['plot_path']}]{r['dir']}[/link]"
-        sound_cell = f"[link=file://{r['sound_path']}]{r['sound_short']}[/link]"
+        sound_cell = f"[link=file://{r['sound_path']}]▶️[/link]"
 
         table.add_row(
             f"{star}{r['wave']}",
@@ -730,6 +897,8 @@ if __name__ == "__main__":
             f"{r['end_sec']:.2f}",
             f"{r['dur_sec']:.2f}",
             f"{r['scores']['prominence']:.3f}",
+            f"{r['scores']['composite']:.4f}",
+            f"{r['scores']['baseline']:.3f}",
             f"{r['scores']['max_prob']:.3f}",
             sound_cell,
             style=row_style,
