@@ -402,7 +402,7 @@ def _build_wave_report(
     dir_name = f"segment_{parent_seg_num:03d}_wave_{wave_idx:03d}"
     wav_abs = (waves_dir / dir_name / "sound.wav").resolve()
     plot_abs = (waves_dir / dir_name / "wave_plot.png").resolve()
-    short = _shorten_path(str(wav_abs))
+    short = wav_abs.name
 
     d = wave["details"]
     return {
@@ -471,17 +471,6 @@ def build_summary_rows(
         _build_wave_report(wave, idx, waves_dir, segments)
         for idx, wave in enumerate(speech_waves, 1)
     ]
-
-
-def _shorten_path(path_str: str) -> str:
-    """
-    Show only the last 2 components of a path to keep the table columns narrow.
-    E.g. segment_001_wave_003/sound.wav
-    """
-    parts = Path(path_str).parts
-    if len(parts) <= 2:
-        return path_str
-    return "/".join(parts[-2:])
 
 
 if __name__ == "__main__":

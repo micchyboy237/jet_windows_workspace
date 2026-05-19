@@ -629,19 +629,23 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
                 response = await future
 
+                # ─── CHANGED: always respond so the client can unblock ───
+                sent = await safe_send(websocket, response)
+                if not sent:
+                    logger.info(f"Client gone before result sent uuid={uuid_[-6:]}…")
+                    break
+
                 if response["success"]:
-                    sent = await safe_send(websocket, response)
-                    if not sent:
-                        logger.info(f"Client gone before result sent uuid={uuid_[-6:]}…")
-                        break
                     console.print(
                         f"[success]Processed successfully[/success] [uuid]{uuid_[-6:]}…[/uuid]"
                     )
                 else:
                     console.print(
-                        f"[warning]Empty response: {response.get('message', '')}[/warning]"
+                        f"[warning]Empty response sent: {response.get('message', '')}[/warning]"
                         f" [uuid]{uuid_[-6:]}…[/uuid]"
                     )
+                # ─────────────────────────────────────────────────────────
+
                 console.rule(style="dim")
 
             except Exception as proc_err:
@@ -650,6 +654,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 error_resp = {
                     "uuid": header_dict.get("uuid", "unknown"),
                     "error": str(proc_err),
+                    "success": False,
                     "transcription_ja": "",
                     "translation_en": "",
                 }
