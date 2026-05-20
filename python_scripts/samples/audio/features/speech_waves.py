@@ -1,3 +1,5 @@
+# speech_waves.py
+
 from __future__ import annotations
 
 import dataclasses
@@ -144,19 +146,6 @@ def check_speech_waves(
     sampling_rate: int = SAMPLE_RATE,
     shape_cfg: Optional[WaveShapeConfig] = None,
 ) -> List[SpeechWave]:
-    """
-    Analyze speech probabilities from FireRedVAD and return complete wave
-    metadata. Updated for 10ms hop length (HOP_SIZE samples per frame).
-
-    Now uses prominence-based shape validation so flat plateaus (low excursion,
-    low prominence) are rejected even when all frames exceed the threshold.
-    Waves that are shorter than shape_cfg.min_duration_sec are also rejected,
-    enforcing the same floor as the VAD's min_speech_duration argument.
-
-    composite_score is computed once and stored inside details so every
-    consumer of a SpeechWave object can read it directly without calling
-    _compute_composite_score() separately.
-    """
     if shape_cfg is None:
         shape_cfg = WaveShapeConfig()
 
@@ -168,55 +157,66 @@ def check_speech_waves(
     state: WaveState = "below"
     rise_frame_idx: int | None = None
 
-    if speech_probs and speech_probs[0] >= BASELINE_THRESHOLD:
-        current_wave = SpeechWave(
-            has_risen=False,
-            has_multi_passed=False,
-            has_fallen=False,
-            is_valid=False,
-            start_sec=0.0,
-            end_sec=0.0,
-            details={
-                "frame_start": 0,
-                "frame_end": 0,
-                "frame_len": 0,
-                "duration_sec": 0.0,
-                "min_prob": speech_probs[0],
-                "max_prob": speech_probs[0],
-                "avg_prob": speech_probs[0],
-                "std_prob": 0.0,
-                "composite_score": 0.0,  # placeholder — wave not yet closed
-            },
-        )
-        state = "above"
+    if speech_probs:
+        if speech_probs[0] < BASELINE_THRESHOLD:
+            current_wave = SpeechWave(
+                has_risen=False,
+                has_multi_passed=False,
+                has_fallen=False,
+                is_valid=False,
+                start_sec=0.0,
+                end_sec=0.0,
+                details={
+                    "frame_start": 0,
+                    "frame_end": 0,
+                    "frame_len": 0,
+                    "duration_sec": 0.0,
+                    "min_prob": speech_probs[0],
+                    "max_prob": speech_probs[0],
+                    "avg_prob": speech_probs[0],
+                    "std_prob": 0.0,
+                    "composite_score": 0.0,
+                },
+            )
+            state = "below"
+
+        elif speech_probs[0] >= threshold:
+            state = "above"
 
     for i, prob in enumerate(speech_probs):
         frame_time_sec = i * HOP_SIZE / sampling_rate
 
         if state == "below":
-            if prob >= BASELINE_THRESHOLD:
+            if prob >= threshold:
                 rise_frame_idx = i
+
+                # ── Preroll: walk back from rise_frame_idx until we find a
+                #    frame strictly below BASELINE_THRESHOLD (or hit index 0).
+                preroll_start = rise_frame_idx
+                while preroll_start > 0 and speech_probs[preroll_start - 1] >= BASELINE_THRESHOLD:
+                    preroll_start -= 1
+                preroll_start_sec = preroll_start * HOP_SIZE / sampling_rate
+
                 current_wave = SpeechWave(
-                    has_risen=True,
+                    has_risen=current_wave["has_risen"] if current_wave else True,
                     has_multi_passed=False,
                     has_fallen=False,
                     is_valid=False,
-                    start_sec=frame_time_sec,
-                    end_sec=frame_time_sec,
+                    start_sec=preroll_start_sec,
+                    end_sec=preroll_start_sec,
                     details={
-                        "frame_start": i,
-                        "frame_end": i,
+                        "frame_start": preroll_start,
+                        "frame_end": preroll_start,
                         "frame_len": 0,
                         "duration_sec": 0.0,
                         "min_prob": prob,
                         "max_prob": prob,
                         "avg_prob": prob,
                         "std_prob": 0.0,
-                        "composite_score": 0.0,  # placeholder — wave not yet closed
+                        "composite_score": 0.0,
                     },
                 )
 
-            if prob >= threshold:
                 state = "above"
         else:
             if prob >= threshold:
@@ -227,11 +227,13 @@ def check_speech_waves(
                     if prob <= BASELINE_THRESHOLD:
                         current_wave["has_fallen"] = True
 
-                    frame_start = rise_frame_idx if rise_frame_idx is not None else 0
+                    # frame_start uses the preroll-adjusted value stored in details
+                    frame_start = current_wave["details"]["frame_start"]
                     frame_end = i
                     wave_probs = speech_probs[frame_start:frame_end]
                     frame_len = frame_end - frame_start
 
+                    # entry_prob: the frame immediately before the preroll start
                     entry_prob = (
                         speech_probs[frame_start - 1] if frame_start > 0 else 0.0
                     )
@@ -265,16 +267,14 @@ def check_speech_waves(
                         else 0.0,
                         "duration_ok": duration_ok,
                         **shape_diag,
-                        "composite_score": 0.0,  # populated immediately below
+                        "composite_score": 0.0,
                     }
-                    # Compute after details is assigned so the helper can read it
                     current_wave["details"]["composite_score"] = (
                         _compute_composite_score(current_wave)
                     )
 
-                if prob <= BASELINE_THRESHOLD:
+                if prob < BASELINE_THRESHOLD:
                     waves.append(current_wave)
-
                     current_wave = None
                     rise_frame_idx = None
                     state = "below"
@@ -286,7 +286,8 @@ def check_speech_waves(
         current_wave["end_sec"] = len(speech_probs) * HOP_SIZE / sampling_rate
 
         if rise_frame_idx is not None:
-            frame_start = rise_frame_idx
+            # frame_start is already preroll-adjusted in details
+            frame_start = current_wave["details"]["frame_start"]
             frame_end = len(speech_probs)
             wave_probs = speech_probs[frame_start:frame_end]
             frame_len = frame_end - frame_start
@@ -307,9 +308,8 @@ def check_speech_waves(
                 "std_prob": statistics.stdev(wave_probs) if frame_len > 1 else 0.0,
                 "duration_ok": False,
                 **shape_diag,
-                "composite_score": 0.0,  # populated immediately below
+                "composite_score": 0.0,
             }
-            # Wave is incomplete (no clean fall), score is informational only
             current_wave["details"]["composite_score"] = _compute_composite_score(
                 current_wave
             )

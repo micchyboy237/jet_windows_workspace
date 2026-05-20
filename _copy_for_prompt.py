@@ -143,7 +143,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Can we add composite score in SpeechWaveDetails?
+I want a new function that I will use for determining 
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
