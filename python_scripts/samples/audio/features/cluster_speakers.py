@@ -89,14 +89,17 @@ class ClusteringResult:
     # Algorithm used and its key parameters
     algorithm: str = ""
     linkage: str = ""
-    distance_threshold: float = 0.0
+
+    # User-facing similarity threshold (0–1); stored as-is for display/serialisation.
+    # The internal cosine *distance* threshold passed to sklearn is (1 - similarity_threshold).
+    similarity_threshold: float = 0.0
 
 
 def cluster_speakers(
     speaker_paths: List[str],
     embeddings: Dict[str, np.ndarray],
     *,
-    distance_threshold: float = 0.8,
+    similarity_threshold: float = 0.2,
     linkage: str = "average",
     n_clusters: int | None = None,
 ) -> ClusteringResult:
@@ -110,16 +113,20 @@ def cluster_speakers(
     needed.
 
     Args:
-        speaker_paths:      Ordered list of audio file paths (keys into embeddings).
-        embeddings:         Dict mapping path → (1, D) numpy embedding array.
-        distance_threshold: Cosine distance cut-off for merging clusters.
-                            Ignored when n_clusters is set. Default 0.8
-                            (≈ similarity ≥ 0.8, "possibly same speaker").
-        linkage:            Linkage criterion – 'average', 'complete', or
-                            'single'. 'average' (UPGMA) matches pyannote's
-                            default centroid strategy most closely.
-        n_clusters:         Force an exact cluster count. When set,
-                            distance_threshold is ignored.
+        speaker_paths:        Ordered list of audio file paths (keys into embeddings).
+        embeddings:           Dict mapping path → (1, D) numpy embedding array.
+        similarity_threshold: Cosine *similarity* cut-off for merging clusters (0–1).
+                              Two speakers are merged when their cosine similarity
+                              is **above** this value, i.e. the internal cosine
+                              distance threshold is ``1 - similarity_threshold``.
+                              Higher values → stricter merging → more clusters.
+                              Ignored when n_clusters is set.
+                              Default 0.2 (≈ "possibly same speaker").
+        linkage:              Linkage criterion – 'average', 'complete', or
+                              'single'. 'average' (UPGMA) matches pyannote's
+                              default centroid strategy most closely.
+        n_clusters:           Force an exact cluster count. When set,
+                              similarity_threshold is ignored.
 
     Returns:
         ClusteringResult dataclass.
@@ -127,8 +134,17 @@ def cluster_speakers(
     if len(speaker_paths) < 2:
         raise ValueError("At least 2 speaker embeddings are required for clustering.")
 
+    if not (0.0 <= similarity_threshold <= 1.0):
+        raise ValueError(
+            f"similarity_threshold must be in [0, 1], got {similarity_threshold}."
+        )
+
     # Stack into (N, D) matrix – each row is one speaker's embedding
     matrix = np.vstack([embeddings[p] for p in speaker_paths])  # (N, D)
+
+    # sklearn uses cosine *distance* = 1 − cosine_similarity internally.
+    # Convert the user-supplied similarity threshold to a distance threshold.
+    distance_threshold = 1.0 - similarity_threshold
 
     ahc_kwargs: dict = dict(metric="cosine", linkage=linkage)
     if n_clusters is not None:
@@ -153,7 +169,7 @@ def cluster_speakers(
         n_clusters=int(ahc.n_clusters_),
         algorithm="AgglomerativeClustering",
         linkage=linkage,
-        distance_threshold=distance_threshold if n_clusters is None else -1.0,
+        similarity_threshold=similarity_threshold if n_clusters is None else -1.0,
     )
 
 
@@ -219,7 +235,7 @@ def display_clustering(
     console.print(
         f"\n[dim]Algorithm: {result.algorithm} | "
         f"Linkage: {result.linkage} | "
-        f"Threshold: {result.distance_threshold}[/]\n"
+        f"Similarity threshold: {result.similarity_threshold}[/]\n"
     )
 
 
@@ -249,7 +265,7 @@ def save_results(
             {
                 "algorithm": result.algorithm,
                 "linkage": result.linkage,
-                "distance_threshold": result.distance_threshold,
+                "similarity_threshold": result.similarity_threshold,
                 "n_clusters": result.n_clusters,
                 "labels": {str(k): v for k, v in result.labels.items()},
                 "clusters": {
@@ -293,8 +309,13 @@ def main() -> None:
         "-t",
         "--threshold",
         type=float,
-        default=0.8,
-        help="Cosine distance threshold for merging clusters (default: 0.8). Ignored if --n-clusters is set.",
+        default=0.2,
+        help=(
+            "Cosine similarity threshold for merging clusters (0–1, default: 0.2). "
+            "Speakers with similarity above this value are merged into the same cluster. "
+            "Higher values → stricter merging → more clusters. "
+            "Ignored if --n-clusters is set."
+        ),
     )
     parser.add_argument(
         "-l",
@@ -336,7 +357,7 @@ def main() -> None:
         result = cluster_speakers(
             speaker_paths,
             embeddings,
-            distance_threshold=args.threshold,
+            similarity_threshold=args.threshold,
             linkage=args.linkage,
             n_clusters=args.n_clusters,
         )
