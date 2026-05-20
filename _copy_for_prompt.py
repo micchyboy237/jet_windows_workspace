@@ -124,11 +124,9 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\word_utils_ja.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_word_utils_ja.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\interfaces.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\distributed.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\speaker_verification.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_speechbrain_embedding.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_speechbrain_embedding.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_native_pyannote_speaker_labeler.py",
     r"",
 ]
 
@@ -146,33 +144,52 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix
+Write down recommended options in handling this issue
 
+🎤 Processing: C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav
+============================================================
+1/3 Extracting speech segments...
+   Attempting VAD with PyAnnote...
+   PyAnnote VAD failed: name 'AudioDecoder' is not defined
+   Using librosa-loaded audio for VAD...
+   Loading with librosa: C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav
+   Found 42 speech segments
+2/3 Extracting speaker embeddings...
+   Loading with librosa: C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav
+   Processed 22 chunks (20 rejected)
+3/3 Clustering speakers...
 Traceback (most recent call last):
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_speechbrain_embedding.py", line 6, in <module>
-    embedding_model = SpeechBrainPretrainedSpeakerEmbedding(
-                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\speaker_verification.py", line 255, in __init__
-    self.classifier_ = SpeechBrain_EncoderClassifier.from_hparams(
-                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\interfaces.py", line 487, in from_hparams
-    return pretrained_from_hparams(
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\interfaces.py", line 183, in pretrained_from_hparams
-    hparams_local_path = fetch(
-                         ^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py", line 429, in fetch
-    download_file_hf(hf_kwargs, destination, local_strategy)
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\distributed.py", line 318, in main_proc_wrapped_func
-    result = function(*args, **kwargs)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py", line 277, in download_file_hf
-    link_with_strategy(fetched_file, destination, local_strategy)
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py", line 164, in link_with_strategy
-    dst.symlink_to(src)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\pathlib.py", line 1386, in symlink_to
-    os.symlink(target, self, target_is_directory)
-OSError: [WinError 1314] A required privilege is not held by the client: 'C:\\Users\\druiv\\.cache\\huggingface\\hub\\models--speechbrain--spkrec-ecapa-voxceleb\\snapshots\\0f99f2d0ebe89ac095bcc5903c4dd8f72b367286\\hyperparams.yaml' -> 'C:\\Users\\druiv\\Desktop\\Jet_Files\\Jet_Windows_Workspace\\None\\speechbrain\\hyperparams.yaml'
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_native_pyannote_speaker_labeler.py", line 559, in <module>
+    labeled_chunks, saved_files = labeler.process_audio(
+                                  ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_native_pyannote_speaker_labeler.py", line 473, in process_audio
+    labeled_chunks = self.cluster_speakers(valid_chunks, n_speakers=n_speakers, threshold=threshold)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_native_pyannote_speaker_labeler.py", line 297, in cluster_speakers
+    labels = clustering.fit_predict(embeddings)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\cluster\_agglomerative.py", line 1116, in fit_predict
+    return super().fit_predict(X, y)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\base.py", line 695, in fit_predict
+    self.fit(X, **kwargs)
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\base.py", line 1365, in wrapper
+    return fit_method(estimator, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\cluster\_agglomerative.py", line 990, in fit
+    X = validate_data(self, X, ensure_min_samples=2)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\utils\validation.py", line 2954, in validate_data
+    out = check_array(X, input_name="X", **check_params)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\utils\validation.py", line 1105, in check_array
+    _assert_all_finite(
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\utils\validation.py", line 120, in _assert_all_finite
+    _assert_all_finite_element_wise(
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\utils\validation.py", line 169, in _assert_all_finite_element_wise
+    raise ValueError(msg_err)
+ValueError: Input X contains NaN.
+AgglomerativeClustering does not accept missing values encoded as NaN natively. For supervised learning, you might want to consider sklearn.ensemble.HistGradientBoostingClassifier and Regressor which accept missing values encoded as NaNs natively. Alternatively, it is possible to preprocess the data, for instance by using an imputer transformer in a pipeline or drop samples with missing values. See https://scikit-learn.org/stable/modules/impute.html You can find a list of all estimators that handle NaN values at the following page: https://scikit-learn.org/stable/modules/impute.html#estimators-that-handle-nan-values
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

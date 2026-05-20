@@ -147,40 +147,44 @@ class SpeakerLabeler:
     
     def extract_speech_segments(self, audio_path):
         """Extract speech segments with VAD"""
+        # Try PyAnnote VAD first
         try:
-            # Method 1: Try PyAnnote's native loading
             print("   Attempting VAD with PyAnnote...")
             vad_scores = self.segmentation(audio_path).data
         except Exception as e:
             print(f"   PyAnnote VAD failed: {e}")
             print("   Using librosa-loaded audio for VAD...")
-            
-            # Method 2: Load with librosa and use manual VAD
             waveform, sample_rate = self.load_audio(audio_path)
-            
-            # Use energy-based VAD as fallback
             vad_scores = self._energy_based_vad(waveform, sample_rate)
         
-        # Find speech regions (simple threshold)
         from scipy.ndimage import label
         
+        # Handle different types of vad_scores
         if isinstance(vad_scores, np.ndarray):
             vad_array = vad_scores.squeeze()
         else:
             vad_array = np.array(vad_scores).squeeze()
         
+        # Ensure we have a waveform reference for frame timing
+        if 'waveform' not in locals():
+            waveform, sample_rate = self.load_audio(audio_path)
+        
         speech_mask = vad_array > 0.5
         labeled, num_features = label(speech_mask)
+        
+        # Calculate frame duration properly
+        if hasattr(self.segmentation, 'model') and hasattr(self.segmentation.model, 'specifications'):
+            # Use PyAnnote's frame duration if available
+            frame_duration = self.segmentation.model.specifications.duration
+        else:
+            # Estimate from waveform length
+            frame_duration = len(waveform.squeeze()) / (len(vad_array) * self.embedding_model.sample_rate)
         
         segments = []
         for i in range(1, num_features + 1):
             region = np.where(labeled == i)[0]
             start_frame = region[0]
             end_frame = region[-1]
-            
-            # Calculate time based on frame length (typical VAD frame: 10ms)
-            # Adjust based on actual VAD output length
-            frame_duration = len(vad_array) / len(waveform.squeeze()) if 'waveform' in locals() else 0.01
             
             segments.append({
                 'start': start_frame * frame_duration,
@@ -193,7 +197,7 @@ class SpeakerLabeler:
         
         self.segments = segments
         return segments, vad_array
-    
+
     def _energy_based_vad(self, waveform, sample_rate, frame_length=0.025, threshold=0.1):
         """Simple energy-based VAD as fallback"""
         import librosa
