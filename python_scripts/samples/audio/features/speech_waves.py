@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import List, Literal, Optional
 
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import numpy as np
 import scipy.io.wavfile as wavfile
 from _types import AudioInput, SpeechWave
@@ -18,6 +17,9 @@ from energy import compute_rms_per_frame
 from loader import load_audio
 
 WaveState = Literal["below", "above"]
+
+
+BASELINE_THRESHOLD = 0.1
 
 
 @dataclasses.dataclass
@@ -49,7 +51,7 @@ class WaveShapeConfig:
     min_peak_prob: float = 0.55
     min_frames: int = 3
     min_duration_sec: float = 0.25  # matches default --min-speech-duration of 250 ms
-    min_baseline: float = 0.0       # 0.0 = disabled by default
+    min_baseline: float = 0.0  # 0.0 = disabled by default
 
 
 def is_prominent_wave(
@@ -166,7 +168,7 @@ def check_speech_waves(
     state: WaveState = "below"
     rise_frame_idx: int | None = None
 
-    if speech_probs and speech_probs[0] >= threshold:
+    if speech_probs and speech_probs[0] >= BASELINE_THRESHOLD:
         current_wave = SpeechWave(
             has_risen=False,
             has_multi_passed=False,
@@ -183,7 +185,7 @@ def check_speech_waves(
                 "max_prob": speech_probs[0],
                 "avg_prob": speech_probs[0],
                 "std_prob": 0.0,
-                "composite_score": 0.0,   # placeholder — wave not yet closed
+                "composite_score": 0.0,  # placeholder — wave not yet closed
             },
         )
         state = "above"
@@ -192,7 +194,7 @@ def check_speech_waves(
         frame_time_sec = i * HOP_SIZE / sampling_rate
 
         if state == "below":
-            if prob >= threshold:
+            if prob >= BASELINE_THRESHOLD:
                 rise_frame_idx = i
                 current_wave = SpeechWave(
                     has_risen=True,
@@ -210,9 +212,11 @@ def check_speech_waves(
                         "max_prob": prob,
                         "avg_prob": prob,
                         "std_prob": 0.0,
-                        "composite_score": 0.0,   # placeholder — wave not yet closed
+                        "composite_score": 0.0,  # placeholder — wave not yet closed
                     },
                 )
+
+            if prob >= threshold:
                 state = "above"
         else:
             if prob >= threshold:
@@ -220,7 +224,8 @@ def check_speech_waves(
                     current_wave["has_multi_passed"] = True
             else:
                 if current_wave is not None:
-                    current_wave["has_fallen"] = True
+                    if prob <= BASELINE_THRESHOLD:
+                        current_wave["has_fallen"] = True
 
                     frame_start = rise_frame_idx if rise_frame_idx is not None else 0
                     frame_end = i
@@ -242,6 +247,7 @@ def check_speech_waves(
                     current_wave["is_valid"] = (
                         current_wave["has_risen"]
                         and current_wave["has_multi_passed"]
+                        and current_wave["has_fallen"]
                         and shape_ok
                         and duration_ok
                     )
@@ -259,18 +265,19 @@ def check_speech_waves(
                         else 0.0,
                         "duration_ok": duration_ok,
                         **shape_diag,
-                        "composite_score": 0.0,   # populated immediately below
+                        "composite_score": 0.0,  # populated immediately below
                     }
                     # Compute after details is assigned so the helper can read it
                     current_wave["details"]["composite_score"] = (
                         _compute_composite_score(current_wave)
                     )
 
+                if prob <= BASELINE_THRESHOLD:
                     waves.append(current_wave)
 
-                current_wave = None
-                rise_frame_idx = None
-                state = "below"
+                    current_wave = None
+                    rise_frame_idx = None
+                    state = "below"
 
     # Handle a wave that never fell back below the threshold
     if current_wave is not None:
@@ -300,11 +307,11 @@ def check_speech_waves(
                 "std_prob": statistics.stdev(wave_probs) if frame_len > 1 else 0.0,
                 "duration_ok": False,
                 **shape_diag,
-                "composite_score": 0.0,   # populated immediately below
+                "composite_score": 0.0,  # populated immediately below
             }
             # Wave is incomplete (no clean fall), score is informational only
-            current_wave["details"]["composite_score"] = (
-                _compute_composite_score(current_wave)
+            current_wave["details"]["composite_score"] = _compute_composite_score(
+                current_wave
             )
 
         waves.append(current_wave)
@@ -384,6 +391,8 @@ def save_wave_plot(
       absolute amplitude; annotated with "(normalised)" on the y-axis
     - Same x-axis and time markers as the top panel
     """
+    threshold = BASELINE_THRESHOLD
+
     # --- align arrays --------------------------------------------------------
     min_length = min(len(probs), len(rms_values))
     probs_aligned = probs[:min_length]
@@ -396,19 +405,19 @@ def save_wave_plot(
 
     # --- pull wave metadata --------------------------------------------------
     d = wave["details"] if wave is not None else {}
-    peak_prob   = d.get("max_prob",    max(probs_aligned) if probs_aligned else 0.0)
-    avg_prob    = d.get("avg_prob",    0.0)
-    prominence  = d.get("prominence",  0.0)
-    excursion   = d.get("excursion",   0.0)
-    baseline    = d.get("baseline",    0.0)
-    duration_s  = d.get("duration_sec", min_length * hop_size / sampling_rate)
-    composite   = _compute_composite_score(wave) if wave is not None else 0.0
+    peak_prob = d.get("max_prob", max(probs_aligned) if probs_aligned else 0.0)
+    avg_prob = d.get("avg_prob", 0.0)
+    prominence = d.get("prominence", 0.0)
+    excursion = d.get("excursion", 0.0)
+    baseline = d.get("baseline", 0.0)
+    duration_s = d.get("duration_sec", min_length * hop_size / sampling_rate)
+    composite = _compute_composite_score(wave) if wave is not None else 0.0
 
     # Wave start/end in milliseconds relative to the wave window origin
     # (frame_start is absolute; the slice already starts there, so t=0 in
     # the plot is the wave's own first frame)
     wave_start_ms = 0.0
-    wave_end_ms   = duration_s * 1000.0
+    wave_end_ms = duration_s * 1000.0
 
     # --- normalise RMS -------------------------------------------------------
     rms_arr = np.array(rms_aligned, dtype=float)
@@ -417,7 +426,10 @@ def save_wave_plot(
 
     # --- figure setup --------------------------------------------------------
     fig, (ax1, ax2) = plt.subplots(
-        2, 1, figsize=(11, 6), sharex=True,
+        2,
+        1,
+        figsize=(11, 6),
+        sharex=True,
         gridspec_kw={"height_ratios": [3, 1.6]},
     )
     fig.subplots_adjust(hspace=0.08, left=0.09, right=0.97, top=0.92, bottom=0.11)
@@ -425,9 +437,14 @@ def save_wave_plot(
     # ── TOP PANEL: VAD probability ──────────────────────────────────────────
     # Above-threshold shading
     ax1.fill_between(
-        times_ms, probs_aligned, threshold,
+        times_ms,
+        probs_aligned,
+        threshold,
         where=[p >= threshold for p in probs_aligned],
-        alpha=0.18, color="#2196F3", interpolate=True, label=None,
+        alpha=0.18,
+        color="#2196F3",
+        interpolate=True,
+        label=None,
     )
 
     # Probability curve
@@ -435,34 +452,63 @@ def save_wave_plot(
 
     # Threshold line (actual value, not hardcoded 0.5)
     ax1.axhline(
-        y=threshold, color="#E53935", linestyle="--", linewidth=0.9,
-        alpha=0.7, label=f"Threshold ({threshold:.2f})",
+        y=threshold,
+        color="#E53935",
+        linestyle="--",
+        linewidth=0.9,
+        alpha=0.7,
+        label=f"Threshold ({threshold:.2f})",
     )
 
     # Baseline line
     if wave is not None and baseline > 0.0:
         ax1.axhline(
-            y=baseline, color="#6D4C41", linestyle=":", linewidth=1.0,
-            alpha=0.8, label=f"Baseline ({baseline:.3f})",
+            y=baseline,
+            color="#6D4C41",
+            linestyle=":",
+            linewidth=1.0,
+            alpha=0.8,
+            label=f"Baseline ({baseline:.3f})",
         )
 
     # Wave start / end vertical markers
-    ax1.axvline(wave_start_ms, color="#4CAF50", linestyle="--", linewidth=1.0,
-                alpha=0.7, label="Wave start")
-    ax1.axvline(wave_end_ms,   color="#FF7043", linestyle="--", linewidth=1.0,
-                alpha=0.7, label="Wave end")
+    ax1.axvline(
+        wave_start_ms,
+        color="#4CAF50",
+        linestyle="--",
+        linewidth=1.0,
+        alpha=0.7,
+        label="Wave start",
+    )
+    ax1.axvline(
+        wave_end_ms,
+        color="#FF7043",
+        linestyle="--",
+        linewidth=1.0,
+        alpha=0.7,
+        label="Wave end",
+    )
 
     # Peak annotation
     if probs_aligned:
         peak_frame = int(np.argmax(probs_aligned))
-        peak_ms    = times_ms[peak_frame]
-        ax1.plot(peak_ms, probs_aligned[peak_frame], "o",
-                 color="#E53935", markersize=5, zorder=5)
+        peak_ms = times_ms[peak_frame]
+        ax1.plot(
+            peak_ms,
+            probs_aligned[peak_frame],
+            "o",
+            color="#E53935",
+            markersize=5,
+            zorder=5,
+        )
         ax1.annotate(
             f"{probs_aligned[peak_frame]:.3f}",
             xy=(peak_ms, probs_aligned[peak_frame]),
-            xytext=(4, 4), textcoords="offset points",
-            fontsize=8, color="#E53935", zorder=6,
+            xytext=(4, 4),
+            textcoords="offset points",
+            fontsize=8,
+            color="#E53935",
+            zorder=6,
         )
 
     # Metric text-box (upper-right corner)
@@ -476,13 +522,20 @@ def save_wave_plot(
         f"composite:   {composite:.4f}"
     )
     ax1.text(
-        0.985, 0.97, metrics_text,
+        0.985,
+        0.97,
+        metrics_text,
         transform=ax1.transAxes,
-        fontsize=7.5, family="monospace",
-        verticalalignment="top", horizontalalignment="right",
+        fontsize=7.5,
+        family="monospace",
+        verticalalignment="top",
+        horizontalalignment="right",
         bbox=dict(
-            boxstyle="round,pad=0.4", facecolor="white",
-            edgecolor="#BDBDBD", alpha=0.88, linewidth=0.6,
+            boxstyle="round,pad=0.4",
+            facecolor="white",
+            edgecolor="#BDBDBD",
+            alpha=0.88,
+            linewidth=0.6,
         ),
         zorder=7,
     )
@@ -493,21 +546,19 @@ def save_wave_plot(
     ax1.grid(True, alpha=0.25, linewidth=0.5)
     ax1.legend(fontsize=7.5, loc="upper left", framealpha=0.85, edgecolor="#BDBDBD")
     ax1.set_title(
-        f"Segment {seg_num:03d}  ·  Wave {wave_num:03d}  ·  "
-        f"{duration_s*1000:.0f} ms",
-        fontsize=10, pad=6,
+        f"Segment {seg_num:03d}  ·  Wave {wave_num:03d}  ·  {duration_s * 1000:.0f} ms",
+        fontsize=10,
+        pad=6,
     )
 
     # ── BOTTOM PANEL: normalised RMS energy ─────────────────────────────────
-    ax2.fill_between(times_ms[:len(rms_norm)], rms_norm,
-                     alpha=0.25, color="#388E3C")
-    ax2.plot(times_ms[:len(rms_norm)], rms_norm,
-             color="#2E7D32", linewidth=1.2)
+    ax2.fill_between(times_ms[: len(rms_norm)], rms_norm, alpha=0.25, color="#388E3C")
+    ax2.plot(times_ms[: len(rms_norm)], rms_norm, color="#2E7D32", linewidth=1.2)
 
-    ax2.axvline(wave_start_ms, color="#4CAF50", linestyle="--",
-                linewidth=1.0, alpha=0.7)
-    ax2.axvline(wave_end_ms,   color="#FF7043", linestyle="--",
-                linewidth=1.0, alpha=0.7)
+    ax2.axvline(
+        wave_start_ms, color="#4CAF50", linestyle="--", linewidth=1.0, alpha=0.7
+    )
+    ax2.axvline(wave_end_ms, color="#FF7043", linestyle="--", linewidth=1.0, alpha=0.7)
 
     ax2.set_xlabel("Time (ms)", fontsize=9)
     ax2.set_ylabel("RMS energy\n(normalised)", fontsize=8)
@@ -616,14 +667,14 @@ def _build_wave_report(
         "sound_path": str(wav_abs),
         # ── probability scores ────────────────────────────────────────
         "scores": {
-            "min_prob":   round(d["min_prob"],             6),
-            "max_prob":   round(d["max_prob"],             6),
-            "avg_prob":   round(d["avg_prob"],             6),
-            "std_prob":   round(d["std_prob"],             6),
-            "baseline":   round(d.get("baseline",  0.0),  6),
+            "min_prob": round(d["min_prob"], 6),
+            "max_prob": round(d["max_prob"], 6),
+            "avg_prob": round(d["avg_prob"], 6),
+            "std_prob": round(d["std_prob"], 6),
+            "baseline": round(d.get("baseline", 0.0), 6),
             "prominence": round(d.get("prominence", 0.0), 6),
-            "excursion":  round(d.get("excursion",  0.0), 6),
-            "composite":  round(_compute_composite_score(wave), 6),
+            "excursion": round(d.get("excursion", 0.0), 6),
+            "composite": round(_compute_composite_score(wave), 6),
         },
     }
 
@@ -648,7 +699,9 @@ def _top5_reports(
       that genuinely rise and fall rather than sitting as flat plateaus.
     """
     indexed = list(enumerate(speech_waves, 1))  # [(1, wave), (2, wave), …]
-    ranked = sorted(indexed, key=lambda iv: _compute_composite_score(iv[1]), reverse=True)
+    ranked = sorted(
+        indexed, key=lambda iv: _compute_composite_score(iv[1]), reverse=True
+    )
     return [
         _build_wave_report(wave, idx, waves_dir, segments) for idx, wave in ranked[:5]
     ]
@@ -676,7 +729,6 @@ if __name__ == "__main__":
     from rich import box
     from rich.console import Console
     from rich.table import Table
-
     from vad_firered2 import extract_speech_timestamps
     # from vad_tenvad import extract_speech_timestamps
 
@@ -684,8 +736,8 @@ if __name__ == "__main__":
 
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 
-    DEFAULT_AUDIO = (
-        r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
+    DEFAULT_AUDIO = str(
+        Path("~/.cache/files/audio/recording_3_speakers.wav").expanduser().resolve()
     )
 
     parser = argparse.ArgumentParser(
@@ -701,7 +753,8 @@ if __name__ == "__main__":
         help="Input audio file path.",
     )
     parser.add_argument(
-        "-o", "--output-dir",
+        "-o",
+        "--output-dir",
         default=OUTPUT_DIR,
         type=Path,
         help="Output results directory.",
@@ -709,13 +762,15 @@ if __name__ == "__main__":
 
     # ── VAD core ──────────────────────────────────────────────────────────────
     parser.add_argument(
-        "-t", "--threshold",
+        "-t",
+        "--threshold",
         type=float,
         default=0.5,
         help="VAD probability threshold (above = speech).",
     )
     parser.add_argument(
-        "-s", "--hop-size",
+        "-s",
+        "--hop-size",
         type=int,
         default=160,
         help="Frame hop size in samples (160 = 10 ms at 16 kHz).",
@@ -723,7 +778,8 @@ if __name__ == "__main__":
 
     # ── VAD segment filtering ─────────────────────────────────────────────────
     parser.add_argument(
-        "-d", "--min-speech-duration",
+        "-d",
+        "--min-speech-duration",
         type=int,
         default=250,
         metavar="MS",
@@ -733,21 +789,24 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "-g", "--min-silence-duration",
+        "-g",
+        "--min-silence-duration",
         type=int,
         default=100,
         metavar="MS",
         help="Minimum silence gap between segments in ms.",
     )
     parser.add_argument(
-        "-n", "--include-non-speech",
+        "-n",
+        "--include-non-speech",
         action="store_true",
         help="Include non-speech segments in the VAD output.",
     )
 
     # ── WaveShapeConfig ───────────────────────────────────────────────────────
     parser.add_argument(
-        "-p", "--min-prominence",
+        "-p",
+        "--min-prominence",
         type=float,
         default=WaveShapeConfig.min_prominence,
         metavar="FLOAT",
@@ -757,7 +816,8 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "-e", "--min-excursion",
+        "-e",
+        "--min-excursion",
         type=float,
         default=WaveShapeConfig.min_excursion,
         metavar="FLOAT",
@@ -767,7 +827,8 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "-P", "--min-peak-prob",
+        "-P",
+        "--min-peak-prob",
         type=float,
         default=WaveShapeConfig.min_peak_prob,
         metavar="FLOAT",
@@ -777,14 +838,16 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "-f", "--min-frames",
+        "-f",
+        "--min-frames",
         type=int,
         default=WaveShapeConfig.min_frames,
         metavar="N",
         help="Minimum number of frames a wave must span.",
     )
     parser.add_argument(
-        "-b", "--min-baseline",
+        "-b",
+        "--min-baseline",
         type=float,
         default=WaveShapeConfig.min_baseline,
         metavar="FLOAT",
@@ -879,16 +942,16 @@ if __name__ == "__main__":
         show_lines=False,
         header_style="bold cyan",
     )
-    table.add_column("#",          style="dim",         justify="right", no_wrap=True)
-    table.add_column("Dir",        style="cyan",        justify="left",  no_wrap=True)
-    table.add_column("Start (s)",  style="white",       justify="right", no_wrap=True)
-    table.add_column("End (s)",    style="white",       justify="right", no_wrap=True)
-    table.add_column("Dur (s)",    style="yellow",      justify="right", no_wrap=True)
-    table.add_column("Prominence", style="magenta",     justify="right", no_wrap=True)
-    table.add_column("Composite",  style="bright_cyan", justify="right", no_wrap=True)
-    table.add_column("Baseline",   style="blue",        justify="right", no_wrap=True)
-    table.add_column("Peak prob",  style="green",       justify="right", no_wrap=True)
-    table.add_column("Sound",      style="bright_black",justify="left")
+    table.add_column("#", style="dim", justify="right", no_wrap=True)
+    table.add_column("Dir", style="cyan", justify="left", no_wrap=True)
+    table.add_column("Start (s)", style="white", justify="right", no_wrap=True)
+    table.add_column("End (s)", style="white", justify="right", no_wrap=True)
+    table.add_column("Dur (s)", style="yellow", justify="right", no_wrap=True)
+    table.add_column("Prominence", style="magenta", justify="right", no_wrap=True)
+    table.add_column("Composite", style="bright_cyan", justify="right", no_wrap=True)
+    table.add_column("Baseline", style="blue", justify="right", no_wrap=True)
+    table.add_column("Peak prob", style="green", justify="right", no_wrap=True)
+    table.add_column("Sound", style="bright_black", justify="left")
 
     top5_dirs = {w["dir"] for w in top5}
 
@@ -897,7 +960,7 @@ if __name__ == "__main__":
         row_style = "bold" if is_top5 else ""
         star = "★ " if is_top5 else "  "
 
-        dir_cell   = f"[link=file://{r['plot_path']}]{r['dir']}[/link]"
+        dir_cell = f"[link=file://{r['plot_path']}]{r['dir']}[/link]"
         sound_cell = f"[link=file://{r['sound_path']}]▶️[/link]"
 
         table.add_row(
@@ -919,7 +982,7 @@ if __name__ == "__main__":
     console.print()
 
     summary_path = (args.output_dir / "summary.json").resolve()
-    top5_path    = (args.output_dir / "top_5_waves.json").resolve()
+    top5_path = (args.output_dir / "top_5_waves.json").resolve()
 
     console.print(
         f"[bold green]✓[/bold green] All wave files saved under : [cyan]{waves_dir}[/cyan]"
