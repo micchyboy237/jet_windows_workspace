@@ -96,7 +96,7 @@ def cluster_speakers(
     speaker_paths: List[str],
     embeddings: Dict[str, np.ndarray],
     *,
-    distance_threshold: float = 0.5,
+    distance_threshold: float = 0.8,
     linkage: str = "average",
     n_clusters: int | None = None,
 ) -> ClusteringResult:
@@ -113,8 +113,8 @@ def cluster_speakers(
         speaker_paths:      Ordered list of audio file paths (keys into embeddings).
         embeddings:         Dict mapping path → (1, D) numpy embedding array.
         distance_threshold: Cosine distance cut-off for merging clusters.
-                            Ignored when n_clusters is set. Default 0.5
-                            (≈ similarity ≥ 0.5, "possibly same speaker").
+                            Ignored when n_clusters is set. Default 0.8
+                            (≈ similarity ≥ 0.8, "possibly same speaker").
         linkage:            Linkage criterion – 'average', 'complete', or
                             'single'. 'average' (UPGMA) matches pyannote's
                             default centroid strategy most closely.
@@ -293,8 +293,8 @@ def main() -> None:
         "-t",
         "--threshold",
         type=float,
-        default=0.5,
-        help="Cosine distance threshold for merging clusters (default: 0.5). Ignored if --n-clusters is set.",
+        default=0.8,
+        help="Cosine distance threshold for merging clusters (default: 0.8). Ignored if --n-clusters is set.",
     )
     parser.add_argument(
         "-l",
