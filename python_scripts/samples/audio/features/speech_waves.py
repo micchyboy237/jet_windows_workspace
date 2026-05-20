@@ -150,6 +150,10 @@ def check_speech_waves(
     low prominence) are rejected even when all frames exceed the threshold.
     Waves that are shorter than shape_cfg.min_duration_sec are also rejected,
     enforcing the same floor as the VAD's min_speech_duration argument.
+
+    composite_score is computed once and stored inside details so every
+    consumer of a SpeechWave object can read it directly without calling
+    _compute_composite_score() separately.
     """
     if shape_cfg is None:
         shape_cfg = WaveShapeConfig()
@@ -162,7 +166,6 @@ def check_speech_waves(
     state: WaveState = "below"
     rise_frame_idx: int | None = None
 
-    # Handle case where probabilities start already above threshold
     if speech_probs and speech_probs[0] >= threshold:
         current_wave = SpeechWave(
             has_risen=False,
@@ -180,12 +183,12 @@ def check_speech_waves(
                 "max_prob": speech_probs[0],
                 "avg_prob": speech_probs[0],
                 "std_prob": 0.0,
+                "composite_score": 0.0,   # placeholder — wave not yet closed
             },
         )
         state = "above"
 
     for i, prob in enumerate(speech_probs):
-        # Frame time in seconds
         frame_time_sec = i * HOP_SIZE / sampling_rate
 
         if state == "below":
@@ -207,28 +210,28 @@ def check_speech_waves(
                         "max_prob": prob,
                         "avg_prob": prob,
                         "std_prob": 0.0,
+                        "composite_score": 0.0,   # placeholder — wave not yet closed
                     },
                 )
                 state = "above"
-
-        else:  # state == "above"
+        else:
             if prob >= threshold:
                 if current_wave is not None:
                     current_wave["has_multi_passed"] = True
             else:
                 if current_wave is not None:
                     current_wave["has_fallen"] = True
-                    # ------ shape-based validation ------------
+
                     frame_start = rise_frame_idx if rise_frame_idx is not None else 0
                     frame_end = i
                     wave_probs = speech_probs[frame_start:frame_end]
                     frame_len = frame_end - frame_start
 
-                    # Entry/Exit for baseline
                     entry_prob = (
                         speech_probs[frame_start - 1] if frame_start > 0 else 0.0
                     )
-                    exit_prob = prob  # dropped below threshold
+                    exit_prob = prob
+
                     shape_ok, shape_diag = is_prominent_wave(
                         wave_probs, entry_prob, exit_prob, shape_cfg
                     )
@@ -243,8 +246,6 @@ def check_speech_waves(
                         and duration_ok
                     )
                     current_wave["end_sec"] = frame_time_sec
-
-                    # Finalize details for complete wave
                     current_wave["details"] = {
                         "frame_start": frame_start,
                         "frame_end": frame_end,
@@ -258,17 +259,23 @@ def check_speech_waves(
                         else 0.0,
                         "duration_ok": duration_ok,
                         **shape_diag,
+                        "composite_score": 0.0,   # populated immediately below
                     }
+                    # Compute after details is assigned so the helper can read it
+                    current_wave["details"]["composite_score"] = (
+                        _compute_composite_score(current_wave)
+                    )
+
                     waves.append(current_wave)
 
                 current_wave = None
                 rise_frame_idx = None
                 state = "below"
 
-    # Handle unfinished wave at the end of the sequence
+    # Handle a wave that never fell back below the threshold
     if current_wave is not None:
         current_wave["has_fallen"] = False
-        current_wave["is_valid"] = False  # incomplete waves are never valid
+        current_wave["is_valid"] = False
         current_wave["end_sec"] = len(speech_probs) * HOP_SIZE / sampling_rate
 
         if rise_frame_idx is not None:
@@ -277,14 +284,11 @@ def check_speech_waves(
             wave_probs = speech_probs[frame_start:frame_end]
             frame_len = frame_end - frame_start
             duration_sec = current_wave["end_sec"] - current_wave["start_sec"]
-
             entry_prob = speech_probs[frame_start - 1] if frame_start > 0 else 0.0
-            # If it never fell, use threshold as proxy for exit prob
             exit_prob = threshold
             shape_ok, shape_diag = is_prominent_wave(
                 wave_probs, entry_prob, exit_prob, shape_cfg
             )
-
             current_wave["details"] = {
                 "frame_start": frame_start,
                 "frame_end": frame_end,
@@ -294,9 +298,15 @@ def check_speech_waves(
                 "max_prob": max(wave_probs) if wave_probs else 0.0,
                 "avg_prob": statistics.mean(wave_probs) if wave_probs else 0.0,
                 "std_prob": statistics.stdev(wave_probs) if frame_len > 1 else 0.0,
-                "duration_ok": False,  # incomplete — always invalid regardless
+                "duration_ok": False,
                 **shape_diag,
+                "composite_score": 0.0,   # populated immediately below
             }
+            # Wave is incomplete (no clean fall), score is informational only
+            current_wave["details"]["composite_score"] = (
+                _compute_composite_score(current_wave)
+            )
+
         waves.append(current_wave)
 
     return waves

@@ -1,7 +1,7 @@
-import numpy as np
-
 from pathlib import Path
 from typing import List, Literal, Optional, TypedDict, Union
+
+import numpy as np
 
 AudioInput = Union[np.ndarray, bytes, bytearray, str, Path]
 
@@ -24,6 +24,7 @@ class SpeechWaveDetails(TypedDict):
     max_prob: float
     avg_prob: float
     std_prob: float
+    composite_score: float
 
 
 class SpeechWave(SpeechWaveMeta):
