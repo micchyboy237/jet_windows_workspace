@@ -249,14 +249,14 @@ def label_speakers_for_segment(
     
     if labeler.total_segments_processed % 10 == 0:
         save_speaker_state()
-        if labeler.total_segments_processed % 20 == 0 and labeler.speaker_count > 1:
-            consol_result = labeler.consolidate_speakers(dry_run=False)
-            if consol_result["merges_performed"]:
-                console.print(
-                    f"[info]Auto-consolidation: merged {len(consol_result['merges_performed'])} "
-                    f"speaker pairs ({consol_result['speakers_before']} → "
-                    f"{consol_result['speakers_after']} speakers)[/info]"
-                )
+        # if labeler.total_segments_processed % 20 == 0 and labeler.speaker_count > 1:
+        #     consol_result = labeler.consolidate_speakers(dry_run=False)
+        #     if consol_result["merges_performed"]:
+        #         console.print(
+        #             f"[info]Auto-consolidation: merged {len(consol_result['merges_performed'])} "
+        #             f"speaker pairs ({consol_result['speakers_before']} → "
+        #             f"{consol_result['speakers_after']} speakers)[/info]"
+        #         )
     
     return speaker_results, primary_label, primary_confidence, metadata
 
