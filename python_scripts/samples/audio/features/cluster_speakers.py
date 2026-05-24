@@ -23,34 +23,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 console = Console(record=True)
 
 
-# ── Compatibility patch ────────────────────────────────────────────────────────
-
-def _patch_torchmetrics_compat() -> None:
-    import torchmetrics.utilities.data as _tmd
-
-    if not hasattr(_tmd, "get_num_classes"):
-        def get_num_classes(pred, target=None, num_classes=None):
-            """Stub replacing removed torchmetrics helper."""
-            if num_classes is not None:
-                return num_classes
-            if target is not None:
-                return int(target.max().item()) + 1
-            return int(pred.max().item()) + 1
-
-        _tmd.get_num_classes = get_num_classes
-
-    if "pytorch_lightning.metrics" not in sys.modules:
-        import pytorch_lightning as _pl
-
-        if not hasattr(_pl, "metrics"):
-            _metrics_mod = types.ModuleType("pytorch_lightning.metrics")
-            sys.modules["pytorch_lightning.metrics"] = _metrics_mod
-            _pl.metrics = _metrics_mod
-
-
-_patch_torchmetrics_compat()
-
-
 # ── Audio helpers ──────────────────────────────────────────────────────────────
 
 def load_audio(path: str) -> tuple[torch.Tensor, int]:
