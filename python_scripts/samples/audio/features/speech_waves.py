@@ -17,6 +17,7 @@ from _types import AudioInput, SpeechWave
 from config import HOP_SIZE, SAMPLE_RATE
 from energy import compute_rms_per_frame
 from loader import load_audio
+from norm_speech_loudness import normalize_audio_for_vad
 
 WaveState = Literal["below", "above"]
 
@@ -628,6 +629,26 @@ def save_wave_data(
 # ── Reporting helpers ──
 
 
+def _find_parent_segment(wave: SpeechWave, segments: list) -> int:
+    """
+    Find which segment a wave belongs to based on time overlap.
+    Returns 1-based segment number.
+    """
+    wave_start = wave["start_sec"]
+    wave_end = wave["end_sec"]
+    
+    for seg in segments:
+        seg_start = seg.get("start_sec", 0.0)
+        seg_end = seg.get("end_sec", 0.0)
+        
+        # Check for any time overlap between wave and segment
+        if wave_start <= seg_end and wave_end >= seg_start:
+            return seg.get("num", seg.get("segment_num", 1))
+    
+    # Fallback to first segment if no match found
+    return 1
+
+
 def _build_wave_report(
     wave: SpeechWave,
     wave_idx: int,
@@ -638,12 +659,7 @@ def _build_wave_report(
     Flatten one SpeechWave into a clean, self-contained report dict.
     Used for both summary.json rows and top_5_waves.json entries.
     """
-    frame_start = wave["details"]["frame_start"]
-    parent_seg_num = 0
-    for seg in segments:
-        if seg["frame_start"] <= frame_start <= seg["frame_end"]:
-            parent_seg_num = seg["num"]
-            break
+    parent_seg_num = _find_parent_segment(wave, segments)
 
     dir_name = f"segment_{parent_seg_num:03d}_wave_{wave_idx:03d}"
     wav_abs = (waves_dir / dir_name / "sound.wav").resolve()
@@ -794,7 +810,7 @@ if __name__ == "__main__":
         help="Minimum silence gap between segments in ms.",
     )
     parser.add_argument(
-        "-n",
+        "-ns",
         "--include-non-speech",
         action="store_true",
         help="Include non-speech segments in the VAD output.",
@@ -855,6 +871,16 @@ if __name__ == "__main__":
         ),
     )
 
+    parser.add_argument(
+        "-n",
+        "--normalize",
+        action="store_true",
+        help=(
+            "Normalize audio before VAD processing. Applies RMS-based normalization "
+            "to improve VAD performance on low-volume or variable-level recordings."
+        ),
+    )
+
     args = parser.parse_args()
 
     # ── Build shape config from args ──────────────────────────────────────────
@@ -872,17 +898,21 @@ if __name__ == "__main__":
     shutil.rmtree(args.output_dir, ignore_errors=True)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
+    # Load audio for wave extraction
+    audio_np, sr = load_audio(args.input, sr=SAMPLE_RATE, mono=True)
+
+    if args.normalize:
+        audio_np_norm, vad_stats = normalize_audio_for_vad(audio_np, sr)
+        audio_np = audio_np_norm
+
     segments, scores = extract_speech_timestamps(
-        audio=args.input,
+        audio=audio_np,
         include_non_speech=args.include_non_speech,
         threshold=args.threshold,
         min_speech_duration_sec=args.min_speech_duration / 1000,
         min_silence_duration_sec=args.min_silence_duration / 1000,
         with_scores=True,
     )
-
-    # Load audio for wave extraction
-    audio_np, sr = load_audio(args.input, sr=SAMPLE_RATE, mono=True)
 
     speech_waves = get_speech_waves(
         args.input,
@@ -895,6 +925,7 @@ if __name__ == "__main__":
     save_file(segments, args.output_dir / "segments.json")
     save_file(scores, args.output_dir / "speech_probs.json")
     save_file(speech_waves, args.output_dir / "speech_waves.json")
+    # save_file(vad_stats, args.output_dir / "vad_stats.json")
 
     # Create waves directory and save individual wave files
     waves_dir = args.output_dir / "waves"
@@ -905,13 +936,7 @@ if __name__ == "__main__":
     )
 
     for wave_idx, wave in enumerate(speech_waves, 1):
-        wave_frame_start = wave["details"]["frame_start"]
-
-        parent_seg_num = 1
-        for seg in segments:
-            if seg["frame_start"] <= wave_frame_start <= seg["frame_end"]:
-                parent_seg_num = seg["num"]
-                break
+        parent_seg_num = _find_parent_segment(wave, segments)
 
         save_wave_data(
             wave=wave,
