@@ -44,26 +44,41 @@ if __name__ == "__main__":
     class MockEmbeddingModel:
         """Mock embedding model that returns synthetic embeddings.
         
-        In a real application, replace this with pyannote.audio Inference.
-        This mock takes a dict with optional 'speaker_id' key for demo purposes.
+        Generates consistent, separable embeddings for two speakers with
+        controlled noise to simulate real-world variation.
+        
+        Key design:
+        - Two orthogonal "voice prints" ensure speakers are distinguishable
+        - Per-speaker seed gives consistent but slightly varied embeddings
+        - Low noise level (0.03) simulates realistic within-speaker variation
         """
         def __init__(self, dimension: int = 192, seed: int = 42):
             self.dimension = dimension
-            self.rng = np.random.RandomState(seed)
+            self.base_rng = np.random.RandomState(seed)
             
-            # Create fixed "voice prints" for two speakers
-            self.speaker_0_voice = self.rng.randn(1, dimension)
-            self.speaker_1_voice = self.rng.randn(1, dimension)
+            # Create orthogonal "voice prints" for two speakers
+            # Orthogonal vectors maximize cosine distance between speakers
+            v0 = self.base_rng.randn(dimension)
+            v1 = self.base_rng.randn(dimension)
+            # Make orthogonal via Gram-Schmidt
+            v1 = v1 - np.dot(v1, v0) * v0 / np.dot(v0, v0)
             
-            # Normalize for cosine similarity
-            self.speaker_0_voice = self.speaker_0_voice / np.linalg.norm(self.speaker_0_voice)
-            self.speaker_1_voice = self.speaker_1_voice / np.linalg.norm(self.speaker_1_voice)
+            self.speaker_0_voice = v0 / np.linalg.norm(v0)
+            self.speaker_1_voice = v1 / np.linalg.norm(v1)
+            
+            # Per-speaker RNGs for consistent variation
+            self.spk0_rng = np.random.RandomState(seed + 100)
+            self.spk1_rng = np.random.RandomState(seed + 200)
+            
+            # Verify separation
+            cosine_sim = np.dot(self.speaker_0_voice, self.speaker_1_voice)
+            console.print(
+                f"[dim]Mock voice prints cosine similarity: {cosine_sim:.6f} "
+                f"(near 0 = well-separated)[/dim]"
+            )
         
         def __call__(self, audio_dict: dict) -> np.ndarray:
-            """Simulate embedding computation with noise.
-            
-            Uses a hidden "speaker_id" in the audio dict to generate
-            consistent embeddings per speaker with some noise.
+            """Simulate embedding computation with realistic noise.
             
             Parameters
             ----------
@@ -72,23 +87,30 @@ if __name__ == "__main__":
                     - "waveform": torch.Tensor
                     - "sample_rate": int
                 May contain:
-                    - "speaker_id": int (0 or 1) for demo speaker selection
+                    - "speaker_id": int (0 or 1)
+                    - "noise_level": float (default 0.03)
+            
+            Returns
+            -------
+            np.ndarray
+                Normalized speaker embedding of shape (1, dimension).
             """
             speaker_id = audio_dict.get("speaker_id", 0)
-            noise_level = 0.15
+            noise_level = audio_dict.get("noise_level", 0.03)
             
             if speaker_id == 0:
                 base = self.speaker_0_voice.copy()
+                noise = self.spk0_rng.randn(self.dimension) * noise_level
             else:
                 base = self.speaker_1_voice.copy()
+                noise = self.spk1_rng.randn(self.dimension) * noise_level
             
-            # Add noise to simulate real-world variation
-            noise = self.rng.randn(1, self.dimension) * noise_level
+            # Add noise to simulate real-world channel/session variation
             embedding = base + noise
             
-            # Normalize for cosine similarity
+            # L2 normalize for cosine similarity
             embedding = embedding / np.linalg.norm(embedding)
-            return embedding
+            return embedding.reshape(1, -1)
     
     # ─── Custom SegmentSpeakerLabeler with Mock Support ──────────────────────
     class MockSegmentSpeakerLabeler(SegmentSpeakerLabeler):
@@ -99,28 +121,14 @@ if __name__ == "__main__":
             waveform,
             sample_rate: int,
             speaker_id: int = 0,
+            noise_level: float = 0.03,
         ) -> np.ndarray:
-            """Override to pass speaker_id to mock model.
-            
-            Parameters
-            ----------
-            waveform : torch.Tensor
-                Audio waveform.
-            sample_rate : int
-                Sample rate.
-            speaker_id : int
-                Mock speaker ID for demo.
-            
-            Returns
-            -------
-            np.ndarray
-                Speaker embedding.
-            """
-            # Pass speaker_id through the audio dict to the mock model
+            """Override to pass speaker_id and noise_level to mock model."""
             return self.embedding_model({
                 "waveform": waveform,
                 "sample_rate": sample_rate,
                 "speaker_id": speaker_id,
+                "noise_level": noise_level,
             })
         
         def label_segment_with_speaker_id(
@@ -129,33 +137,15 @@ if __name__ == "__main__":
             sample_rate: int,
             timestamp: float,
             speaker_id: int = 0,
+            noise_level: float = 0.03,
             context: Optional[Dict] = None,
         ) -> Tuple[str, float, Dict]:
-            """Label a segment with a known mock speaker ID for demo purposes.
-            
-            Parameters
-            ----------
-            waveform : torch.Tensor
-                Audio waveform.
-            sample_rate : int
-                Sample rate.
-            timestamp : float
-                Segment timestamp.
-            speaker_id : int
-                Mock speaker ID (0 or 1).
-            context : dict, optional
-                Additional context.
-            
-            Returns
-            -------
-            Tuple[str, float, Dict]
-                Label, confidence, metadata.
-            """
+            """Label a segment with a known mock speaker ID for demo purposes."""
             self.total_segments_processed += 1
             
             # Compute embedding with speaker_id for mock
             embedding = self.compute_embedding(
-                waveform, sample_rate, speaker_id=speaker_id
+                waveform, sample_rate, speaker_id=speaker_id, noise_level=noise_level
             )
             
             # Find best match among known speakers
@@ -241,7 +231,9 @@ if __name__ == "__main__":
         Panel.fit(
             "[bold]Scenario:[/bold] Simulated conversation between 2 speakers.\n"
             "Audio segments arrive in sequence.\n"
-            "The labeler progressively learns and tracks speakers.",
+            "The labeler progressively learns and tracks speakers.\n\n"
+            "[bold]Expected:[/bold] All Person_0 segments → same label, "
+            "all Person_1 segments → same (different) label.",
             title="Demo Overview",
             border_style="cyan",
         )
@@ -252,8 +244,8 @@ if __name__ == "__main__":
     mock_model = MockEmbeddingModel(dimension=192)
     labeler = MockSegmentSpeakerLabeler(
         embedding_model=mock_model,
-        threshold_same=0.15,
-        threshold_possible=0.075,
+        threshold_same=0.75,
+        threshold_possible=0.60,
         min_segments_for_reference=2,
         max_embeddings_per_speaker=50,
         temporal_smoothing_window=3.0,
@@ -261,34 +253,29 @@ if __name__ == "__main__":
     )
     
     # ─── Simulated Audio Segments ────────────────────────────────────────────
-    # Each segment has:
-    #   - timestamp: when the segment occurs (seconds)
-    #   - speaker_id: actual speaker (0 or 1) for mock embedding generation
-    #   - duration: length of segment in seconds
-    
     segments = [
         # Speaker 0 starts talking (segments 1-4)
-        {"timestamp": 0.5,  "speaker_id": 0, "duration": 2.0},
-        {"timestamp": 3.0,  "speaker_id": 0, "duration": 1.5},
-        {"timestamp": 5.0,  "speaker_id": 0, "duration": 2.5},
-        {"timestamp": 8.0,  "speaker_id": 0, "duration": 1.0},
+        {"timestamp": 0.5,  "speaker_id": 0, "duration": 2.0, "noise_level": 0.03},
+        {"timestamp": 3.0,  "speaker_id": 0, "duration": 1.5, "noise_level": 0.04},
+        {"timestamp": 5.0,  "speaker_id": 0, "duration": 2.5, "noise_level": 0.03},
+        {"timestamp": 8.0,  "speaker_id": 0, "duration": 1.0, "noise_level": 0.05},
         
         # Speaker 1 interjects (segments 5-7)
-        {"timestamp": 10.0, "speaker_id": 1, "duration": 1.5},
-        {"timestamp": 12.0, "speaker_id": 1, "duration": 2.0},
-        {"timestamp": 14.5, "speaker_id": 1, "duration": 1.0},
+        {"timestamp": 10.0, "speaker_id": 1, "duration": 1.5, "noise_level": 0.03},
+        {"timestamp": 12.0, "speaker_id": 1, "duration": 2.0, "noise_level": 0.04},
+        {"timestamp": 14.5, "speaker_id": 1, "duration": 1.0, "noise_level": 0.03},
         
         # Back to Speaker 0 (segments 8-10)
-        {"timestamp": 16.0, "speaker_id": 0, "duration": 2.0},
-        {"timestamp": 18.5, "speaker_id": 0, "duration": 1.5},
-        {"timestamp": 20.5, "speaker_id": 0, "duration": 2.0},
+        {"timestamp": 16.0, "speaker_id": 0, "duration": 2.0, "noise_level": 0.04},
+        {"timestamp": 18.5, "speaker_id": 0, "duration": 1.5, "noise_level": 0.03},
+        {"timestamp": 20.5, "speaker_id": 0, "duration": 2.0, "noise_level": 0.05},
         
         # Speaker 1 again (segments 11-12)
-        {"timestamp": 23.0, "speaker_id": 1, "duration": 1.5},
-        {"timestamp": 25.0, "speaker_id": 1, "duration": 2.0},
+        {"timestamp": 23.0, "speaker_id": 1, "duration": 1.5, "noise_level": 0.03},
+        {"timestamp": 25.0, "speaker_id": 1, "duration": 2.0, "noise_level": 0.04},
         
         # Brief Speaker 0 (segment 13)
-        {"timestamp": 27.5, "speaker_id": 0, "duration": 0.8},
+        {"timestamp": 27.5, "speaker_id": 0, "duration": 0.8, "noise_level": 0.03},
     ]
     
     # ─── Process Segments ────────────────────────────────────────────────────
@@ -298,11 +285,11 @@ if __name__ == "__main__":
     current_speaker = None
     
     for i, seg in enumerate(segments, 1):
-        # Create a dummy waveform tensor (silence) for the demo
+        # Create a dummy waveform tensor for the demo
         num_samples = int(seg["duration"] * 16000)
         waveform = torch.zeros(1, num_samples)
         
-        # Build context for temporal smoothing
+        # Build context
         context = {
             "previous_speaker": current_speaker,
             "segment_duration": seg["duration"],
@@ -315,6 +302,7 @@ if __name__ == "__main__":
             sample_rate=16000,
             timestamp=seg["timestamp"],
             speaker_id=seg["speaker_id"],
+            noise_level=seg.get("noise_level", 0.03),
             context=context,
         )
         
@@ -352,7 +340,6 @@ if __name__ == "__main__":
     table.add_column("Match Type")
     
     for r in results:
-        # Color code confidence
         conf = r["confidence"]
         if conf >= 0.85:
             conf_str = f"[green]{conf:.3f}[/green]"
@@ -361,7 +348,6 @@ if __name__ == "__main__":
         else:
             conf_str = f"[red]{conf:.3f}[/red]"
         
-        # Color code match type
         mt = r["match_type"]
         if mt == "strong_match":
             mt_str = f"[green]{mt}[/green]"
@@ -371,6 +357,13 @@ if __name__ == "__main__":
             mt_str = f"[dim yellow]{mt}[/dim yellow]"
         else:
             mt_str = f"[cyan]{mt}[/cyan]"
+        
+        # Highlight correct/incorrect assignments
+        expected_prefix = "SPEAKER_0" if r["actual_speaker"] == "Person_0" else "SPEAKER_0"
+        is_correct = (
+            (r["actual_speaker"] == "Person_0" and r["labeled_as"].startswith("SPEAKER_0")) or
+            False  # Will be checked after we know which labels map to which person
+        )
         
         table.add_row(
             str(r["segment"]),
@@ -388,8 +381,18 @@ if __name__ == "__main__":
     console.rule("[bold green]Similarity Scores Detail[/bold green]")
     console.print()
     
+    # Determine max speakers for dynamic columns
+    all_labels = set()
+    for r in results:
+        all_labels.update(r["all_scores"].keys())
+    sorted_labels = sorted(all_labels)
+    
+    # Truncate to first 5 speakers for readability
+    display_labels = sorted_labels[:5]
+    has_more = len(sorted_labels) > 5
+    
     score_table = Table(
-        title="Per-Segment Similarity Scores",
+        title="Per-Segment Similarity Scores (top 5 speakers)",
         show_header=True,
         header_style="bold cyan",
         border_style="dim",
@@ -397,31 +400,38 @@ if __name__ == "__main__":
     
     score_table.add_column("Seg", justify="right", style="dim")
     score_table.add_column("Time", justify="right", style="magenta")
+    score_table.add_column("Actual", style="yellow")
     score_table.add_column("Chosen", style="green bold")
     
-    # Dynamic columns for each speaker
-    max_speakers = max(len(r["all_scores"]) for r in results) if results else 0
-    for si in range(max_speakers):
-        score_table.add_column(f"Spk_{si+1}", justify="right")
+    for label in display_labels:
+        score_table.add_column(label, justify="right")
+    
+    if has_more:
+        score_table.add_column("...", justify="right", style="dim")
     
     for r in results:
         row = [
             str(r["segment"]),
             f"{r['timestamp']:.1f}s",
+            r["actual_speaker"],
             r["labeled_as"],
         ]
         
-        for label in sorted(r["all_scores"].keys()):
-            score = r["all_scores"][label]
-            if score >= 0.85:
-                row.append(f"[green]{score:.3f}[/green]")
-            elif score >= 0.65:
-                row.append(f"[yellow]{score:.3f}[/yellow]")
+        for label in display_labels:
+            score = r["all_scores"].get(label, None)
+            if score is not None:
+                if score >= 0.85:
+                    row.append(f"[green]{score:.3f}[/green]")
+                elif score >= 0.65:
+                    row.append(f"[yellow]{score:.3f}[/yellow]")
+                else:
+                    row.append(f"[red]{score:.3f}[/red]")
             else:
-                row.append(f"[red]{score:.3f}[/red]")
+                row.append("[dim]—[/dim]")
         
-        # Pad remaining columns if fewer speakers
-        row.extend(["[dim]—[/dim]"] * (max_speakers - len(r["all_scores"])))
+        if has_more:
+            remaining = len(r["all_scores"]) - len(display_labels)
+            row.append(f"[dim]+{remaining}[/dim]")
         
         score_table.add_row(*row)
     
@@ -444,6 +454,7 @@ if __name__ == "__main__":
     speaker_table.add_column("First Seen", justify="right", style="magenta")
     speaker_table.add_column("Last Seen", justify="right", style="magenta")
     speaker_table.add_column("Duration", justify="right", style="yellow")
+    speaker_table.add_column("Embeddings", justify="right", style="dim")
     
     for label in labeler.known_speakers:
         info = labeler.get_speaker_info(label)
@@ -453,6 +464,7 @@ if __name__ == "__main__":
             f"{info['first_seen']:.1f}s",
             f"{info['last_seen']:.1f}s",
             f"{info['active_duration']:.1f}s",
+            str(len(labeler._speakers[label].embeddings)),
         )
     
     console.print(speaker_table)
@@ -472,7 +484,6 @@ if __name__ == "__main__":
     console.rule("[bold green]Accuracy Check[/bold green]")
     console.print()
     
-    # Check if Person_0 consistently maps to one label and Person_1 to another
     person0_labels = set()
     person1_labels = set()
     
@@ -483,19 +494,51 @@ if __name__ == "__main__":
             person1_labels.add(r["labeled_as"])
     
     if len(person0_labels) == 1 and len(person1_labels) == 1:
-        if person0_labels != person1_labels:
+        p0_label = person0_labels.pop()
+        p1_label = person1_labels.pop()
+        if p0_label != p1_label:
+            # Count correct assignments
+            correct = sum(
+                1 for r in results
+                if (r["actual_speaker"] == "Person_0" and r["labeled_as"] == p0_label) or
+                   (r["actual_speaker"] == "Person_1" and r["labeled_as"] == p1_label)
+            )
+            accuracy = correct / len(results) * 100
             console.print(
-                f"[green]✓ Perfect! Person_0 → {person0_labels.pop()}, "
-                f"Person_1 → {person1_labels.pop()}[/green]"
+                f"[green]✓ Perfect clustering![/green]\n"
+                f"  Person_0 → [bold green]{p0_label}[/bold green] "
+                f"({len([r for r in results if r['actual_speaker'] == 'Person_0'])} segments)\n"
+                f"  Person_1 → [bold green]{p1_label}[/bold green] "
+                f"({len([r for r in results if r['actual_speaker'] == 'Person_1'])} segments)\n"
+                f"  Accuracy: [bold green]{accuracy:.0f}%[/bold green] ({correct}/{len(results)})"
             )
         else:
             console.print(
-                f"[yellow]⚠ Both speakers got the same label: {person0_labels.pop()}[/yellow]"
+                f"[red]✗ Both speakers got the same label: {p0_label}[/red]\n"
+                f"  Thresholds may need adjustment."
             )
+    elif len(person0_labels) == 1 and len(person1_labels) <= 2:
+        p0_label = person0_labels.pop()
+        console.print(
+            f"[yellow]⚠ Minor label mixing for Person_1[/yellow]\n"
+            f"  Person_0 → [green]{p0_label}[/green] (consistent)\n"
+            f"  Person_1 → [yellow]{person1_labels}[/yellow]\n"
+            f"  Try lowering noise_level or adjusting thresholds."
+        )
+    elif len(person1_labels) == 1 and len(person0_labels) <= 2:
+        p1_label = person1_labels.pop()
+        console.print(
+            f"[yellow]⚠ Minor label mixing for Person_0[/yellow]\n"
+            f"  Person_1 → [green]{p1_label}[/green] (consistent)\n"
+            f"  Person_0 → [yellow]{person0_labels}[/yellow]\n"
+            f"  Try lowering noise_level or adjusting thresholds."
+        )
     else:
         console.print(
-            f"[yellow]⚠ Label mixing detected: "
-            f"Person_0 → {person0_labels}, Person_1 → {person1_labels}[/yellow]"
+            f"[red]✗ Significant label mixing detected[/red]\n"
+            f"  Person_0 → [red]{person0_labels}[/red] ({len(person0_labels)} labels)\n"
+            f"  Person_1 → [red]{person1_labels}[/red] ({len(person1_labels)} labels)\n"
+            f"  [dim]Try: lower noise_level, increase threshold_same, or use more segments for reference.[/dim]"
         )
     
     # ─── Serialization Demo ──────────────────────────────────────────────────
@@ -503,19 +546,11 @@ if __name__ == "__main__":
     console.rule("[bold green]Serialization Demo[/bold green]")
     console.print()
     
-    # Serialize state
     state = labeler.to_dict()
     console.print("[bold]State serialized successfully[/bold]")
     console.print(f"  Speakers saved: [bright_white]{len(state['speakers'])}[/bright_white]")
     console.print(f"  Next speaker ID: [bright_white]{state['next_speaker_id']}[/bright_white]")
     console.print(f"  Total segments: [bright_white]{state['total_segments_processed']}[/bright_white]")
-    
-    # Check state structure
-    for label, spk_data in state["speakers"].items():
-        console.print(
-            f"  [dim]{label}: {spk_data['segment_count']} embeddings, "
-            f"{len(spk_data['embeddings'])} stored[/dim]"
-        )
     
     # Create a new labeler and restore state
     console.print()
@@ -531,38 +566,41 @@ if __name__ == "__main__":
     
     # Verify restored state by processing a new segment
     console.print()
-    console.print("[bold]Verifying restored labeler with new segment...[/bold]")
+    console.print("[bold]Verifying restored labeler with new segment (Person_0)...[/bold]")
     
-    new_waveform = torch.zeros(1, 16000)  # 1 second of silence
+    new_waveform = torch.zeros(1, 16000)
     
     label, confidence, metadata = labeler2.label_segment_with_speaker_id(
         waveform=new_waveform,
         sample_rate=16000,
         timestamp=30.0,
         speaker_id=0,
-        context={"previous_speaker": labeler2.known_speakers[0] if labeler2.known_speakers else None},
+        noise_level=0.03,
+        context={"previous_speaker": current_speaker},
     )
     
-    console.print(
-        f"  New segment (Person_0) → [green]{label}[/green] "
-        f"(confidence: {confidence:.3f}, type: {metadata['match_type']})"
-    )
+    # Check if it matched an existing speaker
+    if metadata["match_type"] in ("strong_match", "early_match", "context_match"):
+        console.print(
+            f"  [green]✓ Correctly matched to existing speaker: {label}[/green] "
+            f"(confidence: {confidence:.3f}, type: {metadata['match_type']})"
+        )
+    else:
+        console.print(
+            f"  [yellow]⚠ Created new speaker: {label}[/yellow] "
+            f"(confidence: {confidence:.3f}, type: {metadata['match_type']})"
+        )
     
     # ─── Speaker Merge Demo ──────────────────────────────────────────────────
     console.print()
     console.rule("[bold green]Speaker Merge Demo[/bold green]")
     console.print()
     
-    # Create a scenario where we mistakenly have 3 speakers
-    console.print("[dim]Simulating accidental speaker split...[/dim]")
-    console.print()
-    
-    # Add some segments for a "third" speaker (actually same as speaker 0 but
-    # with different mock_id for demonstration)
+    # Reset and build up speakers for merge demo
     labeler.reset()
-    console.print("[yellow]Labeler reset for merge demo[/yellow]")
+    console.print("[dim]Building speaker references for merge demo...[/dim]")
     
-    # First, build up two speakers normally
+    current_speaker = None
     for i, seg in enumerate(segments[:8], 1):
         waveform = torch.zeros(1, int(seg["duration"] * 16000))
         label, _, _ = labeler.label_segment_with_speaker_id(
@@ -570,29 +608,41 @@ if __name__ == "__main__":
             sample_rate=16000,
             timestamp=seg["timestamp"],
             speaker_id=seg["speaker_id"],
+            noise_level=seg.get("noise_level", 0.03),
             context={"previous_speaker": current_speaker},
         )
         current_speaker = label
     
     console.print()
-    console.print(f"[bold]Speakers before merge:[/bold] [bright_white]{labeler.known_speakers}[/bright_white]")
+    console.print(
+        f"[bold]Speakers before merge:[/bold] "
+        f"[bright_white]{labeler.known_speakers}[/bright_white]"
+        f" ([bright_white]{labeler.speaker_count}[/bright_white] total)"
+    )
     
     if labeler.speaker_count >= 2:
         speakers = labeler.known_speakers
+        spk_a, spk_b = speakers[0], speakers[1]
+        
         console.print()
         console.print(
-            f"[yellow]Merging [bold]{speakers[0]}[/bold] and [bold]{speakers[1]}[/bold]...[/yellow]"
+            f"[yellow]Merging [bold]{spk_a}[/bold] and [bold]{spk_b}[/bold]...[/yellow]"
         )
-        merged = labeler.merge_speakers(speakers[0], speakers[1])
+        
+        info_a = labeler.get_speaker_info(spk_a)
+        info_b = labeler.get_speaker_info(spk_b)
+        console.print(f"  {spk_a}: {info_a['segment_count']} segments")
+        console.print(f"  {spk_b}: {info_b['segment_count']} segments")
+        
+        merged = labeler.merge_speakers(spk_a, spk_b)
         
         if merged:
+            info_merged = labeler.get_speaker_info(merged)
+            console.print()
             console.print(f"[green]✓ Merged into: [bold]{merged}[/bold][/green]")
+            console.print(f"  Combined segments: [bright_white]{info_merged['segment_count']}[/bright_white]")
             console.print(f"  Remaining speakers: [bright_white]{labeler.known_speakers}[/bright_white]")
             console.print(f"  Speaker count: [bright_white]{labeler.speaker_count}[/bright_white]")
-            
-            # Show merged speaker info
-            info = labeler.get_speaker_info(merged)
-            console.print(f"  Total segments for {merged}: [bright_white]{info['segment_count']}[/bright_white]")
         else:
             console.print("[red]✗ Merge failed[/red]")
     
@@ -618,6 +668,7 @@ if __name__ == "__main__":
         sample_rate=16000,
         timestamp=segments[0]["timestamp"],
         speaker_id=segments[0]["speaker_id"],
+        noise_level=segments[0].get("noise_level", 0.03),
     )
     
     console.print(
@@ -625,6 +676,34 @@ if __name__ == "__main__":
         f"(confidence: {confidence:.3f}, type: {metadata['match_type']})"
     )
     console.print(f"  Speaker count: [bright_white]{labeler.speaker_count}[/bright_white]")
+    
+    # ─── Threshold Guidance ──────────────────────────────────────────────────
+    console.print()
+    console.rule("[bold cyan]Threshold Tuning Guide[/bold cyan]")
+    console.print()
+    
+    guide = Table(show_header=True, header_style="bold cyan", border_style="dim")
+    guide.add_column("Issue", style="yellow")
+    guide.add_column("Fix", style="green")
+    
+    guide.add_row(
+        "Too many speakers created",
+        "Lower [bold]noise_level[/bold] (e.g., 0.01–0.02)\nor raise [bold]threshold_same[/bold] (e.g., 0.80–0.85)"
+    )
+    guide.add_row(
+        "Different speakers merged together",
+        "Increase [bold]noise_level[/bold] (e.g., 0.05–0.08)\nor lower [bold]threshold_same[/bold] (e.g., 0.65–0.70)"
+    )
+    guide.add_row(
+        "Label flickering between speakers",
+        "Increase [bold]temporal_smoothing_window[/bold]\n(e.g., 5.0s instead of 3.0s)"
+    )
+    guide.add_row(
+        "Late detection of new speakers",
+        "Decrease [bold]min_segments_for_reference[/bold]\n(e.g., 1 instead of 2)"
+    )
+    
+    console.print(guide)
     
     # ─── Final Notes ─────────────────────────────────────────────────────────
     console.print()
@@ -649,7 +728,8 @@ if __name__ == "__main__":
             "5. [green]Speaker Merging[/green]\n"
             "   Accidentally split speakers can be merged post-hoc\n"
             "   without reprocessing audio.\n\n"
-            "[dim]Replace MockEmbeddingModel with pyannote.audio Inference for real use.[/dim]",
+            "[dim]Replace MockEmbeddingModel with pyannote.audio Inference for real use.\n"
+            "Real embeddings are much more consistent than mock noise![/dim]",
             title="Summary",
             border_style="green",
             padding=(1, 2),
