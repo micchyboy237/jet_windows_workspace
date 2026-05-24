@@ -85,7 +85,8 @@ def main():
     waveforms = resolve_audio_paths_as_tensor_list(
         args.speakers, 
         sr=sample_rate, 
-        recursive=True
+        recursive=True,
+        includes=["**/sound.wav"],
     )
 
     audio_data = list(zip(waveforms, audio_files))

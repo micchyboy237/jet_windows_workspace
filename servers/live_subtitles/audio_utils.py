@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Union, Sequence, Generator, Tuple
+from typing import Union, Sequence, Generator, Tuple, Optional
 from pathlib import Path
 
 import io
@@ -27,9 +27,74 @@ AUDIO_EXTENSIONS = {
 AudioPathsInput = Union[str, Path, Sequence[Union[str, Path]]]
 
 
-def resolve_audio_paths(audio_inputs: AudioPathsInput, recursive: bool = False) -> list[str]:
+def _collect_audio_files(
+    root_path: Path, 
+    recursive: bool = False,
+    includes: Optional[list[str]] = None
+) -> set[Path]:
+    """
+    Collect audio files from a directory using optional include patterns.
+    
+    Args:
+        root_path: Root directory to search
+        recursive: Whether to search recursively
+        includes: Optional glob patterns to filter files
+    
+    Returns:
+        Set of Path objects for matching audio files
+    """
+    if not includes:
+        # No includes specified, use default glob behavior
+        pattern = "**/*" if recursive else "*"
+        return {p for p in root_path.glob(pattern) if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS}
+    
+    # Use include patterns - each pattern is treated as a relative glob from root_path
+    matched_files = set()
+    
+    for include_pattern in includes:
+        # Use rglob for recursive patterns, glob for non-recursive
+        # rglob automatically handles **/ patterns correctly
+        if recursive or '**' in include_pattern:
+            for p in root_path.rglob(include_pattern):
+                if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS:
+                    matched_files.add(p)
+        else:
+            for p in root_path.glob(include_pattern):
+                if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS:
+                    matched_files.add(p)
+    
+    return matched_files
+
+
+def resolve_audio_paths(
+    audio_inputs: AudioPathsInput, 
+    recursive: bool = False,
+    includes: Optional[list[str]] = None
+) -> list[str]:
     """
     Resolve single file, list, or directory into a sorted list of absolute audio file paths as strings.
+    
+    Args:
+        audio_inputs: Single file, list of files, or directory path
+        recursive: Whether to recursively search directories (default: False)
+        includes: Optional list of glob patterns to filter files (e.g., ['**/sound.wav', '*.mp3'])
+                  Patterns are relative to each input directory
+    
+    Returns:
+        Sorted list of absolute path strings to valid audio files
+    
+    Examples:
+        # Get all WAV files recursively
+        resolve_audio_paths("audio_dir/", recursive=True, includes=["**/*.wav"])
+        
+        # Get specific files from any subdirectory
+        resolve_audio_paths("audio_dir/", includes=["**/sound.wav", "**/music.mp3"])
+        
+        # Get MP3 files only from top level
+        resolve_audio_paths("audio_dir/", includes=["*.mp3"])
+        
+        # Complex patterns
+        resolve_audio_paths("audio_dir/", includes=["recordings/**/voice*.wav"])
     """
     inputs = [audio_inputs] if isinstance(audio_inputs, (str, Path)) else audio_inputs
     resolved_paths: list[Path] = []
@@ -38,12 +103,23 @@ def resolve_audio_paths(audio_inputs: AudioPathsInput, recursive: bool = False) 
         path = Path(item)
 
         if path.is_dir():
-            pattern = "**/*" if recursive else "*"
-            for p in path.glob(pattern):
-                if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS:
-                    resolved_paths.append(p.resolve())
-        elif path.is_file() and path.suffix.lower() in AUDIO_EXTENSIONS:
-            resolved_paths.append(path.resolve())
+            # Use the new collection method for directories
+            matched_files = _collect_audio_files(path, recursive=recursive, includes=includes)
+            resolved_paths.extend(p.resolve() for p in matched_files)
+            
+        elif path.is_file():
+            # For individual files, check if they match includes patterns (if any)
+            if path.suffix.lower() in AUDIO_EXTENSIONS:
+                if not includes or any(
+                    path.match(pattern) or 
+                    path.match(f"**/{pattern}")  # Allow **/ matching for individual files too
+                    for pattern in includes
+                ):
+                    resolved_paths.append(path.resolve())
+                else:
+                    print(f"Skipping file not matching include patterns: {path}")
+            else:
+                print(f"Skipping non-audio file: {path}")
         elif path.exists():
             print(f"Skipping non-audio file: {path}")
         else:
@@ -61,6 +137,7 @@ def resolve_audio_paths_as_np_list(
     sr: int = 16_000,
     mono: bool = True,
     recursive: bool = False,
+    includes: Optional[list[str]] = None,
 ) -> list[np.ndarray]:
     """
     Resolve audio files from paths and load them as numpy arrays.
@@ -70,6 +147,7 @@ def resolve_audio_paths_as_np_list(
         sr: Target sample rate for loaded audio (default: 16000 Hz)
         mono: Whether to convert to mono (default: True)
         recursive: Whether to recursively search directories (default: False)
+        includes: Optional list of glob patterns to filter files (e.g., ['**/sound.wav', '*.mp3'])
     
     Returns:
         List of numpy arrays containing audio data for each file
@@ -79,7 +157,7 @@ def resolve_audio_paths_as_np_list(
         RuntimeError: If any audio file fails to load
     """
     # Get all audio file paths using resolve_audio_paths
-    audio_paths = resolve_audio_paths(audio_inputs, recursive=recursive)
+    audio_paths = resolve_audio_paths(audio_inputs, recursive=recursive, includes=includes)
     
     # Load each audio file into a numpy array
     audio_data_list = []
@@ -116,6 +194,7 @@ def resolve_audio_paths_as_tensor_list(
     sr: int = 16_000,
     mono: bool = True,
     recursive: bool = False,
+    includes: Optional[list[str]] = None,
     device: Union[str, torch.device] = "cpu",
 ) -> list["torch.Tensor"]:
     """
@@ -126,6 +205,7 @@ def resolve_audio_paths_as_tensor_list(
         sr: Target sample rate for loaded audio (default: 16000 Hz)
         mono: Whether to convert to mono (default: True)
         recursive: Whether to recursively search directories (default: False)
+        includes: Optional list of glob patterns to filter files (e.g., ['**/sound.wav', '*.mp3'])
         device: Target device for the tensors (default: "cpu")
     
     Returns:
@@ -137,7 +217,7 @@ def resolve_audio_paths_as_tensor_list(
         RuntimeError: If any audio file fails to load
     """
     # Get all audio file paths using resolve_audio_paths
-    audio_paths = resolve_audio_paths(audio_inputs, recursive=recursive)
+    audio_paths = resolve_audio_paths(audio_inputs, recursive=recursive, includes=includes)
     
     # Load each audio file into a numpy array first, then convert to tensor
     audio_tensor_list = []

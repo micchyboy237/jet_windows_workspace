@@ -52,7 +52,7 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
 
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\inference.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\inference.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\clustering.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\cluster_speakers.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\compare_speakers.py",
@@ -76,7 +76,7 @@ include_files = [
     # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\_metadata.py",
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
     r"",
 ]
 
@@ -94,16 +94,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-The speech audio bytes sent in payload may contain the ff:
-- duration ranging from 2.0s - 20.0s
-- most of the larger durations usually contain speakers that are within smaller durations
-- trailing true silent segments
-
-In SegmentSpeakerLabeler:
-- Can we add a new method label_segments that may have more than 1 speaker results?
-- Can we add a method that consolidates the existing speakers and labels?
-
-Then update live_subtitles_server2_segment_speaker to update the speaker info sent in payload to be a list.
+Fix why this is only keeping a single subdir under last_<n>_segments
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
