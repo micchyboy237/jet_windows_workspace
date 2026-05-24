@@ -132,8 +132,9 @@ include_files = [
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\inference.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\clustering.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\cluster_speakers.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\cluster_speakers.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\compare_speakers.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
     r"",
 ]
 
@@ -151,7 +152,9 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Is the current cluster_speakers logic fine or will it improve using pyannote's own clustering features?
+Analyze the best approach to implementing and integrating a segment speaker labeler that dynamically determines the speaker label of each received speech speaker, while progressively maintaining references.
+
+Then provide the full working code for segment_speaker_labeler and unified diff in live_subtitles_server2.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
@@ -161,7 +164,7 @@ Use visuals, diagrams, or tables when helpful.
 Show full code for new files, then show full function code for updated functions.
 Keep explanations simple and clear.
 
-Write flexible, reusable, and maintainable code.
+Write flexible, reusable, maintainable, and robust code.
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """

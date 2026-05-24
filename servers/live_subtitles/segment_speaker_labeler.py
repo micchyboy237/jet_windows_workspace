@@ -1,424 +1,641 @@
-# segment_speaker_labeler.py
-from __future__ import annotations
+"""Progressive segment speaker labeling with dynamic reference maintenance."""
 
-import contextlib
-import io
-import os
-from pathlib import Path
-from typing import List, Literal, TypedDict, Union
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+import warnings
 
 import numpy as np
 import torch
-import torchaudio
-from pyannote.audio import Inference, Model
-from pyannote.audio.pipelines.clustering import (
-    AgglomerativeClustering as PyannoteAgglomerativeClustering,
-)
-from tqdm import tqdm
+from scipy.spatial.distance import cdist
+from rich.console import Console
 
-AudioInput = Union[np.ndarray, bytes, bytearray, io.BytesIO, str, Path]
+console = Console()
 
 
-class SegmentResult(TypedDict):
-    path: str
-    parent_dir: str
-    speaker_label: int
-    centroid_cosine_similarity: float
-    nearest_neighbor_cosine_similarity: float
+@dataclass
+class SpeakerReference:
+    """Maintains reference data for a single speaker."""
+    
+    label: str
+    embeddings: List[np.ndarray] = field(default_factory=list)
+    centroid: Optional[np.ndarray] = None
+    first_seen: float = 0.0
+    last_seen: float = 0.0
+    segment_count: int = 0
+    
+    def add_embedding(self, embedding: np.ndarray, timestamp: float) -> None:
+        """Add a new embedding and update centroid progressively.
+        
+        Uses cumulative moving average for numerical stability.
+        """
+        if embedding.ndim == 1:
+            embedding = embedding.reshape(1, -1)
+        
+        self.embeddings.append(embedding)
+        self.segment_count += 1
+        
+        if self.centroid is None:
+            self.centroid = embedding.copy()
+        else:
+            # Progressive centroid update: C_new = C_old + (x - C_old) / n
+            self.centroid += (embedding - self.centroid) / self.segment_count
+        
+        self.last_seen = timestamp
+        if self.first_seen == 0.0:
+            self.first_seen = timestamp
+    
+    @property
+    def active_duration(self) -> float:
+        """Total active duration of this speaker."""
+        return self.last_seen - self.first_seen
+    
+    @property
+    def has_valid_centroid(self) -> bool:
+        """Check if centroid is valid."""
+        return self.centroid is not None and not np.any(np.isnan(self.centroid))
 
 
 class SegmentSpeakerLabeler:
+    """Dynamically labels speaker segments with progressive reference building.
+    
+    This class maintains a running database of speaker embeddings and assigns
+    labels to incoming segments based on cosine similarity matching against
+    known speaker centroids.
+    
+    Parameters
+    ----------
+    embedding_model : Inference
+        Pyannote Inference instance for computing embeddings.
+    threshold_same : float
+        Cosine similarity threshold to classify as same speaker (0.0 to 1.0).
+    threshold_possible : float
+        Lower threshold for possible match, triggers context check.
+    min_segments_for_reference : int
+        Minimum segments before a speaker reference is considered reliable.
+    max_embeddings_per_speaker : int
+        Maximum number of embeddings stored per speaker (FIFO).
+    temporal_smoothing_window : float
+        Time window (seconds) for temporal smoothing of labels.
+    debug : bool
+        Enable debug logging.
+    
+    Examples
+    --------
+    >>> from pyannote.audio import Inference, Model
+    >>> model = Model.from_pretrained("pyannote/embedding")
+    >>> inference = Inference(model, window="whole")
+    >>> labeler = SegmentSpeakerLabeler(embedding_model=inference)
+    >>> 
+    >>> # Process a segment
+    >>> label = labeler.label_segment(
+    ...     waveform=audio_tensor,
+    ...     sample_rate=16000,
+    ...     timestamp=1.5
+    ... )
     """
-    A reusable class for clustering short speech segments using pyannote speaker embeddings
-    and pyannote's clustering implementations (Agglomerative).
-
-    Designed for cases where each segment is assumed to contain a single speaker
-    (e.g., extracted speech clips named 'sound.wav' in subdirectories).
-
-    Features:
-    - Configurable embedding model
-    - Progress bars via tqdm
-    - Normalized embeddings for cosine similarity
-    - Returns structured results with speaker labels and similarities
-    - Generic and reusable – no hardcoded paths or business logic
-    """
-
+    
     def __init__(
         self,
-        embedding_model: str = "pyannote/embedding",
-        hf_token: str | None = None,
-        distance_threshold: float = 0.7,
-        clustering_method: Literal["average", "complete", "single"] = "average",
-        min_cluster_size: int = 1,
-        use_accelerator: bool = True,
-        device: str | torch.device | None = None,
-        verbose: bool = False,
-    ) -> None:
-        """
-        Initialize the clusterer.
-
-        Parameters
-        ----------
-        embedding_model : str, optional
-            Hugging Face model name for speaker embedding.
-        hf_token : str | None, optional
-            Hugging Face authentication token (required for gated models).
-        distance_threshold : float, optional
-            Distance threshold for agglomerative clustering (lower → more clusters).
-        clustering_method : Literal["average", "complete", "single"], optional
-            Linkage method for agglomerative clustering. Defaults to "average".
-        min_cluster_size : int, optional
-            Minimum number of segments in a cluster.
-        use_accelerator : bool, optional
-            Use MPS (Apple), CUDA or CPU as available.
-        device : str | torch.device | None, optional
-            Overrides auto-detection if provided.
-        verbose : bool, optional
-            If True, enables verbose output for debugging.
-        """
-
-        self.verbose = verbose
-
-        # ── Prefer provided device; otherwise, auto-select MPS, CUDA, then CPU ──────
-        if device is not None:
-            self.device = torch.device(device)
-            device_str = str(self.device)
-        else:
-            if torch.backends.mps.is_available():
-                device_str = "mps"
-            elif use_accelerator and torch.cuda.is_available():
-                device_str = "cuda"
-            else:
-                device_str = "cpu"
-            self.device = torch.device(device_str)
-
-        if self.verbose:
-            print(
-                f"Using device: {self.device} ({'MPS acceleration' if device_str == 'mps' else 'CUDA' if device_str == 'cuda' else 'CPU'})"
-            )
-
-        # ── Use HF_TOKEN from environment if not supplied ─────────────────────────
-        if hf_token is None:
-            hf_token = os.getenv("HF_TOKEN")
-
-        # ── Suppress safetensors "open file:" prints during model load ─────────
-        @contextlib.contextmanager
-        def suppress_safetensors_output():
-            with contextlib.redirect_stdout(io.StringIO()):
-                yield
-
-        with suppress_safetensors_output():
-            self.model = Model.from_pretrained(
-                embedding_model,
-                use_auth_token=hf_token,
-                map_location=self.device,
-                strict=False,
-            )
-
-        with suppress_safetensors_output():
-            self.inference = Inference(
-                model=self.model,
-                duration=3.0,
-                step=0.5,
-                window="sliding",
-            )
-
-        self.inference.to(self.device)
-
-        # ────────────── Clustering config ──────────────
-        self.distance_threshold = distance_threshold
-        self.clustering_method = clustering_method
-        self.min_cluster_size = min_cluster_size
-
-        # Instantiate the agglomerative clusterer
-        self._clusterer = PyannoteAgglomerativeClustering(metric="cosine").instantiate(
-            {
-                "threshold": self.distance_threshold,
-                "method": self.clustering_method,
-                "min_cluster_size": self.min_cluster_size,
-            }
-        )
-
-    def _load_audio_dict(self, path: str):
-        waveform, sample_rate = torchaudio.load(path)
-        return {
-            "waveform": waveform,
-            "sample_rate": sample_rate,
-        }
-
-    def _extract_embeddings(self, segments: List[AudioInput]) -> np.ndarray:
-        """Extract and L2-normalize speaker embeddings with progress bar."""
-        embeddings: List[np.ndarray] = []
-
-        segments_list = (
-            tqdm(segments, desc="Extracting embeddings") if self.verbose else segments
-        )
-        for item in segments_list:
-            if isinstance(item, (str, Path)):
-                audio = self._load_audio_dict(str(item))
-            else:
-                audio = self._normalize_audio_input(item)
-
-            result = self.inference(audio)
-
-            # When using sliding window, result is SlidingWindowFeature
-            if hasattr(result, "data"):
-                emb_array = result.data
-                if emb_array.shape[0] == 0:
-                    raise ValueError(
-                        "No windows extracted for very short/empty segment"
-                    )
-                emb = np.mean(emb_array, axis=0)
-            else:
-                emb = result
-                if emb.ndim == 2:
-                    emb = emb.squeeze(0)
-                elif emb.ndim > 2:
-                    raise ValueError(f"Unexpected embedding shape {emb.shape}")
-
-            norm = np.linalg.norm(emb)
-            if norm == 0:
-                raise ValueError("Zero-norm embedding – silent or invalid audio?")
-            emb = emb / norm
-            embeddings.append(emb)
-
-        return np.stack(embeddings)
-
-    def _normalize_audio_input(self, item: AudioInput):
-        """Convert any AudioInput to format accepted by pyannote.audio.Inference"""
-
-        if isinstance(item, (str, Path)):
-            return str(Path(item))
-
-        if isinstance(item, io.BytesIO):
-            item.seek(0)
-            return item
-
-        if isinstance(item, (bytes, bytearray)):
-            return io.BytesIO(bytes(item))
-
-        if isinstance(item, np.ndarray):
-            if item.ndim not in (1, 2):
-                raise ValueError(f"Expected 1D or 2D waveform, got shape {item.shape}")
-
-            # channels-first expected by pyannote: (channels, time)
-            if item.ndim == 1:
-                waveform = torch.from_numpy(item).unsqueeze(0)
-            else:
-                waveform = torch.from_numpy(item.T)
-
-            if waveform.dtype != torch.float32:
-                waveform = waveform.float()
-
-            return {
-                "waveform": waveform,
-                "sample_rate": 16000,
-            }
-
-        raise TypeError(f"Unsupported audio input type: {type(item).__name__}")
-
-    def _nearest_neighbor_similarity(
+        embedding_model,
+        threshold_same: float = 0.75,
+        threshold_possible: float = 0.60,
+        min_segments_for_reference: int = 2,
+        max_embeddings_per_speaker: int = 50,
+        temporal_smoothing_window: float = 3.0,
+        debug: bool = False,
+    ):
+        self.embedding_model = embedding_model
+        self.threshold_same = threshold_same
+        self.threshold_possible = threshold_possible
+        self.min_segments_for_reference = min_segments_for_reference
+        self.max_embeddings_per_speaker = max_embeddings_per_speaker
+        self.temporal_smoothing_window = temporal_smoothing_window
+        self.debug = debug
+        
+        # Speaker database: label -> SpeakerReference
+        self._speakers: Dict[str, SpeakerReference] = {}
+        
+        # Label history for temporal smoothing: (timestamp, label)
+        self._label_history: List[Tuple[float, str]] = []
+        
+        # Speaker counter for generating unique labels
+        self._next_speaker_id = 1
+        
+        # Statistics
+        self.total_segments_processed = 0
+        self.total_speakers_created = 0
+    
+    @property
+    def known_speakers(self) -> List[str]:
+        """Return list of known speaker labels."""
+        return sorted(self._speakers.keys())
+    
+    @property
+    def speaker_count(self) -> int:
+        """Number of known speakers."""
+        return len(self._speakers)
+    
+    def compute_embedding(
         self,
-        embeddings: np.ndarray,
+        waveform: torch.Tensor,
+        sample_rate: int,
     ) -> np.ndarray:
-        """
-        Compute nearest-neighbor cosine similarity for each embedding.
-        Assumes embeddings are L2-normalized.
-        """
-        sim_matrix = embeddings @ embeddings.T
-        np.fill_diagonal(sim_matrix, -1.0)
-        return sim_matrix.max(axis=1)
-
-    def similarity(
-        self,
-        audio_a: AudioInput,
-        audio_b: AudioInput,
-    ) -> float:
-        """
-        Compute cosine similarity between two audio inputs using speaker embeddings.
-
-        Returns
-        -------
-        float
-            Cosine similarity in [-1, 1].
-        """
-        embeddings = self._extract_embeddings([audio_a, audio_b])
-        return float(np.dot(embeddings[0], embeddings[1]))
-
-    def is_same_speaker(
-        self,
-        audio_a: AudioInput,
-        audio_b: AudioInput,
-    ) -> bool:
-        """
-        Determine whether two audio inputs are likely from the same speaker.
-
-        This method intentionally reuses `cluster_segments` to stay consistent
-        with clustering-time similarity semantics.
-
-        Returns
-        -------
-        bool
-            True if both inputs are assigned the same speaker label AND
-            the similarity evidence is defined (non-singleton cluster).
-        """
-        results = self.cluster_segments([audio_a, audio_b])
-
-        if len(results) != 2:
-            return False
-
-        a, b = results
-
-        # Different cluster → definitely different speakers
-        if a["speaker_label"] != b["speaker_label"]:
-            return False
-
-        # Singleton / undefined similarity is represented as 0.0 (nan becomes float nan)
-        if (
-            a["centroid_cosine_similarity"] <= 0.0
-            or b["centroid_cosine_similarity"] <= 0.0
-        ):
-            return False
-
-        return True
-
-    def cluster_segments(
-        self,
-        segments: AudioInput | List[AudioInput],
-    ) -> List[SegmentResult]:
-        """
-        Cluster speaker embeddings from provided audio segments.
-
+        """Compute speaker embedding from waveform segment.
+        
         Parameters
         ----------
-        segments : AudioInput | List[AudioInput]
-            Single audio item or list of items. Each item can be:
-            • np.ndarray     → mono float32 waveform @ 16 kHz
-            • bytes          → raw encoded audio bytes
-            • io.BytesIO     → buffer with encoded audio
-            • str / Path     → path to audio file
+        waveform : torch.Tensor
+            Audio waveform of shape (channels, samples).
+        sample_rate : int
+            Sample rate of the audio.
+        
+        Returns
+        -------
+        np.ndarray
+            Speaker embedding vector of shape (1, dimension).
         """
-        if not segments:
-            raise ValueError("No segment(s) provided to cluster_segments.")
-
-        # Normalize to list
-        segment_list: List[AudioInput] = (
-            [segments] if not isinstance(segments, list) else segments
-        )
-
-        if not segment_list:
-            raise ValueError("Empty segment list provided.")
-
-        if self.verbose:
-            print(f"Found {len(segment_list)} segment(s). Clustering embeddings...")
-
-        embeddings = self._extract_embeddings(segment_list)
-
-        # Agglomerative clustering (only strategy left)
-        labels = self._clusterer.cluster(
-            embeddings,
-            min_clusters=1,
-            max_clusters=9999,
-        )
-
-        # Majority-size remapping (largest cluster → label 0, etc.)
-        unique_labels = np.unique(labels)
-        cluster_sizes_list = [(l, np.sum(labels == l)) for l in unique_labels]
-        cluster_sizes_list.sort(key=lambda x: -x[1])
-        old_label_to_priority = {
-            old: idx for idx, (old, _) in enumerate(cluster_sizes_list)
+        try:
+            # Ensure correct shape for pyannote
+            if waveform.dim() == 1:
+                waveform = waveform.unsqueeze(0)
+            
+            embedding = self.embedding_model({
+                "waveform": waveform,
+                "sample_rate": sample_rate,
+            })
+            
+            # Convert to numpy if tensor
+            if hasattr(embedding, "detach"):
+                embedding = embedding.detach().cpu().numpy()
+            
+            # Ensure 2D
+            if embedding.ndim == 1:
+                embedding = embedding.reshape(1, -1)
+            
+            return embedding
+            
+        except Exception as e:
+            if self.debug:
+                console.print(f"[red]Error computing embedding: {e}[/]")
+            raise
+    
+    def find_best_match(
+        self,
+        embedding: np.ndarray,
+    ) -> Tuple[Optional[str], float, Dict[str, float]]:
+        """Find the best matching speaker for an embedding.
+        
+        Parameters
+        ----------
+        embedding : np.ndarray
+            Speaker embedding to match.
+        
+        Returns
+        -------
+        Tuple[Optional[str], float, Dict[str, float]]
+            - Best match label (None if no match)
+            - Best similarity score
+            - All similarity scores per speaker
+        """
+        if not self._speakers:
+            return None, 0.0, {}
+        
+        # Compute similarities against all known centroids
+        speaker_labels = []
+        centroids = []
+        
+        for label, ref in self._speakers.items():
+            if ref.has_valid_centroid:
+                speaker_labels.append(label)
+                centroids.append(ref.centroid)
+        
+        if not centroids:
+            return None, 0.0, {}
+        
+        centroids_array = np.vstack(centroids)
+        distances = cdist(embedding, centroids_array, metric="cosine")
+        similarities = 1.0 - distances.flatten()
+        
+        # Create similarity dictionary
+        sim_dict = {
+            label: float(sim)
+            for label, sim in zip(speaker_labels, similarities)
         }
-        labels = np.array([old_label_to_priority[l] for l in labels])
-        unique_labels = np.unique(labels)
-
-        # ── Compute centroids and nearest-neighbor similarities ──
-        cluster_centroids: dict[int, np.ndarray] = {}
-        cluster_sizes: dict[int, int] = {}
-
-        for l in np.unique(labels):
-            idx = labels == l
-            size = int(np.sum(idx))
-            cluster_sizes[int(l)] = size
-            if size == 0:
-                continue
-            centroid = embeddings[idx].mean(axis=0)
-            centroid /= np.linalg.norm(centroid) + 1e-12
-            cluster_centroids[int(l)] = centroid
-
-        nearest_neighbor_sim = np.zeros(len(embeddings), dtype=np.float32)
-        for label in np.unique(labels):
-            idx = np.where(labels == label)[0]
-            if len(idx) <= 1:
-                nearest_neighbor_sim[idx] = np.nan
-                continue
-            cluster_embs = embeddings[idx]
-            nn_sim = self._nearest_neighbor_similarity(cluster_embs)
-            nearest_neighbor_sim[idx] = nn_sim
-
-        results: List[SegmentResult] = []
-
-        for i, (item, label) in enumerate(zip(segment_list, labels)):
-            if isinstance(item, (str, Path)):
-                path_obj = Path(item)
-                path_str = str(path_obj)
-                parent_dir = path_obj.parent.name
-            else:
-                path_str = ""
-                parent_dir = ""
-
-            cluster_size = cluster_sizes.get(int(label), 0)
-            if cluster_size <= 1:
-                centroid_sim = np.nan
-            else:
-                centroid_sim = float(
-                    np.dot(embeddings[i], cluster_centroids[int(label)])
+        
+        # Find best match
+        best_idx = np.argmax(similarities)
+        best_label = speaker_labels[best_idx]
+        best_score = float(similarities[best_idx])
+        
+        return best_label, best_score, sim_dict
+    
+    def apply_temporal_smoothing(
+        self,
+        candidate_label: str,
+        timestamp: float,
+        similarity: float,
+    ) -> str:
+        """Apply temporal smoothing to prevent rapid label switching.
+        
+        Parameters
+        ----------
+        candidate_label : str
+            Proposed label.
+        timestamp : float
+            Current timestamp.
+        similarity : float
+            Similarity score for candidate label.
+        
+        Returns
+        -------
+        str
+            Smoothed label assignment.
+        """
+        # Clean old history entries
+        cutoff = timestamp - self.temporal_smoothing_window
+        self._label_history = [
+            (t, l) for t, l in self._label_history
+            if t >= cutoff
+        ]
+        
+        if not self._label_history:
+            self._label_history.append((timestamp, candidate_label))
+            return candidate_label
+        
+        # Count recent labels
+        recent_labels = [l for t, l in self._label_history]
+        most_common = max(set(recent_labels), key=recent_labels.count)
+        most_common_count = recent_labels.count(most_common)
+        total_recent = len(recent_labels)
+        
+        # If recent history strongly favors a different label, smooth
+        if (
+            most_common != candidate_label
+            and most_common_count > total_recent * 0.6
+            and similarity < self.threshold_same + 0.05
+        ):
+            if self.debug:
+                console.print(
+                    f"[yellow]Temporal smoothing: keeping '{most_common}' "
+                    f"over '{candidate_label}' (sim={similarity:.3f})[/]"
                 )
-
-            results.append(
-                {
-                    "path": path_str,
-                    "parent_dir": parent_dir,
-                    "speaker_label": int(label),
-                    "centroid_cosine_similarity": centroid_sim,
-                    "nearest_neighbor_cosine_similarity": float(
-                        nearest_neighbor_sim[i]
-                    ),
-                }
+            candidate_label = most_common
+        
+        self._label_history.append((timestamp, candidate_label))
+        return candidate_label
+    
+    def create_new_speaker(
+        self,
+        embedding: np.ndarray,
+        timestamp: float,
+    ) -> str:
+        """Create a new speaker reference.
+        
+        Parameters
+        ----------
+        embedding : np.ndarray
+            Speaker embedding.
+        timestamp : float
+            Current timestamp.
+        
+        Returns
+        -------
+        str
+            New speaker label.
+        """
+        label = f"SPEAKER_{self._next_speaker_id:02d}"
+        self._next_speaker_id += 1
+        self.total_speakers_created += 1
+        
+        ref = SpeakerReference(label=label)
+        ref.add_embedding(embedding, timestamp)
+        self._speakers[label] = ref
+        
+        if self.debug:
+            console.print(f"[green]Created new speaker: {label}[/]")
+        
+        return label
+    
+    def update_reference(
+        self,
+        label: str,
+        embedding: np.ndarray,
+        timestamp: float,
+    ) -> None:
+        """Update speaker reference with new embedding.
+        
+        Parameters
+        ----------
+        label : str
+            Speaker label to update.
+        embedding : np.ndarray
+            New embedding to add.
+        timestamp : float
+            Current timestamp.
+        """
+        if label not in self._speakers:
+            self._speakers[label] = SpeakerReference(label=label)
+        
+        ref = self._speakers[label]
+        ref.add_embedding(embedding, timestamp)
+        
+        # Enforce max embeddings limit (FIFO)
+        if len(ref.embeddings) > self.max_embeddings_per_speaker:
+            ref.embeddings = ref.embeddings[-self.max_embeddings_per_speaker:]
+            # Recompute centroid from remaining embeddings
+            if ref.embeddings:
+                ref.centroid = np.mean(
+                    np.vstack(ref.embeddings), axis=0, keepdims=True
+                )
+    
+    def label_segment(
+        self,
+        waveform: torch.Tensor,
+        sample_rate: int,
+        timestamp: float,
+        context: Optional[Dict] = None,
+    ) -> Tuple[str, float, Dict]:
+        """Label a speech segment with a speaker identity.
+        
+        This is the main entry point for processing segments.
+        
+        Parameters
+        ----------
+        waveform : torch.Tensor
+            Audio waveform of shape (channels, samples) or (samples,).
+        sample_rate : int
+            Sample rate of the audio.
+        timestamp : float
+            Timestamp of the segment in seconds.
+        context : dict, optional
+            Additional context information (e.g., previous speaker,
+            segment duration, etc.) for improved matching.
+        
+        Returns
+        -------
+        Tuple[str, float, Dict]
+            - Assigned speaker label
+            - Confidence score
+            - Additional metadata dictionary
+        """
+        self.total_segments_processed += 1
+        
+        # Compute embedding for this segment
+        embedding = self.compute_embedding(waveform, sample_rate)
+        
+        # Find best match among known speakers
+        best_label, best_score, all_scores = self.find_best_match(embedding)
+        
+        metadata = {
+            "timestamp": timestamp,
+            "all_scores": all_scores,
+            "is_new_speaker": False,
+            "match_type": "none",
+        }
+        
+        assigned_label = None
+        confidence = 0.0
+        
+        # Decision logic
+        if best_label is None:
+            # No speakers known yet
+            assigned_label = self.create_new_speaker(embedding, timestamp)
+            metadata["is_new_speaker"] = True
+            metadata["match_type"] = "first_speaker"
+            confidence = 1.0
+            
+        elif best_score >= self.threshold_same:
+            # Strong match
+            ref = self._speakers[best_label]
+            if ref.segment_count >= self.min_segments_for_reference:
+                # Reference is reliable
+                assigned_label = best_label
+                confidence = best_score
+                metadata["match_type"] = "strong_match"
+            else:
+                # Reference still building, but treat as match
+                assigned_label = best_label
+                confidence = best_score * 0.9  # Slightly lower confidence
+                metadata["match_type"] = "early_match"
+            
+        elif best_score >= self.threshold_possible:
+            # Possible match - check context and temporal smoothing
+            smoothed_label = self.apply_temporal_smoothing(
+                best_label, timestamp, best_score
             )
-
-        if self.verbose:
-            print(f"Processing complete → {len(np.unique(labels))} speakers detected.")
-        return results
-
-
-if __name__ == "__main__":
-    import argparse
-    import json
-    import sys
-
-    parser = argparse.ArgumentParser(
-        description="Cluster speech segments and compare speaker similarity."
-    )
-    parser.add_argument(
-        "audio_paths",
-        nargs="+",
-        help="Audio file paths to cluster and compare (at least two required for similarity checks).",
-    )
-    args = parser.parse_args()
-
-    if len(args.audio_paths) < 2:
-        print(
-            "Please provide at least two audio paths as positional arguments.",
-            file=sys.stderr,
+            
+            if context and "previous_speaker" in context:
+                prev_speaker = context["previous_speaker"]
+                if prev_speaker in self._speakers:
+                    prev_similarity = all_scores.get(prev_speaker, 0.0)
+                    if prev_similarity >= self.threshold_same - 0.05:
+                        # Context suggests same speaker
+                        assigned_label = prev_speaker
+                        confidence = prev_similarity
+                        metadata["match_type"] = "context_match"
+                    else:
+                        assigned_label = smoothed_label
+                        confidence = best_score
+                        metadata["match_type"] = "possible_match"
+                else:
+                    assigned_label = smoothed_label
+                    confidence = best_score
+                    metadata["match_type"] = "possible_match"
+            else:
+                assigned_label = smoothed_label
+                confidence = best_score
+                metadata["match_type"] = "possible_match"
+            
+        else:
+            # No match - create new speaker
+            assigned_label = self.create_new_speaker(embedding, timestamp)
+            metadata["is_new_speaker"] = True
+            metadata["match_type"] = "new_speaker"
+            confidence = 1.0 - best_score  # Confidence in "newness"
+        
+        # Update reference with this embedding
+        self.update_reference(assigned_label, embedding, timestamp)
+        
+        if self.debug:
+            console.print(
+                f"[dim]Segment {self.total_segments_processed}: "
+                f"t={timestamp:.2f}s → {assigned_label} "
+                f"(confidence: {confidence:.3f}, type: {metadata['match_type']})[/]"
+            )
+        
+        return assigned_label, confidence, metadata
+    
+    def get_speaker_info(self, label: str) -> Optional[Dict]:
+        """Get information about a specific speaker.
+        
+        Parameters
+        ----------
+        label : str
+            Speaker label.
+        
+        Returns
+        -------
+        Optional[Dict]
+            Speaker information dictionary or None if not found.
+        """
+        if label not in self._speakers:
+            return None
+        
+        ref = self._speakers[label]
+        return {
+            "label": ref.label,
+            "segment_count": ref.segment_count,
+            "first_seen": ref.first_seen,
+            "last_seen": ref.last_seen,
+            "active_duration": ref.active_duration,
+            "has_valid_centroid": ref.has_valid_centroid,
+        }
+    
+    def get_all_speakers_info(self) -> Dict[str, Dict]:
+        """Get information about all known speakers.
+        
+        Returns
+        -------
+        Dict[str, Dict]
+            Dictionary mapping speaker labels to their information.
+        """
+        return {
+            label: self.get_speaker_info(label)
+            for label in self._speakers
+        }
+    
+    def merge_speakers(
+        self,
+        label1: str,
+        label2: str,
+    ) -> Optional[str]:
+        """Merge two speaker references.
+        
+        Parameters
+        ----------
+        label1 : str
+            First speaker label to merge.
+        label2 : str
+            Second speaker label to merge.
+        
+        Returns
+        -------
+        Optional[str]
+            The merged speaker label, or None if merge failed.
+        """
+        if label1 not in self._speakers or label2 not in self._speakers:
+            return None
+        
+        ref1 = self._speakers[label1]
+        ref2 = self._speakers[label2]
+        
+        # Merge into the one with more segments
+        if ref1.segment_count >= ref2.segment_count:
+            primary, secondary = ref1, ref2
+            primary_label = label1
+        else:
+            primary, secondary = ref2, ref1
+            primary_label = label2
+        
+        # Add all embeddings from secondary to primary
+        for emb in secondary.embeddings:
+            primary.embeddings.append(emb)
+        
+        primary.segment_count += secondary.segment_count
+        primary.last_seen = max(primary.last_seen, secondary.last_seen)
+        primary.first_seen = min(primary.first_seen, secondary.first_seen)
+        
+        # Recompute centroid
+        if primary.embeddings:
+            primary.centroid = np.mean(
+                np.vstack(primary.embeddings), axis=0, keepdims=True
+            )
+        
+        # Remove secondary
+        del self._speakers[label1 if primary_label == label2 else label2]
+        
+        if self.debug:
+            console.print(
+                f"[yellow]Merged speakers: {label1} + {label2} → {primary_label}[/]"
+            )
+        
+        return primary_label
+    
+    def reset(self) -> None:
+        """Reset the labeler to initial state."""
+        self._speakers.clear()
+        self._label_history.clear()
+        self._next_speaker_id = 1
+        self.total_segments_processed = 0
+        self.total_speakers_created = 0
+        
+        if self.debug:
+            console.print("[yellow]SegmentSpeakerLabeler reset[/]")
+    
+    def to_dict(self) -> Dict:
+        """Serialize the labeler state to a dictionary.
+        
+        Returns
+        -------
+        Dict
+            Serializable state dictionary.
+        """
+        speakers_data = {}
+        for label, ref in self._speakers.items():
+            speakers_data[label] = {
+                "label": ref.label,
+                "embeddings": [emb.tolist() for emb in ref.embeddings],
+                "centroid": ref.centroid.tolist() if ref.centroid is not None else None,
+                "first_seen": ref.first_seen,
+                "last_seen": ref.last_seen,
+                "segment_count": ref.segment_count,
+            }
+        
+        return {
+            "speakers": speakers_data,
+            "next_speaker_id": self._next_speaker_id,
+            "total_segments_processed": self.total_segments_processed,
+            "total_speakers_created": self.total_speakers_created,
+            "threshold_same": self.threshold_same,
+            "threshold_possible": self.threshold_possible,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict, embedding_model) -> "SegmentSpeakerLabeler":
+        """Create a labeler from a serialized state dictionary.
+        
+        Parameters
+        ----------
+        data : Dict
+            Serialized state from to_dict().
+        embedding_model : Inference
+            Pyannote Inference instance.
+        
+        Returns
+        -------
+        SegmentSpeakerLabeler
+            Reconstructed labeler instance.
+        """
+        labeler = cls(
+            embedding_model=embedding_model,
+            threshold_same=data.get("threshold_same", 0.75),
+            threshold_possible=data.get("threshold_possible", 0.60),
         )
-        sys.exit(1)
-
-    labeler = SegmentSpeakerLabeler()
-
-    cluster_results = labeler.cluster_segments(args.audio_paths)
-    similarity = labeler.similarity(args.audio_paths[0], args.audio_paths[1])
-    same_speaker = labeler.is_same_speaker(args.audio_paths[0], args.audio_paths[1])
-
-    print(f"Clusters:\n{json.dumps(cluster_results, indent=2, ensure_ascii=False)}")
-    print(f"Similarity between first two: {similarity:.4f}")
-    print(f"Same speaker (first two): {same_speaker}")
+        
+        labeler._next_speaker_id = data.get("next_speaker_id", 1)
+        labeler.total_segments_processed = data.get("total_segments_processed", 0)
+        labeler.total_speakers_created = data.get("total_speakers_created", 0)
+        
+        for label, ref_data in data.get("speakers", {}).items():
+            ref = SpeakerReference(
+                label=ref_data["label"],
+                first_seen=ref_data["first_seen"],
+                last_seen=ref_data["last_seen"],
+                segment_count=ref_data["segment_count"],
+            )
+            ref.embeddings = [np.array(emb) for emb in ref_data["embeddings"]]
+            if ref_data["centroid"] is not None:
+                ref.centroid = np.array(ref_data["centroid"])
+            labeler._speakers[label] = ref
+        
+        return labeler
