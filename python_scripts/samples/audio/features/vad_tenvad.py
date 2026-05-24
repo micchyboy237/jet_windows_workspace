@@ -1,23 +1,35 @@
+import io
 import json
+import os
+import platform
 import shutil
+import subprocess
 from pathlib import Path
-from typing import List, Literal, TypedDict, Union
+from typing import List, Literal, Optional, TypedDict, Union
+
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy.io.wavfile as wavfile
-from rich.console import Console
-from ten_vad import TenVad
-import io
-import os
-import librosa
-import numpy as np
 import torch
+import torchaudio
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+
+from ten_vad import TenVad
 
 console = Console()
-OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-Path(OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
 AudioInput = Union[np.ndarray, bytes, bytearray, str, Path]
 
 
@@ -34,13 +46,29 @@ class SpeechSegment(TypedDict):
     segment_probs: List[float]
 
 
+# ---------------------------------------------------------------------------
+# Defaults (mirror vad_firered2's style)
+# ---------------------------------------------------------------------------
+DEFAULT_SAMPLING_RATE = 16000
+DEFAULT_HOP_SIZE = 160
+DEFAULT_THRESHOLD = 0.5
+DEFAULT_MIN_SPEECH_MS = 250
+DEFAULT_MIN_SILENCE_MS = 100
+DEFAULT_RETURN_SECONDS = False
+
+
+# ---------------------------------------------------------------------------
+# Audio I/O helpers
+# ---------------------------------------------------------------------------
 def load_audio(
     audio: AudioInput,
     sr: int = 16_000,
     mono: bool = True,
 ) -> tuple[np.ndarray, int]:
     """
-    Robust audio loader for ASR pipelines with correct datatype, normalization, layout, and resampling.
+    Robust audio loader for ASR pipelines with correct datatype, normalization,
+    layout, and resampling.
+
     Handles:
       - File paths
       - In-memory WAV bytes
@@ -49,11 +77,14 @@ def load_audio(
       - Automatically normalizes to [-1.0, 1.0] float32
       - Always resamples to target_sr
       - Correctly converts stereo → mono regardless of channel position
+
     Returns
     -------
     np.ndarray
         Shape (samples,), float32, [-1.0, 1.0], exactly `sr` Hz
     """
+    import librosa
+
     current_sr: int | None
     if isinstance(audio, (str, os.PathLike)):
         y, current_sr = librosa.load(audio, sr=None, mono=False)
@@ -72,6 +103,7 @@ def load_audio(
         y = y / (2 ** (np.iinfo(y.dtype).bits - 1))
     if len(y) > 0 and np.abs(y).max() > 1.0 + 1e-6:
         y = y / np.abs(y).max()
+
     if y.ndim == 1:
         y = y[None, :]
     elif y.ndim == 2:
@@ -79,113 +111,62 @@ def load_audio(
             y = y.T
     else:
         raise ValueError(f"Audio must be 1D or 2D, got shape {y.shape}")
+
     if mono and y.shape[0] > 1:
         y = np.mean(y, axis=0, keepdims=True)
+
     sr = current_sr or sr
     if current_sr != sr:
         y = librosa.resample(y, orig_sr=sr, target_sr=sr)
+
     return y.squeeze(), sr
 
 
 def float32_to_int16(audio: np.ndarray) -> np.ndarray:
     """Convert float32 audio in range [-1, 1] to int16."""
-    audio_int16 = np.clip(audio * 32767, -32768, 32767).astype(np.int16)
-    return audio_int16
+    return np.clip(audio * 32767, -32768, 32767).astype(np.int16)
 
 
-def compute_rms_per_frame(
-    audio: np.ndarray,
-    hop_size: int,
-    start_frame: int,
-    end_frame: int,
-) -> List[float]:
-    """
-    Compute RMS energy for each frame in the given frame range.
-    Args:
-        audio: Float32 audio array (mono).
-        hop_size: Number of samples per frame.
-        start_frame: First frame index (inclusive).
-        end_frame: Last frame index (inclusive).
-    Returns:
-        List of RMS values (one per frame).
-    """
-    rms_values = []
-    for frame_idx in range(start_frame, end_frame + 1):
-        start_sample = frame_idx * hop_size
-        end_sample = start_sample + hop_size
-        frame_audio = audio[start_sample:end_sample]
-        if len(frame_audio) == 0:
-            rms = 0.0
-        else:
-            rms = np.sqrt(np.mean(frame_audio**2))
-        rms_values.append(float(rms))
-    return rms_values
-
-
-def save_plot(
-    probs: List[float],
-    rms_values: List[float],
-    output_path: Path,
-    title: str = "Speech Probabilities and RMS Energy",
-) -> None:
-    """Create a dual subplot figure and save as PNG."""
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-    frames = np.arange(len(probs))
-    ax1.plot(frames, probs, color="blue", linewidth=1)
-    ax1.set_ylabel("VAD Probability")
-    ax1.set_ylim(0, 1)
-    ax1.grid(True, alpha=0.3)
-    ax1.set_title(title)
-    ax2.plot(frames, rms_values, color="green", linewidth=1)
-    ax2.set_xlabel("Frame Index")
-    ax2.set_ylabel("RMS Energy")
-    ax2.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close(fig)
-
-
-def save_json(data, path: Path) -> None:
-    """Save data as JSON with indentation."""
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-
-
+# ---------------------------------------------------------------------------
+# Core VAD extraction
+# ---------------------------------------------------------------------------
 def extract_speech_timestamps(
     audio: AudioInput,
     with_scores: bool = False,
     include_non_speech: bool = False,
-    hop_size: int = 160,
-    threshold: float = 0.5,
-    min_speech_duration_ms: int = 250,
-    min_silence_duration_ms: int = 100,
+    return_seconds: bool = DEFAULT_RETURN_SECONDS,
+    hop_size: int = DEFAULT_HOP_SIZE,
+    threshold: float = DEFAULT_THRESHOLD,
+    min_speech_duration_ms: int = DEFAULT_MIN_SPEECH_MS,
+    min_silence_duration_ms: int = DEFAULT_MIN_SILENCE_MS,
     **kwargs,
 ) -> Union[List[SpeechSegment], tuple[List[SpeechSegment], List[float]]]:
     """
     Extract speech segments from audio using TEN VAD.
+
     Args:
         audio: Input audio (file path, bytes, numpy array, or torch tensor).
         with_scores: If True, return a tuple (segments, frame_probs).
         include_non_speech: If True, include non-speech segments in output.
+        return_seconds: If True, start/end in seconds; else in samples.
         hop_size: Number of samples per VAD frame (default 160).
         threshold: VAD probability threshold for speech (default 0.5).
         min_speech_duration_ms: Minimum duration of a speech segment in ms.
         min_silence_duration_ms: Minimum silence duration between speech segments
-                                 that should be considered a true break. Silences
-                                 shorter than this will be merged into a single
-                                 speech segment.
+                                 that should be considered a true break.
+
     Returns:
         List of SpeechSegment dicts, or tuple (segments, frame_probs).
     """
     audio_np, sr = load_audio(audio, sr=16000, mono=True)
     if sr != 16000:
         raise ValueError(f"TEN VAD requires 16000 Hz, got {sr}")
-    audio_int16 = float32_to_int16(audio_np)
 
+    audio_int16 = float32_to_int16(audio_np)
     vad = TenVad(hop_size=hop_size, threshold=threshold)
+
     num_samples = len(audio_int16)
     num_frames = (num_samples + hop_size - 1) // hop_size
-
     probs = []
     for i in range(num_frames):
         start = i * hop_size
@@ -193,255 +174,596 @@ def extract_speech_timestamps(
         frame = audio_int16[start:end]
         if len(frame) < hop_size:
             frame = np.pad(frame, (0, hop_size - len(frame)), mode="constant")
-        prob, flag = vad.process(frame)
+        prob, _flag = vad.process(frame)
         probs.append(prob)
 
+    # ------------------------------------------------------------------
+    # Convert probabilities to binary flags, then merge runs
+    # ------------------------------------------------------------------
     vad_flags = [1 if p >= threshold else 0 for p in probs]
     frame_duration_ms = (hop_size / sr) * 1000
     min_speech_frames = int(np.ceil(min_speech_duration_ms / frame_duration_ms))
     min_silence_frames = int(np.ceil(min_silence_duration_ms / frame_duration_ms))
 
-    # ── Extract speech runs ──
-    speech_runs = []
-    idx = 0
-    while idx < len(vad_flags):
-        if vad_flags[idx] == 1:
-            start = idx
-            while idx < len(vad_flags) and vad_flags[idx] == 1:
-                idx += 1
-            end = idx - 1
-            speech_runs.append((start, end))
-        else:
-            idx += 1
-
-    # ── Merge speech runs separated by short silences ──
-    merged_runs = []
-    if speech_runs:
-        current_start, current_end = speech_runs[0]
-        for next_start, next_end in speech_runs[1:]:
-            gap_frames = next_start - current_end - 1
-            if gap_frames < min_silence_frames:
-                current_end = next_end
-            else:
-                merged_runs.append((current_start, current_end))
-                current_start, current_end = next_start, next_end
-        merged_runs.append((current_start, current_end))
-
-    segments = []
-    segment_counter = 0
-
-    # ── Create speech segments from merged runs ──
-    for start_frame, end_frame in merged_runs:
-        duration_frames = end_frame - start_frame + 1
-        if duration_frames >= min_speech_frames:
-            duration_ms = duration_frames * frame_duration_ms
-            segment = {
-                "num": segment_counter,
-                "start": start_frame * frame_duration_ms / 1000.0,
-                "end": (end_frame + 1) * frame_duration_ms / 1000.0,
-                "prob": float(np.mean(probs[start_frame : end_frame + 1])),
-                "duration": duration_ms / 1000.0,
-                "frames_length": duration_frames,
-                "frame_start": start_frame,
-                "frame_end": end_frame,
-                "type": "speech",
-                "segment_probs": probs[start_frame : end_frame + 1],
-            }
-            segments.append(segment)
-            segment_counter += 1
-
-    # ── Handle non-speech segments with merging ──
-    if include_non_speech:
-        # STEP 1: Extract raw non-speech runs
-        non_speech_runs = []
+    def _extract_runs(flags, target_val):
+        runs = []
         idx = 0
-        while idx < len(vad_flags):
-            if vad_flags[idx] == 0:
+        while idx < len(flags):
+            if flags[idx] == target_val:
                 start = idx
-                while idx < len(vad_flags) and vad_flags[idx] == 0:
+                while idx < len(flags) and flags[idx] == target_val:
                     idx += 1
-                end = idx - 1
-                non_speech_runs.append((start, end))
+                runs.append((start, idx - 1))
             else:
-                # Skip speech frames while collecting non-speech runs
-                while idx < len(vad_flags) and vad_flags[idx] == 1:
-                    idx += 1
-        
-        # STEP 2: Merge non-speech runs separated by short speech gaps
-        merged_non_speech_runs = []
-        if non_speech_runs:
-            current_start, current_end = non_speech_runs[0]
-            for next_start, next_end in non_speech_runs[1:]:
-                # Calculate speech frames between two non-speech runs
-                gap_frames = next_start - current_end - 1
-                # Merge if the speech gap is shorter than min_speech_duration
-                if gap_frames < min_speech_frames:
-                    current_end = next_end  # Extend current run
-                else:
-                    # Gap is long enough: finalize current run
-                    merged_non_speech_runs.append((current_start, current_end))
-                    current_start, current_end = next_start, next_end
-            # Don't forget the last run
-            merged_non_speech_runs.append((current_start, current_end))
-        
-        # STEP 3: Create segments from merged non-speech runs
-        for start_frame, end_frame in merged_non_speech_runs:
-            duration_frames = end_frame - start_frame + 1
-            duration_ms = duration_frames * frame_duration_ms
-            segment = {
-                "num": segment_counter,
-                "start": start_frame * frame_duration_ms / 1000.0,
-                "end": (end_frame + 1) * frame_duration_ms / 1000.0,
-                "prob": float(np.mean(probs[start_frame : end_frame + 1])),
-                "duration": duration_ms / 1000.0,
-                "frames_length": duration_frames,
-                "frame_start": start_frame,
-                "frame_end": end_frame,
-                "type": "non-speech",
-                "segment_probs": probs[start_frame : end_frame + 1],
-            }
-            segments.append(segment)
-            segment_counter += 1
-        
-        # STEP 4: Sort all segments by time and renumber sequentially
+                idx += 1
+        return runs
+
+    def _merge_runs(runs, min_gap_frames):
+        if not runs:
+            return []
+        merged = []
+        cur_start, cur_end = runs[0]
+        for nxt_start, nxt_end in runs[1:]:
+            gap = nxt_start - cur_end - 1
+            if gap < min_gap_frames:
+                cur_end = nxt_end
+            else:
+                merged.append((cur_start, cur_end))
+                cur_start, cur_end = nxt_start, nxt_end
+        merged.append((cur_start, cur_end))
+        return merged
+
+    # --- Speech segments ---
+    speech_runs = _extract_runs(vad_flags, 1)
+    merged_speech = _merge_runs(speech_runs, min_silence_frames)
+
+    segments: List[SpeechSegment] = []
+    seg_num = 1
+
+    def _make_segment(
+        num: int,
+        f_start: int,
+        f_end: int,
+        seg_type: Literal["speech", "non-speech"],
+    ) -> SpeechSegment:
+        start_sec = f_start * frame_duration_ms / 1000.0
+        end_sec = (f_end + 1) * frame_duration_ms / 1000.0
+        dur_sec = end_sec - start_sec
+        seg_probs_slice = probs[f_start : f_end + 1]
+        avg_prob = float(np.mean(seg_probs_slice)) if seg_probs_slice else 0.0
+
+        start_val = start_sec if return_seconds else f_start * hop_size
+        end_val = end_sec if return_seconds else (f_end + 1) * hop_size
+
+        return SpeechSegment(
+            num=num,
+            start=start_val,
+            end=end_val,
+            prob=avg_prob,
+            duration=dur_sec,
+            frames_length=f_end - f_start + 1,
+            frame_start=f_start,
+            frame_end=f_end,
+            type=seg_type,
+            segment_probs=seg_probs_slice if with_scores else [],
+        )
+
+    for f_start, f_end in merged_speech:
+        dur_frames = f_end - f_start + 1
+        if dur_frames >= min_speech_frames:
+            segments.append(_make_segment(seg_num, f_start, f_end, "speech"))
+            seg_num += 1
+
+    # --- Non-speech segments (optional) ---
+    if include_non_speech:
+        non_speech_runs = _extract_runs(vad_flags, 0)
+        merged_ns = _merge_runs(non_speech_runs, min_speech_frames)
+        for f_start, f_end in merged_ns:
+            segments.append(_make_segment(seg_num, f_start, f_end, "non-speech"))
+            seg_num += 1
         segments.sort(key=lambda s: s["start"])
-        for i, seg in enumerate(segments):
-            seg["num"] = i
+        for i, s in enumerate(segments):
+            s["num"] = i + 1
 
     if with_scores:
         return segments, probs
     return segments
 
 
+# ---------------------------------------------------------------------------
+# Audio extraction from segments
+# ---------------------------------------------------------------------------
+def extract_speech_audio(
+    audio: AudioInput,
+    sampling_rate: int = DEFAULT_SAMPLING_RATE,
+    hop_size: int = DEFAULT_HOP_SIZE,
+    threshold: float = DEFAULT_THRESHOLD,
+    min_speech_duration_ms: int = DEFAULT_MIN_SPEECH_MS,
+    min_silence_duration_ms: int = DEFAULT_MIN_SILENCE_MS,
+) -> List[np.ndarray]:
+    """
+    Extract contiguous speech segments from the input audio using TEN VAD.
+    Returns a flat list of numpy arrays where each array represents one complete
+    speech segment in float32 format, normalized to [-1.0, 1.0].
+    """
+    if sampling_rate != 16000:
+        raise ValueError(f"TEN VAD requires 16000 Hz, got {sampling_rate}")
+
+    speech_segments = extract_speech_timestamps(
+        audio=audio,
+        return_seconds=True,
+        include_non_speech=False,
+        hop_size=hop_size,
+        threshold=threshold,
+        min_speech_duration_ms=min_speech_duration_ms,
+        min_silence_duration_ms=min_silence_duration_ms,
+    )
+
+    audio_np, sr = load_audio(audio=audio, sr=sampling_rate, mono=True)
+    if sr != sampling_rate:
+        raise ValueError(
+            f"Loaded sample rate {sr} does not match requested {sampling_rate}"
+        )
+
+    speech_audio_chunks: List[np.ndarray] = []
+    for segment in speech_segments:
+        start_sec: float = segment["start"]
+        end_sec: float = segment["end"]
+        start_sample = int(round(start_sec * sr))
+        end_sample = int(round(end_sec * sr))
+        segment_audio = audio_np[start_sample:end_sample]
+        if len(segment_audio) == 0:
+            continue
+        speech_audio_chunks.append(segment_audio.astype(np.float32, copy=False))
+
+    return speech_audio_chunks
+
+
+# ---------------------------------------------------------------------------
+# Plot / RMS helpers (matching vad_firered2 style)
+# ---------------------------------------------------------------------------
+def _frames_from_seconds(sec: float, hop_size: int = 160, sr: int = 16000) -> int:
+    """Convert seconds to a frame index using hop_size and sample rate."""
+    frame_shift_sec = hop_size / sr
+    return int(round(sec / frame_shift_sec))
+
+
+def _compute_rms(
+    signal: np.ndarray,
+    frame_length: int = 160,
+    hop_length: int = 160,
+) -> np.ndarray:
+    """
+    Compute per-frame RMS energy aligned to 10 ms frames.
+    160 samples @ 16 kHz = exactly 10 ms per frame.
+    """
+    if signal.size == 0:
+        return np.array([], dtype=np.float32)
+
+    num_frames = 1 + max(0, (len(signal) - frame_length) // hop_length)
+    rms = np.zeros(num_frames, dtype=np.float32)
+    for i in range(num_frames):
+        start = i * hop_length
+        frame = signal[start : start + frame_length]
+        if frame.size:
+            rms[i] = float(np.sqrt(np.mean(frame**2)))
+    return rms
+
+
+def _generate_plot(
+    probs: np.ndarray,
+    segment_idx: int,
+    duration_sec: float,
+    output_path: Path,
+    is_dummy: bool = False,
+    rms: Optional[np.ndarray] = None,
+) -> None:
+    """Save a speech-probability (+ optional RMS energy) plot to *output_path*."""
+    num_frames = len(probs)
+    if num_frames == 0:
+        return
+
+    has_rms = rms is not None and len(rms) > 0
+    rows = 2 if has_rms else 1
+    fig, axes = plt.subplots(rows, 1, figsize=(9.5, 3.2 * rows), dpi=140)
+    if rows == 1:
+        axes = [axes]
+
+    label = "Speech probability (dummy)" if is_dummy else "Speech probability"
+    color = "#ff7f0e" if is_dummy else "#2ca02c"
+
+    ax = axes[0]
+    ax.plot(probs, color=color, linewidth=1.8, label=label)
+    ax.fill_between(range(num_frames), probs, color=color, alpha=0.14)
+    ax.axhline(
+        y=0.5,
+        linestyle="--",
+        color="#d62728",
+        alpha=0.65,
+        linewidth=1.2,
+        label="threshold = 0.5",
+    )
+    ax.set_ylim(-0.03, 1.03)
+    ax.set_xlim(0, num_frames - 1)
+    ax.set_ylabel("Speech Probability", fontsize=10.5)
+    ax.set_xlabel(
+        f"Frame (10 ms)  —  {num_frames} frames ≈ {duration_sec:.1f} s",
+        fontsize=10.5,
+    )
+    ax.set_title(
+        f"Segment {segment_idx:03d} — {'Dummy ' if is_dummy else ''}Model Probabilities",
+        fontsize=12,
+        pad=12,
+    )
+    ax.grid(True, alpha=0.28, linestyle="--", zorder=0)
+    ax.legend(loc="upper right", fontsize=9.5, framealpha=0.92)
+
+    if has_rms:
+        ax_rms = axes[1]
+        ax_rms.plot(range(len(rms)), rms, linewidth=1.6, label="RMS energy")
+        ax_rms.fill_between(range(len(rms)), rms, alpha=0.15)
+        ax_rms.set_ylabel("RMS Energy", fontsize=10.5)
+        ax_rms.set_xlabel("Frame (10 ms)", fontsize=10.5)
+        ax_rms.set_xlim(0, len(rms) - 1)
+        ax_rms.grid(True, alpha=0.28, linestyle="--", zorder=0)
+        ax_rms.legend(loc="upper right", fontsize=9.5, framealpha=0.92)
+
+    fig.tight_layout(pad=0.9)
+    plt.savefig(output_path, bbox_inches="tight", dpi=140)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Reusable save_segments (matches vad_firered2's output structure)
+# ---------------------------------------------------------------------------
+def save_segments(
+    segments: List[SpeechSegment],
+    audio_chunks: List[np.ndarray],
+    output_base_dir: Path,
+) -> List[SpeechSegment]:
+    """
+    Persist every speech segment to *output_base_dir/segments/segment_NNN/*.
+
+    For each segment the function writes:
+      sound.wav          – 16-kHz PCM-16 audio
+      meta.json          – SpeechSegment metadata + probs_info summary
+      speech_probs.json  – per-frame probabilities + summary stats
+      energies.json      – per-frame RMS energy
+      speech_and_rms.png – probability + RMS energy plot
+
+    Parameters
+    ----------
+    segments:
+        Output of ``extract_speech_timestamps(..., return_seconds=True,
+        with_scores=True)``.  Non-speech segments are skipped automatically.
+    audio_chunks:
+        Output of ``extract_speech_audio()``.  Must contain one array per
+        *speech* segment in the same order.
+    output_base_dir:
+        Root directory that will receive the ``segments/`` sub-tree.
+
+    Returns
+    -------
+    List[SpeechSegment]
+        Metadata for every saved segment (``output_path`` field populated).
+    """
+    output_base_dir.mkdir(parents=True, exist_ok=True)
+    segments_dir = output_base_dir / "segments"
+    segments_dir.mkdir(exist_ok=True)
+
+    speech_segments = [s for s in segments if s["type"] == "speech"]
+
+    if len(speech_segments) != len(audio_chunks):
+        console.print(
+            f"[yellow]save_segments: {len(speech_segments)} speech segments but "
+            f"{len(audio_chunks)} audio chunks — zipping by position, extras ignored.[/yellow]"
+        )
+
+    pairs = list(zip(speech_segments, audio_chunks))
+    saved: List[SpeechSegment] = []
+
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        "[progress.percentage]{task.percentage:>3.0f}%",
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    )
+
+    with progress:
+        task = progress.add_task("[cyan]Saving segments + plots…", total=len(pairs))
+        for meta, audio_np in pairs:
+            idx = meta["num"]
+            seg_dir = segments_dir / f"segment_{idx:03d}"
+            seg_dir.mkdir(exist_ok=True)
+
+            # --- WAV ---
+            wav_path = seg_dir / "sound.wav"
+            try:
+                torchaudio.save(
+                    str(wav_path),
+                    torch.from_numpy(audio_np).unsqueeze(0),
+                    16000,
+                    encoding="PCM_S",
+                    bits_per_sample=16,
+                )
+            except Exception as exc:
+                console.print(f"[red]Failed to save WAV {wav_path}: {exc}[/red]")
+                progress.advance(task)
+                continue
+
+            # --- Per-frame probabilities ---
+            seg_probs_list: List[float] = meta.get("segment_probs", [])
+            seg_probs_arr = np.asarray(seg_probs_list, dtype=np.float32)
+            is_dummy = len(seg_probs_arr) == 0
+
+            if is_dummy:
+                num_frames = max(1, _frames_from_seconds(meta["duration"]))
+                t = np.linspace(0, 1, num_frames)
+                base = 0.12 + 0.76 / (1 + np.exp(-14 * (t - 0.48)))
+                noise = np.random.default_rng().normal(0, 0.035, num_frames)
+                seg_probs_arr = np.clip(base + noise, 0.03, 0.99).astype(np.float32)
+                seg_probs_arr *= 0.88 + 0.12 * np.sin(np.pi * t) ** 0.35
+                console.print(
+                    f"[yellow]Segment {idx:03d}: no probabilities stored — "
+                    "using synthetic fallback.[/yellow]"
+                )
+
+            probs_info = {
+                "num_frames": int(len(seg_probs_arr)),
+                "mean": float(np.mean(seg_probs_arr)),
+                "max": float(np.max(seg_probs_arr)),
+                "min": float(np.min(seg_probs_arr)),
+                "std": float(np.std(seg_probs_arr)),
+                "median": float(np.median(seg_probs_arr)),
+                "frame_rate_hz": 100,
+            }
+
+            # --- meta.json ---
+            meta_to_save = dict(meta)
+            meta_to_save["output_path"] = str(wav_path.relative_to(output_base_dir))
+            meta_to_save["probs_info"] = probs_info
+            meta_to_save.pop("segment_probs", None)
+
+            with open(seg_dir / "meta.json", "w", encoding="utf-8") as fh:
+                json.dump(meta_to_save, fh, indent=2, ensure_ascii=False)
+
+            # --- speech_probs.json ---
+            with open(seg_dir / "speech_probs.json", "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "probs": seg_probs_arr.tolist(),
+                        "frame_shift_sec": 0.010,
+                        "frame_start": meta.get("frame_start", 0),
+                        "summary": probs_info,
+                        "is_dummy": is_dummy,
+                    },
+                    fh,
+                    indent=2,
+                )
+
+            # --- energies.json ---
+            rms = _compute_rms(audio_np)
+            with open(seg_dir / "energies.json", "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "rms": rms.tolist(),
+                        "frame_shift_sec": 0.010,
+                        "num_frames": int(len(rms)),
+                    },
+                    fh,
+                    indent=2,
+                )
+
+            # --- Plot ---
+            _generate_plot(
+                probs=seg_probs_arr,
+                segment_idx=idx,
+                duration_sec=float(meta["duration"]),
+                output_path=seg_dir / "speech_and_rms.png",
+                is_dummy=is_dummy,
+                rms=rms,
+            )
+
+            meta["output_path"] = meta_to_save["output_path"]
+            saved.append(meta)
+            progress.advance(task)
+
+    console.print(f"[bold green]✓ Saved {len(saved)} segments[/bold green]")
+    console.print(
+        f"Output: [link=file://{segments_dir.resolve()}]{segments_dir}[/link]"
+    )
+    return saved
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import argparse
+
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 
     DEFAULT_AUDIO = str(
         Path("~/.cache/files/audio/recording_3_speakers.wav").expanduser().resolve()
     )
+
     parser = argparse.ArgumentParser(
-        description="Extract speech timestamps from audio using TEN VAD.",
+        description="Extract speech segments with TEN VAD",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "input",
+        "audio_path",
         nargs="?",
         default=DEFAULT_AUDIO,
-        help=f"Input audio file path (default: {DEFAULT_AUDIO})"
+        help="input audio file",
     )
     parser.add_argument(
         "-o",
-        "--output",
+        "--output-dir",
         default=str(OUTPUT_DIR),
-        help=f"Output results dir (default: {OUTPUT_DIR})",
+        type=str,
+        help=f"output directory (default: '{OUTPUT_DIR}')",
     )
     parser.add_argument(
-        "-t", "--threshold", type=float, default=0.5, help="VAD probability threshold"
+        "-t",
+        "--threshold",
+        type=float,
+        default=DEFAULT_THRESHOLD,
+        help=f"speech threshold (default: {DEFAULT_THRESHOLD})",
     )
     parser.add_argument(
-        "-s", "--hop-size", type=int, default=160, help="Frame hop size in samples"
+        "-s",
+        "--hop-size",
+        type=int,
+        default=DEFAULT_HOP_SIZE,
+        help=f"frame hop size in samples (default: {DEFAULT_HOP_SIZE})",
     )
     parser.add_argument(
+        "-md",
         "--min-speech-duration",
-        "-d",
         type=int,
-        default=250,
-        help="Minimum speech segment duration in ms",
+        default=DEFAULT_MIN_SPEECH_MS,
+        help=f"minimum speech duration in ms (default: {DEFAULT_MIN_SPEECH_MS})",
     )
     parser.add_argument(
+        "-ms",
         "--min-silence-duration",
-        "-g",
         type=int,
-        default=100,
-        help="Minimum silence duration in ms",
+        default=DEFAULT_MIN_SILENCE_MS,
+        help=f"minimum silence duration in ms (default: {DEFAULT_MIN_SILENCE_MS})",
+    )
+    parser.add_argument(
+        "-mp",
+        "--min-prob",
+        type=float,
+        default=0.0,
+        help="minimum average speech probability to keep a segment (default: 0.0 = no filter)",
+    )
+    parser.add_argument(
+        "-mnd",
+        "--min-duration",
+        type=float,
+        default=0.0,
+        help="minimum duration in seconds to keep a segment (default: 0.0 = no filter)",
     )
     parser.add_argument(
         "--include-non-speech",
         "-n",
         action="store_true",
-        help="Include non-speech segments",
+        help="Include non-speech segments in output",
     )
+
     args = parser.parse_args()
 
-    segments, scores = extract_speech_timestamps(
-        audio=args.input,
+    audio_path = args.audio_path
+    output_dir = Path(args.output_dir)
+
+    # --- Clear output directory (moved from module level) ---
+    shutil.rmtree(output_dir, ignore_errors=True)
+
+    console.rule("Audio Segmenter – TEN VAD", style="blue")
+    console.print(f"[bold cyan]Processing:[/bold cyan] {Path(audio_path).name}\n")
+
+    # --- Extract timestamps ---
+    segments, speech_probs = extract_speech_timestamps(
+        audio_path,
+        with_scores=True,
         include_non_speech=args.include_non_speech,
+        return_seconds=True,
         hop_size=args.hop_size,
         threshold=args.threshold,
         min_speech_duration_ms=args.min_speech_duration,
         min_silence_duration_ms=args.min_silence_duration,
-        with_scores=True,
     )
 
-    audio_np, sr = load_audio(args.input, sr=16000, mono=True)
-    audio_int16 = float32_to_int16(audio_np)
+    # --- Filter segments ---
+    original_count = len(segments)
+    filtered = []
+    for s in segments:
+        if s.get("prob", 0.0) < args.min_prob:
+            continue
+        if s.get("duration", 0.0) < args.min_duration:
+            continue
+        filtered.append(s)
+    segments = filtered
 
-    output_dir = Path(args.output)
-    segments_dir = output_dir / "segments"
-    segments_dir.mkdir(parents=True, exist_ok=True)
-
-    speech_segments_json = output_dir / "speech_segments.json"
-    speech_probs_json = output_dir / "speech_probs.json"
-
-    with open(speech_segments_json, "w") as f:
-        json.dump(
-            {
-                "count": len(segments),
-                "segments": segments,
-            },
-            f,
-            indent=2,
-        )
-    segments_url = f"file://{speech_segments_json.resolve()}"
-    console.print(
-        f"[green]{len(segments)} Segments saved to [link={segments_url}]{speech_segments_json}[/link][/green]"
-    )
-
-    with open(speech_probs_json, "w") as f:
-        json.dump(scores, f, indent=2)
-    probs_url = f"file://{speech_probs_json.resolve()}"
-    console.print(
-        f"[green]{len(scores)} probabilities saved to [link={probs_url}]{speech_probs_json}[/link][/green]"
-    )
-
-    console.print(
-        f"\n[bold]Generating {len(segments)} per‑segment files for {len(segments)} speech segments...[/bold]"
-    )
-    for seg in segments:
-        num = seg["num"]
-        seg_subdir = segments_dir / f"segment_{num:03d}"
-        seg_subdir.mkdir(exist_ok=True)
-
-        start_frame = seg["frame_start"]
-        end_frame = seg["frame_end"]
-        hop_size = args.hop_size
-        start_sample = start_frame * hop_size
-        end_sample = (end_frame + 1) * hop_size
-        segment_audio_int16 = audio_int16[start_sample:end_sample]
-
-        wav_path = seg_subdir / "sound.wav"
-        wavfile.write(wav_path, sr, segment_audio_int16)
-
-        segment_probs = seg["segment_probs"]
-        probs_path = seg_subdir / "speech_probs.json"
-        save_json(segment_probs, probs_path)
-
-        rms_values = compute_rms_per_frame(audio_np, hop_size, start_frame, end_frame)
-        energies_path = seg_subdir / "energies.json"
-        save_json(rms_values, energies_path)
-
-        segment_json_path = seg_subdir / "segment.json"
-        save_json(seg, segment_json_path)
-
-        plot_path = seg_subdir / "speech_and_rms.png"
-        save_plot(segment_probs, rms_values, plot_path, title=f"Segment {num:03d}")
-
-        color = "green" if seg["type"] == "speech" else "red"
-        type_label = seg["type"].replace("-", "_")
+    if original_count != len(segments):
         console.print(
-            f"  [cyan]✓[/cyan] segment_{num:03d}: [bold cyan]{len(segment_probs)}[/bold cyan] frames,  [bold cyan]{seg['duration']:.2f}[/bold cyan]s, avg_prob={seg['prob']:.3f}, avg_rms={np.mean(rms_values):.3f}, [{color}]{type_label}[/{color}]"
+            f"[yellow]Filtered: {len(segments)}/{original_count} segments kept "
+            f"(min-prob={args.min_prob:.3f}, min-duration={args.min_duration:.2f}s)[/yellow]"
         )
 
-    console.print(
-        f"\n[bold green]All {len(segments)} per‑segment files saved under: {segments_dir}[/bold green]"
+    console.print(f"\n[bold green]Segments found:[/bold green] {len(segments)}\n")
+
+    # --- Extract audio chunks ---
+    audio_chunks = extract_speech_audio(
+        audio_path,
+        sampling_rate=DEFAULT_SAMPLING_RATE,
+        hop_size=args.hop_size,
+        threshold=args.threshold,
+        min_speech_duration_ms=args.min_speech_duration,
+        min_silence_duration_ms=args.min_silence_duration,
     )
+
+    speech_segments = [s for s in segments if s["type"] == "speech"]
+    audio_chunks = audio_chunks[: len(speech_segments)]
+
+    # --- Save all segments ---
+    saved_metas = save_segments(segments, audio_chunks, output_dir)
+
+    # --- Print segment summaries with ▶ Play links ---
+    def play_segment(wav_path: Path):
+        try:
+            if platform.system() == "Darwin":
+                subprocess.run(["afplay", str(wav_path)], check=False)
+            elif platform.system() == "Windows":
+                subprocess.run(
+                    [
+                        "powershell",
+                        "-c",
+                        f"(New-Object Media.SoundPlayer '{wav_path}').PlaySync()",
+                    ],
+                    check=False,
+                )
+            else:
+                subprocess.run(["aplay", str(wav_path)], check=False)
+        except Exception:
+            pass
+
+    for seg in saved_metas:
+        seg_type = seg["type"]
+        type_color = "bold green" if seg_type == "speech" else "bold red"
+        wav_rel = seg.get("output_path")
+        wav_full = output_dir / wav_rel if wav_rel else None
+
+        console.print(
+            f"[yellow][[/yellow] [bold white]{seg['start']:.2f}[/bold white]"
+            f" - [bold white]{seg['end']:.2f}[/bold white] [yellow]][/yellow] "
+            f"dur=[bold magenta]{seg['duration']:.2f}s[/bold magenta] "
+            f"prob=[bold cyan]{seg['prob']:.3f}[/bold cyan] "
+            f"type=[{type_color}]{seg_type}[/{type_color}]"
+            f"   [bold blue][link=file://{wav_full}]▶ Play[/link][/bold blue]"
+        )
+
+    if not any(s["type"] == "speech" for s in saved_metas):
+        console.print("[red]No speech segments found after filtering.[/red]")
+        raise SystemExit(0)
+
+    # --- Summary JSON ---
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = output_dir / "all_speech_segments.json"
+    with open(summary_path, "w", encoding="utf-8") as fh:
+        slim = [
+            {k: v for k, v in m.items() if k != "segment_probs"}
+            for m in saved_metas
+        ]
+        json.dump(slim, fh, ensure_ascii=False, indent=2)
+
+    console.print(
+        f"[bold green]✓ Summary saved to:[/bold green] "
+        f"[link=file://{summary_path.resolve()}]{summary_path}[/link]"
+    )
+    console.rule("Done", style="green")

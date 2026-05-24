@@ -560,8 +560,10 @@ if __name__ == "__main__":
     import subprocess
     import platform
 
-    DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    DEFAULT_AUDIO = str(
+        Path("~/.cache/files/audio/recording_3_speakers.wav").expanduser().resolve()
+    )
 
     parser = argparse.ArgumentParser(
         description="Extract speech segments with FireRedVAD"
