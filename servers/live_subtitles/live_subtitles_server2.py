@@ -12,7 +12,7 @@ import numpy as np
 import scipy.io.wavfile as wavfile
 import uvicorn
 from audio_context_buffer import AudioContextBuffer
-from audio_search import search_audio
+# from audio_search import search_audio
 from diff_utils import console_diff_highlight, extract_new_ja_text
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel, Field
@@ -376,7 +376,7 @@ def blocking_process_audio(
     else:
         console.print("[dim italic]No new translation[/dim italic]")
 
-    search_audio(full_audio_bytes, audio_bytes)
+    # search_audio(full_audio_bytes, audio_bytes)
 
     # Log previous and current diffs
     if prev_full_ja_text and full_ja_text != prev_full_ja_text:

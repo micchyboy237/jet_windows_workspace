@@ -13,7 +13,7 @@ import numpy as np
 import scipy.io.wavfile as wavfile
 import uvicorn
 from audio_context_buffer import AudioContextBuffer
-from audio_search import search_audio
+# from audio_search import search_audio
 from diff_utils import console_diff_highlight, extract_new_ja_text
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel, Field
@@ -48,7 +48,7 @@ logging.basicConfig(
     format="%(message)s",
     handlers=[RichHandler(rich_tracebacks=True, markup=True)],
 )
-logger = logging.getLogger("live_subtitles_server2")
+logger = logging.getLogger("live_subtitles_server2_speaker")
 for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(name).handlers = []
     logging.getLogger(name).propagate = True
@@ -548,7 +548,7 @@ def blocking_process_audio(
     else:
         console.print("[dim italic]No new translation[/dim italic]")
 
-    search_audio(full_audio_bytes, audio_bytes)
+    # search_audio(full_audio_bytes, audio_bytes)
 
     # Log previous and current diffs
     if prev_full_ja_text and full_ja_text != prev_full_ja_text:
@@ -1026,7 +1026,7 @@ if __name__ == "__main__":
     logger.info("   POST /speakers/merge")
     logger.info("Press Ctrl+C to stop\n")
     uvicorn.run(
-        app="live_subtitles_server2:app",
+        app="live_subtitles_server2_speaker:app",
         host="0.0.0.0",
         port=8000,
         reload=False,
