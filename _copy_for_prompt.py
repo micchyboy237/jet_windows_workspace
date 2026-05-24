@@ -76,7 +76,8 @@ include_files = [
     # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\_metadata.py",
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_segment_speaker_labeler.py",
     r"",
 ]
 
@@ -94,14 +95,14 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix why this is only keeping a single subdir under last_<n>_segments
+Add a new reset method in segment_speaker_labeler then add a new endpoint in live_subtitles_server2_segment_speaker.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
 Provide step-by-step analysis and explain the flow first.
 Use visuals, diagrams, or tables when helpful.
 
-Show full code for new files, then show full function code for updated functions.
+Show full code for new files, then show full function code for new or updated functions.
 Keep explanations simple and clear.
 
 Write flexible, reusable, maintainable, and robust code.
