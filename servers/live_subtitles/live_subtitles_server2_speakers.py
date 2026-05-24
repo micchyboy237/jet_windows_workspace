@@ -3,17 +3,17 @@ import json
 import logging
 import shutil
 import time
+import torch
 import uuid as uuid_module
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import numpy as np
 import scipy.io.wavfile as wavfile
 import uvicorn
 from audio_context_buffer import AudioContextBuffer
-# from audio_search import search_audio
 from diff_utils import console_diff_highlight, extract_new_ja_text
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel, Field
@@ -24,7 +24,8 @@ from sentence_matcher_ja import fuzzy_shortest_best_match_contains, fuzzy_match_
 from sentence_utils import split_sentences_ja
 from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
 from translate_jp_en_llm_prefixed import translate_japanese_to_english
-from segment_speaker_labeler import SegmentSpeakerLabeler
+from speaker_labeler import SpeakerLabeler
+from pyannote.core import Segment
 from pyannote.audio import Inference, Model
 
 console = Console(
@@ -48,7 +49,7 @@ logging.basicConfig(
     format="%(message)s",
     handlers=[RichHandler(rich_tracebacks=True, markup=True)],
 )
-logger = logging.getLogger("live_subtitles_server2_speaker")
+logger = logging.getLogger("live_subtitles_server2_speakers")
 for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(name).handlers = []
     logging.getLogger(name).propagate = True
@@ -75,59 +76,60 @@ prev_vad_reason = None
 
 # ─── Speaker Labeler Setup ───────────────────────────────────────────────────
 # Lazy initialization to avoid loading model at import time
-_speaker_labeler: Optional[SegmentSpeakerLabeler] = None
-_embedding_model: Optional[Model] = None
-_embedding_inference: Optional[Inference] = None
-_current_speaker: Optional[str] = None
+_speaker_labeler: Optional[SpeakerLabeler] = None
+_current_speakers: Dict[str, Dict] = {}  # Track multiple active speakers
 _last_speaker_change_time: float = 0.0
 
 
-def _get_speaker_labeler() -> SegmentSpeakerLabeler:
+def _get_speaker_labeler() -> SpeakerLabeler:
     """Get or initialize the speaker labeler singleton.
     
     Lazy initialization defers model loading until first use.
+    Uses the new SpeakerLabeler with segmentation model.
     """
-    global _speaker_labeler, _embedding_model, _embedding_inference
+    global _speaker_labeler
     
     if _speaker_labeler is not None:
         return _speaker_labeler
     
-    console.print("[info]Loading speaker embedding model...[/info]")
+    console.print("[info]Loading speaker segmentation model...[/info]")
+    console.print("[info]This may take a minute on first run (downloading pyannote/segmentation-3.0)[/info]")
     
     try:
-        _embedding_model = Model.from_pretrained("pyannote/embedding")
-        _embedding_inference = Inference(_embedding_model, window="whole")
+        # Initialize the new SpeakerLabeler with segmentation model
+        _speaker_labeler = SpeakerLabeler(
+            device="cuda" if torch.cuda.is_available() else "cpu",
+            min_duration_on=0.1,      # Minimum speech segment duration
+            min_duration_off=0.3,     # Minimum non-speech gap
+            max_speakers_per_chunk=3,  # Max speakers per 10s chunk
+            max_speakers_per_frame=2,  # Max overlapping speakers
+            chunk_duration=10.0,       # Process in 10-second chunks
+            overlap_threshold=0.5,     # Overlap detection threshold
+        )
+        console.print("[success]SpeakerLabeler initialized with pyannote/segmentation-3.0[/success]")
         
-        # Try to restore previous state
+        # Try to restore previous state if available
         if SPEAKER_STATE_PATH.exists():
             try:
                 with open(SPEAKER_STATE_PATH, 'r') as f:
                     state = json.load(f)
-                _speaker_labeler = SegmentSpeakerLabeler.from_dict(
-                    state,
-                    embedding_model=_embedding_inference,
-                )
+                # Restore speaker references and segments
+                if "speaker_references" in state:
+                    # Convert dict back to Segment objects
+                    restored_refs = {}
+                    for k, segs in state["speaker_references"].items():
+                        restored_refs[k] = [Segment(s["start"], s["end"]) for s in segs]
+                    _speaker_labeler.speaker_references = restored_refs
+                if "all_segments" in state:
+                    _speaker_labeler.all_segments = state["all_segments"]
                 console.print(
                     f"[success]Restored speaker state: "
-                    f"{_speaker_labeler.speaker_count} speaker(s), "
-                    f"{_speaker_labeler.total_segments_processed} segments processed[/success]"
+                    f"{len(_speaker_labeler.speaker_references)} speaker(s), "
+                    f"{len(_speaker_labeler.all_segments)} segments processed[/success]"
                 )
-                return _speaker_labeler
             except Exception as e:
                 console.print(f"[warning]Could not restore speaker state: {e}[/warning]")
-        
-        # Create fresh labeler
-        _speaker_labeler = SegmentSpeakerLabeler(
-            embedding_model=_embedding_inference,
-            threshold_same=0.75,
-            threshold_possible=0.60,
-            min_segments_for_reference=2,
-            max_embeddings_per_speaker=50,
-            temporal_smoothing_window=3.0,
-            debug=True,
-        )
-        console.print("[success]Speaker labeler initialized[/success]")
-        
+                
     except Exception as e:
         console.print(f"[error]Failed to initialize speaker labeler: {e}[/error]")
         raise
@@ -139,21 +141,30 @@ def save_speaker_state():
     """Persist the current speaker labeler state to disk."""
     if _speaker_labeler is None:
         return
-    
     try:
-        state = _speaker_labeler.to_dict()
+        state = {
+            "speaker_references": {
+                k: [{"start": s.start, "end": s.end} for s in segs]
+                for k, segs in _speaker_labeler.speaker_references.items()
+            },
+            "all_segments": _speaker_labeler.all_segments,
+        }
         with open(SPEAKER_STATE_PATH, 'w') as f:
             json.dump(state, f, indent=2)
     except Exception as e:
         console.print(f"[warning]Could not save speaker state: {e}[/warning]")
 
 
-def label_speaker_for_segment(
+def label_speakers_for_segment(
     waveform: np.ndarray,
     sample_rate: int,
-    timestamp: Optional[float] = None,
-) -> tuple[str, float, Dict]:
-    """Label a speaker for an audio segment using the progressive labeler.
+    start_time: float = 0.0,
+    end_time: Optional[float] = None,
+) -> List[Dict]:
+    """Label speakers in an audio segment using the segmentation model.
+    
+    Unlike the old version which returns a single speaker, this returns
+    a list of speakers detected in the segment, including overlapping speech.
     
     Parameters
     ----------
@@ -161,85 +172,109 @@ def label_speaker_for_segment(
         Audio waveform as int16 numpy array.
     sample_rate : int
         Sample rate of the audio.
-    timestamp : float, optional
-        Timestamp for this segment. If None, uses current time.
+    start_time : float
+        Start time offset for this segment.
+    end_time : float, optional
+        End time offset. If None, calculated from waveform duration.
     
     Returns
     -------
-    tuple[str, float, Dict]
-        - Speaker label
-        - Confidence score
-        - Additional metadata
+    List[Dict]
+        List of speaker segments with keys:
+        - speaker: Speaker label
+        - start: Start time in seconds
+        - end: End time in seconds
+        - duration: Segment duration
+        - is_overlapped: Whether this is overlapping speech
+        - confidence: Confidence score (0-1)
     """
-    global _current_speaker, _last_speaker_change_time
+    global _current_speakers, _last_speaker_change_time
     
     if waveform.size == 0:
-        return "SPEAKER_UNKNOWN", 0.0, {"error": "empty_waveform"}
+        return []
     
-    if timestamp is None:
-        timestamp = time.time()
+    if end_time is None:
+        end_time = start_time + len(waveform) / sample_rate
     
     labeler = _get_speaker_labeler()
     
-    # Convert int16 to float32 tensor for pyannote
+    # Convert to float32 for model (normalize int16 to [-1, 1])
     waveform_float = waveform.astype(np.float32) / 32768.0
-    waveform_tensor = __import__('torch').from_numpy(waveform_float)
-    if waveform_tensor.dim() == 1:
-        waveform_tensor = waveform_tensor.unsqueeze(0)
     
-    # Build context for improved matching
-    context = {
-        "previous_speaker": _current_speaker,
-        "time_since_last_change": timestamp - _last_speaker_change_time if _last_speaker_change_time > 0 else float('inf'),
-        "segment_duration": len(waveform) / sample_rate,
-    }
-    
-    # Get speaker label
-    label, confidence, metadata = labeler.label_segment(
-        waveform=waveform_tensor,
+    # Process the segment directly using process_chunk
+    results = labeler.process_chunk(
+        waveform=waveform_float,
         sample_rate=sample_rate,
-        timestamp=timestamp,
-        context=context,
+        chunk_start_time=start_time,
     )
     
-    # Update current speaker tracking
-    if label != _current_speaker:
-        if confidence > 0.8 or _current_speaker is None:
-            if _current_speaker is not None:
-                console.print(
-                    f"[speaker]🔊 Speaker change: {_current_speaker} → {label} "
-                    f"(confidence: {confidence:.3f})[/speaker]"
-                )
-            _current_speaker = label
-            _last_speaker_change_time = timestamp
-    else:
-        _last_speaker_change_time = timestamp
+    # Update current speakers tracking
+    current_time = time.time()
+    speaker_segments = results.get("speaker_segments", [])
     
-    # Persist state periodically
-    if labeler.total_segments_processed % 10 == 0:
+    # Update global current speakers based on latest segments
+    if speaker_segments:
+        latest_speakers = set()
+        for seg in speaker_segments:
+            latest_speakers.add(seg["speaker"])
+        
+        # Compare with previous speakers
+        old_speakers = set(_current_speakers.keys())
+        if latest_speakers != old_speakers:
+            console.print(
+                f"[speaker]🔊 Speaker change: {old_speakers} → {latest_speakers}[/speaker]"
+            )
+            _last_speaker_change_time = current_time
+        
+        # Update current speakers info
+        _current_speakers = {
+            seg["speaker"]: {
+                "last_seen": current_time,
+                "is_overlapped": seg["is_overlapped"],
+            }
+            for seg in speaker_segments
+        }
+    
+    # Save state periodically
+    if labeler.all_segments and len(labeler.all_segments) % 10 == 0:
         save_speaker_state()
     
-    return label, confidence, metadata
+    return speaker_segments
 
 
 def get_speaker_diarization() -> Dict:
-    """Get current speaker diarization summary."""
+    """Get current speaker diarization summary including multiple speakers."""
     labeler = _speaker_labeler
     if labeler is None:
         return {
-            "current_speaker": None,
+            "current_speakers": [],
             "known_speakers": [],
             "speaker_count": 0,
             "speakers_info": {},
-            "total_segments_processed": 0,
+            "total_speaker_segments": 0,
+            "speaker_timeline": [],
         }
     
     return {
-        "current_speaker": _current_speaker,
-        "known_speakers": labeler.known_speakers,
-        "speaker_count": labeler.speaker_count,
-        "speakers_info": labeler.get_all_speakers_info(),
-        "total_segments_processed": labeler.total_segments_processed,
+        "current_speakers": [
+            {
+                "speaker": speaker,
+                "is_overlapped": info.get("is_overlapped", False),
+                "last_seen": info.get("last_seen"),
+            }
+            for speaker, info in _current_speakers.items()
+        ],
+        "known_speakers": labeler.get_unique_speakers(),
+        "speaker_count": len(labeler.speaker_references),
+        "speakers_info": {
+            speaker: {
+                "segment_count": len(segments),
+                "total_duration_seconds": sum(s.duration for s in segments),
+            }
+            for speaker, segments in labeler.speaker_references.items()
+        },
+        "total_speaker_segments": len(labeler.all_segments),
+        "speaker_timeline": labeler.get_speaker_timeline()[-20:],  # Last 20 segments
     }
 
 
@@ -254,57 +289,56 @@ def blocking_process_audio(
 ) -> dict:
     """
     Runs in thread pool — contains the blocking CPU/GPU heavy work.
+    Updated to handle multiple speakers.
     """
     global prev_vad_reason, prev_end_sec
+    
     uuid_ = header.get("uuid")
     if not uuid_:
         console.print("[error]Missing UUID in header[/error]")
         return {"message": "missing uuid", "success": False}
-
+    
     sample_rate = header.get("sample_rate", 16000)
     full_trans_result = None
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
-
+    
     if should_reset_context(header):
         context_buffer.reset()
     else:
         prev_vad_reason = header["vad_reason"]
-
+    
     new_audio_duration_sec = len(audio_np) / sample_rate
     context_duration_sec = context_buffer.get_total_duration()
     max_duration_sec = context_buffer.max_duration_sec
     combined_naive_sec = context_duration_sec + new_audio_duration_sec
-
+    
     context_audio_int16, actual_context_sec, segments_used = (
         context_buffer.get_context_audio_within_limit(new_audio_duration_sec)
     )
-
+    
     if combined_naive_sec > max_duration_sec:
         dropped_segments = len(context_buffer.segments) - segments_used
         console.print(
             f"[warning]⚠️  Combined audio ({combined_naive_sec:.2f}s) would exceed "
             f"max_duration_sec ({max_duration_sec:.2f}s). "
-            f"Dropped {dropped_segments} oldest segment(s) to stay within limit. "
+            f"Dropped {dropped_segments} oldest segment(s). "
             f"Using {segments_used} segment(s) = {actual_context_sec:.2f}s context.[/warning]"
         )
-
+    
     if context_audio_int16.size > 0:
         full_audio_int16 = np.concatenate([context_audio_int16, audio_np])
     else:
         full_audio_int16 = audio_np
-
+    
     actual_full_duration_sec = len(full_audio_int16) / sample_rate
-
-    # Hard safety guard — should never trigger, but catches bugs immediately.
     if actual_full_duration_sec > max_duration_sec + 1e-3:
         raise RuntimeError(
             f"BUG: full_audio duration {actual_full_duration_sec:.3f}s "
-            f"exceeds max_duration_sec {max_duration_sec:.2f}s after trimming. "
-            "This should never happen — check get_context_audio_within_limit()."
+            f"exceeds max_duration_sec {max_duration_sec:.2f}s after trimming."
         )
-
+    
     full_audio_bytes = full_audio_int16.tobytes()
-
+    
     console.print(
         f"[info]VAD Reason:[/info] [value]{header['vad_reason']}[/value]"
     )
@@ -320,35 +354,42 @@ def blocking_process_audio(
         f"[info]Full Duration:[/info] "
         f"[time]{actual_full_duration_sec:.2f}s[/time] / [time]{max_duration_sec:.2f}s[/time] max"
     )
-
-    # ─── Speaker Labeling ────────────────────────────────────────────────────
-    # Label the new audio segment for speaker identification
-    segment_timestamp = header.get("start_sec", time.time())
-    speaker_label, speaker_confidence, speaker_metadata = label_speaker_for_segment(
+    
+    segment_start_time = header.get("start_sec", time.time())
+    segment_end_time = header.get("end_sec", segment_start_time + new_audio_duration_sec)
+    
+    # Get speakers in this segment (returns list of speaker segments)
+    speaker_segments = label_speakers_for_segment(
         waveform=audio_np,
         sample_rate=sample_rate,
-        timestamp=segment_timestamp,
+        start_time=segment_start_time,
+        end_time=segment_end_time,
     )
     
-    console.print(
-        f"[speaker]Speaker: {speaker_label} (confidence: {speaker_confidence:.3f}, "
-        f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
-    )
-    # ─────────────────────────────────────────────────────────────────────────
-
+    # Display speaker info
+    if speaker_segments:
+        speaker_summary = ", ".join([
+            f"{s['speaker']} ({s['start']:.1f}s-{s['end']:.1f}s)" 
+            for s in speaker_segments
+        ])
+        console.print(f"[speaker]Speakers detected: {speaker_summary}[/speaker]")
+    else:
+        console.print("[dim]No speakers detected in segment[/dim]")
+    
+    # Continue with transcription
     full_trans_result = transcribe_japanese(
         audio_bytes=full_audio_bytes,
         sample_rate=sample_rate,
     )
+    
     full_trans_result = full_trans_result.copy()
     full_word_segments = full_trans_result.pop("word_segments")
     full_phrase_segments = full_trans_result.pop("phrase_segments")
     full_metadata = full_trans_result.pop("metadata")
-
     full_word_segments_text = "".join(s["word"] for s in full_word_segments)
     full_ja_text = full_word_segments_text
     full_ja_sents = split_sentences_ja(full_ja_text)
-
+    
     prev_full_ja_text = None
     prev_full_en_text = None
     unchanged_text = None
@@ -356,20 +397,18 @@ def blocking_process_audio(
     new_ja_start_index = None
     new_ja_similarity = None
     history = None
-
+    
     if context_buffer.segments:
         _, last_meta = context_buffer.get_last_segment()
         prev_full_ja_text = last_meta.get("full_ja_text", "")
         prev_full_en_text = last_meta.get("full_en_text", "")
-
         new_ja_text_res = extract_new_ja_text(prev_full_ja_text, full_ja_text)
         unchanged_text = new_ja_text_res["unchanged_text"]
         new_ja_text = new_ja_text_res["new_text"]
         new_ja_start_index = new_ja_text_res["start_index"]
         new_ja_similarity = new_ja_text_res["similarity"]
-
         last_ja_sentence, last_en_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
-
+        
         MATCH_SCORE_CUTOFF = 75
         match_result = fuzzy_shortest_best_match_contains(
             query=new_ja_text,
@@ -377,7 +416,6 @@ def blocking_process_audio(
             score_cutoff=MATCH_SCORE_CUTOFF,
             max_extra_chars=30,
         )
-
         if match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
             console.print("[success bold]✅ Accepted[/success bold]")
             new_text_start = match_result["end"]
@@ -387,48 +425,42 @@ def blocking_process_audio(
             console.print(
                 f"[warning]Fuzzy match too weak (score={match_result['score']:.1f}).[/warning]"
             )
-            console.print(
-                f"[warning]Translating the full text.[/warning]"
-            )
+            console.print(f"[warning]Translating the full text.[/warning]")
             new_text = full_ja_text.strip()
-
+        
         new_clean = new_text.rstrip('.。！？、…・「」『』').rstrip()
         if not new_clean:
             return {
                 "uuid": uuid_,
                 "transcription_ja": "",
                 "translation_en": "",
-                "speaker_label": speaker_label,
-                "speaker_confidence": speaker_confidence,
+                "speaker_segments": speaker_segments,
                 "success": False,
                 "message": "Same text as previous",
             }
-
+        
         old_ja_sents = split_sentences_ja(prev_full_ja_text)
         old_ja_text = prev_full_ja_text
         old_en_sents = split_sentences_ja(prev_full_en_text)
         old_en_text = prev_full_en_text
         new_ja_sents = split_sentences_ja(new_text)
         ja_text = "".join(new_ja_sents).strip()
-
         last_sentence_pos = match_result["start"] if match_result["score"] >= MATCH_SCORE_CUTOFF else -1
         last_sentence_clean = match_result["match"].strip() if match_result["score"] >= MATCH_SCORE_CUTOFF else None
-
+        
         if ja_text:
-            # Reserve the new audio duration sec buffer to avoid exceeding max transcription context length.
             hist_result = context_buffer.get_context_history_by_duration(
                 max_duration_sec=context_buffer.max_duration_sec,
                 reserved_duration_sec=new_audio_duration_sec,
             )
-            history          = hist_result["history"]
+            history = hist_result["history"]
             included_indices = hist_result["included_indices"]
-
-            history_pairs      = len(history) // 2
-            max_dur            = context_buffer.max_duration_sec
-            inc_dur            = hist_result["included_duration_sec"]
-            total_history_dur  = inc_dur + new_audio_duration_sec
-            over_budget        = total_history_dur > max_dur
-
+            history_pairs = len(history) // 2
+            max_dur = context_buffer.max_duration_sec
+            inc_dur = hist_result["included_duration_sec"]
+            total_history_dur = inc_dur + new_audio_duration_sec
+            over_budget = total_history_dur > max_dur
+            
             console.print(
                 f"[info]History:[/info] "
                 f"[number]{history_pairs}[/number] pairs "
@@ -444,7 +476,7 @@ def blocking_process_audio(
                 f"  /  [time]{max_dur:.2f}s[/time] max"
                 + (" [error]⚠ EXCEEDS BUDGET[/error]" if over_budget else "")
             )
-       
+            
             for i, (_, meta) in enumerate(list(context_buffer.segments)):
                 seg_en = (meta.get("en_text") or "").strip()[:60]
                 seg_dur = float(meta.get("duration_sec") or 0.0)
@@ -458,15 +490,15 @@ def blocking_process_audio(
                     f"[{text_tag}]{seg_en}{'…' if seg_en else '(no text)'}[/{text_tag}]"
                     + (f"  [dim]+{seg_dur:.2f}s[/dim]" if i in included_indices else "")
                 )
+            
             trans_en = translate_japanese_to_english(
                 text=ja_text,
                 history=history,
             )
             en_text = trans_en["text"].strip()
-   
         else:
             en_text = ""
-       
+        
         if prev_full_en_text:
             if new_ja_text_res["start_index"] == 0:
                 full_en_text = en_text.strip()
@@ -475,16 +507,12 @@ def blocking_process_audio(
                 full_en_text = (prev_full_en_text + "\n" + en_text).strip() if en_text else prev_full_en_text
         else:
             full_en_text = en_text
-
     else:
         ja_sents = full_ja_sents
         ja_text = full_ja_text
         curr_clean = ja_text.rstrip('.。！？、…・「」『』').rstrip()
-
         if curr_clean:
-            full_trans_en = translate_japanese_to_english(
-                text=ja_text,
-            )
+            full_trans_en = translate_japanese_to_english(text=ja_text)
             new_ja_sents = ja_sents
             full_en_text = full_trans_en["text"].strip()
             en_text = full_en_text
@@ -493,12 +521,10 @@ def blocking_process_audio(
                 "uuid": uuid_,
                 "transcription_ja": "",
                 "translation_en": "",
-                "speaker_label": speaker_label,
-                "speaker_confidence": speaker_confidence,
+                "speaker_segments": speaker_segments,
                 "success": False,
                 "message": "Empty transcription after cleaning",
             }
-
         old_ja_sents = []
         old_en_sents = []
         last_sentence_clean = None
@@ -548,8 +574,6 @@ def blocking_process_audio(
     else:
         console.print("[dim italic]No new translation[/dim italic]")
 
-    # search_audio(full_audio_bytes, audio_bytes)
-
     # Log previous and current diffs
     if prev_full_ja_text and full_ja_text != prev_full_ja_text:
         console.print("[info]Diff (previous full JA → current full JA):[/info]")
@@ -591,7 +615,7 @@ def blocking_process_audio(
             dt = datetime.fromisoformat(iso_str)
             ts_str = dt.strftime("%Y%m%d_%H%M%S")
         except Exception:
-            ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts_str = datetime.now().strftime("%Y%m%d_H%M%S")
     else:
         ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -603,9 +627,6 @@ def blocking_process_audio(
 
     audio_np_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
     wavfile.write(str(segment_dir / "sound.wav"), sample_rate, audio_np_int16)
-
-    with open(segment_dir / "header.json", "w", encoding="utf-8") as f:
-        json.dump(header, f, ensure_ascii=False, indent=2)
 
     wavfile.write(str(segment_dir / "full_sound.wav"), sample_rate, full_audio_int16)
 
@@ -624,16 +645,29 @@ def blocking_process_audio(
     # Save speaker info with the segment
     with open(segment_dir / "speaker_info.json", "w", encoding="utf-8") as f:
         json.dump({
-            "speaker_label": speaker_label,
-            "speaker_confidence": speaker_confidence,
-            "speaker_metadata": speaker_metadata,
+            "speaker_segments": speaker_segments,
+            "speaker_count": len(set(s["speaker"] for s in speaker_segments)) if speaker_segments else 0,
             "diarization": get_speaker_diarization(),
         }, f, ensure_ascii=False, indent=2)
 
+    # Build speaker summary for markdown
+    if speaker_segments:
+        speaker_summary_lines = []
+        for seg in speaker_segments:
+            overlap_marker = " (overlap)" if seg.get("is_overlapped", False) else ""
+            speaker_summary_lines.append(
+                f"  - **{seg['speaker']}**{overlap_marker}: "
+                f"{seg['start']:.2f}s - {seg['end']:.2f}s "
+                f"(duration: {seg['duration']:.2f}s)"
+            )
+        speaker_section = "**Speakers Detected:**\n" + "\n".join(speaker_summary_lines)
+    else:
+        speaker_section = "**Speakers Detected:** None"
+
     md_results = (
-        f"**Speaker:** {speaker_label} (confidence: {speaker_confidence:.3f})\n\n"
-        f"JA: {ja_text}\n\n"
-        f"EN: {en_text}\n"
+        f"{speaker_section}\n\n"
+        f"**JA:** {ja_text}\n\n"
+        f"**EN:** {en_text}\n"
     )
     with open(segment_dir / "results.md", "w", encoding="utf-8") as f:
         f.write(md_results)
@@ -643,8 +677,8 @@ def blocking_process_audio(
         "duration_sec": header.get("duration_sec"),
         "started_at": header.get("started_at"),
         "transcribed_at": datetime.now().isoformat(),
-        "speaker_label": speaker_label,
-        "speaker_confidence": speaker_confidence,
+        "speaker_segments": speaker_segments,
+        "speaker_count": len(set(s["speaker"] for s in speaker_segments)) if speaker_segments else 0,
     }
     with open(segment_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata_out, f, ensure_ascii=False, indent=2)
@@ -678,8 +712,7 @@ def blocking_process_audio(
         "full_en_text": full_en_text,
         "ja_text": ja_text,
         "en_text": en_text,
-        "speaker_label": speaker_label,
-        "speaker_confidence": speaker_confidence,
+        "speaker_segments": speaker_segments,
     })
 
     full_audio_dir = LIVE_AUDIO_BUFFER_DIR
@@ -699,8 +732,7 @@ def blocking_process_audio(
         "sample_rate": context_buffer.sample_rate,
         "last_updated": datetime.now().isoformat(),
         "context_includes_current_segment": True,
-        "current_speaker": _current_speaker,
-        "speaker_count": _speaker_labeler.speaker_count if _speaker_labeler else 0,
+        "current_speakers": _current_speakers,
     }
     with open(full_audio_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(context_summary, f, ensure_ascii=False, indent=2)
@@ -735,14 +767,14 @@ def blocking_process_audio(
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
 
     # Save speaker state periodically
-    if _speaker_labeler and _speaker_labeler.total_segments_processed % 5 == 0:
+    if _speaker_labeler and len(_speaker_labeler.all_segments) % 5 == 0:
         save_speaker_state()
-
+    
     return {
         "uuid": uuid_,
         "new_duration": header['duration_sec'],
-        "context_uuid": context_uuid,
-        "context_duration": context_duration,
+        "context_uuid": context_buffer.get_context_uuid() or uuid_,
+        "context_duration": context_buffer.get_total_duration(),
         "success": bool(ja_text and en_text),
         "new_ja_similarity": new_ja_similarity,
         "new_ja_start_index": new_ja_start_index,
@@ -751,9 +783,7 @@ def blocking_process_audio(
         "transcribed_duration_sec": full_metadata["transcribed_duration_sec"],
         "transcribed_duration_pctg": full_metadata["transcribed_duration_pctg"],
         "coverage_label": full_metadata["coverage_label"],
-        "speaker_label": speaker_label,
-        "speaker_confidence": speaker_confidence,
-        "speaker_match_type": speaker_metadata.get("match_type", "unknown"),
+        "speaker_segments": speaker_segments,
         "diarization": get_speaker_diarization(),
         "old_ja_sents": old_ja_sents,
         "new_ja_sents": new_ja_sents,
@@ -855,8 +885,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     "success": False,
                     "transcription_ja": "",
                     "translation_en": "",
-                    "speaker_label": "SPEAKER_UNKNOWN",
-                    "speaker_confidence": 0.0,
+                    "speaker_segments": [],
+                    "diarization": get_speaker_diarization(),
                 }
                 sent = await safe_send(websocket, error_resp)
                 if not sent:
@@ -876,7 +906,7 @@ async def websocket_endpoint(websocket: WebSocket):
         )
 
 
-# ====================== NEW: REST Endpoints for Speaker Info ======================
+# ====================== REST Endpoints for Speaker Info ======================
 
 @app.get("/speakers")
 async def get_speakers():
@@ -887,11 +917,11 @@ async def get_speakers():
 @app.post("/speakers/reset")
 async def reset_speakers():
     """Reset speaker labeler state."""
-    global _current_speaker, _last_speaker_change_time
+    global _current_speakers, _last_speaker_change_time
     labeler = _speaker_labeler
     if labeler:
         labeler.reset()
-    _current_speaker = None
+    _current_speakers = {}
     _last_speaker_change_time = 0.0
     save_speaker_state()
     return {"success": True, "message": "Speaker state reset"}
@@ -923,6 +953,7 @@ class TranscribeResponse(BaseModel):
     transcription_ja: str
     speaker_label: str = "SPEAKER_UNKNOWN"
     speaker_confidence: float = 0.0
+    speaker_segments: List[Dict] = []
     metadata: Dict[str, Any]
     word_segments: list = []
     phrase_segments: list = []
@@ -938,6 +969,7 @@ class TranslateResponse(BaseModel):
     quality: str = "N/A"
     log_prob: Optional[float] = None
     confidence: Optional[float] = None
+
 
 # ====================== REST Endpoints ======================
 
@@ -965,19 +997,24 @@ async def transcribe_endpoint(
             hotwords=hotwords,
         )
         
-        # Label speaker for this audio
+        # Label speakers for this audio
         audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
-        speaker_label, speaker_confidence, speaker_metadata = label_speaker_for_segment(
+        speaker_segments = label_speakers_for_segment(
             waveform=audio_np,
             sample_rate=sample_rate,
-            timestamp=time.time(),
+            start_time=time.time(),
         )
+        
+        # Get primary speaker (first one) for backward compatibility
+        primary_speaker = speaker_segments[0]["speaker"] if speaker_segments else "SPEAKER_UNKNOWN"
+        primary_confidence = 0.8 if speaker_segments else 0.0
 
         return {
             "success": True,
             "transcription_ja": result.get("text", ""),
-            "speaker_label": speaker_label,
-            "speaker_confidence": speaker_confidence,
+            "speaker_label": primary_speaker,
+            "speaker_confidence": primary_confidence,
+            "speaker_segments": speaker_segments,
             "metadata": result.get("metadata", {}),
             "word_segments": result.get("word_segments", []),
             "phrase_segments": result.get("phrase_segments", []),
@@ -1026,7 +1063,7 @@ if __name__ == "__main__":
     logger.info("   POST /speakers/merge")
     logger.info("Press Ctrl+C to stop\n")
     uvicorn.run(
-        app="live_subtitles_server2_speaker:app",
+        app="live_subtitles_server2_speakers:app",
         host="0.0.0.0",
         port=8000,
         reload=False,

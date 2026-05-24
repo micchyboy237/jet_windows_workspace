@@ -1,3 +1,5 @@
+# speaker_labeler.py
+
 """
 SpeakerLabeler: Dynamic speaker labeling with progressive reference building
 using pyannote/segmentation-3.0 model.
@@ -102,7 +104,7 @@ class SpeakerLabeler:
         
         self._load_model()
         console.log("[green]✓ SpeakerLabeler initialized successfully[/green]")
-    
+
     def _load_model(self):
         """Load the segmentation model and set up pipelines."""
         with console.status("[bold blue]Loading pyannote/segmentation-3.0 model...[/bold blue]"):
@@ -648,6 +650,70 @@ class SpeakerLabeler:
                     f"  {seg['start']:.2f}s - {seg['end']:.2f}s | "
                     f"{seg['speaker']} | {seg['duration']:.2f}s | {overlap_marker}"
                 )
+
+    def get_speakers_at_time(self, timestamp: float) -> List[Dict]:
+        """
+        Get all active speakers at a specific timestamp.
+        
+        Args:
+            timestamp: Time in seconds from start of audio
+            
+        Returns:
+            List of dicts with 'speaker' and 'confidence' keys
+        """
+        active_speakers = []
+        for segment_info in self.all_segments:
+            if segment_info["start"] <= timestamp <= segment_info["end"]:
+                active_speakers.append({
+                    "speaker": segment_info["speaker"],
+                    "start": segment_info["start"],
+                    "end": segment_info["end"],
+                    "confidence": 0.8,  # Placeholder - can be improved with actual confidence
+                    "is_overlapped": segment_info["is_overlapped"],
+                })
+        return active_speakers
+
+    def get_speaker_timeline(self) -> List[Dict]:
+        """
+        Get complete timeline of speaker segments.
+        
+        Returns:
+            List of all speaker segments with timing and speaker info
+        """
+        return self.all_segments.copy()
+
+    def get_unique_speakers(self) -> List[str]:
+        """
+        Get list of all unique speakers detected.
+        
+        Returns:
+            List of speaker labels
+        """
+        return list(self.speaker_references.keys())
+
+    def get_speaker_stats(self) -> Dict:
+        """
+        Get comprehensive statistics about detected speakers.
+        
+        Returns:
+            Dictionary with speaker statistics
+        """
+        stats = {}
+        for speaker, segments in self.speaker_references.items():
+            total_duration = sum(seg.duration for seg in segments)
+            stats[speaker] = {
+                "segment_count": len(segments),
+                "total_duration_seconds": total_duration,
+                "average_segment_duration": total_duration / len(segments) if segments else 0,
+            }
+        return stats
+
+    def reset(self) -> None:
+        """Reset all speaker labeling state."""
+        self.speaker_references.clear()
+        self.all_segments.clear()
+        self.global_speaker_counter = 0
+        console.log("[yellow]✓ Speaker labeler state reset[/yellow]")
 
 
 if __name__ == "__main__":

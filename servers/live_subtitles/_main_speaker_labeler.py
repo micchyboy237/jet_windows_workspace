@@ -9,6 +9,13 @@ from rich.panel import Panel
 from rich.traceback import install as install_rich_traceback
 import os
 
+OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+DEFAULT_AUDIO = str(
+    Path("~/.cache/files/audio/recording_3_speakers.wav")
+    .expanduser()
+    .resolve()
+)
+
 def main():
     from speaker_labeler import SpeakerLabeler
 
@@ -23,7 +30,15 @@ def main():
     parser.add_argument(
         "audio_file",
         type=str,
+        nargs="?",
+        default=DEFAULT_AUDIO,
         help="Path to audio file (WAV, MP3, FLAC, etc.)"
+    )
+    parser.add_argument(
+        "-o", "--output-dir",
+        default=OUTPUT_DIR,
+        type=Path,
+        help="Output directory",
     )
     parser.add_argument(
         "--token",

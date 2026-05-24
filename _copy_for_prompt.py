@@ -52,85 +52,7 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
 
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ten-vad\include\ten_vad.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ten-vad\examples\build-and-deploy-windows.bat",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ten-vad\examples\plot_pr_curves.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ten-vad\examples\test.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ten-vad\README.md",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\receiver_pipeline.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\segment_speaker_labeler.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_tenvad.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\diff_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speech_waves.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\loader.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\file_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\energy.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_tenvad.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp4.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp4.py",
-    # r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--separation-ami-1.0\snapshots\4d38e95cfd067c894b8b60b00761831fb01e4a8c\README.md",
-    # r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9\README.md",
-    # r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9\config.yaml",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\run_separation_pipeline.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_emotion_litagin_speech_improved.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_emotion_litagin_speech.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_emotion_litagin_window.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\transcriptions\transcribe_emotion_litagin.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server_mac.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_cached.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\translate_jp_en_llm_prefixed.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_matcher_ja.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\audio_context_buffer.py"
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\compare_speakers.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_transcriber2.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_ja_en_pipeline.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_segments_buffer.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_firered_hybrid.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\vad_extractors.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\live_vad_segments.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\config.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server3.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server3_jp_en.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speech_segment_tracker.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\core\stream_vad_postprocessor.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\fireredvad_utils.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\word_utils_ja.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\test_word_utils_ja.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\speaker_verification.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_native_pyannote_speaker_labeler.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_onnx_wespeaker_embedding.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_native_pyannote_speaker_embedding.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\pyannote\examples\example_speechbrain_embedding.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\inference.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\inference.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\clustering.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\cluster_speakers.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\compare_speakers.py",
@@ -143,15 +65,18 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\pipeline.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\utils\signal.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\__init__.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\multilabel.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\multilabel.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\speech_separation.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\voice_activity_detection.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speaker_labeler.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_speaker_labeler.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\io.py",
     # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\_metadata.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
     r"",
 ]
 
@@ -169,126 +94,16 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Its throwing error.
-Can we use Inference -> crop or its not possible?
-Also if its possible for the fix to be applied in MultiLabelSegmentation, then show full updated multilabel.
+The speech audio bytes sent in payload may contain the ff:
+- duration ranging from 2.0s - 20.0s
+- most of the larger durations usually contain speakers that are within smaller durations
+- trailing true silent segments
 
+In SegmentSpeakerLabeler:
+- Can we add a new method label_segments that may have more than 1 speaker results?
+- Can we add a method that consolidates the existing speakers and labels?
 
-
-╭───────────────────────────────────────────────────────────────────╮
-│ SpeakerLabeler Demo                                               │
-│ Model: pyannote/segmentation-3.0                                  │
-│ Audio: C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav │
-╰───────────────────────────────────────────────────────────────────╯
-
-Step 1: Initializing SpeakerLabeler
-[19:42:49] Model classes: ['speaker#1', 'speaker#2', 'speaker#3']                                 speaker_labeler.py:110
-           Overlap class indices: []                                                              speaker_labeler.py:113
-           ✓ Model and pipelines loaded                                                           speaker_labeler.py:127
-           ✓ SpeakerLabeler initialized successfully                                               speaker_labeler.py:98
-
-Step 2: Processing audio file
-File: C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav
-Size: 3625.0 KB
-╭───────────────────────────────────╮
-│ Starting Speaker Labeling Process │
-╰───────────────────────────────────╯
-           Loading audio file: C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav         speaker_labeler.py:212
-Audio Duration: 58.00s | Sample Rate: 16000Hz
-           Processing chunk 1: 0.0s - 10.0s                                                       speaker_labeler.py:528
-             → Running VAD...                                                                     speaker_labeler.py:288
-⠋ Processing audio chunks...[NeMo W 2026-05-24 19:42:49 nemo_logging:364] C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\utils\reproducibility.py:74: ReproducibilityWarning: TensorFloat-32 (TF32) has been disabled as it might lead to reproducibility issues and lower accuracy.
-    It can be re-enabled by calling
-       >>> import torch
-       >>> torch.backends.cuda.matmul.allow_tf32 = True
-       >>> torch.backends.cudnn.allow_tf32 = True
-    See https://github.com/pyannote/pyannote-audio/issues/1370 for more details.
-
-      warnings.warn(
-
-             → Running MultiLabel Segmentation (overlap detection)...                             speaker_labeler.py:293
-⠦ Processing audio chunks...
-
-Error: too many values to unpack (expected 2)
-╭─────────────────────────────── Traceback (most recent call last) ────────────────────────────────╮
-│ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_speaker_labe │
-│ ler.py:76 in main                                                                                │
-│                                                                                                  │
-│    73 │   │   console.print(f"[dim]File: {audio_path}[/dim]")                                    │
-│    74 │   │   console.print(f"[dim]Size: {audio_path.stat().st_size / 1024:.1f} KB[/dim]")       │
-│    75 │   │                                                                                      │
-│ ❱  76 │   │   results = labeler.label_speakers(str(audio_path))                                  │
-│    77 │   │                                                                                      │
-│    78 │   │   # Display results                                                                  │
-│    79 │   │   console.print(f"\n[bold]Step 3: Displaying Results[/bold]")                        │
-│                                                                                                  │
-│ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speaker_labeler.py │
-│ :533 in label_speakers                                                                           │
-│                                                                                                  │
-│   530 │   │   │   │   │   f"{chunk_start_time:.1f}s - {end_sample/sample_rate:.1f}s[/blue]"      │
-│   531 │   │   │   │   )                                                                          │
-│   532 │   │   │   │                                                                              │
-│ ❱ 533 │   │   │   │   chunk_results = self.process_chunk(                                        │
-│   534 │   │   │   │   │   chunk_waveform,                                                        │
-│   535 │   │   │   │   │   sample_rate,                                                           │
-│   536 │   │   │   │   │   chunk_start_time                                                       │
-│                                                                                                  │
-│ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speaker_labeler.py │
-│ :340 in process_chunk                                                                            │
-│                                                                                                  │
-│   337 │   │                                                                                      │
-│   338 │   │   try:                                                                               │
-│   339 │   │   │   # Run pipelines                                                                │
-│ ❱ 340 │   │   │   results = self._process_single_chunk(temp_chunk_file, chunk_start_time)        │
-│   341 │   │   │                                                                                  │
-│   342 │   │   │   # Get raw segmentation for speaker labeling                                    │
-│   343 │   │   │   console.log("[yellow]  → Running raw speaker segmentation...[/yellow]")        │
-│                                                                                                  │
-│ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speaker_labeler.py │
-│ :294 in _process_single_chunk                                                                    │
-│                                                                                                  │
-│   291 │   │                                                                                      │
-│   292 │   │   # Run MultiLabel Segmentation                                                      │
-│   293 │   │   console.log("[yellow]  → Running MultiLabel Segmentation (overlap detection)...[   │
-│ ❱ 294 │   │   multilabel_result = self.multilabel_pipeline(chunk_file)                           │
-│   295 │   │   results["multilabel"] = multilabel_result                                          │
-│   296 │   │                                                                                      │
-│   297 │   │   # Extract overlap regions                                                          │
-│                                                                                                  │
-│ C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\pipeline.py │
-│ :478 in __call__                                                                                 │
-│                                                                                                  │
-│   475 │   │   # requested number of speakers in case of diarization                              │
-│   476 │   │   track_pipeline_apply(self, file, **kwargs)                                         │
-│   477 │   │                                                                                      │
-│ ❱ 478 │   │   return self.apply(file, **kwargs)                                                  │
-│   479 │                                                                                          │
-│   480 │   def to(self, device: torch.device) -> Pipeline:                                        │
-│   481 │   │   \"\"\"Send pipeline to `device`\"\"\"                                                    │
-│                                                                                                  │
-│ C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\multil │
-│ abel.py:207 in apply                                                                             │
-│                                                                                                  │
-│   204 │   │   │   │   segmentations.data[:, i : i + 1], segmentations.sliding_window             │
-│   205 │   │   │   )                                                                              │
-│   206 │   │   │   # obtain hard segments                                                         │
-│ ❱ 207 │   │   │   label_annotation: Annotation = self._binarize[label](label_segmentation)       │
-│   208 │   │   │                                                                                  │
-│   209 │   │   │   # add them to the pool of labels                                               │
-│   210 │   │   │   detection.update(                                                              │
-│                                                                                                  │
-│ C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\utils\signal.py: │
-│ 268 in __call__                                                                                  │
-│                                                                                                  │
-│   265 │   │   │   Binarized scores.                                                              │
-│   266 │   │   \"\"\"                                                                                │
-│   267 │   │                                                                                      │
-│ ❱ 268 │   │   num_frames, num_classes = scores.data.shape                                        │
-│   269 │   │   frames = scores.sliding_window                                                     │
-│   270 │   │   timestamps = [frames[i].middle for i in range(num_frames)]                         │
-│   271                                                                                            │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-ValueError: too many values to unpack (expected 2)
+Then update live_subtitles_server2_segment_speaker to update the speaker info sent in payload to be a list.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
