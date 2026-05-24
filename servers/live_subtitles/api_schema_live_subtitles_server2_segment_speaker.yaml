@@ -1,514 +1,545 @@
-
 # **Output format (JSON text):**
 # See the response schema below.
+
 responses:
-'101':
-  description: WebSocket upgrade successful
-  content:
-    application/json:
-      schema:
-        $ref: '#/components/schemas/WebSocketResponse'
+  "101":
+    description: WebSocket upgrade successful
+    content:
+      application/json:
+        schema:
+          $ref: "#/components/schemas/WebSocketResponse"
 
 /transcribe:
-post:
-tags:
-- Transcription
-summary: Transcribe Japanese audio to text
-description: Upload a Japanese audio file and receive the transcription.
-operationId: transcribe_audio
-requestBody:
-required: true
-content:
-  multipart/form-data:
-    schema:
+  post:
+    tags:
+      - Transcription
+    summary: Transcribe Japanese audio to text
+    description: Upload a Japanese audio file and receive the transcription.
+    operationId: transcribe_audio
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required:
+              - audio_file
+            properties:
+              audio_file:
+                type: string
+                format: binary
+                description: Japanese audio file (WAV, PCM int16 recommended)
+              sample_rate:
+                type: integer
+                default: 16000
+                description: Sample rate of the audio in Hz
+              hotwords:
+                type: string
+                description: Optional hotwords for better recognition (comma-separated)
+    responses:
+      "200":
+        description: Successful transcription
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranscribeResponse"
+      "400":
+        description: Empty audio file
+      "500":
+        description: Transcription error
+
+/translate:
+  post:
+    tags:
+      - Translation
+    summary: Translate Japanese text to English
+    description: Translate Japanese text to English with optional conversation history for context.
+    operationId: translate_text
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/TranslateRequest"
+    responses:
+      "200":
+        description: Successful translation
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranslateResponse"
+      "400":
+        description: Missing or empty Japanese text
+      "500":
+        description: Translation error
+
+/speakers:
+  get:
+    tags:
+      - Speakers
+    summary: Get current speaker diarization information
+    description: Returns information about all known speakers and the current active speaker.
+    operationId: get_speakers
+    responses:
+      "200":
+        description: Speaker diarization info
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeakerDiarization"
+
+/speakers/reset:
+  post:
+    tags:
+      - Speakers
+    summary: Reset speaker labeler state
+    description: Clear all known speakers and reset the speaker labeler.
+    operationId: reset_speakers
+    responses:
+      "200":
+        description: Speaker state reset successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                message:
+                  type: string
+                  example: Speaker state reset
+
+/speakers/merge:
+  post:
+    tags:
+      - Speakers
+    summary: Merge two speaker labels
+    description: Merge two speaker labels into one. All segments attributed to either speaker will be combined.
+    operationId: merge_speakers
+    requestBody:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            required:
+              - label1
+              - label2
+            properties:
+              label1:
+                type: string
+                description: First speaker label to merge
+                example: SPEAKER_01
+              label2:
+                type: string
+                description: Second speaker label to merge
+                example: SPEAKER_02
+    responses:
+      "200":
+        description: Speakers merged successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                merged_label:
+                  type: string
+                  description: The resulting merged speaker label
+                  example: SPEAKER_01
+      "400":
+        description: Could not merge speakers
+
+/speakers/consolidate:
+  post:
+    tags:
+      - Speakers
+    summary: Consolidate similar speakers
+    description: |
+      Automatically merge speakers that are above a similarity threshold.
+      Can run in dry-run mode to preview merges without executing them.
+    operationId: consolidate_speakers
+    requestBody:
+      required: true
+      content:
+        application/x-www-form-urlencoded:
+          schema:
+            type: object
+            properties:
+              threshold:
+                type: number
+                minimum: 0.0
+                maximum: 1.0
+                default: 0.85
+                description: Similarity threshold above which speakers are merged
+              dry_run:
+                type: boolean
+                default: false
+                description: If true, returns proposed merges without executing them
+    responses:
+      "200":
+        description: Consolidation results
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConsolidateResponse"
+      "400":
+        description: Speaker labeler not initialized
+
+components:
+  schemas:
+    WebSocketHeader:
       type: object
+      description: Client-sent header in WebSocket binary message
       required:
-        - audio_file
+        - uuid
+        - forced
+        - vad_reason
+        - start_sec
+        - end_sec
+        - duration_sec
+        - started_at
       properties:
-        audio_file:
+        uuid:
           type: string
-          format: binary
-          description: Japanese audio file (WAV, PCM int16 recommended)
+          format: uuid
+          description: Unique identifier for this audio segment
+        forced:
+          type: boolean
+          description: Whether this segment was forced (not triggered by VAD)
+        vad_reason:
+          type: string
+          description: Voice Activity Detection trigger reason
+          enum:
+            - speech_start
+            - speech_end
+            - speech_continue
+            - forced
+            - timeout
+            - silence
+        start_sec:
+          type: number
+          format: float
+          description: Segment start time in seconds
+        end_sec:
+          type: number
+          format: float
+          description: Segment end time in seconds
+        duration_sec:
+          type: number
+          format: float
+          description: Segment duration in seconds
         sample_rate:
           type: integer
           default: 16000
-          description: Sample rate of the audio in Hz
-        hotwords:
+          description: Audio sample rate in Hz
+        started_at:
           type: string
-          description: Optional hotwords for better recognition (comma-separated)
-responses:
-'200':
-  description: Successful transcription
-  content:
-    application/json:
-      schema:
-        $ref: '#/components/schemas/TranscribeResponse'
-'400':
-  description: Empty audio file
-'500':
-  description: Transcription error
+          format: date-time
+          description: ISO timestamp when segment was captured
+        start_time_utc:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Absolute UTC wall-clock timestamp when this speech segment started.
+            ISO 8601 format with microsecond precision.
+            Null when timestamp tracking is not available (e.g. file-based input).
+          example: "2026-05-25T14:32:17.123456+00:00"
+        end_time_utc:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Absolute UTC wall-clock timestamp when this speech segment ended.
+            ISO 8601 format with microsecond precision.
+            Null when timestamp tracking is not available.
+          example: "2026-05-25T14:32:19.876543+00:00"
+        gap_sec:
+          type: number
+          format: float
+          nullable: true
+          description: |
+            Real-time silence gap in seconds between the previous segment's end
+            and this segment's start. Calculated from absolute UTC timestamps,
+            so it reflects actual wall-clock time, not buffer-relative time.
 
-/translate:
-post:
-tags:
-- Translation
-summary: Translate Japanese text to English
-description: Translate Japanese text to English with optional conversation history for context.
-operationId: translate_text
-requestBody:
-required: true
-content:
-  application/json:
-    schema:
-      $ref: '#/components/schemas/TranslateRequest'
-responses:
-'200':
-  description: Successful translation
-  content:
-    application/json:
-      schema:
-        $ref: '#/components/schemas/TranslateResponse'
-'400':
-  description: Missing or empty Japanese text
-'500':
-  description: Translation error
+            - `null` for the first segment in a session (no previous segment).
+            - `null` when timestamp tracking is not available.
+            - Negative values indicate overlapping segments (should not normally occur).
+          example: 0.58
 
-/speakers:
-get:
-tags:
-- Speakers
-summary: Get current speaker diarization information
-description: Returns information about all known speakers and the current active speaker.
-operationId: get_speakers
-responses:
-'200':
-  description: Speaker diarization info
-  content:
-    application/json:
-      schema:
-        $ref: '#/components/schemas/SpeakerDiarization'
-
-/speakers/reset:
-post:
-tags:
-- Speakers
-summary: Reset speaker labeler state
-description: Clear all known speakers and reset the speaker labeler.
-operationId: reset_speakers
-responses:
-'200':
-  description: Speaker state reset successfully
-  content:
-    application/json:
-      schema:
-        type: object
-        properties:
-          success:
-            type: boolean
-            example: true
-          message:
-            type: string
-            example: Speaker state reset
-
-/speakers/merge:
-post:
-tags:
-- Speakers
-summary: Merge two speaker labels
-description: Merge two speaker labels into one. All segments attributed to either speaker will be combined.
-operationId: merge_speakers
-requestBody:
-required: true
-content:
-  application/x-www-form-urlencoded:
-    schema:
+    WebSocketResponse:
       type: object
-      required:
-        - label1
-        - label2
+      description: Server response for each processed audio segment
       properties:
-        label1:
+        uuid:
           type: string
-          description: First speaker label to merge
+          format: uuid
+          description: Echo of the client's segment UUID
+        success:
+          type: boolean
+          description: Whether processing produced valid transcription/translation
+        message:
+          type: string
+          description: Status message (present on failure)
+        new_duration:
+          type: number
+          description: Duration of new audio segment in seconds
+        context_uuid:
+          type: string
+          description: UUID of the current context segment
+        context_duration:
+          type: number
+          description: Total duration of audio context buffer in seconds
+        transcription_ja:
+          type: string
+          description: New Japanese text (incremental, not full context)
+        translation_en:
+          type: string
+          description: English translation of the new Japanese text
+        new_ja_similarity:
+          type: number
+          nullable: true
+          description: Similarity score for fuzzy matching (null for first segment)
+        new_ja_start_index:
+          type: integer
+          nullable: true
+          description: Start index of new text in full context (null for first segment)
+        transcribed_duration_sec:
+          type: number
+          description: Duration of transcribed audio in seconds
+        transcribed_duration_pctg:
+          type: number
+          description: Percentage of audio that was transcribed
+        coverage_label:
+          type: string
+          description: Human-readable coverage label
+          enum:
+            - full
+            - partial
+            - minimal
+        speaker_label:
+          type: string
+          description: Primary speaker label
           example: SPEAKER_01
-        label2:
+        speaker_confidence:
+          type: number
+          description: Confidence score for speaker identification (0.0 to 1.0)
+        speaker_match_type:
           type: string
-          description: Second speaker label to merge
-          example: SPEAKER_02
-responses:
-'200':
-  description: Speakers merged successfully
-  content:
-    application/json:
-      schema:
-        type: object
-        properties:
-          success:
-            type: boolean
-            example: true
-          merged_label:
-            type: string
-            description: The resulting merged speaker label
-            example: SPEAKER_01
-'400':
-  description: Could not merge speakers
+          description: How the speaker was matched
+          enum:
+            - exact_match
+            - high_confidence
+            - possible_match
+            - new_speaker
+            - unknown
+            - empty_waveform
+        speakers:
+          type: array
+          description: All possible speakers detected in the segment
+          items:
+            $ref: "#/components/schemas/SpeakerResult"
+        diarization:
+          $ref: "#/components/schemas/SpeakerDiarization"
+        segment_number:
+          type: integer
+          description: Sequential segment number
+        segment_dir:
+          type: string
+          description: Directory name for this segment's saved files
 
-/speakers/consolidate:
-post:
-tags:
-- Speakers
-summary: Consolidate similar speakers
-description: |
-Automatically merge speakers that are above a similarity threshold.
-Can run in dry-run mode to preview merges without executing them.
-operationId: consolidate_speakers
-requestBody:
-required: true
-content:
-  application/x-www-form-urlencoded:
-    schema:
+    SpeakerResult:
+      type: object
+      description: Individual speaker identification result
+      properties:
+        label:
+          type: string
+          description: Speaker label
+        confidence:
+          type: number
+          description: Confidence score (0.0 to 1.0)
+        match_type:
+          type: string
+          description: Type of speaker match
+        is_primary:
+          type: boolean
+          description: Whether this is the primary speaker for the segment
+        is_new_speaker:
+          type: boolean
+          description: Whether this is a newly identified speaker
+
+    SpeakerDiarization:
+      type: object
+      description: Current speaker diarization state
+      properties:
+        current_speaker:
+          type: string
+          nullable: true
+          description: Currently active speaker label
+        known_speakers:
+          type: array
+          items:
+            type: string
+          description: List of all known speaker labels
+        speaker_count:
+          type: integer
+          description: Total number of unique speakers identified
+        total_segments_processed:
+          type: integer
+          description: Total number of audio segments processed
+        speakers_info:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/SpeakerInfo"
+          description: Detailed info per speaker, keyed by speaker label
+
+    SpeakerInfo:
+      type: object
+      description: Detailed information about a single speaker
+      properties:
+        first_seen:
+          type: number
+          description: Timestamp of first appearance
+        last_seen:
+          type: number
+          description: Timestamp of most recent appearance
+        segment_count:
+          type: integer
+          description: Number of segments attributed to this speaker
+        average_confidence:
+          type: number
+          description: Average confidence score for this speaker
+
+    TranscribeResponse:
+      type: object
+      description: Response from the transcription endpoint
+      properties:
+        success:
+          type: boolean
+          example: true
+        transcription_ja:
+          type: string
+          description: Full Japanese transcription text
+        metadata:
+          type: object
+          description: Transcription metadata (duration, coverage, etc.)
+        word_segments:
+          type: array
+          description: Word-level segmentation with timestamps
+          items:
+            $ref: "#/components/schemas/WordSegment"
+        phrase_segments:
+          type: array
+          description: Phrase-level segmentation with timestamps
+          items:
+            $ref: "#/components/schemas/PhraseSegment"
+
+    WordSegment:
       type: object
       properties:
-        threshold:
+        word:
+          type: string
+          description: Individual word
+        start:
+          type: number
+          description: Start time in seconds
+        end:
+          type: number
+          description: End time in seconds
+
+    PhraseSegment:
+      type: object
+      properties:
+        phrase:
+          type: string
+          description: Phrase text
+        start:
+          type: number
+          description: Start time in seconds
+        end:
+          type: number
+          description: End time in seconds
+
+    TranslateRequest:
+      type: object
+      description: Translation request body
+      required:
+        - japanese_text
+      properties:
+        japanese_text:
+          type: string
+          description: Japanese text to translate to English
+          example: こんにちは、元気ですか？
+        history:
+          type: array
+          description: Conversation history for context (alternating JA/EN pairs)
+          items:
+            type: string
+          example: ["前の文", "Previous sentence"]
+        temperature:
           type: number
           minimum: 0.0
           maximum: 1.0
-          default: 0.85
-          description: Similarity threshold above which speakers are merged
+          default: 0.35
+          description: LLM temperature for translation generation
+
+    TranslateResponse:
+      type: object
+      description: Translation response
+      properties:
+        success:
+          type: boolean
+          example: true
+        translation_en:
+          type: string
+          description: English translation
+          example: Hello, how are you?
+        quality:
+          type: string
+          description: Translation quality assessment
+          example: good
+        log_prob:
+          type: number
+          nullable: true
+          description: Log probability of the translation
+        confidence:
+          type: number
+          nullable: true
+          description: Confidence score for the translation
+
+    ConsolidateResponse:
+      type: object
+      description: Speaker consolidation results
+      properties:
+        success:
+          type: boolean
+          example: true
+        speakers_before:
+          type: integer
+          description: Number of speakers before consolidation
+        speakers_after:
+          type: integer
+          description: Number of speakers after consolidation
+        merges_performed:
+          type: array
+          description: List of merges that were performed (or proposed in dry-run)
+          items:
+            type: object
+            properties:
+              from:
+                type: string
+                description: Speaker label that was merged
+              to:
+                type: string
+                description: Speaker label that remained
+              similarity:
+                type: number
+                description: Similarity score between the merged speakers
         dry_run:
           type: boolean
-          default: false
-          description: If true, returns proposed merges without executing them
-responses:
-'200':
-  description: Consolidation results
-  content:
-    application/json:
-      schema:
-        $ref: '#/components/schemas/ConsolidateResponse'
-'400':
-  description: Speaker labeler not initialized
-
-components:
-schemas:
-WebSocketHeader:
-type: object
-description: Client-sent header in WebSocket binary message
-required:
-- uuid
-- forced
-- vad_reason
-- start_sec
-- end_sec
-- duration_sec
-- started_at
-properties:
-uuid:
-  type: string
-  format: uuid
-  description: Unique identifier for this audio segment
-forced:
-  type: boolean
-  description: Whether this segment was forced (not triggered by VAD)
-vad_reason:
-  type: string
-  description: Voice Activity Detection trigger reason
-  enum:
-    - speech_start
-    - speech_end
-    - speech_continue
-    - forced
-    - timeout
-    - silence
-start_sec:
-  type: number
-  format: float
-  description: Segment start time in seconds
-end_sec:
-  type: number
-  format: float
-  description: Segment end time in seconds
-duration_sec:
-  type: number
-  format: float
-  description: Segment duration in seconds
-started_at:
-  type: string
-  format: date-time
-  description: ISO timestamp when segment was captured
-sample_rate:
-  type: integer
-  default: 16000
-  description: Audio sample rate in Hz
-
-WebSocketResponse:
-type: object
-description: Server response for each processed audio segment
-properties:
-uuid:
-  type: string
-  format: uuid
-  description: Echo of the client's segment UUID
-success:
-  type: boolean
-  description: Whether processing produced valid transcription/translation
-message:
-  type: string
-  description: Status message (present on failure)
-new_duration:
-  type: number
-  description: Duration of new audio segment in seconds
-context_uuid:
-  type: string
-  description: UUID of the current context segment
-context_duration:
-  type: number
-  description: Total duration of audio context buffer in seconds
-transcription_ja:
-  type: string
-  description: New Japanese text (incremental, not full context)
-translation_en:
-  type: string
-  description: English translation of the new Japanese text
-new_ja_similarity:
-  type: number
-  nullable: true
-  description: Similarity score for fuzzy matching (null for first segment)
-new_ja_start_index:
-  type: integer
-  nullable: true
-  description: Start index of new text in full context (null for first segment)
-transcribed_duration_sec:
-  type: number
-  description: Duration of transcribed audio in seconds
-transcribed_duration_pctg:
-  type: number
-  description: Percentage of audio that was transcribed
-coverage_label:
-  type: string
-  description: Human-readable coverage label
-  enum:
-    - full
-    - partial
-    - minimal
-speaker_label:
-  type: string
-  description: Primary speaker label
-  example: SPEAKER_01
-speaker_confidence:
-  type: number
-  description: Confidence score for speaker identification (0.0 to 1.0)
-speaker_match_type:
-  type: string
-  description: How the speaker was matched
-  enum:
-    - exact_match
-    - high_confidence
-    - possible_match
-    - new_speaker
-    - unknown
-    - empty_waveform
-speakers:
-  type: array
-  description: All possible speakers detected in the segment
-  items:
-    $ref: '#/components/schemas/SpeakerResult'
-diarization:
-  $ref: '#/components/schemas/SpeakerDiarization'
-segment_number:
-  type: integer
-  description: Sequential segment number
-segment_dir:
-  type: string
-  description: Directory name for this segment's saved files
-
-SpeakerResult:
-type: object
-description: Individual speaker identification result
-properties:
-label:
-  type: string
-  description: Speaker label
-confidence:
-  type: number
-  description: Confidence score (0.0 to 1.0)
-match_type:
-  type: string
-  description: Type of speaker match
-is_primary:
-  type: boolean
-  description: Whether this is the primary speaker for the segment
-is_new_speaker:
-  type: boolean
-  description: Whether this is a newly identified speaker
-
-SpeakerDiarization:
-type: object
-description: Current speaker diarization state
-properties:
-current_speaker:
-  type: string
-  nullable: true
-  description: Currently active speaker label
-known_speakers:
-  type: array
-  items:
-    type: string
-  description: List of all known speaker labels
-speaker_count:
-  type: integer
-  description: Total number of unique speakers identified
-total_segments_processed:
-  type: integer
-  description: Total number of audio segments processed
-speakers_info:
-  type: object
-  additionalProperties:
-    $ref: '#/components/schemas/SpeakerInfo'
-  description: Detailed info per speaker, keyed by speaker label
-
-SpeakerInfo:
-type: object
-description: Detailed information about a single speaker
-properties:
-first_seen:
-  type: number
-  description: Timestamp of first appearance
-last_seen:
-  type: number
-  description: Timestamp of most recent appearance
-segment_count:
-  type: integer
-  description: Number of segments attributed to this speaker
-average_confidence:
-  type: number
-  description: Average confidence score for this speaker
-
-TranscribeResponse:
-type: object
-description: Response from the transcription endpoint
-properties:
-success:
-  type: boolean
-  example: true
-transcription_ja:
-  type: string
-  description: Full Japanese transcription text
-metadata:
-  type: object
-  description: Transcription metadata (duration, coverage, etc.)
-word_segments:
-  type: array
-  description: Word-level segmentation with timestamps
-  items:
-    $ref: '#/components/schemas/WordSegment'
-phrase_segments:
-  type: array
-  description: Phrase-level segmentation with timestamps
-  items:
-    $ref: '#/components/schemas/PhraseSegment'
-
-WordSegment:
-type: object
-properties:
-word:
-  type: string
-  description: Individual word
-start:
-  type: number
-  description: Start time in seconds
-end:
-  type: number
-  description: End time in seconds
-
-PhraseSegment:
-type: object
-properties:
-phrase:
-  type: string
-  description: Phrase text
-start:
-  type: number
-  description: Start time in seconds
-end:
-  type: number
-  description: End time in seconds
-
-TranslateRequest:
-type: object
-description: Translation request body
-required:
-- japanese_text
-properties:
-japanese_text:
-  type: string
-  description: Japanese text to translate to English
-  example: こんにちは、元気ですか？
-history:
-  type: array
-  description: Conversation history for context (alternating JA/EN pairs)
-  items:
-    type: string
-  example: ["前の文", "Previous sentence"]
-temperature:
-  type: number
-  minimum: 0.0
-  maximum: 1.0
-  default: 0.35
-  description: LLM temperature for translation generation
-
-TranslateResponse:
-type: object
-description: Translation response
-properties:
-success:
-  type: boolean
-  example: true
-translation_en:
-  type: string
-  description: English translation
-  example: Hello, how are you?
-quality:
-  type: string
-  description: Translation quality assessment
-  example: good
-log_prob:
-  type: number
-  nullable: true
-  description: Log probability of the translation
-confidence:
-  type: number
-  nullable: true
-  description: Confidence score for the translation
-
-ConsolidateResponse:
-type: object
-description: Speaker consolidation results
-properties:
-success:
-  type: boolean
-  example: true
-speakers_before:
-  type: integer
-  description: Number of speakers before consolidation
-speakers_after:
-  type: integer
-  description: Number of speakers after consolidation
-merges_performed:
-  type: array
-  description: List of merges that were performed (or proposed in dry-run)
-  items:
-    type: object
-    properties:
-      from:
-        type: string
-        description: Speaker label that was merged
-      to:
-        type: string
-        description: Speaker label that remained
-      similarity:
-        type: number
-        description: Similarity score between the merged speakers
-dry_run:
-  type: boolean
-  description: Whether this was a dry run (no actual changes made)
+          description: Whether this was a dry run (no actual changes made)

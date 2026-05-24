@@ -64,11 +64,10 @@ transport:
       vad_reason:
         type: string
         enum:
-          - silence
-          - forced
-          - partial
-          - manual
-        description: Reason why VAD emitted segment
+          - silence # Prolonged silence
+          - valley # Probability dip
+          - hard_limit # Max duration limit
+        description: Reason why VAD ended segment
 
       forced:
         type: boolean
