@@ -11,6 +11,12 @@ from rich.console import Console
 
 console = Console()
 
+DEFAULT_THRESHOLD_SAME: float = 0.15
+DEFAULT_THRESHOLD_POSSIBLE: float = 0.075
+DEFAULT_MIN_SEGMENTS_FOR_REFERENCE: int = 2
+DEFAULT_MAX_EMBEDDINGS_PER_SPEAKER: int = 50
+DEFAULT_TEMPORAL_SMOOTHING_WINDOW: float = 3.0
+
 
 @dataclass
 class SpeakerReference:
@@ -97,11 +103,11 @@ class SegmentSpeakerLabeler:
     def __init__(
         self,
         embedding_model,
-        threshold_same: float = 0.75,
-        threshold_possible: float = 0.60,
-        min_segments_for_reference: int = 2,
-        max_embeddings_per_speaker: int = 50,
-        temporal_smoothing_window: float = 3.0,
+        threshold_same: float = DEFAULT_THRESHOLD_SAME,
+        threshold_possible: float = DEFAULT_THRESHOLD_POSSIBLE,
+        min_segments_for_reference: int = DEFAULT_MIN_SEGMENTS_FOR_REFERENCE,
+        max_embeddings_per_speaker: int = DEFAULT_MAX_EMBEDDINGS_PER_SPEAKER,
+        temporal_smoothing_window: float = DEFAULT_TEMPORAL_SMOOTHING_WINDOW,
         debug: bool = False,
     ):
         self.embedding_model = embedding_model
@@ -618,8 +624,8 @@ class SegmentSpeakerLabeler:
         """
         labeler = cls(
             embedding_model=embedding_model,
-            threshold_same=data.get("threshold_same", 0.75),
-            threshold_possible=data.get("threshold_possible", 0.60),
+            threshold_same=data.get("threshold_same", DEFAULT_THRESHOLD_SAME),
+            threshold_possible=data.get("threshold_possible", DEFAULT_THRESHOLD_POSSIBLE),
         )
         
         labeler._next_speaker_id = data.get("next_speaker_id", 1)
