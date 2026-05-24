@@ -21,9 +21,6 @@ from loader import load_audio
 WaveState = Literal["below", "above"]
 
 
-BASELINE_THRESHOLD = 0.1
-
-
 @dataclasses.dataclass
 class WaveShapeConfig:
     """
@@ -42,10 +39,9 @@ class WaveShapeConfig:
             shorter than this are rejected even if they pass frame and shape
             checks. Derived independently of min_frames so both constraints
             must be satisfied.
-        min_baseline: Minimum required baseline probability (average of the
-            entry and exit probabilities at the wave edges). 0.0 disables
-            the check. Useful for rejecting waves that rise from near-silence
-            even if their peak and prominence look acceptable.
+        baseline_threshold: Probability threshold used to determine when a
+            wave has truly fallen back to baseline/silence level. Used to
+            detect wave boundaries and preroll adjustments.
     """
 
     min_prominence: float = 0.05
@@ -53,7 +49,7 @@ class WaveShapeConfig:
     min_peak_prob: float = 0.55
     min_frames: int = 3
     min_duration_sec: float = 0.25  # matches default --min-speech-duration of 250 ms
-    min_baseline: float = 0.0  # 0.0 = disabled by default
+    baseline_threshold: float = 0.1  # threshold for silence/baseline detection
 
 
 def is_prominent_wave(
@@ -84,19 +80,15 @@ def is_prominent_wave(
     excursion = peak_prob - min_prob
     n_frames = len(wave_probs)
 
-    baseline_ok = baseline >= cfg.min_baseline
-
     passed = (
         prominence >= cfg.min_prominence
         and excursion >= cfg.min_excursion
         and peak_prob >= cfg.min_peak_prob
         and n_frames >= cfg.min_frames
-        and baseline_ok
     )
 
     diagnostics = {
         "baseline": round(baseline, 6),
-        "baseline_ok": baseline_ok,
         "peak_prob": round(peak_prob, 6),
         "prominence": round(prominence, 6),
         "excursion": round(excursion, 6),
@@ -158,7 +150,7 @@ def check_speech_waves(
     rise_frame_idx: int | None = None
 
     if speech_probs:
-        if speech_probs[0] < BASELINE_THRESHOLD:
+        if speech_probs[0] < shape_cfg.baseline_threshold:
             current_wave = SpeechWave(
                 has_risen=False,
                 has_multi_passed=False,
@@ -191,9 +183,9 @@ def check_speech_waves(
                 rise_frame_idx = i
 
                 # ── Preroll: walk back from rise_frame_idx until we find a
-                #    frame strictly below BASELINE_THRESHOLD (or hit index 0).
+                #    frame strictly below baseline_threshold (or hit index 0).
                 preroll_start = rise_frame_idx
-                while preroll_start > 0 and speech_probs[preroll_start - 1] >= BASELINE_THRESHOLD:
+                while preroll_start > 0 and speech_probs[preroll_start - 1] >= shape_cfg.baseline_threshold:
                     preroll_start -= 1
                 preroll_start_sec = preroll_start * HOP_SIZE / sampling_rate
 
@@ -224,7 +216,7 @@ def check_speech_waves(
                     current_wave["has_multi_passed"] = True
             else:
                 if current_wave is not None:
-                    if prob <= BASELINE_THRESHOLD:
+                    if prob <= shape_cfg.baseline_threshold:
                         current_wave["has_fallen"] = True
 
                     # frame_start uses the preroll-adjusted value stored in details
@@ -273,7 +265,7 @@ def check_speech_waves(
                         _compute_composite_score(current_wave)
                     )
 
-                if prob < BASELINE_THRESHOLD:
+                if prob < shape_cfg.baseline_threshold:
                     waves.append(current_wave)
                     current_wave = None
                     rise_frame_idx = None
@@ -373,6 +365,7 @@ def save_wave_plot(
     threshold: float = 0.5,
     hop_size: int = HOP_SIZE,
     sampling_rate: int = SAMPLE_RATE,
+    shape_cfg: Optional[WaveShapeConfig] = None,
 ) -> None:
     """
     Create a two-panel visualization for a single speech wave.
@@ -391,7 +384,10 @@ def save_wave_plot(
       absolute amplitude; annotated with "(normalised)" on the y-axis
     - Same x-axis and time markers as the top panel
     """
-    threshold = BASELINE_THRESHOLD
+    if shape_cfg is None:
+        shape_cfg = WaveShapeConfig()
+    
+    baseline_threshold = shape_cfg.baseline_threshold
 
     # --- align arrays --------------------------------------------------------
     min_length = min(len(probs), len(rms_values))
@@ -450,7 +446,7 @@ def save_wave_plot(
     # Probability curve
     ax1.plot(times_ms, probs_aligned, color="#1565C0", linewidth=1.4, zorder=3)
 
-    # Threshold line (actual value, not hardcoded 0.5)
+    # Threshold line
     ax1.axhline(
         y=threshold,
         color="#E53935",
@@ -460,16 +456,15 @@ def save_wave_plot(
         label=f"Threshold ({threshold:.2f})",
     )
 
-    # Baseline line
-    if wave is not None and baseline > 0.0:
-        ax1.axhline(
-            y=baseline,
-            color="#6D4C41",
-            linestyle=":",
-            linewidth=1.0,
-            alpha=0.8,
-            label=f"Baseline ({baseline:.3f})",
-        )
+    # Baseline threshold line
+    ax1.axhline(
+        y=baseline_threshold,
+        color="#6D4C41",
+        linestyle=":",
+        linewidth=1.0,
+        alpha=0.8,
+        label=f"Baseline threshold ({baseline_threshold:.3f})",
+    )
 
     # Wave start / end vertical markers
     ax1.axvline(
@@ -580,6 +575,7 @@ def save_wave_data(
     wave_num: int,
     hop_size: int = HOP_SIZE,
     threshold: float = 0.5,
+    shape_cfg: Optional[WaveShapeConfig] = None,
 ) -> None:
     """Save all wave-related data to the specified directory."""
     wave_dir = output_dir / f"segment_{seg_num:03d}_wave_{wave_num:03d}"
@@ -625,6 +621,7 @@ def save_wave_data(
         threshold=threshold,
         hop_size=hop_size,
         sampling_rate=sampling_rate,
+        shape_cfg=shape_cfg,
     )
 
 
@@ -847,14 +844,14 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-b",
-        "--min-baseline",
+        "--baseline-threshold",
         type=float,
-        default=WaveShapeConfig.min_baseline,
+        default=WaveShapeConfig.baseline_threshold,
         metavar="FLOAT",
         help=(
-            "Minimum baseline probability a wave must have. Baseline is the "
-            "average of the entry and exit probabilities at the wave edges. "
-            "0.0 disables the check (default)."
+            "Probability threshold used to determine when a wave has truly "
+            "fallen back to baseline/silence level. Used for wave boundary "
+            "detection and preroll adjustments."
         ),
     )
 
@@ -869,7 +866,7 @@ if __name__ == "__main__":
         min_peak_prob=args.min_peak_prob,
         min_frames=args.min_frames,
         min_duration_sec=args.min_speech_duration / 1000,
-        min_baseline=args.min_baseline,
+        baseline_threshold=args.baseline_threshold,
     )
 
     shutil.rmtree(args.output_dir, ignore_errors=True)
@@ -925,7 +922,8 @@ if __name__ == "__main__":
             seg_num=parent_seg_num,
             wave_num=wave_idx,
             hop_size=args.hop_size,
-            threshold=args.threshold,  # pass through so plots reflect the actual threshold
+            threshold=args.threshold,
+            shape_cfg=shape_cfg,
         )
 
     # ── Summary table & JSON ──────────────────────────────────────────────────
