@@ -471,14 +471,22 @@ def save_results(
 
 def main() -> None:
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    DEFAULT_AUDIO = str(
+        Path(
+            "~/Desktop/Jet_Files/Jet_Windows_Workspace/python_scripts/samples/audio"
+            "/features/generated/speech_waves/waves/"
+        )
+        .expanduser()
+        .resolve()
+    )
 
     parser = argparse.ArgumentParser(
         description="Compare speaker embeddings from WAV files using cosine similarity."
     )
     parser.add_argument(
         "speakers",
-        nargs="+",
-        type=str,
+        nargs="*",
+        default=[DEFAULT_AUDIO],
         help=(
             "Paths to speaker WAV files or directories (space-separated, at least 2 "
             "required). Directories are scanned recursively for audio files."

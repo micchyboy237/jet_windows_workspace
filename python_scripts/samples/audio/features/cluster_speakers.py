@@ -1,5 +1,3 @@
-# cluster_speakers.py
-
 import argparse
 import json
 import shutil
@@ -14,19 +12,23 @@ import torch
 import torchaudio
 from audio_utils import resolve_audio_paths
 from pyannote.audio import Inference, Model
+from pyannote.audio.pipelines.clustering import (
+    AgglomerativeClustering as PyannoteAHC,
+)
+from pyannote.core import SlidingWindow, SlidingWindowFeature
 from rich.console import Console
 from rich.table import Table
-from sklearn.cluster import AgglomerativeClustering as SklearnAHC
 from sklearn.metrics.pairwise import cosine_similarity
 
 console = Console(record=True)
 
 
+# ── Compatibility patch ────────────────────────────────────────────────────────
+
 def _patch_torchmetrics_compat() -> None:
     import torchmetrics.utilities.data as _tmd
 
     if not hasattr(_tmd, "get_num_classes"):
-
         def get_num_classes(pred, target=None, num_classes=None):
             """Stub replacing removed torchmetrics helper."""
             if num_classes is not None:
@@ -36,6 +38,7 @@ def _patch_torchmetrics_compat() -> None:
             return int(pred.max().item()) + 1
 
         _tmd.get_num_classes = get_num_classes
+
     if "pytorch_lightning.metrics" not in sys.modules:
         import pytorch_lightning as _pl
 
@@ -47,6 +50,8 @@ def _patch_torchmetrics_compat() -> None:
 
 _patch_torchmetrics_compat()
 
+
+# ── Audio helpers ──────────────────────────────────────────────────────────────
 
 def load_audio(path: str) -> tuple[torch.Tensor, int]:
     """Load audio file into waveform tensor, downmix to mono if needed."""
@@ -73,88 +78,134 @@ def compute_embedding(
     return embedding
 
 
+# ── Result dataclass ───────────────────────────────────────────────────────────
+
 @dataclass
 class ClusteringResult:
     """Holds the output of cluster_speakers()."""
 
-    # Maps each input file path → cluster label (0-based int)
     labels: Dict[str, int] = field(default_factory=dict)
-
-    # Maps cluster label → list of file paths in that cluster
     clusters: Dict[int, List[str]] = field(default_factory=dict)
-
-    # Total number of distinct clusters found
     n_clusters: int = 0
-
-    # Algorithm used and its key parameters
     algorithm: str = ""
     linkage: str = ""
+    # Distance threshold in [0, 2] cosine-distance space (pyannote convention).
+    # -1.0 when n_clusters was forced explicitly.
+    distance_threshold: float = 0.0
+    # Soft cluster scores: (N, K) — one row per file, one col per cluster.
+    # Higher score → file more likely belongs to that cluster.
+    soft_scores: np.ndarray | None = None
+    # Centroid vectors: (K, D) — one centroid per cluster.
+    centroids: np.ndarray | None = None
 
-    # User-facing similarity threshold (0–1); stored as-is for display/serialisation.
-    # The internal cosine *distance* threshold passed to sklearn is (1 - similarity_threshold).
-    similarity_threshold: float = 0.0
 
+# ── Core clustering ────────────────────────────────────────────────────────────
 
 def cluster_speakers(
     speaker_paths: List[str],
     embeddings: Dict[str, np.ndarray],
     *,
-    similarity_threshold: float = 0.2,
-    linkage: str = "average",
+    distance_threshold: float = 0.7,
+    method: str = "average",
+    min_cluster_size: int = 1,
     n_clusters: int | None = None,
+    min_clusters: int | None = None,
+    max_clusters: int | None = None,
 ) -> ClusteringResult:
     """
-    Cluster speaker embeddings using agglomerative hierarchical clustering.
+    Cluster speaker embeddings using pyannote's own AgglomerativeClustering.
 
-    Uses sklearn's AgglomerativeClustering with cosine affinity, which mirrors
-    the approach used inside pyannote's own diarization pipeline
-    (pyannote.audio.pipelines.clustering.AgglomerativeClustering) but operates
-    directly on the pre-computed embedding matrix so no segmentation pass is
-    needed.
+    Compared to a plain sklearn approach, this version adds:
+      - NaN and low-activity embedding filtering   (filter_embeddings)
+      - Small-cluster merging into nearest centroid (min_cluster_size)
+      - Soft cluster confidence scores             (soft_clusters)
+      - Per-cluster centroid vectors               (centroids)
+      - min_clusters / max_clusters enforcement
+
+    How the reshape works
+    ---------------------
+    Pyannote's clustering pipeline expects:
+      embeddings    : (num_chunks, num_speakers, D)
+      segmentations : (num_chunks, num_frames,   num_speakers)
+
+    Since every file here is a standalone whole-file embedding (no chunked
+    segmentation), we treat each file as one chunk with exactly one speaker
+    slot and one always-active frame:
+      embeddings    : (N, 1, D)
+      segmentations : (N, 1, 1)  — all-ones (always active)
+
+    After clustering, hard_clusters[:, 0] gives the integer label per file.
 
     Args:
-        speaker_paths:        Ordered list of audio file paths (keys into embeddings).
-        embeddings:           Dict mapping path → (1, D) numpy embedding array.
-        similarity_threshold: Cosine *similarity* cut-off for merging clusters (0–1).
-                              Two speakers are merged when their cosine similarity
-                              is **above** this value, i.e. the internal cosine
-                              distance threshold is ``1 - similarity_threshold``.
-                              Higher values → stricter merging → more clusters.
-                              Ignored when n_clusters is set.
-                              Default 0.2 (≈ "possibly same speaker").
-        linkage:              Linkage criterion – 'average', 'complete', or
-                              'single'. 'average' (UPGMA) matches pyannote's
-                              default centroid strategy most closely.
-        n_clusters:           Force an exact cluster count. When set,
-                              similarity_threshold is ignored.
+        speaker_paths:      Ordered list of audio file paths (keys into
+                            embeddings). Must contain at least 2 entries.
+        embeddings:         Dict mapping path → (1, D) numpy array.
+        distance_threshold: Cosine distance cut-off in [0, 2].
+                            Lower → fewer merges → more clusters.
+                            Typical useful range: 0.4 – 1.0.
+                            Default 0.7 mirrors pyannote's tuned sweet-spot.
+                            Ignored when n_clusters is provided.
+        method:             Scipy linkage method: 'average', 'complete',
+                            'single', 'ward', 'centroid', 'median'.
+                            'average' (UPGMA) is pyannote's default and works
+                            well for cosine-distance speaker embeddings.
+        min_cluster_size:   Minimum number of files a cluster must contain.
+                            Clusters smaller than this are dissolved and their
+                            files reassigned to the nearest large-cluster
+                            centroid. Default 1 (no merging).
+        n_clusters:         Force an exact cluster count. Overrides
+                            distance_threshold but still respects min/max.
+        min_clusters:       Minimum cluster count the dendrogram cut must
+                            produce. Useful when you know at least K speakers
+                            are present.
+        max_clusters:       Maximum cluster count.
 
     Returns:
-        ClusteringResult dataclass.
+        ClusteringResult dataclass with labels, clusters, soft_scores,
+        centroids, and metadata.
     """
     if len(speaker_paths) < 2:
         raise ValueError("At least 2 speaker embeddings are required for clustering.")
 
-    if not (0.0 <= similarity_threshold <= 1.0):
-        raise ValueError(
-            f"similarity_threshold must be in [0, 1], got {similarity_threshold}."
-        )
+    # ── 1. Stack embeddings into (N, 1, D) ────────────────────────────────────
+    stacked = np.stack(
+        [embeddings[p].squeeze(0) for p in speaker_paths], axis=0
+    )  # (N, D)
+    N, D = stacked.shape
+    emb_3d = stacked[:, np.newaxis, :]  # (N, 1, D)
 
-    # Stack into (N, D) matrix – each row is one speaker's embedding
-    matrix = np.vstack([embeddings[p] for p in speaker_paths])  # (N, D)
+    # ── 2. Build synthetic all-ones segmentations (N, 1, 1) ───────────────────
+    #    filter_embeddings checks active frames. One always-on frame per file
+    #    means every embedding passes the activity filter (min_active_ratio).
+    seg_data = np.ones((N, 1, 1), dtype=np.float32)
+    window = SlidingWindow(start=0.0, duration=1.0, step=1.0)
+    segmentations = SlidingWindowFeature(seg_data, window)
 
-    # sklearn uses cosine *distance* = 1 − cosine_similarity internally.
-    # Convert the user-supplied similarity threshold to a distance threshold.
-    distance_threshold = 1.0 - similarity_threshold
+    # ── 3. Configure pyannote's AgglomerativeClustering ───────────────────────
+    #    Hyper-parameters are normally set via pipeline.instantiate() from a
+    #    YAML config, but we set them directly so no config file is needed.
+    clusterer = PyannoteAHC(metric="cosine")
+    clusterer.threshold = distance_threshold
+    clusterer.method = method
+    clusterer.min_cluster_size = min_cluster_size
 
-    ahc_kwargs: dict = dict(metric="cosine", linkage=linkage)
-    if n_clusters is not None:
-        ahc_kwargs["n_clusters"] = n_clusters
-    else:
-        ahc_kwargs["n_clusters"] = None
-        ahc_kwargs["distance_threshold"] = distance_threshold
+    # ── 4. Run clustering ─────────────────────────────────────────────────────
+    #    Returns:
+    #      hard_clusters : (N, 1)    integer label per (chunk, speaker)
+    #      soft_clusters : (N, 1, K) score per (chunk, speaker, cluster)
+    #      centroids     : (K, D)
+    hard_clusters, soft_clusters, centroids = clusterer(
+        emb_3d,
+        segmentations=segmentations,
+        num_clusters=n_clusters,
+        min_clusters=min_clusters,
+        max_clusters=max_clusters,
+    )
 
-    ahc = SklearnAHC(**ahc_kwargs)
-    raw_labels: np.ndarray = ahc.fit_predict(matrix)  # shape (N,)
+    # ── 5. Flatten speaker dimension (always 0) and map back to paths ─────────
+    raw_labels: np.ndarray = hard_clusters[:, 0]       # (N,)
+    n_found = int(raw_labels.max()) + 1
+    soft_scores: np.ndarray = soft_clusters[:, 0, :]   # (N, K)
 
     label_map: Dict[str, int] = {
         path: int(raw_labels[i]) for i, path in enumerate(speaker_paths)
@@ -166,17 +217,31 @@ def cluster_speakers(
     return ClusteringResult(
         labels=label_map,
         clusters=cluster_map,
-        n_clusters=int(ahc.n_clusters_),
-        algorithm="AgglomerativeClustering",
-        linkage=linkage,
-        similarity_threshold=similarity_threshold if n_clusters is None else -1.0,
+        n_clusters=n_found,
+        algorithm="PyannoteAgglomerativeClustering",
+        linkage=method,
+        distance_threshold=distance_threshold if n_clusters is None else -1.0,
+        soft_scores=soft_scores,
+        centroids=centroids,
     )
 
 
+# ── Display & output ───────────────────────────────────────────────────────────
+
 def display_clustering(
-    result: ClusteringResult, embeddings: Dict[str, np.ndarray]
+    result: ClusteringResult,
+    embeddings: Dict[str, np.ndarray],
 ) -> None:
-    """Enhanced Rich table with Duration, Size, Cluster Count, and Similarity to Centroid."""
+    """
+    Print a Rich table with per-file Duration, Size, Similarity to centroid,
+    and (when available) the soft cluster confidence score.
+    """
+    has_soft = result.soft_scores is not None
+    # Build a fast lookup: path → row index in soft_scores
+    path_to_idx: Dict[str, int] = {
+        path: i for i, path in enumerate(result.labels.keys())
+    }
+
     table = Table(
         title=f"Speaker Clusters ({result.n_clusters} found)", show_lines=True
     )
@@ -184,12 +249,12 @@ def display_clustering(
     table.add_column("Files", style="white", no_wrap=True)
     table.add_column("Duration", style="cyan", justify="right")
     table.add_column("Size", style="magenta", justify="right")
-    table.add_column("Similarity", style="green", justify="right")
+    table.add_column("Centroid sim", style="green", justify="right")
+    if has_soft:
+        table.add_column("Confidence", style="blue", justify="right")
 
     for label, members in sorted(result.clusters.items()):
         cluster_size = len(members)
-
-        # Compute cluster centroid
         cluster_embeddings = np.vstack([embeddings[p] for p in members])
         centroid = np.mean(cluster_embeddings, axis=0, keepdims=True)
 
@@ -199,43 +264,44 @@ def display_clustering(
             file_link = f"file://{full_path}"
             linked_text = f"[link={file_link}]{short_name}[/link]"
 
-            # === Duration ===
             try:
                 waveform, sr = torchaudio.load(full_path)
-                duration = waveform.shape[1] / sr
-                duration_str = f"{duration:.2f}s"
-            except:
+                duration_str = f"{waveform.shape[1] / sr:.2f}s"
+            except Exception:
                 duration_str = "—"
 
-            # === File Size ===
             try:
-                size_mb = p.stat().st_size / (1024 * 1024)
-                size_str = f"{size_mb:.1f} MB"
-            except:
+                size_str = f"{p.stat().st_size / (1024 * 1024):.1f} MB"
+            except Exception:
                 size_str = "—"
 
-            # === Similarity to Centroid ===
             try:
-                emb = embeddings[full_path]
-                sim = cosine_similarity(emb, centroid)[0][0]
+                sim = cosine_similarity(embeddings[full_path], centroid)[0][0]
                 sim_str = f"{sim:.3f}"
-            except:
+            except Exception:
                 sim_str = "—"
 
-            # Cluster column (only on first row)
-            if i == 0:
-                cluster_cell = f"Cluster {label}\n[dim]({cluster_size})[/dim]"
-            else:
-                cluster_cell = ""
+            cluster_cell = (
+                f"Cluster {label}\n[dim]({cluster_size})[/dim]" if i == 0 else ""
+            )
+            row = [cluster_cell, linked_text, duration_str, size_str, sim_str]
 
-            table.add_row(cluster_cell, linked_text, duration_str, size_str, sim_str)
+            if has_soft:
+                try:
+                    idx = path_to_idx[full_path]
+                    score = float(result.soft_scores[idx, label])
+                    row.append(f"{score:.3f}")
+                except Exception:
+                    row.append("—")
+
+            table.add_row(*row)
 
     console.print("\n")
     console.print(table)
     console.print(
         f"\n[dim]Algorithm: {result.algorithm} | "
         f"Linkage: {result.linkage} | "
-        f"Similarity threshold: {result.similarity_threshold}[/]\n"
+        f"Distance threshold: {result.distance_threshold}[/]\n"
     )
 
 
@@ -247,25 +313,34 @@ def save_results(
     """
     Save clustering outputs to output_dir:
       - embeddings.npz
+      - centroids.npz   (when available)
       - clustering.json
       - report.html
     """
     shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. embeddings.npz
     npz_path = output_dir / "embeddings.npz"
     np.savez(npz_path, **{str(k): v for k, v in embeddings.items()})
     console.print(f"[dim]Saved embeddings  → {npz_path}[/]")
 
-    # 2. clustering.json
+    if result.centroids is not None:
+        centroids_path = output_dir / "centroids.npz"
+        np.savez(centroids_path, centroids=result.centroids)
+        console.print(f"[dim]Saved centroids   → {centroids_path}[/]")
+
+    if result.soft_scores is not None:
+        soft_path = output_dir / "soft_scores.npz"
+        np.savez(soft_path, soft_scores=result.soft_scores)
+        console.print(f"[dim]Saved soft scores → {soft_path}[/]")
+
     cluster_path = output_dir / "clustering.json"
     cluster_path.write_text(
         json.dumps(
             {
                 "algorithm": result.algorithm,
                 "linkage": result.linkage,
-                "similarity_threshold": result.similarity_threshold,
+                "distance_threshold": result.distance_threshold,
                 "n_clusters": result.n_clusters,
                 "labels": {str(k): v for k, v in result.labels.items()},
                 "clusters": {
@@ -277,22 +352,34 @@ def save_results(
     )
     console.print(f"[dim]Saved clustering  → {cluster_path}[/]")
 
-    # 3. report.html
     html_path = output_dir / "report.html"
     console.save_html(str(html_path))
     console.print(f"[dim]Saved report      → {html_path}[/]")
 
 
+# ── CLI entry point ────────────────────────────────────────────────────────────
+
 def main() -> None:
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    DEFAULT_AUDIO = str(
+        Path(
+            "~/Desktop/Jet_Files/Jet_Windows_Workspace/python_scripts/samples/audio"
+            "/features/generated/speech_waves/waves/"
+        )
+        .expanduser()
+        .resolve()
+    )
 
     parser = argparse.ArgumentParser(
-        description="Cluster speaker embeddings from WAV files using agglomerative hierarchical clustering."
+        description=(
+            "Cluster speaker embeddings from WAV files using pyannote's "
+            "AgglomerativeClustering pipeline."
+        )
     )
     parser.add_argument(
         "speakers",
-        nargs="+",
-        type=str,
+        nargs="*",
+        default=[DEFAULT_AUDIO],
         help=(
             "Paths to speaker WAV files or directories (space-separated, at least 2 "
             "required). Directories are scanned recursively for audio files."
@@ -307,13 +394,12 @@ def main() -> None:
     )
     parser.add_argument(
         "-t",
-        "--threshold",
+        "--distance-threshold",
         type=float,
-        default=0.2,
+        default=0.7,
         help=(
-            "Cosine similarity threshold for merging clusters (0–1, default: 0.2). "
-            "Speakers with similarity above this value are merged into the same cluster. "
-            "Higher values → stricter merging → more clusters. "
+            "Cosine distance threshold for merging clusters (0–2, default: 0.7). "
+            "Lower → stricter merging → more clusters. "
             "Ignored if --n-clusters is set."
         ),
     )
@@ -322,21 +408,40 @@ def main() -> None:
         "--linkage",
         type=str,
         default="average",
-        choices=["average", "complete", "single"],
-        help="Linkage criterion for AHC (default: average).",
+        choices=["average", "complete", "single", "ward", "centroid", "median"],
+        help="Linkage method for the dendrogram (default: average).",
     )
     parser.add_argument(
         "-n",
         "--n-clusters",
         type=int,
         default=None,
-        help="Force exact number of clusters. Overrides --threshold.",
+        help="Force exact number of clusters. Overrides --distance-threshold.",
+    )
+    parser.add_argument(
+        "--min-clusters",
+        type=int,
+        default=None,
+        help="Minimum number of clusters.",
+    )
+    parser.add_argument(
+        "--max-clusters",
+        type=int,
+        default=None,
+        help="Maximum number of clusters.",
+    )
+    parser.add_argument(
+        "--min-cluster-size",
+        type=int,
+        default=1,
+        help=(
+            "Minimum files a cluster must contain before being dissolved and "
+            "reassigned to the nearest large cluster (default: 1, no merging)."
+        ),
     )
     args = parser.parse_args()
 
-    # Resolve input paths (recursively scan directories)
     speaker_paths = resolve_audio_paths(args.speakers, recursive=True)
-
     if len(speaker_paths) < 2:
         console.print(
             "[red]Error: At least 2 speaker files are required for clustering.[/]"
@@ -357,9 +462,12 @@ def main() -> None:
         result = cluster_speakers(
             speaker_paths,
             embeddings,
-            similarity_threshold=args.threshold,
-            linkage=args.linkage,
+            distance_threshold=args.distance_threshold,
+            method=args.linkage,
+            min_cluster_size=args.min_cluster_size,
             n_clusters=args.n_clusters,
+            min_clusters=args.min_clusters,
+            max_clusters=args.max_clusters,
         )
 
     display_clustering(result, embeddings)
