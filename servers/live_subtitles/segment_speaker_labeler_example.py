@@ -252,8 +252,8 @@ if __name__ == "__main__":
     mock_model = MockEmbeddingModel(dimension=192)
     labeler = MockSegmentSpeakerLabeler(
         embedding_model=mock_model,
-        threshold_same=0.75,
-        threshold_possible=0.60,
+        threshold_same=0.15,
+        threshold_possible=0.075,
         min_segments_for_reference=2,
         max_embeddings_per_speaker=50,
         temporal_smoothing_window=3.0,
