@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+from threading import Lock
 
 import numpy as np
 import scipy.io.wavfile as wavfile
@@ -56,7 +57,7 @@ for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
 
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-N_SEGMENT_RESULTS = 10
+N_SEGMENT_RESULTS = 20
 LAST_N_SEGMENTS_DIR = OUTPUT_DIR / f"last_{N_SEGMENT_RESULTS}_segments"
 LAST_N_SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
 LIVE_AUDIO_BUFFER_DIR = OUTPUT_DIR
@@ -80,6 +81,9 @@ _embedding_model: Optional[Model] = None
 _embedding_inference: Optional[Inference] = None
 _current_speaker: Optional[str] = None
 _last_speaker_change_time: float = 0.0
+
+# Lock for thread-safe segment directory cleanup
+_segments_lock = Lock()
 
 
 def _get_speaker_labeler() -> SegmentSpeakerLabeler:
@@ -758,13 +762,21 @@ def blocking_process_audio(
     with open(segment_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata_out, f, ensure_ascii=False, indent=2)
 
-    subdirs = sorted(
-        [d for d in LAST_N_SEGMENTS_DIR.iterdir() if d.is_dir() and d.name.startswith("segments_")],
-        key=lambda d: d.name,
-    )
-    if len(subdirs) > N_SEGMENT_RESULTS:
-        for old in subdirs[:-N_SEGMENT_RESULTS]:
-            shutil.rmtree(old, ignore_errors=True)
+    # Clean up old segment directories, keeping only the N most recent
+    with _segments_lock:
+        subdirs = sorted(
+            [d for d in LAST_N_SEGMENTS_DIR.iterdir() 
+             if d.is_dir() and d.name.startswith("segments_")],
+            key=lambda d: d.name,
+        )
+        # Remove oldest directories if we have more than N_SEGMENT_RESULTS
+        while len(subdirs) > N_SEGMENT_RESULTS:
+            oldest = subdirs.pop(0)
+            try:
+                shutil.rmtree(oldest)
+                console.print(f"[dim]Removed old segment directory: {oldest.name}[/dim]")
+            except Exception as e:
+                console.print(f"[warning]Failed to remove old segment directory {oldest.name}: {e}[/warning]")
 
     context_duration = context_buffer.get_total_duration()
     context_uuid = context_buffer.get_context_uuid() or uuid_
