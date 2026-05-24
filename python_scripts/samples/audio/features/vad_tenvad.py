@@ -316,7 +316,9 @@ def extract_speech_timestamps(
 if __name__ == "__main__":
     import argparse
 
-    DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
+    DEFAULT_AUDIO = str(
+        Path("~/.cache/files/audio/recording_3_speakers.wav").expanduser().resolve()
+    )
     parser = argparse.ArgumentParser(
         description="Extract speech timestamps from audio using TEN VAD.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
