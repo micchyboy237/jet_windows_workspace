@@ -647,3 +647,8 @@ class SegmentSpeakerLabeler:
             labeler._speakers[label] = ref
         
         return labeler
+
+
+if __name__ == "__main__":
+    from _main_segment_speaker_labeler import main
+    main()

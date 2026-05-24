@@ -8,14 +8,7 @@ import os
 import numpy as np
 import numpy.typing as npt
 import librosa
-
-# Optional torch support
-try:
-    import torch
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
-    torch = None  # type: ignore
+import torch
 
 AudioInput = Union[
     str,
@@ -61,6 +54,122 @@ def resolve_audio_paths(audio_inputs: AudioPathsInput, recursive: bool = False) 
 
     # Return sorted list of absolute path strings
     return sorted(str(p) for p in resolved_paths)
+
+
+def resolve_audio_paths_as_np_list(
+    audio_inputs: AudioPathsInput,
+    sr: int = 16_000,
+    mono: bool = True,
+    recursive: bool = False,
+) -> list[np.ndarray]:
+    """
+    Resolve audio files from paths and load them as numpy arrays.
+    
+    Args:
+        audio_inputs: Single file, list of files, or directory path
+        sr: Target sample rate for loaded audio (default: 16000 Hz)
+        mono: Whether to convert to mono (default: True)
+        recursive: Whether to recursively search directories (default: False)
+    
+    Returns:
+        List of numpy arrays containing audio data for each file
+        
+    Raises:
+        ValueError: If no valid audio files are found
+        RuntimeError: If any audio file fails to load
+    """
+    # Get all audio file paths using resolve_audio_paths
+    audio_paths = resolve_audio_paths(audio_inputs, recursive=recursive)
+    
+    # Load each audio file into a numpy array
+    audio_data_list = []
+    failed_files = []
+    
+    for audio_path in audio_paths:
+        try:
+            audio_array, actual_sr = load_audio(audio_path, sr=sr, mono=mono)
+            
+            # Resample if the loaded sample rate doesn't match target
+            if actual_sr != sr:
+                audio_array = resample_audio(audio_array, actual_sr, target_sr=sr)
+            
+            audio_data_list.append(audio_array)
+            
+        except Exception as e:
+            failed_files.append((audio_path, str(e)))
+    
+    # Report any failures
+    if failed_files:
+        error_msg = f"Failed to load {len(failed_files)} audio file(s):\n"
+        for file_path, error in failed_files:
+            error_msg += f"  - {file_path}: {error}\n"
+        raise RuntimeError(error_msg)
+    
+    if not audio_data_list:
+        raise ValueError("No audio data could be loaded from the provided inputs.")
+    
+    return audio_data_list
+
+
+def resolve_audio_paths_as_tensor_list(
+    audio_inputs: AudioPathsInput,
+    sr: int = 16_000,
+    mono: bool = True,
+    recursive: bool = False,
+    device: Union[str, torch.device] = "cpu",
+) -> list["torch.Tensor"]:
+    """
+    Resolve audio files from paths and load them as torch tensors.
+    
+    Args:
+        audio_inputs: Single file, list of files, or directory path
+        sr: Target sample rate for loaded audio (default: 16000 Hz)
+        mono: Whether to convert to mono (default: True)
+        recursive: Whether to recursively search directories (default: False)
+        device: Target device for the tensors (default: "cpu")
+    
+    Returns:
+        List of torch tensors containing audio data for each file
+        
+    Raises:
+        ImportError: If torch is not installed
+        ValueError: If no valid audio files are found
+        RuntimeError: If any audio file fails to load
+    """
+    # Get all audio file paths using resolve_audio_paths
+    audio_paths = resolve_audio_paths(audio_inputs, recursive=recursive)
+    
+    # Load each audio file into a numpy array first, then convert to tensor
+    audio_tensor_list = []
+    failed_files = []
+    
+    for audio_path in audio_paths:
+        try:
+            # Load audio as numpy array
+            audio_array, actual_sr = load_audio(audio_path, sr=sr, mono=mono)
+            
+            # Resample if the loaded sample rate doesn't match target
+            if actual_sr != sr:
+                audio_array = resample_audio(audio_array, actual_sr, target_sr=sr)
+            
+            # Convert numpy array to torch tensor
+            audio_tensor = torch.from_numpy(audio_array).to(device)
+            audio_tensor_list.append(audio_tensor)
+            
+        except Exception as e:
+            failed_files.append((audio_path, str(e)))
+    
+    # Report any failures
+    if failed_files:
+        error_msg = f"Failed to load {len(failed_files)} audio file(s):\n"
+        for file_path, error in failed_files:
+            error_msg += f"  - {file_path}: {error}\n"
+        raise RuntimeError(error_msg)
+    
+    if not audio_tensor_list:
+        raise ValueError("No audio data could be loaded from the provided inputs.")
+    
+    return audio_tensor_list
 
 
 def load_audio(
@@ -134,7 +243,7 @@ def load_audio(
         y = audio.astype(np.float32, copy=False)
         current_sr = None
 
-    elif HAS_TORCH and isinstance(audio, torch.Tensor):
+    elif isinstance(audio, torch.Tensor):
         y = audio.detach().float().cpu().numpy()
         current_sr = None
 
