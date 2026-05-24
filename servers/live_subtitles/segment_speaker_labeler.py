@@ -1,3 +1,5 @@
+# segment_speaker_labeler.py
+
 """Progressive segment speaker labeling with dynamic reference maintenance."""
 
 from dataclasses import dataclass, field
