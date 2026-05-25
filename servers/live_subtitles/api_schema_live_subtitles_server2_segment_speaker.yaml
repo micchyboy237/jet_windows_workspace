@@ -1,6 +1,5 @@
 # **Output format (JSON text):**
 # See the response schema below.
-
 responses:
   "101":
     description: WebSocket upgrade successful
@@ -8,7 +7,6 @@ responses:
       application/json:
         schema:
           $ref: "#/components/schemas/WebSocketResponse"
-
 /transcribe:
   post:
     tags:
@@ -47,7 +45,6 @@ responses:
         description: Empty audio file
       "500":
         description: Transcription error
-
 /translate:
   post:
     tags:
@@ -72,7 +69,6 @@ responses:
         description: Missing or empty Japanese text
       "500":
         description: Translation error
-
 /speakers:
   get:
     tags:
@@ -87,7 +83,6 @@ responses:
           application/json:
             schema:
               $ref: "#/components/schemas/SpeakerDiarization"
-
 /speakers/reset:
   post:
     tags:
@@ -109,7 +104,6 @@ responses:
                 message:
                   type: string
                   example: Speaker state reset
-
 /speakers/merge:
   post:
     tags:
@@ -152,7 +146,6 @@ responses:
                   example: SPEAKER_01
       "400":
         description: Could not merge speakers
-
 /speakers/consolidate:
   post:
     tags:
@@ -188,7 +181,6 @@ responses:
               $ref: "#/components/schemas/ConsolidateResponse"
       "400":
         description: Speaker labeler not initialized
-
 components:
   schemas:
     WebSocketHeader:
@@ -209,29 +201,26 @@ components:
           description: Unique identifier for this audio segment
         forced:
           type: boolean
-          description: Whether this segment was forced (not triggered by VAD)
+          description: Whether this segment was forced (not triggered by VAD silence)
         vad_reason:
           type: string
-          description: Voice Activity Detection trigger reason
+          description: Voice Activity Detection trigger reason for segment boundary
           enum:
-            - speech_start
-            - speech_end
-            - speech_continue
-            - forced
-            - timeout
             - silence
+            - valley
+            - hard_limit
         start_sec:
           type: number
           format: float
-          description: Segment start time in seconds
+          description: Segment start time in seconds relative to recording start
         end_sec:
           type: number
           format: float
-          description: Segment end time in seconds
+          description: Segment end time in seconds relative to recording start
         duration_sec:
           type: number
           format: float
-          description: Segment duration in seconds
+          description: Total segment duration in seconds
         sample_rate:
           type: integer
           default: 16000
@@ -239,7 +228,7 @@ components:
         started_at:
           type: string
           format: date-time
-          description: ISO timestamp when segment was captured
+          description: ISO timestamp when segment capture was initiated (local system time)
         start_time_utc:
           type: string
           format: date-time
@@ -266,12 +255,28 @@ components:
             Real-time silence gap in seconds between the previous segment's end
             and this segment's start. Calculated from absolute UTC timestamps,
             so it reflects actual wall-clock time, not buffer-relative time.
-
             - `null` for the first segment in a session (no previous segment).
             - `null` when timestamp tracking is not available.
             - Negative values indicate overlapping segments (should not normally occur).
           example: 0.58
-
+        vad_score:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0.0
+          maximum: 1.0
+          description: |
+            Balanced VAD segment quality score (0.0 to 1.0).
+            Computed from per-frame voice activity probabilities using a
+            balanced scoring method that considers peak height, sustained
+            width, and global distribution.
+            Higher scores indicate clearer, more sustained speech segments.
+            - `null` when segment probabilities are not available.
+            - Values ≥ 0.85: Excellent sustained speech
+            - Values ≥ 0.70: Good voice activity
+            - Values ≥ 0.55: Marginal/uncertain
+            - Values < 0.55: Poor or no voice activity
+          example: 0.868
     WebSocketResponse:
       type: object
       description: Server response for each processed audio segment
@@ -352,7 +357,6 @@ components:
         segment_dir:
           type: string
           description: Directory name for this segment's saved files
-
     SpeakerResult:
       type: object
       description: Individual speaker identification result
@@ -372,7 +376,6 @@ components:
         is_new_speaker:
           type: boolean
           description: Whether this is a newly identified speaker
-
     SpeakerDiarization:
       type: object
       description: Current speaker diarization state
@@ -397,7 +400,6 @@ components:
           additionalProperties:
             $ref: "#/components/schemas/SpeakerInfo"
           description: Detailed info per speaker, keyed by speaker label
-
     SpeakerInfo:
       type: object
       description: Detailed information about a single speaker
@@ -414,7 +416,6 @@ components:
         average_confidence:
           type: number
           description: Average confidence score for this speaker
-
     TranscribeResponse:
       type: object
       description: Response from the transcription endpoint
@@ -438,7 +439,6 @@ components:
           description: Phrase-level segmentation with timestamps
           items:
             $ref: "#/components/schemas/PhraseSegment"
-
     WordSegment:
       type: object
       properties:
@@ -451,7 +451,6 @@ components:
         end:
           type: number
           description: End time in seconds
-
     PhraseSegment:
       type: object
       properties:
@@ -464,7 +463,6 @@ components:
         end:
           type: number
           description: End time in seconds
-
     TranslateRequest:
       type: object
       description: Translation request body
@@ -487,7 +485,6 @@ components:
           maximum: 1.0
           default: 0.35
           description: LLM temperature for translation generation
-
     TranslateResponse:
       type: object
       description: Translation response
@@ -511,7 +508,6 @@ components:
           type: number
           nullable: true
           description: Confidence score for the translation
-
     ConsolidateResponse:
       type: object
       description: Speaker consolidation results
