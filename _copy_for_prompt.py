@@ -92,8 +92,10 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr_onnx.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\funasr\utils\postprocess_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\funasr\utils\postprocess_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
     r"",
 ]
 
@@ -111,7 +113,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update TranscriptionResult to include language, emo, event, and any other data can be parsed from result text.
+How to make sure speaker labeler is only called when transcribed text has many characters?
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
@@ -121,7 +123,7 @@ Use visuals, diagrams, or tables when helpful.
 Show full code for new files, then show full function code for new or updated functions.
 Keep explanations simple and clear.
 
-Write flexible, reusable, maintainable, and robust code.
+Write smart, flexible, reusable, maintainable, and robust code.
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """

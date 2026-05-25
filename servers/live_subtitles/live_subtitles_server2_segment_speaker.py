@@ -294,6 +294,41 @@ def should_reset_context(header: dict) -> bool:
     return True
 
 
+def should_label_speaker(text: str, min_chars: int = 10) -> bool:
+    """
+    Determine if speaker labeling should be performed based on text content.
+    
+    Parameters
+    ----------
+    text : str
+        Transcribed Japanese text
+    min_chars : int
+        Minimum number of meaningful characters required
+    
+    Returns
+    -------
+    bool
+        True if speaker labeling should proceed
+    """
+    # Strip whitespace and punctuation
+    clean_text = text.strip().rstrip('.。！？、…・「」『』').strip()
+    
+    # Count only Japanese characters (hiragana, katakana, kanji)
+    ja_chars = sum(1 for c in clean_text if (
+        '\u3040' <= c <= '\u309f' or  # Hiragana
+        '\u30a0' <= c <= '\u30ff' or  # Katakana
+        '\u4e00' <= c <= '\u9fff' or  # Kanji
+        '\u3400' <= c <= '\u4dbf'     # Kanji Extension A
+    ))
+    
+    # Also count meaningful non-Japanese characters (letters, digits)
+    meaningful_chars = sum(1 for c in clean_text if c.isalnum())
+    
+    total_meaningful = ja_chars + meaningful_chars
+    
+    return total_meaningful >= min_chars
+
+
 def blocking_process_audio(
     audio_bytes: bytes,
     header: dict
@@ -364,36 +399,8 @@ def blocking_process_audio(
         f"[info]Full Duration:[/info] "
         f"[time]{actual_full_duration_sec:.2f}s[/time] / [time]{max_duration_sec:.2f}s[/time] max"
     )
-    
-    segment_timestamp = header.get("start_sec", time.time())
-    segment_duration = header.get("duration_sec", len(audio_np) / sample_rate)
-    use_multiple = segment_duration >= 3.0
-    
-    speaker_results, primary_label, primary_confidence, speaker_metadata = (
-        label_speakers_for_segment(
-            waveform=audio_np,
-            sample_rate=sample_rate,
-            timestamp=segment_timestamp,
-            return_multiple=use_multiple,
-        )
-    )
-    
-    if len(speaker_results) > 1:
-        speakers_str = ", ".join(
-            f"{r['label']}({r['confidence']:.2f})"
-            for r in speaker_results[:3]
-        )
-        console.print(
-            f"[speaker]Speakers: [{speakers_str}] "
-            f"(primary: {primary_label}, type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
-        )
-    else:
-        console.print(
-            f"[speaker]Speaker: {primary_label} "
-            f"(confidence: {primary_confidence:.3f}, "
-            f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
-        )
-    
+
+    # STEP 1: Transcribe first (before speaker labeling)
     full_trans_result = transcribe_japanese(
         audio_bytes=full_audio_bytes,
         sample_rate=sample_rate,
@@ -406,6 +413,54 @@ def blocking_process_audio(
     full_word_segments_text = "".join(s["word"] for s in full_word_segments)
     full_ja_text = full_word_segments_text
     full_ja_sents = split_sentences_ja(full_ja_text)
+
+    # STEP 2: Check if text content is sufficient for speaker labeling
+    text_has_sufficient_content = should_label_speaker(
+        full_ja_text, 
+        min_chars=10  # Configurable threshold
+    )
+
+    # STEP 3: Only perform speaker labeling if text has enough content
+    speaker_results = []
+    primary_label = None
+    primary_confidence = 0.0
+    speaker_metadata = {"match_type": "skipped_no_text"}
+
+    if text_has_sufficient_content:
+        segment_timestamp = header.get("start_sec", time.time())
+        segment_duration = header.get("duration_sec", len(audio_np) / sample_rate)
+        use_multiple = segment_duration >= 3.0
+        
+        speaker_results, primary_label, primary_confidence, speaker_metadata = (
+            label_speakers_for_segment(
+                waveform=audio_np,
+                sample_rate=sample_rate,
+                timestamp=segment_timestamp,
+                return_multiple=use_multiple,
+            )
+        )
+
+        if len(speaker_results) > 1:
+            speakers_str = ", ".join(
+                f"{r['label']}({r['confidence']:.2f})"
+                for r in speaker_results[:3]
+            )
+            console.print(
+                f"[speaker]Speakers: [{speakers_str}] "
+                f"(primary: {primary_label}, type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+            )
+        else:
+            console.print(
+                f"[speaker]Speaker: {primary_label} "
+                f"(confidence: {primary_confidence:.3f}, "
+                f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+            )
+    else:
+        console.print(
+            f"[warning]Skipping speaker labeling - insufficient text content "
+            f"(text: '{full_ja_text[:50]}{'...' if len(full_ja_text) > 50 else ''}', "
+            f"length: {len(full_ja_text)} chars)[/warning]"
+        )
     
     prev_full_ja_text = None
     prev_full_en_text = None
@@ -782,6 +837,7 @@ def blocking_process_audio(
     if _speaker_labeler and _speaker_labeler.total_segments_processed % 5 == 0:
         save_speaker_state()
     
+    # Build response with speaker info (even if skipped)
     response = {
         "uuid": uuid_,
         "new_duration": header['duration_sec'],
@@ -797,9 +853,17 @@ def blocking_process_audio(
         "coverage_label": full_metadata["coverage_label"],
         "speaker_label": primary_label,
         "speaker_confidence": primary_confidence,
-        "speaker_match_type": speaker_metadata.get("match_type", "unknown"),
+        "speaker_match_type": speaker_metadata.get("match_type", "skipped"),
         "speakers": speaker_results,
-        "diarization": get_speaker_diarization(),
+        "diarization": get_speaker_diarization() if text_has_sufficient_content else {
+            "current_speaker": _current_speaker,
+            "known_speakers": [],
+            "speaker_count": 0,
+            "speakers_info": {},
+            "total_segments_processed": 0,
+            "note": "Speaker labeling skipped - insufficient text content"
+        },
+        "speaker_labeling_performed": text_has_sufficient_content,
         "old_ja_sents": old_ja_sents,
         "new_ja_sents": new_ja_sents,
         "old_en_sents": old_en_sents,
@@ -808,6 +872,7 @@ def blocking_process_audio(
         "segment_number": segment_num,
         "segment_dir": segment_dir_name,
     }
+
     return response
 
 

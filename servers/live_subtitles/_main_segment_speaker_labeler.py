@@ -97,6 +97,7 @@ def main():
         for i, (waveform, filepath_str) in enumerate(audio_data):
             filepath = Path(filepath_str)
             filename = filepath.name
+            dir_path = str(filepath.parent)  # Get directory path
             timestamp = 0.0
 
             if waveform.dim() == 1:
@@ -124,6 +125,7 @@ def main():
                 "index": i + 1,
                 "file": str(filepath),
                 "filename": filename,
+                "dir": dir_path,  # Add directory path
                 "duration": duration,
                 "matches": matches,
             })
@@ -137,6 +139,7 @@ def main():
                 "index": group["index"],
                 "file": group["file"],
                 "filename": group["filename"],
+                "dir": group["dir"],  # Add directory to results
                 "duration": group["duration"],
                 "label": match["label"],
                 "confidence": match["confidence"],
@@ -153,7 +156,7 @@ def main():
         title_justify="left"
     )
     table.add_column("#", justify="right", style="dim")
-    table.add_column("Filename", style="cyan", no_wrap=True)
+    table.add_column("Dir", style="cyan")  # Changed from "Filename" to "Dir"
     table.add_column("Duration", justify="right")
     table.add_column("Rank", justify="center")
     table.add_column("Speaker", style="green", justify="center")
@@ -170,9 +173,10 @@ def main():
             # Only show segment index on first row
             index_str = str(group["index"]) if is_first else ""
 
-            # Only show filename on first row
-            filename_str = group["filename"] if is_first else ""
-
+            # Show directory name with terminal link on first row
+            dir_name = Path(group["dir"]).name  # Get just the directory name
+            dir_link = f"[link=file://{group['dir']}]{dir_name}[/link]" if is_first else ""
+            
             # Only show duration on first row
             duration_str = f"{group['duration']:.2f}s" if is_first else ""
 
@@ -185,7 +189,7 @@ def main():
 
             table.add_row(
                 index_str,
-                filename_str,
+                dir_link,  # Changed from filename_str to dir_link
                 duration_str,
                 rank_str,
                 f"[bold]{match['label']}[/bold]",
@@ -229,6 +233,7 @@ def main():
         {
             "file": r["file"],
             "filename": r["filename"],
+            "dir": r["dir"],  # Add directory to summary
             "duration": r["duration"],
             "primary_speaker": r["label"],
             "confidence": r["confidence"],
