@@ -484,12 +484,12 @@ if __name__ == "__main__":
     
     default_audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\start_15s_recording_1_speaker.wav"
     
-    parser = argparse.ArgumentParser(description="Japanese ASR demo.")
+    parser = argparse.ArgumentParser(description="ASR demo with language detection.")
     parser.add_argument(
         "audio_path",
         nargs="?",
         default=default_audio_path,
-        help="Japanese audio to transcribe (optional, defaults to sample audio path)",
+        help="Audio to transcribe (optional, defaults to sample audio path)",
     )
     parser.add_argument(
         "-l", "--language",
@@ -501,14 +501,14 @@ if __name__ == "__main__":
     language = args.language
     
     console = Console()
-    console.print("[bold green]Japanese:[/bold green]")
+    
     result: TranscriptionResult = transcribe_audio_llm_from_file(
         audio_path,
         language=language,
     )
     
-    # ✅ Extract new fields
-    ja_text = result.pop("text")
+    # ✅ Extract fields
+    transcribed_text = result.pop("text")
     detected_language = result.pop("language")
     detected_emotion = result.pop("emo")
     detected_event = result.pop("event")
@@ -520,6 +520,41 @@ if __name__ == "__main__":
     console.print(f"[cyan]🔤 Detected Language:[/cyan] {detected_language or 'unknown'}")
     console.print(f"[cyan]😊 Detected Emotion:[/cyan] {detected_emotion or 'neutral'}")
     console.print(f"[cyan]🎵 Detected Events:[/cyan] {detected_event or 'none'}")
+    
+    # ✅ Language-specific processing
+    language_map = {
+        "zh": "Chinese",
+        "en": "English",
+        "ja": "Japanese",
+        "ko": "Korean",
+        "yue": "Cantonese",
+    }
+    detected_lang_name = language_map.get(detected_language, detected_language or "Unknown")
+    console.print(f"[bold green]{detected_lang_name}:[/bold green]")
+    
+    # ✅ Only apply Japanese-specific processing if language is Japanese
+    if detected_language == "ja":
+        # Japanese-specific processing already done in transcribe_audio_llm_from_file
+        console.print(f"JA:\n[bold cyan]{transcribed_text}[/bold cyan]")
+        
+        # ✅ Translate only if Japanese
+        console.print("[dim]Loading translator...[/dim]")
+        try:
+            en_text = translate_japanese_to_english(transcribed_text)["text"]
+            console.print(f"EN:\n[bold cyan]{en_text}[/bold cyan]")
+            
+            # Save English translation
+            en_text_path = OUTPUT_DIR / "en_text.md"
+            with open(en_text_path, "w", encoding="utf-8") as f:
+                f.write(en_text)
+            console.print(
+                f"[bold green]Saved en_text to:[/bold green] [link=file://{en_text_path.resolve()}]{en_text_path}[/link]"
+            )
+        except Exception as e:
+            console.print(f"[yellow]Translation failed: {e}[/yellow]")
+    else:
+        # ✅ For non-Japanese languages, just display the transcribed text
+        console.print(f"Text:\n[bold cyan]{transcribed_text}[/bold cyan]")
     
     pprint(result, expand_all=True)
     
@@ -535,6 +570,7 @@ if __name__ == "__main__":
     rich_meta_path = OUTPUT_DIR / "rich_metadata.json"
     rich_meta = {
         "language": detected_language,
+        "language_name": detected_lang_name,
         "emotion": detected_emotion,
         "event": detected_event,
     }
@@ -544,11 +580,12 @@ if __name__ == "__main__":
         f"[bold green]Saved rich_metadata to:[/bold green] [link=file://{rich_meta_path.resolve()}]{rich_meta_path}[/link]"
     )
     
-    ja_text_path = OUTPUT_DIR / "ja_text.md"
-    with open(ja_text_path, "w", encoding="utf-8") as f:
-        f.write(ja_text)
+    # ✅ Save transcribed text (language-agnostic name)
+    text_path = OUTPUT_DIR / "transcribed_text.md"
+    with open(text_path, "w", encoding="utf-8") as f:
+        f.write(transcribed_text)
     console.print(
-        f"[bold green]Saved ja_text to:[/bold green] [link=file://{ja_text_path.resolve()}]{ja_text_path}[/link]"
+        f"[bold green]Saved transcribed_text to:[/bold green] [link=file://{text_path.resolve()}]{text_path}[/link]"
     )
     
     word_segments_path = OUTPUT_DIR / "word_segments.json"
@@ -572,43 +609,41 @@ if __name__ == "__main__":
         f"[bold green]Saved metadata to:[/bold green] [link=file://{metadata_path.resolve()}]{metadata_path}[/link]"
     )
     
-    phrases_dir = OUTPUT_DIR / "phrases"
-    phrases_dir.mkdir(parents=True, exist_ok=True)
-    console.print(
-        f"[bold green]Created phrases directory:[/bold green] [link=file://{phrases_dir.resolve()}]{phrases_dir}[/link]"
-    )
-    
-    sample_rate, full_audio_data = wavfile.read(str(audio_path))
-    for phrase in phrase_segments:
-        phrase_num = phrase["index"]
-        phrase_dir = phrases_dir / f"phrase_{phrase_num}"
-        phrase_dir.mkdir(parents=True, exist_ok=True)
-        meta_path = phrase_dir / "meta.json"
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(phrase, f, ensure_ascii=False, indent=2)
+    # ✅ Only create phrase segments if they exist (works for all languages)
+    if phrase_segments:
+        phrases_dir = OUTPUT_DIR / "phrases"
+        phrases_dir.mkdir(parents=True, exist_ok=True)
         console.print(
-            f"[bold green]Saved meta.json to:[/bold green] [link=file://{meta_path.resolve()}]{meta_path}[/link]"
+            f"[bold green]Created phrases directory:[/bold green] [link=file://{phrases_dir.resolve()}]{phrases_dir}[/link]"
         )
-        start_sec = phrase.get("start_sec")
-        end_sec = phrase.get("end_sec")
-        if start_sec is not None and end_sec is not None:
-            start_sample = int(start_sec * sample_rate)
-            end_sample = int(end_sec * sample_rate)
-            sliced_data = full_audio_data[start_sample:end_sample]
-            sound_path = phrase_dir / "sound.wav"
-            wavfile.write(str(sound_path), sample_rate, sliced_data)
+        
+        sample_rate, full_audio_data = wavfile.read(str(audio_path))
+        for phrase in phrase_segments:
+            phrase_num = phrase["index"]
+            phrase_dir = phrases_dir / f"phrase_{phrase_num}"
+            phrase_dir.mkdir(parents=True, exist_ok=True)
+            meta_path = phrase_dir / "meta.json"
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(phrase, f, ensure_ascii=False, indent=2)
             console.print(
-                f"[bold green]Saved sound.wav to:[/bold green] [link=file://{sound_path.resolve()}]{sound_path}[/link]"
+                f"[bold green]Saved meta.json to:[/bold green] [link=file://{meta_path.resolve()}]{meta_path}[/link]"
             )
-        else:
-            console.print(
-                f"[yellow]Skipping sound.wav for phrase_{phrase_num} (no timestamps)[/yellow]"
-            )
+            start_sec = phrase.get("start_sec")
+            end_sec = phrase.get("end_sec")
+            if start_sec is not None and end_sec is not None:
+                start_sample = int(start_sec * sample_rate)
+                end_sample = int(end_sec * sample_rate)
+                sliced_data = full_audio_data[start_sample:end_sample]
+                sound_path = phrase_dir / "sound.wav"
+                wavfile.write(str(sound_path), sample_rate, sliced_data)
+                console.print(
+                    f"[bold green]Saved sound.wav to:[/bold green] [link=file://{sound_path.resolve()}]{sound_path}[/link]"
+                )
+            else:
+                console.print(
+                    f"[yellow]Skipping sound.wav for phrase_{phrase_num} (no timestamps)[/yellow]"
+                )
     
-    console.print(f"JA:\n[bold cyan]{ja_text}[/bold cyan]")
-    console.print("[dim]Loading translator...[/dim]")
-    en_text = translate_japanese_to_english(ja_text)["text"]
-    console.print(f"EN:\n[bold cyan]{en_text}[/bold cyan]")
     console.print(
         "[bold green]✅ Per-phrase audio + meta export complete![/bold green]"
     )
