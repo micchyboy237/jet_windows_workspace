@@ -235,16 +235,12 @@ def label_speakers_for_segment(
         }]
         metadata["speaker_list"] = speaker_results
     
-    if primary_label != _current_speaker:
-        if primary_confidence > 0.8 or _current_speaker is None:
-            if _current_speaker is not None:
-                console.print(
-                    f"[speaker]🔊 Speaker change: {_current_speaker} → {primary_label} "
-                    f"(confidence: {primary_confidence:.3f})[/speaker]"
-                )
-            _current_speaker = primary_label
-            _last_speaker_change_time = timestamp
-    else:
+    if primary_label and primary_label != _current_speaker:
+        console.print(
+            f"[speaker]🔊 Speaker change: {_current_speaker} → {primary_label} "
+            f"(confidence: {primary_confidence:.3f})[/speaker]"
+        )
+        _current_speaker = primary_label
         _last_speaker_change_time = timestamp
     
     if labeler.total_segments_processed % 10 == 0:
@@ -987,14 +983,37 @@ async def get_speakers():
 
 @app.post("/speakers/reset")
 async def reset_speakers():
-    """Reset speaker labeler state."""
+    """Reset speaker labeler state - fully clears all speaker tracking.
+    
+    Fixed: Also resets the global _current_speaker, clears context buffer
+    speaker metadata, and forces next labeling to ignore previous speaker.
+    """
     global _current_speaker, _last_speaker_change_time
+    
+    # Reset the labeler
     labeler = _speaker_labeler
     if labeler:
         labeler.reset()
+    
+    # Reset global state
     _current_speaker = None
     _last_speaker_change_time = 0.0
+    
+    # Clear speaker labels from context buffer segments
+    if context_buffer.segments:
+        for segment_audio, metadata in context_buffer.segments:
+            metadata["speaker_label"] = None
+            metadata["speaker_confidence"] = 0.0
+            metadata["speakers"] = []
+    
+    # Delete persisted state file
+    if SPEAKER_STATE_PATH.exists():
+        SPEAKER_STATE_PATH.unlink()
+    
     save_speaker_state()
+    
+    console.print("[warning]🔄 Speaker state fully reset: labeler + global state + context buffer[/warning]")
+    
     return {"success": True, "message": "Speaker state reset"}
 
 

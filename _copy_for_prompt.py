@@ -96,6 +96,7 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr.py",
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
     r"",
 ]
 
@@ -113,7 +114,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-How to make sure speaker labeler is only called when transcribed text has many characters?
+Check live_subtitles_server2_segment_speaker on why it can get stuck on a single speaker label even when resetting
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
