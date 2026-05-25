@@ -1,43 +1,40 @@
-from pyannote.audio.core.io import get_audio_metadata, Audio
+from funasr import AutoModel
+from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
-# Test with string path (get_audio_metadata now handles this)
-DEFAULT_AUDIO = "C:/Users/druiv/.cache/files/audio/recording_3_speakers.wav"
+model_dir = "iic/SenseVoiceSmall"
 
-print("=" * 60)
-print("Test 1: Getting metadata from string path")
-print("=" * 60)
-try:
-    metadata = get_audio_metadata(DEFAULT_AUDIO)
-    print(f"✓ Success! Metadata:\n{metadata}")
-except Exception as e:
-    print(f"✗ Failed: {e}")
 
-print("\n" + "=" * 60)
-print("Test 2: Loading full audio")
-print("=" * 60)
-try:
-    audio = Audio(sample_rate=16000, mono='downmix')
-    waveform, sample_rate = audio({"audio": DEFAULT_AUDIO})
-    print(f"✓ Success! Waveform shape: {waveform.shape}, Sample rate: {sample_rate}")
-except Exception as e:
-    print(f"✗ Failed: {e}")
+model = AutoModel(
+    model=model_dir,
+    vad_model="fsmn-vad",
+    vad_kwargs={"max_single_segment_time": 30000},
+    device="cuda:0",
+)
 
-print("\n" + "=" * 60)
-print("Test 3: Getting duration")
-print("=" * 60)
-try:
-    duration = audio.get_duration({"audio": DEFAULT_AUDIO})
-    print(f"✓ Success! Duration: {duration:.2f} seconds")
-except Exception as e:
-    print(f"✗ Failed: {e}")
+# en
+res = model.generate(
+    input=f"{model.model_path}/example/en.mp3",
+    cache={},
+    language="auto",  # "zh", "en", "yue", "ja", "ko", "nospeech"
+    use_itn=True,
+    batch_size_s=60,
+    merge_vad=True,  #
+    merge_length_s=15,
+)
+text = rich_transcription_postprocess(res[0]["text"])
+print(text)
 
-print("\n" + "=" * 60)
-print("Test 4: Cropping a segment")
-print("=" * 60)
-try:
-    from pyannote.core import Segment
-    segment = Segment(0.0, 5.0)  # First 5 seconds
-    crop_waveform, crop_sr = audio.crop({"audio": DEFAULT_AUDIO}, segment)
-    print(f"✓ Success! Crop shape: {crop_waveform.shape}, Sample rate: {crop_sr}")
-except Exception as e:
-    print(f"✗ Failed: {e}")
+# en with timestamp
+res = model.generate(
+    input=f"{model.model_path}/example/en.mp3",
+    cache={},
+    language="auto",  # "zh", "en", "yue", "ja", "ko", "nospeech"
+    use_itn=True,
+    batch_size_s=60,
+    merge_vad=True,  #
+    merge_length_s=15,
+    output_timestamp=True,
+)
+print(res)
+text = rich_transcription_postprocess(res[0]["text"])
+print(text)
