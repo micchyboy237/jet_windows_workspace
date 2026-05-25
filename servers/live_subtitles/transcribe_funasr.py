@@ -50,15 +50,19 @@ class SenseVoiceTranscriber:
                 tmp_path = tmp_file.name
             
             # Generate transcription
-            result = self.model.generate(
+            raw_results = self.model.generate(
                 input=tmp_path,
                 cache={},
                 language=language,
                 use_itn=use_itn,
+                output_timestamp=True,
             )
+            first = raw_results[0]
+
+            print(f"First result:\n{first!r}")
             
             # Extract clean text
-            clean_text = rich_transcription_postprocess(result[0]["text"])
+            clean_text = rich_transcription_postprocess(first["text"])
             return clean_text
             
         finally:

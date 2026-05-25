@@ -76,8 +76,18 @@ include_files = [
     # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\_metadata.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_segment_speaker_labeler.py",
+    r"",
+    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\funasr_onnx\sensevoice_bin.py",
+    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\funasr_onnx\utils\utils.py",
+    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\runtime\python\onnxruntime\funasr_onnx\sensevoice_bin.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\runtime\python\onnxruntime\funasr_onnx\utils\utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\demo_onnx.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\jet_funasr_onnx_model_fixer.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr_onnx.py",
+    r"",
     r"",
 ]
 
@@ -95,191 +105,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix what causes the redundant rows in results table
-
-Processing 20 audio segments...
-
-⠋ Analyzing speakers...Computed embedding for t=0.00s, got 0 top matches
-Actual best score: 0.0000, should_create_new_speaker: True
-Created new speaker: SPEAKER_01
-⚠️  New speaker: SPEAKER_01 (best sim: 0.000, mature: 0, young: 1, total: 1)
-Segment 1: t=0.00s → [SPEAKER_01(1.000)] (primary: SPEAKER_01, speakers: 1)
-Computed embedding for t=0.00s, got 1 top matches
-Actual best score: 0.1226, should_create_new_speaker: True
-Created new speaker: SPEAKER_02
-⚠️  New speaker: SPEAKER_02 (best sim: 0.123, mature: 0, young: 2, total: 2)
-Segment 2: t=0.00s → [SPEAKER_02(1.000), SPEAKER_01(0.123)] (primary: SPEAKER_02, speakers: 2)
-Computed embedding for t=0.00s, got 1 top matches
-Actual best score: 0.2779, should_create_new_speaker: False
-Segment 3: t=0.00s → [SPEAKER_02(0.278)] (primary: SPEAKER_02, speakers: 2)
-Computed embedding for t=0.00s, got 1 top matches
-Actual best score: 0.0946, should_create_new_speaker: True
-Created new speaker: SPEAKER_03
-⚠️  New speaker: SPEAKER_03 (best sim: 0.095, mature: 0, young: 2, total: 3)
-🔧 Maintenance triggered: mature=0, young=2, orphan=0
-Segment 4: t=0.00s → [SPEAKER_03(1.000), SPEAKER_01(0.095)] (primary: SPEAKER_03, speakers: 3)
-Computed embedding for t=0.00s, got 3 top matches
-Actual best score: 0.3891, should_create_new_speaker: False
-Temporal smoothing: keeping 'SPEAKER_02' over 'SPEAKER_03' (sim=0.389)
-Segment 5: t=0.00s → [SPEAKER_02(0.173), SPEAKER_01(0.202)] (primary: SPEAKER_02, speakers: 3)
-⠙ Analyzing speakers...Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.3604, should_create_new_speaker: False
-Temporal smoothing: keeping 'SPEAKER_02' over 'SPEAKER_03' (sim=0.360)
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 6: t=0.00s → [SPEAKER_02(0.332)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.4709, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 7: t=0.00s → [SPEAKER_02(0.471), SPEAKER_01(0.179)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 3 top matches
-Actual best score: 0.2146, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 8: t=0.00s → [SPEAKER_02(0.215), SPEAKER_01(0.189), SPEAKER_03(0.169)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.3784, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 9: t=0.00s → [SPEAKER_02(0.378), SPEAKER_01(0.262)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.4612, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 10: t=0.00s → [SPEAKER_02(0.461), SPEAKER_01(0.427)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 1 top matches
-Actual best score: 0.3470, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 11: t=0.00s → [SPEAKER_02(0.347)] (primary: SPEAKER_02, speakers: 3)
-⠹ Analyzing speakers...Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.2722, should_create_new_speaker: False
-Temporal smoothing: keeping 'SPEAKER_02' over 'SPEAKER_03' (sim=0.272)
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 12: t=0.00s → [SPEAKER_02(0.200)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.4790, should_create_new_speaker: False
-Temporal smoothing: keeping 'SPEAKER_02' over 'SPEAKER_03' (sim=0.479)
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 13: t=0.00s → [SPEAKER_02(0.211)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.3472, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 14: t=0.00s → [SPEAKER_02(0.347), SPEAKER_03(0.162)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 3 top matches
-Actual best score: 0.4259, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 15: t=0.00s → [SPEAKER_02(0.426), SPEAKER_03(0.176), SPEAKER_01(0.155)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 3 top matches
-Actual best score: 0.2852, should_create_new_speaker: False
-Temporal smoothing: keeping 'SPEAKER_02' over 'SPEAKER_01' (sim=0.285)
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 16: t=0.00s → [SPEAKER_02(0.284), SPEAKER_03(0.177)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.3850, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 17: t=0.00s → [SPEAKER_02(0.385), SPEAKER_01(0.298)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.2354, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 18: t=0.00s → [SPEAKER_02(0.235), SPEAKER_03(0.195)] (primary: SPEAKER_02, speakers: 3)
-⠼ Analyzing speakers...Computed embedding for t=0.00s, got 3 top matches
-Actual best score: 0.2843, should_create_new_speaker: False
-Temporal smoothing: keeping 'SPEAKER_02' over 'SPEAKER_01' (sim=0.284)
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 19: t=0.00s → [SPEAKER_02(0.253), SPEAKER_03(0.224)] (primary: SPEAKER_02, speakers: 3)
-Computed embedding for t=0.00s, got 2 top matches
-Actual best score: 0.2126, should_create_new_speaker: False
-🔧 Maintenance triggered: mature=1, young=2, orphan=0
-Segment 20: t=0.00s → [SPEAKER_02(0.213), SPEAKER_03(0.205)] (primary: SPEAKER_02, speakers: 3)
-  Analyzing speakers...
-🎤 Speaker Analysis Results
-┏━━━━┳━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┓
-┃  # ┃ Filename  ┃ Duration ┃ Rank ┃  Speaker   ┃ Confidence ┃    Match Type    ┃ Primary ┃ ▶️ Play ┃
-┡━━━━╇━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━┩
-│  1 │ sound.wav │    2.91s │  —   │ SPEAKER_01 │      1.000 │  first_speaker   │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  2 │ sound.wav │    4.00s │  —   │ SPEAKER_02 │      1.000 │   new_speaker    │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  2 │ sound.wav │    4.00s │  #2  │ SPEAKER_01 │      0.123 │ weak_alternative │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  3 │ sound.wav │    2.73s │  —   │ SPEAKER_02 │      0.278 │    weak_match    │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  4 │ sound.wav │    5.87s │  —   │ SPEAKER_03 │      1.000 │   new_speaker    │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  4 │ sound.wav │    5.87s │  #2  │ SPEAKER_01 │      0.095 │ weak_alternative │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  5 │ sound.wav │    3.60s │  —   │ SPEAKER_02 │      0.173 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  5 │ sound.wav │    3.60s │  #2  │ SPEAKER_01 │      0.202 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  6 │ sound.wav │    7.40s │  —   │ SPEAKER_02 │      0.332 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  7 │ sound.wav │    5.31s │  —   │ SPEAKER_02 │      0.471 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  7 │ sound.wav │    5.31s │  #2  │ SPEAKER_01 │      0.179 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  8 │ sound.wav │    2.42s │  —   │ SPEAKER_02 │      0.215 │    weak_match    │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  8 │ sound.wav │    2.42s │  #2  │ SPEAKER_01 │      0.189 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  8 │ sound.wav │    2.42s │  #3  │ SPEAKER_03 │      0.169 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  9 │ sound.wav │    2.62s │  —   │ SPEAKER_02 │      0.378 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│  9 │ sound.wav │    2.62s │  #2  │ SPEAKER_01 │      0.262 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 10 │ sound.wav │    3.69s │  —   │ SPEAKER_02 │      0.461 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 10 │ sound.wav │    3.69s │  #2  │ SPEAKER_01 │      0.427 │  possible_match  │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 11 │ sound.wav │    4.23s │  —   │ SPEAKER_02 │      0.347 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 12 │ sound.wav │    3.81s │  —   │ SPEAKER_02 │      0.200 │    weak_match    │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 13 │ sound.wav │    5.26s │  —   │ SPEAKER_02 │      0.211 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 14 │ sound.wav │    2.14s │  —   │ SPEAKER_02 │      0.347 │    weak_match    │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 14 │ sound.wav │    2.14s │  #2  │ SPEAKER_03 │      0.162 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 15 │ sound.wav │    3.64s │  —   │ SPEAKER_02 │      0.426 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 15 │ sound.wav │    3.64s │  #2  │ SPEAKER_03 │      0.176 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 15 │ sound.wav │    3.64s │  #3  │ SPEAKER_01 │      0.155 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 16 │ sound.wav │    2.67s │  —   │ SPEAKER_02 │      0.284 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 16 │ sound.wav │    2.67s │  #2  │ SPEAKER_03 │      0.177 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 17 │ sound.wav │    1.81s │  —   │ SPEAKER_02 │      0.385 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 17 │ sound.wav │    1.81s │  #2  │ SPEAKER_01 │      0.298 │  possible_match  │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 18 │ sound.wav │    2.59s │  —   │ SPEAKER_02 │      0.235 │    weak_match    │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 18 │ sound.wav │    2.59s │  #2  │ SPEAKER_03 │      0.195 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 19 │ sound.wav │    3.10s │  —   │ SPEAKER_02 │      0.253 │  possible_match  │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 19 │ sound.wav │    3.10s │  #2  │ SPEAKER_03 │      0.224 │    weak_match    │         │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 20 │ sound.wav │    2.01s │  —   │ SPEAKER_02 │      0.213 │    weak_match    │   ⭐    │ ▶️ Play │
-├────┼───────────┼──────────┼──────┼────────────┼────────────┼──────────────────┼─────────┼────────┤
-│ 20 │ sound.wav │    2.01s │  #2  │ SPEAKER_03 │      0.205 │    weak_match    │         │ ▶️ Play │
-└────┴───────────┴──────────┴──────┴────────────┴────────────┴──────────────────┴─────────┴────────┘
-╭────────────────────────────────────────────────────── Summary ───────────────────────────────────────────────────────╮
-│                                                                                                                      │
-│  Total segments: 20                                                                                                  │
-│  Total results (incl. alternatives): 36                                                                              │
-│  Total duration: 71.8s                                                                                               │
-│  Unique speakers: 3                                                                                                  │
-│  Average matches per segment: 1.8                                                                                    │
-│                                                                                                                      │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-
-Detailed results saved to:
-C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\_main_segment_speaker_labeler\sp
-eaker_analysis.json
-Summary saved to:
-C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\generated\_main_segment_speaker_labeler\sp
-eaker_analysis_summary.json
+Analyze all available results data for onnx model transcription
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
