@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -176,6 +177,29 @@ class ONNXResultAnalyzer:
         # Storage for captured intermediates
         self._captured: Dict[str, Any] = {}
         self.results_history: List[TranscriptionResult] = []
+
+        # ── ONNX verification probe ──────────────────────────────────────────
+        print("\n[Analyzer] === ONNX Runtime Verification ===")
+        try:
+            session = self.model.ort_infer.session
+            print(f"  Model path : {session.get_session_options()}")
+            print(f"  Providers  : {session.get_providers()}")
+            inputs  = [i.name for i in session.get_inputs()]
+            outputs = [o.name for o in session.get_outputs()]
+            print(f"  Inputs     : {inputs}")
+            print(f"  Outputs    : {outputs}")
+            # Confirm the model file on disk
+            import onnxruntime as ort
+            print(f"  ORT version: {ort.__version__}")
+        except AttributeError:
+            # ort_infer might wrap the session differently
+            try:
+                print(f"  ort_infer type : {type(self.model.ort_infer)}")
+                print(f"  ort_infer attrs: {[a for a in dir(self.model.ort_infer) if not a.startswith('_')]}")
+            except Exception as e:
+                print(f"  [WARN] Could not inspect ort_infer: {e}")
+        print("[Analyzer] ==========================================\n")
+        # ────────────────────────────────────────────────────────────────────
 
     def transcribe_with_analysis(
         self,
@@ -474,20 +498,34 @@ class ONNXResultAnalyzer:
     def _parse_special_tokens(
         self, raw_text: str, token_int: List[int]
     ) -> Tuple[str, str, bool]:
-        """Extract language, emotion, and speech flag from special tokens."""
+        """Extract language, emotion, and speech flag from raw_text tags."""
+
+        LANGUAGE_TAG_MAP = {
+            "zh": "zh", "en": "en", "yue": "yue",
+            "ja": "ja", "ko": "ko", "nospeech": "nospeech",
+        }
+        EMOTION_TAG_MAP = {
+            "NEUTRAL": "NEUTRAL", "HAPPY": "HAPPY", "SAD": "SAD",
+            "ANGRY": "ANGRY", "SURPRISED": "SURPRISED",
+        }
+
         lang = "unknown"
         emotion = "unknown"
         is_speech = True
-        
-        for tid in token_int:
-            if tid in self.LANGUAGE_TOKENS:
-                lang = self.LANGUAGE_TOKENS[tid]
-            if tid in self.EMOTION_TOKENS:
-                emotion = self.EMOTION_TOKENS[tid]
-        
-        if "nospeech" in lang or "<|nospeech|>" in raw_text:
+
+        # Match <|tag|> tokens in order
+        tags = re.findall(r"<\|([^|]+)\|>", raw_text)
+        for tag in tags:
+            if tag in LANGUAGE_TAG_MAP:
+                lang = LANGUAGE_TAG_MAP[tag]
+            if tag in EMOTION_TAG_MAP:
+                emotion = EMOTION_TAG_MAP[tag]
+            if tag == "nospeech":
+                is_speech = False
+
+        if lang == "nospeech":
             is_speech = False
-        
+
         return lang, emotion, is_speech
 
     def _log_result(self, result: TranscriptionResult) -> None:
