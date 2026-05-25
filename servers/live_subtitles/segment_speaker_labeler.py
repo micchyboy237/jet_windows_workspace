@@ -549,34 +549,52 @@ class SegmentSpeakerLabeler:
         embedding: np.ndarray,
     ) -> bool:
         """Determine if we should create a new speaker.
-        FIXED: Now properly uses the actual best_score from top_matches
-        instead of requiring matches to pass min_similarity_for_list filter.
+        
+        Creates a new speaker when:
+        - No speakers exist yet
+        - No matches found
+        - Best match is a weak_match (below threshold_possible)
+        - Best score is below threshold_new_speaker
+        
+        Does NOT create when:
+        - strong_match or early_match found
+        - possible_match or better found (score >= threshold_possible)
+        - Context/previous speaker has sufficient similarity
         """
         if len(self._speakers) == 0:
             return True
         if not top_matches:
             return True
+
         best_match = top_matches[0]
         match_type = best_match["match_type"]
+
+        # Strong or early match: definitely existing speaker
         if match_type in ("strong_match", "early_match"):
             return False
-        if best_score >= self.threshold_possible:
+
+        # possible_match or better: existing speaker
+        if match_type == "possible_match":
             return False
-        if len(self._speakers) <= 3:
-            if best_score >= 0.15:
-                return False
-        if context and "previous_speaker" in context:
-            prev_speaker = context["previous_speaker"]
-            if prev_speaker and prev_speaker in self._speakers:
-                for match in top_matches:
-                    if match["label"] == prev_speaker and match["confidence"] >= 0.12:
-                        return False
-        for match in top_matches[:3]:
-            if match["segment_count"] <= self.young_segment_count:
-                if best_score >= 0.15:
-                    return False
+
+        # weak_match: check context before deciding
+        if match_type == "weak_match":
+            # Context can save a weak match if previous speaker has sufficient similarity
+            if context and "previous_speaker" in context:
+                prev_speaker = context["previous_speaker"]
+                if prev_speaker and prev_speaker in self._speakers:
+                    for match in top_matches:
+                        if (
+                            match["label"] == prev_speaker
+                            and match["confidence"] >= self.threshold_possible
+                        ):
+                            return False
+            return True
+
+        # Fallback: use raw score
         if best_score < self.threshold_new_speaker:
             return True
+
         return False
 
     def _deduplicate_results(self, results: List[Dict]) -> List[Dict]:
