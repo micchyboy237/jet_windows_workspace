@@ -109,9 +109,7 @@ def _get_speaker_labeler() -> SegmentSpeakerLabeler:
             embedding_model=_embedding_inference,
             threshold_same=0.75,
             threshold_possible=0.40,
-            min_segments_for_reference=2,
-            max_embeddings_per_speaker=50,
-            temporal_smoothing_window=3.0,
+            threshold_new_speaker=0.25,
             debug=True,
         )
         console.print("[success]Speaker labeler initialized[/success]")

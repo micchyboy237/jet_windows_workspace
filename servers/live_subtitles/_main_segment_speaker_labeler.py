@@ -22,7 +22,8 @@ def main():
     from segment_speaker_labeler import (
         SegmentSpeakerLabeler,
         DEFAULT_THRESHOLD_SAME,
-        DEFAULT_THRESHOLD_POSSIBLE
+        DEFAULT_THRESHOLD_POSSIBLE,
+        DEFAULT_THRESHOLD_NEW_SPEAKER,
     )
 
     console = Console()
@@ -53,6 +54,12 @@ def main():
         type=float,
         default=DEFAULT_THRESHOLD_POSSIBLE,
         help=f"Similarity threshold for possible match (default: {DEFAULT_THRESHOLD_POSSIBLE})",
+    )
+    parser.add_argument(
+        "-tn", "--threshold-new-speaker",
+        type=float,
+        default=DEFAULT_THRESHOLD_NEW_SPEAKER,
+        help=f"Similarity threshold for new speaker creation (default: {DEFAULT_THRESHOLD_NEW_SPEAKER})",
     )
     args = parser.parse_args()
 
@@ -85,6 +92,7 @@ def main():
         embedding_model=inference,
         threshold_same=args.threshold_same,
         threshold_possible=args.threshold_possible,
+        threshold_new_speaker=args.threshold_new_speaker,
         debug=True
     )
 
