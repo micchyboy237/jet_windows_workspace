@@ -24,58 +24,213 @@ DEFAULT_YOUNG_SEGMENT_COUNT: int = 2
 
 @dataclass
 class SpeakerReference:
-    """Maintains reference data for a single speaker."""
-
+    """Maintains reference data for a single speaker with smart embedding storage."""
+    
     label: str
     embeddings: List[np.ndarray] = field(default_factory=list)
     centroid: Optional[np.ndarray] = None
     first_seen: float = 0.0
     last_seen: float = 0.0
     segment_count: int = 0
-
-    def add_embedding(self, embedding: np.ndarray, timestamp: float) -> None:
-        """Add a new embedding and update centroid using median for robustness."""
+    
+    # Storage management
+    embedding_qualities: List[float] = field(default_factory=list)
+    centroid_stability: float = 0.0
+    max_embeddings: int = 50
+    debug: bool = False
+    
+    # Logging levels: 0=quiet, 1=important, 2=verbose
+    log_level: int = 1
+    
+    def add_embedding(self, embedding: np.ndarray, timestamp: float, 
+                      quality_score: float = 1.0) -> None:
+        """Add a new embedding with quality-aware storage."""
         if embedding.ndim == 1:
             embedding = embedding.reshape(1, -1)
+        
+        # Store embedding and quality
         self.embeddings.append(embedding)
+        self.embedding_qualities.append(quality_score)
         self.segment_count += 1
-        if len(self.embeddings) >= 3:
-            try:
-                stacked = np.vstack(self.embeddings)
-                self.centroid = np.median(stacked, axis=0, keepdims=True)
-            except Exception:
-                stacked = np.vstack(self.embeddings)
-                self.centroid = np.mean(stacked, axis=0, keepdims=True)
-        elif len(self.embeddings) == 2:
-            stacked = np.vstack(self.embeddings)
-            self.centroid = np.mean(stacked, axis=0, keepdims=True)
-        else:
-            self.centroid = embedding.copy()
+        
+        # Log only at verbose level
+        if self.debug and self.log_level >= 2:
+            console.print(
+                f"[dim]📥 {self.label}: +1 embedding "
+                f"(q={quality_score:.2f}, total={len(self.embeddings)}, "
+                f"stability={self.centroid_stability:.2f})[/dim]"
+            )
+        
+        # Smart storage management
+        self._manage_storage()
+        
+        # Update centroid
+        old_stability = self.centroid_stability
+        self._update_centroid()
+        
+        # Log significant stability changes
+        if self.debug and self.log_level >= 1:
+            stability_change = abs(self.centroid_stability - old_stability)
+            if stability_change > 0.05:
+                direction = "↑" if self.centroid_stability > old_stability else "↓"
+                console.print(
+                    f"[dim]📊 {self.label}: stability {old_stability:.2f} "
+                    f"{direction} {self.centroid_stability:.2f}[/dim]"
+                )
+        
+        # Update metadata
         self.last_seen = timestamp
         if self.first_seen == 0.0:
             self.first_seen = timestamp
-
+    
+    def _manage_storage(self) -> None:
+        """Smart storage management to maintain diversity and limit memory."""
+        if len(self.embeddings) <= self.max_embeddings:
+            return
+        
+        if self.centroid_stability > 0.9 and len(self.embeddings) > 10:
+            self._prune_for_diversity()
+        else:
+            self._prune_lowest_quality()
+        
+        if self.debug and self.log_level >= 1:
+            console.print(
+                f"[yellow]🗑️  {self.label}: pruned to {len(self.embeddings)} "
+                f"embeddings (stability={self.centroid_stability:.2f})[/yellow]"
+            )
+    
+    def _prune_for_diversity(self) -> None:
+        """Remove most similar pair to maintain embedding diversity."""
+        if len(self.embeddings) <= 2:
+            return
+        
+        stacked = np.vstack(self.embeddings)
+        distances = cdist(stacked, stacked, metric='cosine')
+        similarities = 1 - distances
+        
+        # Find most similar pair
+        np.fill_diagonal(similarities, 0)
+        i, j = np.unravel_index(np.argmax(similarities), similarities.shape)
+        
+        # Remove lower quality one
+        if self.embedding_qualities[i] >= self.embedding_qualities[j]:
+            self.embeddings.pop(j)
+            self.embedding_qualities.pop(j)
+        else:
+            self.embeddings.pop(i)
+            self.embedding_qualities.pop(i)
+    
+    def _prune_lowest_quality(self) -> None:
+        """Remove embedding with lowest combined quality-recenty score."""
+        if not self.embedding_qualities:
+            return
+        
+        qualities = np.array(self.embedding_qualities)
+        recency = np.linspace(0.5, 1.0, len(qualities))
+        combined = qualities * 0.6 + recency * 0.4
+        
+        min_idx = np.argmin(combined)
+        self.embeddings.pop(min_idx)
+        self.embedding_qualities.pop(min_idx)
+    
+    def _update_centroid(self) -> None:
+        """Calculate centroid with quality-weighted averaging."""
+        if not self.embeddings:
+            self.centroid = None
+            return
+        
+        if len(self.embeddings) == 1:
+            self.centroid = self.embeddings[0].copy()
+            self.centroid_stability = 0.1
+            return
+        
+        stacked = np.vstack(self.embeddings)
+        
+        if len(self.embeddings) == 2:
+            self.centroid = np.mean(stacked, axis=0, keepdims=True)
+            self.centroid_stability = 0.3
+            return
+        
+        try:
+            # Weighted average for 3+ samples
+            qualities = np.array(self.embedding_qualities[-len(stacked):])
+            recency = np.exp(np.linspace(-1, 0, len(stacked)))
+            
+            # Distance from median
+            median = np.median(stacked, axis=0)
+            distances = cdist(stacked, median.reshape(1, -1), metric='cosine').flatten()
+            similarity = 1 - distances
+            
+            # Combined weights: 40% quality, 30% recency, 30% similarity
+            weights = (qualities * 0.4 + recency * 0.3 + similarity * 0.3)
+            weights = weights / weights.sum()
+            
+            self.centroid = np.average(stacked, axis=0, weights=weights).reshape(1, -1)
+            self._update_stability()
+            
+        except Exception:
+            # Fallback to simple median
+            self.centroid = np.median(stacked, axis=0, keepdims=True)
+            self.centroid_stability = 0.5
+    
+    def _update_stability(self) -> None:
+        """Calculate centroid stability based on embedding consistency."""
+        if len(self.embeddings) < 5:
+            self.centroid_stability = 0.2 * len(self.embeddings)
+            return
+        
+        # Use last 10 embeddings for stability calculation
+        stacked = np.vstack(self.embeddings[-10:])
+        distances = cdist(stacked, self.centroid, metric='cosine')
+        similarities = 1 - distances.flatten()
+        
+        mean_similarity = np.mean(similarities)
+        variance = np.var(similarities) if len(similarities) > 1 else 1.0
+        
+        self.centroid_stability = mean_similarity * (1 - min(variance, 1.0))
+        self.centroid_stability = max(0.0, min(1.0, self.centroid_stability))
+    
     @property
     def active_duration(self) -> float:
         """Total active duration of this speaker."""
         return self.last_seen - self.first_seen
-
+    
     @property
     def has_valid_centroid(self) -> bool:
         """Check if centroid is valid."""
         return self.centroid is not None and not np.any(np.isnan(self.centroid))
-
+    
     @property
     def centroid_quality(self) -> float:
-        """Estimate centroid quality based on segment count (0.0 to 1.0)."""
+        """Estimate centroid quality based on segment count and stability."""
         if self.segment_count >= 10:
-            return 1.0
+            base_quality = 1.0
         elif self.segment_count >= 5:
-            return 0.8
+            base_quality = 0.8
         elif self.segment_count >= 3:
-            return 0.6
+            base_quality = 0.6
         else:
-            return 0.3
+            base_quality = 0.3
+        
+        return base_quality * (0.5 + 0.5 * self.centroid_stability)
+    
+    def get_storage_summary(self) -> Dict:
+        """Get concise storage summary."""
+        return {
+            "label": self.label,
+            "embeddings": len(self.embeddings),
+            "stability": round(self.centroid_stability, 3),
+            "quality": round(self.centroid_quality, 3),
+            "segments": self.segment_count,
+            "diversity": (
+                round(1 - np.mean(1 - cdist(
+                    np.vstack(self.embeddings), 
+                    np.vstack(self.embeddings), 
+                    metric='cosine'
+                )), 3)
+                if len(self.embeddings) >= 2 else 0
+            )
+        }
 
 
 class SegmentSpeakerLabeler:
@@ -305,16 +460,26 @@ class SegmentSpeakerLabeler:
         self,
         embedding: np.ndarray,
         timestamp: float,
+        quality_score: float = 1.0,
     ) -> str:
-        """Create a new speaker reference."""
+        """Create a new speaker reference with single embedding.
+        
+        FIXED: Only creates one embedding, not two.
+        """
         label = f"SPEAKER_{self._next_speaker_id:02d}"
         self._next_speaker_id += 1
         self.total_speakers_created += 1
-        ref = SpeakerReference(label=label)
-        ref.add_embedding(embedding, timestamp)
+        
+        ref = SpeakerReference(
+            label=label,
+            max_embeddings=self.max_embeddings_per_speaker,
+            debug=self.debug,
+            log_level=1  # Only important logs
+        )
+        # Single embedding addition
+        ref.add_embedding(embedding, timestamp, quality_score=quality_score)
         self._speakers[label] = ref
-        if self.debug:
-            console.print(f"[green]Created new speaker: {label}[/]")
+        
         return label
 
     def update_reference(
@@ -322,21 +487,62 @@ class SegmentSpeakerLabeler:
         label: str,
         embedding: np.ndarray,
         timestamp: float,
+        confidence: float = 1.0,
     ) -> None:
-        """Update speaker reference with new embedding."""
+        """Update speaker reference with new embedding and quality score.
+        
+        FIXED: Uses actual confidence from matching, not default 1.0.
+        """
         if label not in self._speakers:
-            self._speakers[label] = SpeakerReference(label=label)
+            if self.debug:
+                console.print(f"[red]❌ Cannot update non-existent speaker: {label}[/red]")
+            return
+        
         ref = self._speakers[label]
-        ref.add_embedding(embedding, timestamp)
-        if len(ref.embeddings) > self.max_embeddings_per_speaker:
-            ref.embeddings = ref.embeddings[-self.max_embeddings_per_speaker :]
-            if ref.embeddings:
-                if len(ref.embeddings) >= 3:
-                    stacked = np.vstack(ref.embeddings)
-                    ref.centroid = np.median(stacked, axis=0, keepdims=True)
-                else:
-                    stacked = np.vstack(ref.embeddings)
-                    ref.centroid = np.mean(stacked, axis=0, keepdims=True)
+        ref.add_embedding(embedding, timestamp, quality_score=confidence)
+
+    def get_detailed_storage_report(self) -> Dict:
+        """Get comprehensive storage report for all speakers."""
+        report = {
+            "total_speakers": len(self._speakers),
+            "total_embeddings_stored": sum(len(ref.embeddings) for ref in self._speakers.values()),
+            "max_total_capacity": len(self._speakers) * self.max_embeddings_per_speaker,
+            "overall_utilization": 0.0,
+            "speaker_details": {}
+        }
+        
+        total_stored = report["total_embeddings_stored"]
+        if report["max_total_capacity"] > 0:
+            report["overall_utilization"] = total_stored / report["max_total_capacity"] * 100
+        
+        # Get individual speaker stats
+        for label, ref in self._speakers.items():
+            stats = ref.get_storage_stats()
+            report["speaker_details"][label] = stats
+        
+        if self.debug:
+            console.print("\n[bold cyan]📊 DETAILED STORAGE REPORT[/bold cyan]")
+            console.print(f"[cyan]Total speakers: {report['total_speakers']}[/cyan]")
+            console.print(f"[cyan]Total embeddings: {total_stored}/{report['max_total_capacity']} "
+                         f"({report['overall_utilization']:.1f}%)[/cyan]")
+            console.print("\n[bold yellow]Per-Speaker Breakdown:[/bold yellow]")
+            
+            for label, stats in report["speaker_details"].items():
+                console.print(f"\n[green]🔊 {label}:[/green]")
+                console.print(f"[dim]  Segments: {stats['segment_count']}, "
+                             f"Duration: {stats['active_duration']:.1f}s[/dim]")
+                console.print(f"[dim]  Storage: {stats['total_embeddings']}/{stats['max_embeddings']} "
+                             f"({stats['storage_utilization']:.1f}%)[/dim]")
+                console.print(f"[dim]  Stability: {stats['centroid_stability']:.3f}, "
+                             f"Quality: {stats['centroid_quality']:.3f}[/dim]")
+                console.print(f"[dim]  Quality range: {stats['quality_stats']['min_quality']:.3f} - "
+                             f"{stats['quality_stats']['max_quality']:.3f} "
+                             f"(mean: {stats['quality_stats']['mean_quality']:.3f})[/dim]")
+                if 'diversity_stats' in stats:
+                    console.print(f"[dim]  Diversity score: {stats['diversity_stats']['diversity_score']:.3f} "
+                                 f"(pairwise similarity: {stats['diversity_stats']['mean_pairwise_similarity']:.3f})[/dim]")
+        
+        return report
 
     def _get_speaker_categories(self) -> Dict[str, Dict]:
         """Categorize speakers by reliability for maintenance decisions.
@@ -635,9 +841,8 @@ class SegmentSpeakerLabeler:
     ) -> List[Dict]:
         """Label a speech segment with multiple possible speaker identities.
         
-        FIXED: Temporal smoothing and context matching now only override the
-        primary label when confidence meets threshold_possible. Weak matches
-        no longer influence label changes.
+        FIXED: No longer double-adds embeddings for new speakers.
+        Added confidence tracking from match scores.
         """
         self.total_segments_processed += 1
         if top_k is None:
@@ -646,11 +851,14 @@ class SegmentSpeakerLabeler:
         embedding = self.compute_embedding(waveform, sample_rate)
         top_matches = self.find_top_k_matches(embedding, k=top_k)
         
+        # Log basic info only (reduced verbosity)
         if self.debug:
             console.print(
-                f"[dim]Computed embedding for t={timestamp:.2f}s, got {len(top_matches)} top matches[/dim]"
+                f"[dim]Segment {self.total_segments_processed}: "
+                f"t={timestamp:.2f}s, matches={len(top_matches)}[/dim]"
             )
         
+        # Get actual best similarity score
         actual_best_score = 0.0
         if len(self._speakers) > 0:
             _, actual_best_score, _ = self.find_best_match(embedding)
@@ -659,29 +867,29 @@ class SegmentSpeakerLabeler:
             actual_best_score, top_matches, context, embedding
         )
         
-        if self.debug:
-            console.print(
-                f"[dim]Actual best score: {actual_best_score:.4f}, should_create_new_speaker: {should_create}[/dim]"
-            )
-        
         results = []
         seen_labels = set()
         just_created_speaker = False
+        primary_confidence = 1.0  # Track confidence for quality scoring
         
         if should_create or not top_matches:
-            # NEW SPEAKER PATH
-            new_label = self.create_new_speaker(embedding, timestamp)
-            self.update_reference(new_label, embedding, timestamp)
+            # ── NEW SPEAKER PATH ──────────────────────────────────
+            # FIXED: Only create once, no duplicate embedding
+            new_label = self.create_new_speaker(
+                embedding, timestamp, 
+                quality_score=actual_best_score if actual_best_score > 0 else 0.5
+            )
             just_created_speaker = True
             
+            # Log only when creating new speaker (important event)
             if self.debug:
                 categories = self._get_speaker_categories()
                 console.print(
-                    f"[yellow]⚠️  New speaker: {new_label} "
-                    f"(best sim: {actual_best_score:.3f}, "
-                    f"mature: {len(categories['mature'])}, "
-                    f"young: {len(categories['young'])}, "
-                    f"total: {len(self._speakers)})[/yellow]"
+                    f"[yellow]🆕 New speaker: {new_label} "
+                    f"(best_sim={actual_best_score:.3f}, "
+                    f"mature={len(categories['mature'])}, "
+                    f"young={len(categories['young'])}, "
+                    f"total={len(self._speakers)})[/yellow]"
                 )
             
             results.append({
@@ -694,8 +902,9 @@ class SegmentSpeakerLabeler:
                 "last_seen": timestamp,
             })
             seen_labels.add(new_label)
+            primary_confidence = actual_best_score if actual_best_score > 0 else 0.5
             
-            # Add alternatives (existing speakers that this could have matched)
+            # Add alternatives (existing speakers)
             for match in top_matches:
                 if match["label"] not in seen_labels and len(results) < top_k + 1:
                     results.append({
@@ -709,7 +918,7 @@ class SegmentSpeakerLabeler:
                     })
                     seen_labels.add(match["label"])
         else:
-            # EXISTING SPEAKER PATH
+            # ── EXISTING SPEAKER PATH ─────────────────────────────
             all_scores = {m["label"]: m["confidence"] for m in top_matches}
             
             for i, match in enumerate(top_matches):
@@ -721,43 +930,32 @@ class SegmentSpeakerLabeler:
                 match_type = match["match_type"]
                 is_primary = (i == 0)
                 
-                # ── TEMPORAL SMOOTHING ──────────────────────────────────
-                # FIXED: Only apply smoothing when confidence meets threshold_possible.
-                # Previously: triggered on "possible_match" AND "weak_match",
-                # which allowed low-confidence labels to override the top match.
-                # Now: only triggers for "possible_match" or better,
-                # meaning confidence >= threshold_possible (0.35 default).
+                # Track primary confidence for quality scoring
+                if is_primary:
+                    primary_confidence = confidence
+                
+                # ── TEMPORAL SMOOTHING ──────────────────────────────
                 if is_primary and match_type == "possible_match":
                     smoothed_label = self.apply_temporal_smoothing(
                         label, timestamp, confidence
                     )
                     if smoothed_label != label and smoothed_label in all_scores:
                         smoothed_confidence = all_scores[smoothed_label]
-                        # Only accept smoothed label if ITS confidence also meets threshold
                         if smoothed_confidence >= self.threshold_possible:
                             label = smoothed_label
                             confidence = smoothed_confidence
                 
-                # ── CONTEXT MATCHING ────────────────────────────────────
-                # FIXED: Context matching now requires the context speaker's
-                # confidence to meet threshold_possible (not threshold_possible - 0.10).
-                # Previously: prev_sim >= threshold_possible - 0.10 (e.g. 0.25)
-                # Now: prev_sim >= threshold_possible (e.g. 0.35)
-                # AND prev_sim must be HIGHER than the current best match.
+                # ── CONTEXT MATCHING ────────────────────────────────
                 if is_primary and context and "previous_speaker" in context:
                     prev_speaker = context["previous_speaker"]
-                    if prev_speaker and prev_speaker in all_scores and prev_speaker not in seen_labels:
+                    if (prev_speaker and prev_speaker in all_scores 
+                        and prev_speaker not in seen_labels):
                         prev_sim = all_scores[prev_speaker]
-                        # Must meet threshold_possible AND be higher than current best
                         if prev_sim >= self.threshold_possible and prev_sim > confidence:
                             label = prev_speaker
                             confidence = prev_sim
                             match_type = "context_match"
-                            if self.debug:
-                                console.print(
-                                    f"[blue]Context match: {prev_speaker} "
-                                    f"(sim={prev_sim:.3f})[/blue]"
-                                )
+                            primary_confidence = prev_sim
                 
                 results.append({
                     "label": label,
@@ -773,27 +971,32 @@ class SegmentSpeakerLabeler:
                 if len(results) >= top_k:
                     break
             
-            # Deduplicate: if smoothing/context changed the primary to a label
-            # that was already added as an alternative, keep higher confidence
+            # Deduplicate results
             results = self._deduplicate_results(results)
             
-            # Update reference for the primary speaker
+            # ── UPDATE REFERENCE WITH ACTUAL CONFIDENCE ────────────
+            # FIXED: Use the actual match confidence, not 1.0
             primary_result = results[0]
-            self.update_reference(primary_result["label"], embedding, timestamp)
+            self.update_reference(
+                primary_result["label"], 
+                embedding, 
+                timestamp, 
+                confidence=primary_confidence  # Actual similarity score
+            )
         
         # Run maintenance if needed
         self.run_smart_maintenance(timestamp, just_created_speaker=just_created_speaker)
         
+        # Simplified debug output
         if self.debug:
-            speakers_str = ", ".join(
-                f"{r['label']}({r['confidence']:.3f})"
-                for r in results[:3]
-            )
+            primary = results[0]
+            alt_count = len(results) - 1
             console.print(
-                f"[dim]Segment {self.total_segments_processed}: "
-                f"t={timestamp:.2f}s → [{speakers_str}] "
-                f"(primary: {results[0]['label']}, "
-                f"speakers: {len(self._speakers)})[/]"
+                f"[dim]  → {primary['label']} "
+                f"(conf={primary['confidence']:.3f}, "
+                f"type={primary['match_type']}, "
+                f"+{alt_count} alt, "
+                f"speakers={len(self._speakers)})[/dim]"
             )
         
         return results
