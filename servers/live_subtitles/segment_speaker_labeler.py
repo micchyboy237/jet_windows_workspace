@@ -29,7 +29,7 @@ class SpeakerReference:
     label: str
     embeddings: List[np.ndarray] = field(default_factory=list)
     centroid: Optional[np.ndarray] = None
-    first_seen: float = 0.0
+    first_seen: Optional[float] = None   # FIX: None = not yet seen
     last_seen: float = 0.0
     segment_count: int = 0
 
@@ -39,6 +39,7 @@ class SpeakerReference:
             embedding = embedding.reshape(1, -1)
         self.embeddings.append(embedding)
         self.segment_count += 1
+
         if len(self.embeddings) >= 3:
             try:
                 stacked = np.vstack(self.embeddings)
@@ -51,13 +52,22 @@ class SpeakerReference:
             self.centroid = np.mean(stacked, axis=0, keepdims=True)
         else:
             self.centroid = embedding.copy()
-        self.last_seen = timestamp
-        if self.first_seen == 0.0:
+
+        # FIX 1: Use None as sentinel instead of 0.0.
+        # 0.0 is a valid timestamp (first segment at t=0) and must not be used as "unset".
+        if self.first_seen is None:
             self.first_seen = timestamp
+
+        # FIX 2: Only advance last_seen forward.
+        # Out-of-order segments (seeks, resets, or replay) must not wind last_seen backwards.
+        if timestamp > self.last_seen:
+            self.last_seen = timestamp
 
     @property
     def active_duration(self) -> float:
         """Total active duration of this speaker."""
+        if self.first_seen is None:
+            return 0.0
         return self.last_seen - self.first_seen
 
     @property
@@ -897,7 +907,7 @@ class SegmentSpeakerLabeler:
         return {
             "label": ref.label,
             "segment_count": ref.segment_count,
-            "first_seen": ref.first_seen,
+            "first_seen": ref.first_seen if ref.first_seen is not None else 0.0,
             "last_seen": ref.last_seen,
             "active_duration": ref.active_duration,
             "has_valid_centroid": ref.has_valid_centroid,
@@ -1093,37 +1103,34 @@ class SegmentSpeakerLabeler:
         labeler = cls(
             embedding_model=embedding_model,
             threshold_same=data.get("threshold_same", DEFAULT_THRESHOLD_SAME),
-            threshold_possible=data.get(
-                "threshold_possible", DEFAULT_THRESHOLD_POSSIBLE
-            ),
-            threshold_new_speaker=data.get(
-                "threshold_new_speaker", DEFAULT_THRESHOLD_NEW_SPEAKER
-            ),
-            mature_segment_count=data.get(
-                "mature_segment_count", DEFAULT_MATURE_SEGMENT_COUNT
-            ),
-            young_segment_count=data.get(
-                "young_segment_count", DEFAULT_YOUNG_SEGMENT_COUNT
-            ),
+            threshold_possible=data.get("threshold_possible", DEFAULT_THRESHOLD_POSSIBLE),
+            threshold_new_speaker=data.get("threshold_new_speaker", DEFAULT_THRESHOLD_NEW_SPEAKER),
+            mature_segment_count=data.get("mature_segment_count", DEFAULT_MATURE_SEGMENT_COUNT),
+            young_segment_count=data.get("young_segment_count", DEFAULT_YOUNG_SEGMENT_COUNT),
             top_k_speakers=data.get("top_k_speakers", DEFAULT_TOP_K_SPEAKERS),
-            consolidation_threshold=data.get(
-                "consolidation_threshold", DEFAULT_CONSOLIDATION_THRESHOLD
-            ),
+            consolidation_threshold=data.get("consolidation_threshold", DEFAULT_CONSOLIDATION_THRESHOLD),
         )
         labeler._next_speaker_id = data.get("next_speaker_id", 1)
         labeler.total_segments_processed = data.get("total_segments_processed", 0)
         labeler.total_speakers_created = data.get("total_speakers_created", 0)
+
         for label, ref_data in data.get("speakers", {}).items():
+            # FIX: first_seen may be None in serialized state (new format) or a float (old format).
+            # Old data stored 0.0 as sentinel — treat it as None to avoid corrupting active_duration.
+            raw_first_seen = ref_data.get("first_seen")
+            first_seen = None if raw_first_seen in (None, 0.0) else raw_first_seen
+
             ref = SpeakerReference(
                 label=ref_data["label"],
-                first_seen=ref_data["first_seen"],
-                last_seen=ref_data["last_seen"],
+                first_seen=first_seen,
+                last_seen=ref_data.get("last_seen", 0.0),
                 segment_count=ref_data["segment_count"],
             )
-            ref.embeddings = [np.array(emb) for emb in ref_data["embeddings"]]
-            if ref_data["centroid"] is not None:
+            ref.embeddings = [np.array(emb) for emb in ref_data.get("embeddings", [])]
+            if ref_data.get("centroid") is not None:
                 ref.centroid = np.array(ref_data["centroid"])
             labeler._speakers[label] = ref
+
         return labeler
 
 
