@@ -3,6 +3,7 @@
 Comprehensive ONNX model transcription result analyzer.
 Captures, logs, and visualizes all intermediate results for debugging and monitoring.
 """
+
 from __future__ import annotations
 
 import io
@@ -14,13 +15,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import librosa
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 @dataclass
 class AudioMeta:
     """Metadata about the input audio."""
+
     sample_rate: int
     duration_seconds: float
     num_samples: int
@@ -32,6 +34,7 @@ class AudioMeta:
 @dataclass
 class FeatureMeta:
     """Metadata about extracted features."""
+
     fbank_shape: Tuple[int, int]
     lfr_shape: Tuple[int, int]
     padded_shape: Tuple[int, int, int]
@@ -42,6 +45,7 @@ class FeatureMeta:
 @dataclass
 class InferenceMeta:
     """Metadata about ONNX inference."""
+
     input_shapes: Dict[str, Tuple[int, ...]]
     output_shapes: Dict[str, Tuple[int, ...]]
     inference_time_ms: float
@@ -51,6 +55,7 @@ class InferenceMeta:
 @dataclass
 class DecodingMeta:
     """Metadata about CTC decoding."""
+
     raw_logits_shape: Tuple[int, int]
     num_blank_tokens: int
     num_unique_tokens: int
@@ -61,6 +66,7 @@ class DecodingMeta:
 @dataclass
 class TranscriptionResult:
     """Complete transcription result with all metadata."""
+
     audio: AudioMeta
     features: FeatureMeta
     inference: InferenceMeta
@@ -92,8 +98,12 @@ class TranscriptionResult:
                 "num_frames": self.features.num_frames,
             },
             "inference": {
-                "input_shapes": {k: list(v) for k, v in self.inference.input_shapes.items()},
-                "output_shapes": {k: list(v) for k, v in self.inference.output_shapes.items()},
+                "input_shapes": {
+                    k: list(v) for k, v in self.inference.input_shapes.items()
+                },
+                "output_shapes": {
+                    k: list(v) for k, v in self.inference.output_shapes.items()
+                },
                 "time_ms": round(self.inference.inference_time_ms, 2),
                 "provider": self.inference.provider,
             },
@@ -118,7 +128,7 @@ class TranscriptionResult:
 class ONNXResultAnalyzer:
     """
     Hook-based analyzer that wraps SenseVoiceSmall to capture intermediate results.
-    
+
     Usage:
         analyzer = ONNXResultAnalyzer(model_dir="iic/SenseVoiceSmall")
         result = analyzer.transcribe_with_analysis(audio_bytes, language="auto")
@@ -128,13 +138,23 @@ class ONNXResultAnalyzer:
 
     # SenseVoice special token ranges
     LANGUAGE_TOKENS = {
-        3: "zh", 4: "en", 7: "yue", 11: "ja", 12: "ko", 13: "nospeech",
+        3: "zh",
+        4: "en",
+        7: "yue",
+        11: "ja",
+        12: "ko",
+        13: "nospeech",
     }
     EMOTION_TOKENS = {
-        0: "NEUTRAL", 1: "HAPPY", 2: "SAD", 3: "ANGRY", 4: "SURPRISED",
+        0: "NEUTRAL",
+        1: "HAPPY",
+        2: "SAD",
+        3: "ANGRY",
+        4: "SURPRISED",
     }
     EVENT_TOKENS = {
-        14: "withitn", 15: "woitn",  # text normalization
+        14: "withitn",
+        15: "woitn",  # text normalization
     }
 
     def __init__(
@@ -147,7 +167,7 @@ class ONNXResultAnalyzer:
     ) -> None:
         """
         Initialize the analyzer with wrapped SenseVoiceSmall model.
-        
+
         Args:
             model_dir: Path or ModelScope ID for the model.
             device_id: ONNX Runtime device (-1 for CPU, 0+ for GPU).
@@ -156,24 +176,24 @@ class ONNXResultAnalyzer:
             results_log_path: Custom path for results log file.
         """
         from funasr_onnx import SenseVoiceSmall
-        
+
         self.model_dir = model_dir
         self.device_id = device_id
         self.log_results = log_results
         self.results_log_path = results_log_path or "onnx_transcription_results.jsonl"
-        
+
         print(f"[Analyzer] Loading model from: {model_dir}")
         self.model = SenseVoiceSmall(
             model_dir=model_dir,
             device_id=device_id,
             quantize=quantize,
         )
-        
+
         # Store original methods for hooking
         self._original_extract_feat = self.model.extract_feat
         self._original_infer = self.model.infer
         self._original_call = self.model.__call__
-        
+
         # Storage for captured intermediates
         self._captured: Dict[str, Any] = {}
         self.results_history: List[TranscriptionResult] = []
@@ -184,18 +204,21 @@ class ONNXResultAnalyzer:
             session = self.model.ort_infer.session
             print(f"  Model path : {session.get_session_options()}")
             print(f"  Providers  : {session.get_providers()}")
-            inputs  = [i.name for i in session.get_inputs()]
+            inputs = [i.name for i in session.get_inputs()]
             outputs = [o.name for o in session.get_outputs()]
             print(f"  Inputs     : {inputs}")
             print(f"  Outputs    : {outputs}")
             # Confirm the model file on disk
             import onnxruntime as ort
+
             print(f"  ORT version: {ort.__version__}")
         except AttributeError:
             # ort_infer might wrap the session differently
             try:
                 print(f"  ort_infer type : {type(self.model.ort_infer)}")
-                print(f"  ort_infer attrs: {[a for a in dir(self.model.ort_infer) if not a.startswith('_')]}")
+                print(
+                    f"  ort_infer attrs: {[a for a in dir(self.model.ort_infer) if not a.startswith('_')]}"
+                )
             except Exception as e:
                 print(f"  [WARN] Could not inspect ort_infer: {e}")
         print("[Analyzer] ==========================================\n")
@@ -240,13 +263,21 @@ class ONNXResultAnalyzer:
             # Step 4: Inference
             t_start = time.perf_counter()
             ctc_logits, encoder_out_lens = self._infer_with_capture(
-                feats, feats_len, language_arr, textnorm_arr,
+                feats,
+                feats_len,
+                language_arr,
+                textnorm_arr,
             )
             inference_time_ms = (time.perf_counter() - t_start) * 1000
 
             inference_meta = self._build_inference_meta(
-                feats, feats_len, language_arr, textnorm_arr,
-                ctc_logits, encoder_out_lens, inference_time_ms,
+                feats,
+                feats_len,
+                language_arr,
+                textnorm_arr,
+                ctc_logits,
+                encoder_out_lens,
+                inference_time_ms,
             )
 
             # Step 5: CTC decode
@@ -258,7 +289,10 @@ class ONNXResultAnalyzer:
             raw_text = self.model.tokenizer.decode(token_int)
 
             # Step 7: Post-process
-            from funasr_onnx.utils.postprocess_utils import rich_transcription_postprocess
+            from funasr_onnx.utils.postprocess_utils import (
+                rich_transcription_postprocess,
+            )
+
             clean_text = rich_transcription_postprocess(raw_text)
 
             # Step 8: Parse special tokens
@@ -286,7 +320,8 @@ class ONNXResultAnalyzer:
 
         except Exception as e:
             import traceback
-            traceback.print_exc()   # print full trace so next error is immediately visible
+
+            traceback.print_exc()  # print full trace so next error is immediately visible
             error_result = TranscriptionResult(
                 audio=AudioMeta(0, 0.0, 0, 0.0, 0.0, False),
                 features=FeatureMeta((0, 0), (0, 0), (0, 0, 0), 0),
@@ -316,11 +351,11 @@ class ONNXResultAnalyzer:
         """Analyze audio and build metadata."""
         duration = len(waveform) / sr
         peak = float(np.max(np.abs(waveform)))
-        rms = float(np.sqrt(np.mean(waveform ** 2)))
-        
+        rms = float(np.sqrt(np.mean(waveform**2)))
+
         # Simple VAD: consider speech if RMS > threshold
         has_speech = rms > 0.005
-        
+
         return AudioMeta(
             sample_rate=sr,
             duration_seconds=duration,
@@ -363,10 +398,10 @@ class ONNXResultAnalyzer:
         """Build feature metadata."""
         fbank_out = self._captured.get("fbank_outputs", [None])[0]
         fbank_shape = fbank_out.shape if fbank_out is not None else (0, 0)
-        
+
         lfr_out = self._captured.get("lfr_outputs", [np.array([])])[0]
         lfr_shape = lfr_out.shape if lfr_out.size > 0 else (0, 0)
-        
+
         return FeatureMeta(
             fbank_shape=fbank_shape,
             lfr_shape=lfr_shape,
@@ -442,7 +477,7 @@ class ONNXResultAnalyzer:
     ) -> Tuple[DecodingMeta, List[int]]:
         """
         Perform CTC decoding with detailed analysis.
-        
+
         Captures:
         - Logit statistics (max, mean, entropy)
         - Blank token ratio
@@ -451,7 +486,7 @@ class ONNXResultAnalyzer:
         """
         b = 0  # First batch item
         x = ctc_logits[b, : encoder_out_lens[b].item(), :]
-        
+
         # Logit statistics
         self._captured["logit_stats"] = {
             "max_logit": float(np.max(x)),
@@ -459,34 +494,34 @@ class ONNXResultAnalyzer:
             "logit_std": float(np.std(x)),
             "top1_confidence": float(np.mean(np.max(x, axis=-1))),
         }
-        
+
         # Top-k analysis per frame
         top5_indices = np.argsort(x, axis=-1)[:, -5:][:, ::-1]
         self._captured["top5_per_frame"] = top5_indices[:10].tolist()  # First 10 frames
-        
+
         # CTC greedy decode
         yseq = np.argmax(x, axis=-1)
-        
+
         # Count blanks
         num_blanks = int(np.sum(yseq == self.model.blank_id))
         total_frames = len(yseq)
-        
+
         # Deduplicate
         mask = np.concatenate(([True], np.diff(yseq) != 0))
         yseq_dedup = yseq[mask]
-        
+
         # Remove blanks
         non_blank_mask = yseq_dedup != self.model.blank_id
         token_int = yseq_dedup[non_blank_mask].tolist()
-        
+
         # Statistics
         num_unique = len(token_int)
         dedup_ratio = len(yseq_dedup) / total_frames if total_frames > 0 else 0
-        
+
         # Frame-level confidence heatmap (first 50 tokens)
         top_tokens = min(50, x.shape[-1])
-        self._captured["confidence_map"] = x[:min(20, x.shape[0]), :top_tokens]
-        
+        self._captured["confidence_map"] = x[: min(20, x.shape[0]), :top_tokens]
+
         return DecodingMeta(
             raw_logits_shape=x.shape,
             num_blank_tokens=num_blanks,
@@ -501,12 +536,19 @@ class ONNXResultAnalyzer:
         """Extract language, emotion, and speech flag from raw_text tags."""
 
         LANGUAGE_TAG_MAP = {
-            "zh": "zh", "en": "en", "yue": "yue",
-            "ja": "ja", "ko": "ko", "nospeech": "nospeech",
+            "zh": "zh",
+            "en": "en",
+            "yue": "yue",
+            "ja": "ja",
+            "ko": "ko",
+            "nospeech": "nospeech",
         }
         EMOTION_TAG_MAP = {
-            "NEUTRAL": "NEUTRAL", "HAPPY": "HAPPY", "SAD": "SAD",
-            "ANGRY": "ANGRY", "SURPRISED": "SURPRISED",
+            "NEUTRAL": "NEUTRAL",
+            "HAPPY": "HAPPY",
+            "SAD": "SAD",
+            "ANGRY": "ANGRY",
+            "SURPRISED": "SURPRISED",
         }
 
         lang = "unknown"
@@ -541,7 +583,7 @@ class ONNXResultAnalyzer:
     ) -> None:
         """
         Create comprehensive visualization of the transcription analysis.
-        
+
         Shows:
         1. Audio waveform with energy
         2. Feature (fbank) spectrogram
@@ -551,67 +593,75 @@ class ONNXResultAnalyzer:
         """
         fig = plt.figure(figsize=(16, 12))
         gs = fig.add_gridspec(4, 2, hspace=0.4, wspace=0.3)
-        
+
         # 1. Audio waveform
         ax1 = fig.add_subplot(gs[0, :])
-        if hasattr(self, '_last_waveform'):
+        if hasattr(self, "_last_waveform"):
             waveform = self._last_waveform
             time_axis = np.linspace(0, result.audio.duration_seconds, len(waveform))
-            ax1.plot(time_axis, waveform, color='steelblue', alpha=0.8, linewidth=0.5)
+            ax1.plot(time_axis, waveform, color="steelblue", alpha=0.8, linewidth=0.5)
             ax1.set_title("Audio Waveform", fontsize=12, fontweight="bold")
             ax1.set_xlabel("Time (s)")
             ax1.set_ylabel("Amplitude")
             ax1.grid(True, alpha=0.3)
-            ax1.axhline(y=result.audio.rms_energy, color='red', linestyle='--', 
-                       label=f'RMS: {result.audio.rms_energy:.4f}')
+            ax1.axhline(
+                y=result.audio.rms_energy,
+                color="red",
+                linestyle="--",
+                label=f"RMS: {result.audio.rms_energy:.4f}",
+            )
             ax1.legend()
-        
+
         # 2. FBank features
         ax2 = fig.add_subplot(gs[1, 0])
         fbank = self._captured.get("fbank_outputs", [None])[0]
         if fbank is not None:
-            im = ax2.imshow(fbank.T, aspect='auto', origin='lower', cmap='magma')
+            im = ax2.imshow(fbank.T, aspect="auto", origin="lower", cmap="magma")
             ax2.set_title(f"FBank Features\n{fbank.shape}", fontsize=11)
             ax2.set_xlabel("Frames")
             ax2.set_ylabel("Mel Bins")
             plt.colorbar(im, ax=ax2, shrink=0.8)
-        
+
         # 3. LFR features
         ax3 = fig.add_subplot(gs[1, 1])
         lfr = self._captured.get("lfr_outputs", [None])[0]
         if lfr is not None:
-            im3 = ax3.imshow(lfr.T, aspect='auto', origin='lower', cmap='viridis')
+            im3 = ax3.imshow(lfr.T, aspect="auto", origin="lower", cmap="viridis")
             ax3.set_title(f"LFR+CMVN Features\n{lfr.shape}", fontsize=11)
             ax3.set_xlabel("Frames")
             ax3.set_ylabel("Feature Dim")
             plt.colorbar(im3, ax=ax3, shrink=0.8)
-        
+
         # 4. CTC logit confidence
         ax4 = fig.add_subplot(gs[2, 0])
         conf_map = self._captured.get("confidence_map")
         if conf_map is not None:
-            im4 = ax4.imshow(conf_map.T, aspect='auto', origin='lower', cmap='YlOrRd')
-            ax4.set_title(f"CTC Logits (Top 50 tokens, first 20 frames)", fontsize=11)
+            im4 = ax4.imshow(conf_map.T, aspect="auto", origin="lower", cmap="YlOrRd")
+            ax4.set_title("CTC Logits (Top 50 tokens, first 20 frames)", fontsize=11)
             ax4.set_xlabel("Frames")
             ax4.set_ylabel("Token Index")
             plt.colorbar(im4, ax=ax4, shrink=0.8)
-        
+
         # 5. Frame confidence
         ax5 = fig.add_subplot(gs[2, 1])
         if conf_map is not None:
             max_per_frame = np.max(conf_map, axis=1)
-            ax5.bar(range(len(max_per_frame)), max_per_frame, color='steelblue', alpha=0.7)
-            ax5.axhline(y=0.5, color='red', linestyle='--', label='0.5 threshold')
-            ax5.set_title(f"Frame Confidence\nMean: {np.mean(max_per_frame):.3f}", fontsize=11)
+            ax5.bar(
+                range(len(max_per_frame)), max_per_frame, color="steelblue", alpha=0.7
+            )
+            ax5.axhline(y=0.5, color="red", linestyle="--", label="0.5 threshold")
+            ax5.set_title(
+                f"Frame Confidence\nMean: {np.mean(max_per_frame):.3f}", fontsize=11
+            )
             ax5.set_xlabel("Frame")
             ax5.set_ylabel("Max Logit")
             ax5.set_ylim(0, 1)
             ax5.legend()
-        
+
         # 6. Summary statistics
         ax6 = fig.add_subplot(gs[3, :])
-        ax6.axis('off')
-        
+        ax6.axis("off")
+
         summary_text = f"""
         ╔══════════════════════════════════════════════════════════════╗
         ║                   TRANSCRIPTION ANALYSIS                    ║
@@ -644,16 +694,26 @@ class ONNXResultAnalyzer:
         ║    Emotion: {result.emotion_detected}                       ║
         ╚══════════════════════════════════════════════════════════════╝
         """
-        
-        ax6.text(0, 0.5, summary_text, fontfamily='monospace', fontsize=9,
-                verticalalignment='center', transform=ax6.transAxes,
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
-        
-        fig.suptitle(f"ONNX Transcription Analysis - {time.strftime('%Y-%m-%d %H:%M:%S')}", 
-                    fontsize=14, fontweight="bold")
-        
+
+        ax6.text(
+            0,
+            0.5,
+            summary_text,
+            fontfamily="monospace",
+            fontsize=9,
+            verticalalignment="center",
+            transform=ax6.transAxes,
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.3),
+        )
+
+        fig.suptitle(
+            f"ONNX Transcription Analysis - {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            fontsize=14,
+            fontweight="bold",
+        )
+
         if save_path:
-            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            plt.savefig(save_path, dpi=150, bbox_inches="tight")
             print(f"[Analyzer] Visualization saved to: {save_path}")
         else:
             plt.show()
@@ -663,14 +723,18 @@ class ONNXResultAnalyzer:
         """Get aggregate statistics across all transcriptions."""
         if not self.results_history:
             return {"error": "No results available"}
-        
+
         successful = [r for r in self.results_history if r.error is None]
         failed = [r for r in self.results_history if r.error is not None]
-        
+
         inference_times = [r.inference.inference_time_ms for r in successful]
         audio_durations = [r.audio.duration_seconds for r in successful]
-        rtfs = [t / (d * 1000) for t, d in zip(inference_times, audio_durations)] if audio_durations else []
-        
+        rtfs = (
+            [t / (d * 1000) for t, d in zip(inference_times, audio_durations)]
+            if audio_durations
+            else []
+        )
+
         return {
             "total_requests": len(self.results_history),
             "successful": len(successful),
@@ -678,7 +742,9 @@ class ONNXResultAnalyzer:
             "avg_inference_time_ms": np.mean(inference_times) if inference_times else 0,
             "avg_audio_duration_s": np.mean(audio_durations) if audio_durations else 0,
             "avg_rtf": np.mean(rtfs) if rtfs else 0,
-            "p95_inference_time_ms": np.percentile(inference_times, 95) if inference_times else 0,
+            "p95_inference_time_ms": np.percentile(inference_times, 95)
+            if inference_times
+            else 0,
             "languages_detected": list(set(r.language_detected for r in successful)),
         }
 
@@ -724,9 +790,9 @@ def quick_analyze(
         else "N/A"
     )
 
-    print(f"\n{'='*60}")
-    print(f"TRANSCRIPTION RESULT")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print("TRANSCRIPTION RESULT")
+    print(f"{'=' * 60}")
     print(f"Clean Text:  {result.clean_text}")
     print(f"Raw Text:    {result.raw_text}")
     print(f"Language:    {result.language_detected}")
@@ -735,7 +801,7 @@ def quick_analyze(
     print(f"Audio:       {duration_s:.3f}s")
     print(f"RTF:         {rtf_str}")
     print(f"Blank Ratio: {blank_ratio_str}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     if result.error:
         print(f"[ERROR] {result.error}")
@@ -747,17 +813,166 @@ def quick_analyze(
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
+    import json
+    import shutil
 
-    if len(sys.argv) > 1:
-        audio_file = sys.argv[1]
-    else:
-        audio_file = r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\example\en.mp3"
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
 
-    result = quick_analyze(
-        audio_file,
-        language="auto",
-        save_plot="transcription_analysis.png",
+    console = Console()
+
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\example\en.mp3"
+
+    parser = argparse.ArgumentParser(description="ONNX SenseVoice transcription demo.")
+    parser.add_argument(
+        "audio_path",
+        nargs="?",
+        default=DEFAULT_AUDIO,
+        help="Audio file to transcribe (defaults to sample path).",
     )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        default=OUTPUT_DIR,
+        type=Path,
+        help="Output directory",
+    )
+    parser.add_argument(
+        "-l",
+        "--language",
+        default="auto",
+        type=str,
+        help="Language code, e.g. 'ja', 'en', 'auto' (default).",
+    )
+    args = parser.parse_args()
+
+    output_dir = args.output_dir
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    audio_path = args.audio_path
+    language = args.language
+
+    analysis_png_file = output_dir / "transcription_analysis.png"
+    quick_analysis_result = quick_analyze(
+        audio_path,
+        language=language,
+        save_plot=str(analysis_png_file),
+    )
+
     # .to_dict() for JSON-serialisable output
-    print(f"Quick Analysis Result:\n{json.dumps(result.to_dict(), indent=2, ensure_ascii=False)}")
+    quick_analysis_file = output_dir / "quick_analysis.json"
+    rel_analysis_file = quick_analysis_file.name
+    rel_png_file = analysis_png_file.name
+
+    # Display quick analysis result in a formatted table
+    console.print("\n")
+    console.print(Panel.fit("🎯 QUICK ANALYSIS RESULT", style="bold cyan"))
+    console.print("\n")
+
+    # Create main results table
+    result_table = Table(title="Transcription Analysis Results", title_style="bold green")
+    result_table.add_column("Category", style="cyan", no_wrap=True)
+    result_table.add_column("Value", style="white")
+
+    # Audio info
+    result_table.add_row("Duration", f"{quick_analysis_result.audio.duration_seconds:.3f}s")
+    result_table.add_row("Sample Rate", f"{quick_analysis_result.audio.sample_rate} Hz")
+    result_table.add_row("RMS Energy", f"{quick_analysis_result.audio.rms_energy:.4f}")
+    result_table.add_row("Has Speech", "✓" if quick_analysis_result.audio.has_speech else "✗")
+    
+    # Transcription results
+    result_table.add_row("", "")
+    result_table.add_row("[bold]Transcription[/bold]", "")
+    result_table.add_row("  Language", quick_analysis_result.language_detected.upper())
+    result_table.add_row("  Emotion", f"[yellow]{quick_analysis_result.emotion_detected}[/yellow]")
+    result_table.add_row("  Is Speech", "✓" if quick_analysis_result.is_speech else "✗")
+    
+    # Performance metrics
+    result_table.add_row("", "")
+    result_table.add_row("[bold]Performance[/bold]", "")
+    result_table.add_row("  Inference Time", f"{quick_analysis_result.inference.inference_time_ms:.1f}ms")
+    duration = quick_analysis_result.audio.duration_seconds
+    rtf = quick_analysis_result.inference.inference_time_ms / (duration * 1000) if duration > 0 else 0
+    result_table.add_row("  RTF (Real-Time Factor)", f"{rtf:.4f}")
+    result_table.add_row("  Provider", quick_analysis_result.inference.provider)
+    
+    # Decoding stats
+    result_table.add_row("", "")
+    result_table.add_row("[bold]Decoding[/bold]", "")
+    total_frames = quick_analysis_result.decoding.raw_logits_shape[0]
+    blank_ratio = quick_analysis_result.decoding.num_blank_tokens / total_frames if total_frames > 0 else 0
+    result_table.add_row("  Total Frames", str(total_frames))
+    result_table.add_row("  Blank Tokens", f"{quick_analysis_result.decoding.num_blank_tokens} ({blank_ratio:.1%})")
+    result_table.add_row("  Unique Tokens", str(quick_analysis_result.decoding.num_unique_tokens))
+    result_table.add_row("  Dedup Ratio", f"{quick_analysis_result.decoding.dedup_ratio:.1%}")
+
+    console.print(result_table)
+
+    # Display the transcribed text prominently
+    console.print("\n")
+    if quick_analysis_result.clean_text:
+        text_panel = Panel(
+            Text(quick_analysis_result.clean_text, style="bold green"),
+            title="📝 TRANSCRIBED TEXT",
+            title_align="center",
+            border_style="green",
+            padding=(1, 2)
+        )
+        console.print(text_panel)
+    else:
+        console.print("[red]No text was transcribed[/red]")
+    
+    if quick_analysis_result.raw_text and quick_analysis_result.raw_text != quick_analysis_result.clean_text:
+        console.print("\n")
+        raw_panel = Panel(
+            Text(quick_analysis_result.raw_text, style="dim white"),
+            title="Raw Output (with special tokens)",
+            title_align="center",
+            border_style="yellow",
+            padding=(1, 2)
+        )
+        console.print(raw_panel)
+
+    if quick_analysis_result.error:
+        console.print("\n")
+        error_panel = Panel(
+            Text(f"❌ {quick_analysis_result.error}", style="bold red"),
+            title="ERROR",
+            title_align="center",
+            border_style="red"
+        )
+        console.print(error_panel)
+
+    # Display diagnostic info if needed
+    if quick_analysis_result.decoding.num_blank_tokens / total_frames > 0.9:
+        console.print("\n[bold yellow]⚠️  Warning: High blank token ratio (>90%) - possible silent audio or feature extraction issue[/bold yellow]")
+    
+    if quick_analysis_result.inference.inference_time_ms > 500:
+        console.print(f"\n[bold yellow]⚠️  Slow inference ({quick_analysis_result.inference.inference_time_ms:.0f}ms) - consider using GPU or quantization[/bold yellow]")
+
+    # Also print JSON snippet
+    console.print("\n")
+    console.print("[bold yellow]JSON Snippet (full result):[/bold yellow]")
+    console.print_json(
+        json.dumps(quick_analysis_result.to_dict(), indent=2, ensure_ascii=False)
+    )
+
+    with open(quick_analysis_file, "w", encoding="utf-8") as f:
+        json.dump(quick_analysis_result.to_dict(), f, indent=2, ensure_ascii=False)
+
+    console.print("\n")
+    console.print(
+        f"[bold green]✅ Quick Analysis result saved to [/bold green]"
+        f"[link=file://{quick_analysis_file.resolve()}]{rel_analysis_file}[/link]"
+    )
+    console.print(
+        f"[bold green]📊 Visualization saved to [/bold green]"
+        f"[link=file://{analysis_png_file.resolve()}]{rel_png_file}[/link]"
+    )

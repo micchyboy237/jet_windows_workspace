@@ -440,7 +440,7 @@ if __name__ == "__main__":
         help="Audio file to transcribe (defaults to sample path).",
     )
     parser.add_argument(
-        "--language", default="auto",
+        "-l", "--language", default="auto",
         help="Language code, e.g. 'ja', 'en', 'auto' (default).",
     )
     parser.add_argument(

@@ -87,11 +87,13 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\demo_onnx.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\jet_funasr_onnx_model_fixer.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\funasr_onnx_result_analyzer.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\funasr_onnx_result_analyzer.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr_onnx_with_analysis.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr_onnx.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr_onnx.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\funasr\utils\postprocess_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr.py",
     r"",
 ]
 
@@ -109,8 +111,7 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Write the code for transcribe_funasr_onnx that follows similar functions, inputs and types in transcribe_jp_funasr.
-Reuse funasr_onnx_result_analyzer to create factory functions to conform the needed types.
+Update TranscriptionResult to include language, emo, event, and any other data can be parsed from result text.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

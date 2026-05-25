@@ -1354,76 +1354,482 @@ _init_module()
 # ============================================================================
 
 if __name__ == "__main__":
+    import argparse
+    import json
+    import shutil
     import sys
+    from datetime import datetime
+    from pathlib import Path
+
+    from rich.console import Console
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.syntax import Syntax
+    from rich.tree import Tree
+    from rich import box
+
+    console = Console()
+
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\example\en.mp3"
+
+    parser = argparse.ArgumentParser(
+        description="ONNX SenseVoice transcription demo with comprehensive analysis",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Basic transcription with analysis
+  python %(prog)s audio.mp3
+  
+  # Specify language and output directory
+  python %(prog)s audio.mp3 -l zh -o ./results
+  
+  # Disable visualization (faster)
+  python %(prog)s audio.mp3 --no-viz
+  
+  # Use CPU instead of GPU
+  python %(prog)s audio.mp3 --device -1
+  
+  # Disable quantization for higher accuracy (slower)
+  python %(prog)s audio.mp3 --no-quantize
+  
+  # Export results in different formats
+  python %(prog)s audio.mp3 --export-json --export-csv
+  
+  # Show detailed visualization
+  python %(prog)s audio.mp3 --show-plot
+        """
+    )
     
-    print("=" * 70)
-    print("  SenseVoice ONNX Transcription - Result Analysis Demo")
-    print("=" * 70)
+    parser.add_argument(
+        "audio_path",
+        nargs="?",
+        default=DEFAULT_AUDIO,
+        help="Audio file to transcribe (defaults to sample path).",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        default=OUTPUT_DIR,
+        type=Path,
+        help="Output directory for results and visualizations.",
+    )
+    parser.add_argument(
+        "-l",
+        "--language",
+        default="auto",
+        choices=["auto", "zh", "en", "ja", "ko", "yue"],
+        help="Language code (default: auto).",
+    )
+    parser.add_argument(
+        "--device",
+        default="0",
+        help="ONNX Runtime device (-1 for CPU, 0+ for GPU, default: 0).",
+    )
+    parser.add_argument(
+        "--no-quantize",
+        action="store_true",
+        help="Disable INT8 quantization (use FP32 model, slower but more accurate).",
+    )
+    parser.add_argument(
+        "--no-itn",
+        action="store_true",
+        help="Disable Inverse Text Normalization (keep raw numbers/dates).",
+    )
+    parser.add_argument(
+        "--no-viz",
+        action="store_true",
+        help="Skip generating visualization plots.",
+    )
+    parser.add_argument(
+        "--show-plot",
+        action="store_true",
+        help="Display the visualization plot interactively (requires GUI).",
+    )
+    parser.add_argument(
+        "--export-json",
+        action="store_true",
+        help="Export results as JSON file.",
+    )
+    parser.add_argument(
+        "--export-csv",
+        action="store_true",
+        help="Export results as CSV file.",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=4,
+        help="Number of CPU threads for inference (default: 4).",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print detailed debug information.",
+    )
+    parser.add_argument(
+        "--demo-mode",
+        action="store_true",
+        help="Run in demo mode with sample audio and cleanup.",
+    )
     
-    # Test files
-    test_files = {
-        "en": r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\example\en.mp3",
-        "ja": r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\example\ja.mp3",
+    args = parser.parse_args()
+
+    # Setup output directory
+    output_dir = args.output_dir
+    if args.demo_mode:
+        # Use a temporary directory for demo
+        output_dir = Path(__file__).parent / "generated" / "demo_output"
+        shutil.rmtree(output_dir, ignore_errors=True)
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Define static filenames
+    STATIC_FILES = {
+        "visualization": "transcription_analysis.png",
+        "detailed_json": "result_detailed.json",
+        "jsonl_log": "transcription_results.jsonl",
+        "json_export": "result.json",
+        "csv_export": "result.csv",
+        "quick_summary": "summary.txt",
     }
     
-    if len(sys.argv) > 1:
-        test_file = sys.argv[1]
-        test_lang = sys.argv[2] if len(sys.argv) > 2 else "auto"
-    else:
-        test_file = test_files.get("en", list(test_files.values())[0])
-        test_lang = "auto"
+    # Rich header
+    console.print()
+    console.rule("[bold cyan]🎙️  SenseVoice ONNX Transcription Analyzer[/bold cyan]")
+    console.print()
     
-    # Create transcriber with analysis enabled
-    analyzer = SenseVoiceTranscriber(
-        model_dir="iic/SenseVoiceSmall",
-        device_id="0",
-        quantize=True,
-        enable_analysis=True,
-        results_log_path="transcription_results.jsonl",
-    )
+    # Display configuration
+    config_table = Table(title="Configuration", box=box.ROUNDED, style="cyan")
+    config_table.add_column("Parameter", style="bold yellow")
+    config_table.add_column("Value", style="white")
+    
+    config_table.add_row("Audio File", str(args.audio_path))
+    config_table.add_row("Language", args.language.upper())
+    config_table.add_row("Device", f"GPU:{args.device}" if args.device != "-1" else "CPU")
+    config_table.add_row("Quantization", "❌ Disabled" if args.no_quantize else "✅ Enabled")
+    config_table.add_row("ITN (Text Norm)", "❌ Disabled" if args.no_itn else "✅ Enabled")
+    config_table.add_row("CPU Threads", str(args.threads))
+    config_table.add_row("Output Directory", str(output_dir))
+    config_table.add_row("Visualization", "❌ Skipped" if args.no_viz else "✅ Enabled")
+    
+    console.print(config_table)
+    console.print()
+    
+    # Check if audio file exists
+    audio_path = Path(args.audio_path)
+    if not audio_path.exists():
+        console.print(f"[bold red]❌ Error: Audio file not found: {audio_path}[/bold red]")
+        sys.exit(1)
+    
+    # Create transcriber
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=False,
+    ) as progress:
+        task = progress.add_task("[cyan]Loading ONNX model...", total=None)
+        
+        # Use static filename for results log
+        results_log_path = str(output_dir / STATIC_FILES["jsonl_log"])
+        
+        transcriber = SenseVoiceTranscriber(
+            model_dir="iic/SenseVoiceSmall",
+            device_id=args.device,
+            quantize=not args.no_quantize,
+            enable_analysis=True,
+            intra_op_num_threads=args.threads,
+            results_log_path=results_log_path,
+        )
+        
+        progress.update(task, completed=True)
+    
+    console.print("[bold green]✅ Model loaded successfully[/bold green]")
+    console.print()
     
     # Transcribe with analysis
-    print(f"\n[Demo] Transcribing: {test_file}")
-    print(f"[Demo] Language hint: {test_lang}")
+    console.rule("[bold yellow]📝 Transcription in Progress[/bold yellow]")
+    console.print()
     
-    with open(test_file, "rb") as f:
-        audio_bytes = f.read()
-    
-    result = analyzer.transcribe_with_analysis(
-        audio_bytes, 
-        language=test_lang,
-        use_itn=True,
-    )
-    
-    # Print summary
-    result.print_summary()
-    
-    # Generate visualization
-    try:
-        viz_path = analyzer.visualize_result(
-            result, 
-            save_path="transcription_analysis.png",
-            show_plot=False,
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task("[cyan]Processing audio...", total=None)
+        
+        with open(audio_path, "rb") as f:
+            audio_bytes = f.read()
+        
+        result = transcriber.transcribe_with_analysis(
+            audio_bytes,
+            language=args.language,
+            use_itn=not args.no_itn,
         )
-        print(f"[Demo] Visualization saved to: {viz_path}")
-    except ImportError:
-        print("[Demo] matplotlib not available, skipping visualization.")
+        
+        progress.update(task, completed=True)
     
-    # Print aggregate stats (just this one result)
-    stats = analyzer.get_aggregate_statistics()
-    print(f"\n[Aggregate Stats]")
-    print(f"  Success Rate: {stats.get('success_rate', 0):.1%}")
-    if 'timing' in stats:
-        t = stats['timing']
-        print(f"  Avg Inference: {t['avg_inference_ms']:.1f}ms")
-        print(f"  Avg RTF: {t['avg_rtf']:.4f}")
-    if 'confidence' in stats:
-        c = stats['confidence']
-        print(f"  Avg Top-1 Conf: {c['avg_top1']:.3f}")
-        print(f"  Avg Entropy: {c['avg_entropy']:.3f}")
+    console.print()
     
-    # Export results
-    analyzer.export_results("transcription_results.json", format="json")
-    analyzer.export_results("transcription_results.csv", format="csv")
+    # Display main result in a prominent panel
+    if result.error:
+        console.print(Panel(
+            Text(f"❌ TRANSCRIPTION FAILED\n\n{result.error}", style="bold red"),
+            border_style="red",
+            padding=(1, 2)
+        ))
+    else:
+        # Main text panel
+        text_panel = Panel(
+            Text(result.clean_text, style="bold green", justify="center"),
+            title="🎯 TRANSCRIBED TEXT",
+            title_align="center",
+            border_style="green",
+            padding=(2, 4),
+            width=80
+        )
+        console.print(text_panel)
+        console.print()
+        
+        # Create detailed results table
+        result_table = Table(title="Detailed Analysis", box=box.HEAVY_EDGE, title_style="bold cyan")
+        result_table.add_column("Category", style="bold yellow", width=20)
+        result_table.add_column("Metric", style="cyan", width=25)
+        result_table.add_column("Value", style="white", width=30)
+        
+        # Audio metadata
+        result_table.add_row("Audio", "Duration", f"{result.audio.duration_seconds:.3f}s")
+        result_table.add_row("", "Sample Rate", f"{result.audio.sample_rate} Hz")
+        result_table.add_row("", "RMS Energy", f"{result.audio.rms_energy:.4f}")
+        result_table.add_row("", "Peak Amplitude", f"{result.audio.peak_amplitude:.4f}")
+        result_table.add_row("", "Has Speech", "✓" if result.audio.has_speech else "✗")
+        result_table.add_row("", "Silence Ratio", f"{result.audio.silence_ratio:.1%}")
+        
+        # Transcription results
+        result_table.add_row("Transcription", "Language", result.language_detected.upper())
+        result_table.add_row("", "Emotion", f"[yellow]{result.emotion_detected}[/yellow]")
+        result_table.add_row("", "Is Speech", "✓" if result.is_speech else "✗")
+        result_table.add_row("", "Text Norm", result.text_normalization)
+        
+        # Performance metrics
+        rtf = result.inference.inference_time_ms / (result.audio.duration_seconds * 1000)
+        result_table.add_row("Performance", "Inference Time", f"{result.inference.inference_time_ms:.1f} ms")
+        result_table.add_row("", "Total Time", f"{result.total_time_ms:.1f} ms")
+        result_table.add_row("", "RTF", f"{rtf:.4f}")
+        result_table.add_row("", "Provider", result.inference.execution_provider)
+        result_table.add_row("", "Threads", str(result.inference.num_threads))
+        
+        # Decoding statistics
+        result_table.add_row("Decoding", "Encoder Frames", str(result.decoding.num_encoder_frames))
+        result_table.add_row("", "Vocab Size", str(result.decoding.vocab_size))
+        result_table.add_row("", "Top-1 Confidence", f"{result.decoding.top1_confidence_mean:.3f}")
+        result_table.add_row("", "Top-5 Confidence", f"{result.decoding.top5_confidence_mean:.3f}")
+        result_table.add_row("", "Entropy", f"{result.decoding.entropy_mean:.3f}")
+        result_table.add_row("", "Blank Ratio", f"{result.decoding.blank_ratio:.1%}")
+        result_table.add_row("", "Dedup Ratio", f"{result.decoding.dedup_ratio:.1%}")
+        result_table.add_row("", "Unique Tokens", str(result.decoding.num_unique_tokens))
+        
+        console.print(result_table)
+        
+        # Warning panel if applicable
+        if result.warning:
+            console.print()
+            warning_panel = Panel(
+                Text(f"⚠️  {result.warning}", style="bold yellow"),
+                title="Warning",
+                border_style="yellow"
+            )
+            console.print(warning_panel)
+        
+        # Raw text if different from clean text
+        if result.raw_text != result.clean_text and args.verbose:
+            console.print()
+            raw_panel = Panel(
+                Text(result.raw_text, style="dim white"),
+                title="Raw Output (with special tokens)",
+                border_style="blue",
+                padding=(1, 2)
+            )
+            console.print(raw_panel)
     
-    print(f"\n[Demo] Complete!")
+    console.print()
+    
+    # Save all results with static filenames
+    saved_files = []
+    
+    # 1. Save detailed JSON result
+    detailed_json_path = output_dir / STATIC_FILES["detailed_json"]
+    with open(detailed_json_path, "w", encoding="utf-8") as f:
+        json.dump(result.to_dict(include_raw_data=False), f, indent=2, ensure_ascii=False)
+    saved_files.append(detailed_json_path)
+    
+    # 2. Save text summary
+    summary_path = output_dir / STATIC_FILES["quick_summary"]
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write("=" * 70 + "\n")
+        f.write("SENSEVOICE ONNX TRANSCRIPTION SUMMARY\n")
+        f.write("=" * 70 + "\n\n")
+        
+        if result.error:
+            f.write(f"ERROR: {result.error}\n")
+        else:
+            f.write(f"Transcribed Text: {result.clean_text}\n\n")
+            f.write(f"Language: {result.language_detected}\n")
+            f.write(f"Emotion: {result.emotion_detected}\n")
+            f.write(f"Is Speech: {result.is_speech}\n")
+            f.write(f"Text Normalization: {result.text_normalization}\n\n")
+            
+            f.write(f"Audio Duration: {result.audio.duration_seconds:.3f}s\n")
+            f.write(f"Inference Time: {result.inference.inference_time_ms:.1f}ms\n")
+            f.write(f"RTF: {rtf:.4f}\n\n")
+            
+            f.write(f"Top-1 Confidence: {result.decoding.top1_confidence_mean:.3f}\n")
+            f.write(f"Blank Ratio: {result.decoding.blank_ratio:.3f}\n")
+            f.write(f"Unique Tokens: {result.decoding.num_unique_tokens}\n")
+        
+        f.write("\n" + "=" * 70 + "\n")
+        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Model: SenseVoiceSmall ONNX\n")
+        f.write(f"Output Directory: {output_dir}\n")
+    
+    saved_files.append(summary_path)
+    
+    # 3. Generate visualization (if enabled)
+    if not args.no_viz and HAS_MATPLOTLIB and not result.error:
+        viz_path = output_dir / STATIC_FILES["visualization"]
+        console.print(f"[dim]Generating visualization...[/dim]")
+        
+        try:
+            saved_path = transcriber.visualize_result(
+                result,
+                save_path=str(viz_path),
+                show_plot=args.show_plot,
+            )
+            if saved_path:
+                saved_files.append(viz_path)
+                console.print(f"[green]📊 Visualization saved to: {viz_path}[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Visualization failed: {e}[/yellow]")
+    elif not HAS_MATPLOTLIB:
+        console.print("[dim]⚠️  matplotlib not installed, skipping visualization[/dim]")
+    
+    # 4. Export JSON (if requested)
+    if args.export_json:
+        json_path = output_dir / STATIC_FILES["json_export"]
+        transcriber.export_results(str(json_path), format="json")
+        saved_files.append(json_path)
+    
+    # 5. Export CSV (if requested)
+    if args.export_csv:
+        csv_path = output_dir / STATIC_FILES["csv_export"]
+        transcriber.export_results(str(csv_path), format="csv")
+        saved_files.append(csv_path)
+    
+    # Display saved files tree
+    console.print()
+    console.rule("[bold green]💾 Saved Files[/bold green]")
+    console.print()
+    
+    file_tree = Tree(f"📁 {output_dir.name}/", guide_style="bold cyan")
+    
+    # Group files by type
+    viz_file = output_dir / STATIC_FILES["visualization"]
+    json_files = []
+    txt_files = []
+    other_files = []
+    
+    for file_path in saved_files:
+        if file_path.suffix == '.png':
+            viz_group = file_tree.add("[cyan]📊 Visualizations[/cyan]")
+            viz_group.add(f"[green]• {file_path.name}[/green]")
+        elif file_path.suffix in ['.json', '.jsonl']:
+            if not json_files:
+                json_group = file_tree.add("[yellow]📄 JSON Files[/yellow]")
+                json_files.append(json_group)
+            json_files[0].add(f"[green]• {file_path.name}[/green]")
+        elif file_path.suffix == '.csv':
+            if not other_files:
+                csv_group = file_tree.add("[blue]📊 CSV Files[/blue]")
+                other_files.append(csv_group)
+            other_files[0].add(f"[green]• {file_path.name}[/green]")
+        elif file_path.suffix == '.txt':
+            if not txt_files:
+                txt_group = file_tree.add("[white]📝 Text Files[/white]")
+                txt_files.append(txt_group)
+            txt_files[0].add(f"[green]• {file_path.name}[/green]")
+    
+    console.print(file_tree)
+    
+    # Display aggregate statistics (if multiple runs)
+    stats = transcriber.get_aggregate_statistics()
+    if stats.get('total_requests', 0) > 1:
+        console.print()
+        console.rule("[bold blue]📊 Aggregate Statistics[/bold blue]")
+        console.print()
+        
+        stats_table = Table(box=box.SIMPLE)
+        stats_table.add_column("Metric", style="bold")
+        stats_table.add_column("Value", style="cyan")
+        
+        stats_table.add_row("Total Requests", str(stats.get('total_requests', 0)))
+        stats_table.add_row("Success Rate", f"{stats.get('success_rate', 0):.1%}")
+        
+        if 'timing' in stats:
+            t = stats['timing']
+            stats_table.add_row("Avg Inference", f"{t['avg_inference_ms']:.1f}ms")
+            stats_table.add_row("Avg RTF", f"{t['avg_rtf']:.4f}")
+            stats_table.add_row("P95 Inference", f"{t['p95_inference_ms']:.1f}ms")
+        
+        if 'confidence' in stats:
+            c = stats['confidence']
+            stats_table.add_row("Avg Top-1 Conf", f"{c['avg_top1']:.3f}")
+            stats_table.add_row("Low Conf Ratio", f"{c['low_confidence_ratio']:.1%}")
+        
+        console.print(stats_table)
+    
+    # Demo mode cleanup message
+    if args.demo_mode:
+        console.print()
+        console.print("[bold yellow]🎯 Demo mode - files saved to:[/bold yellow]")
+        console.print(f"  📁 {output_dir}")
+        console.print("[dim]Use --output-dir to specify a custom location[/dim]")
+    
+    # Final summary
+    console.print()
+    if result.error:
+        console.rule("[bold red]❌ Transcription Failed[/bold red]")
+        console.print(f"[red]Error: {result.error}[/red]")
+        sys.exit(1)
+    else:
+        console.rule("[bold green]✨ Transcription Complete[/bold green]")
+        console.print(f"[green]✅ Successfully transcribed: {result.clean_text}[/green]")
+        console.print(f"[dim]📁 All results saved to: {output_dir}/[/dim]")
+        
+        # Quick reference to main files
+        console.print()
+        console.print("[bold]Main result files:[/bold]")
+        console.print(f"  • Detailed JSON: [cyan]{STATIC_FILES['detailed_json']}[/cyan]")
+        console.print(f"  • Text Summary: [cyan]{STATIC_FILES['quick_summary']}[/cyan]")
+        if not args.no_viz and HAS_MATPLOTLIB:
+            console.print(f"  • Visualization: [cyan]{STATIC_FILES['visualization']}[/cyan]")
+        console.print(f"  • JSONL Log: [cyan]{STATIC_FILES['jsonl_log']}[/cyan]")
+    
+    console.print()
+    
+    # Optional: Display a quick JSON preview
+    if args.verbose and not result.error:
+        console.print("[dim]JSON Preview (first 2000 chars):[/dim]")
+        json_preview = result.to_dict()
+        # Remove large arrays for preview
+        if 'decoding' in json_preview:
+            json_preview['decoding'].pop('token_sequence', None)
+        preview_str = json.dumps(json_preview, indent=2)[:2000]
+        if len(preview_str) == 2000:
+            preview_str += "..."
+        console.print_json(preview_str)
