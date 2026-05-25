@@ -548,19 +548,7 @@ class SegmentSpeakerLabeler:
         context: Optional[Dict],
         embedding: np.ndarray,
     ) -> bool:
-        """Determine if we should create a new speaker.
-        
-        Creates a new speaker when:
-        - No speakers exist yet
-        - No matches found
-        - Best match is a weak_match (below threshold_possible)
-        - Best score is below threshold_new_speaker
-        
-        Does NOT create when:
-        - strong_match or early_match found
-        - possible_match or better found (score >= threshold_possible)
-        - Context/previous speaker has sufficient similarity
-        """
+        """Determine if we should create a new speaker."""
         if len(self._speakers) == 0:
             return True
         if not top_matches:
@@ -568,6 +556,7 @@ class SegmentSpeakerLabeler:
 
         best_match = top_matches[0]
         match_type = best_match["match_type"]
+        confidence = best_match["confidence"]
 
         # Strong or early match: definitely existing speaker
         if match_type in ("strong_match", "early_match"):
@@ -577,9 +566,8 @@ class SegmentSpeakerLabeler:
         if match_type == "possible_match":
             return False
 
-        # weak_match: check context before deciding
-        if match_type == "weak_match":
-            # Context can save a weak match if previous speaker has sufficient similarity
+        # Low confidence: check context before creating new speaker
+        if confidence < self.threshold_new_speaker:
             if context and "previous_speaker" in context:
                 prev_speaker = context["previous_speaker"]
                 if prev_speaker and prev_speaker in self._speakers:
