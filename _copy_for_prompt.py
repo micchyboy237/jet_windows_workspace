@@ -96,8 +96,11 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_segment_speaker_labeler.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\sentence_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en.py",
     r"",
 ]
 
@@ -115,71 +118,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Check whats causing too much bias on a centroid.
-
-{
-  "current_speaker": "SPEAKER_01",
-  "known_speakers": [
-    "SPEAKER_01",
-    "SPEAKER_02",
-    "SPEAKER_03",
-    "SPEAKER_04",
-    "SPEAKER_05",
-    "SPEAKER_06"
-  ],
-  "speaker_count": 6,
-  "speakers_info": {
-    "SPEAKER_02": {
-      "label": "SPEAKER_02",
-      "segment_count": 4,
-      "first_seen": 0.32,
-      "last_seen": 0.85,
-      "active_duration": 0.53,
-      "has_valid_centroid": true
-    },
-    "SPEAKER_03": {
-      "label": "SPEAKER_03",
-      "segment_count": 3,
-      "first_seen": 0.67,
-      "last_seen": 0.16,
-      "active_duration": -0.51,
-      "has_valid_centroid": true
-    },
-    "SPEAKER_05": {
-      "label": "SPEAKER_05",
-      "segment_count": 5,
-      "first_seen": 0.05,
-      "last_seen": 0.08,
-      "active_duration": 0.03,
-      "has_valid_centroid": true
-    },
-    "SPEAKER_04": {
-      "label": "SPEAKER_04",
-      "segment_count": 2,
-      "first_seen": 0.06,
-      "last_seen": 0.06,
-      "active_duration": 0,
-      "has_valid_centroid": true
-    },
-    "SPEAKER_06": {
-      "label": "SPEAKER_06",
-      "segment_count": 2,
-      "first_seen": 0.04,
-      "last_seen": 0.04,
-      "active_duration": 0,
-      "has_valid_centroid": true
-    },
-    "SPEAKER_01": {
-      "label": "SPEAKER_01",
-      "segment_count": 76,
-      "first_seen": 44.63,
-      "last_seen": 0,
-      "active_duration": -44.63,
-      "has_valid_centroid": true
-    }
-  },
-  "total_segments_processed": 86
-}
+Fix why en_text is getting joined words.
+Also include logs for transcribed and translated texts.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
