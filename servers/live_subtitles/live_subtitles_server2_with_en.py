@@ -291,7 +291,7 @@ def should_reset_context(header: dict) -> bool:
     return True
 
 
-def should_label_speaker(text: str, min_chars: int = 10) -> bool:
+def should_label_speaker(text: str, min_chars: int = 5) -> bool:
     """
     Determine if speaker labeling should be performed based on text content.
 
@@ -461,7 +461,7 @@ def blocking_process_audio(
         console.print(f"[dim]Language: {language} | Words: {len(full_word_segments)}[/dim]")
         
         # Speaker labeling
-        text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=10)
+        text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=5)
         speaker_results = []
         primary_label = None
         primary_confidence = 0.0
@@ -717,7 +717,7 @@ def blocking_process_audio(
     console.print(f"[dim]Sentences: {len(full_ja_sents)}[/dim]")
     
     # Speaker labeling
-    text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=10)
+    text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=5)
     speaker_results = []
     primary_label = None
     primary_confidence = 0.0
