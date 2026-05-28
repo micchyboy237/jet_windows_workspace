@@ -69,7 +69,12 @@ class SpeakerVisualizer:
             console.print(f"[green]✓ Saved: {path}[/]")
             plt.close(fig)
         else:
-            plt.show()
+            # Only show if we're in an interactive environment
+            # Removes warnings caused by displaying non-interactive plot
+            if plt.get_backend().lower() != 'agg':
+                plt.show()
+            else:
+                plt.close(fig)
     
     def _collect_centroids(
         self, labeler
@@ -542,34 +547,34 @@ class SpeakerVisualizer:
         
         summary_text = f"""
         ╔══════════════════════════╗
-        ║  SPEAKER STATISTICS      ║
+        ║ SPEAKER STATISTICS       ║
         ╚══════════════════════════╝
-        
-        📊 Overview
-        ─────────────────────────
-        Total Speakers:      {len(labels):>4d}
-        Total Segments:      {sum(counts):>4d}
-        Avg Seg/Speaker:     {np.mean(counts) if counts else 0:>6.1f}
-        Avg Duration:        {np.mean(durations) if durations else 0:>6.1f}s
-        Avg Quality:         {np.mean(qualities) if qualities else 0:>6.2f}
-        
-        📈 Categories
-        ─────────────────────────
-        Mature (≥{mature_threshold} segs):    {mature_count:>4d}
-        Growing ({young_threshold+1}-{mature_threshold-1}):    {middle_count:>4d}
-        Young (≤{young_threshold} segs):     {young_count:>4d}
-        
-        ⏱️ Temporal
-        ─────────────────────────
-        Total Span:          {max(durations) if durations else 0:>6.1f}s
-        Max Duration:        {max(durations) if durations else 0:>6.1f}s
-        Min Duration:        {min(durations) if durations else 0:>6.1f}s
-        
-        🔍 Quality
-        ─────────────────────────
-        Excellent (≥0.8):    {sum(1 for q in qualities if q >= 0.8):>4d}
-        Good (≥0.6):         {sum(1 for q in qualities if q >= 0.6):>4d}
-        Poor (<0.3):         {sum(1 for q in qualities if q < 0.3):>4d}
+
+        [STATS] Overview
+        ────────────────────────
+        Total Speakers: {len(labels):>4d}
+        Total Segments: {sum(counts):>4d}
+        Avg Seg/Speaker: {np.mean(counts) if counts else 0:>6.1f}
+        Avg Duration: {np.mean(durations) if durations else 0:>6.1f}s
+        Avg Quality: {np.mean(qualities) if qualities else 0:>6.2f}
+
+        [STATS] Categories
+        ────────────────────────
+        Mature (≥{mature_threshold} segs): {mature_count:>4d}
+        Growing: {middle_count:>4d}
+        Young (≤{young_threshold} segs): {young_count:>4d}
+
+        [TIME] Temporal
+        ────────────────────────
+        Total Span: {max(durations) if durations else 0:>6.1f}s
+        Max Duration: {max(durations) if durations else 0:>6.1f}s
+        Min Duration: {min(durations) if durations else 0:>6.1f}s
+
+        [QUALITY] Quality
+        ────────────────────────
+        Excellent (≥0.8): {sum(1 for q in qualities if q >= 0.8):>4d}
+        Good (≥0.6): {sum(1 for q in qualities if q >= 0.6):>4d}
+        Poor (<0.3): {sum(1 for q in qualities if q < 0.3):>4d}
         """
         
         ax4.text(

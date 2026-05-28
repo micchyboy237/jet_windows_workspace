@@ -54,11 +54,6 @@ for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(name).handlers = []
     logging.getLogger(name).propagate = True
 
-# ---- Output Directory ----
-OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
 # ---- FastAPI App ----
 app = FastAPI(title="Live Japanese Subtitles Server 2")
 

@@ -1,20 +1,14 @@
 from __future__ import annotations
 
-from typing import Union, Sequence, Generator, Tuple
+from typing import Union, Sequence, Generator, Tuple, Optional
 from pathlib import Path
 
+import io
 import os
 import numpy as np
 import numpy.typing as npt
 import librosa
-
-# Optional torch support
-try:
-    import torch
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
-    torch = None  # type: ignore
+import torch
 
 AudioInput = Union[
     str,
@@ -137,50 +131,215 @@ def resolve_audio_paths(
     # Return sorted list of absolute path strings
     return sorted(str(p) for p in resolved_paths)
 
+
+def resolve_audio_paths_as_np_list(
+    audio_inputs: AudioPathsInput,
+    sr: int = 16_000,
+    mono: bool = True,
+    recursive: bool = False,
+    includes: Optional[list[str]] = None,
+) -> list[np.ndarray]:
+    """
+    Resolve audio files from paths and load them as numpy arrays.
+    
+    Args:
+        audio_inputs: Single file, list of files, or directory path
+        sr: Target sample rate for loaded audio (default: 16000 Hz)
+        mono: Whether to convert to mono (default: True)
+        recursive: Whether to recursively search directories (default: False)
+        includes: Optional list of glob patterns to filter files (e.g., ['**/sound.wav', '*.mp3'])
+    
+    Returns:
+        List of numpy arrays containing audio data for each file
+        
+    Raises:
+        ValueError: If no valid audio files are found
+        RuntimeError: If any audio file fails to load
+    """
+    # Get all audio file paths using resolve_audio_paths
+    audio_paths = resolve_audio_paths(audio_inputs, recursive=recursive, includes=includes)
+    
+    # Load each audio file into a numpy array
+    audio_data_list = []
+    failed_files = []
+    
+    for audio_path in audio_paths:
+        try:
+            audio_array, actual_sr = load_audio(audio_path, sr=sr, mono=mono)
+            
+            # Resample if the loaded sample rate doesn't match target
+            if actual_sr != sr:
+                audio_array = resample_audio(audio_array, actual_sr, target_sr=sr)
+            
+            audio_data_list.append(audio_array)
+            
+        except Exception as e:
+            failed_files.append((audio_path, str(e)))
+    
+    # Report any failures
+    if failed_files:
+        error_msg = f"Failed to load {len(failed_files)} audio file(s):\n"
+        for file_path, error in failed_files:
+            error_msg += f"  - {file_path}: {error}\n"
+        raise RuntimeError(error_msg)
+    
+    if not audio_data_list:
+        raise ValueError("No audio data could be loaded from the provided inputs.")
+    
+    return audio_data_list
+
+
+def resolve_audio_paths_as_tensor_list(
+    audio_inputs: AudioPathsInput,
+    sr: int = 16_000,
+    mono: bool = True,
+    recursive: bool = False,
+    includes: Optional[list[str]] = None,
+    device: Union[str, torch.device] = "cpu",
+) -> list["torch.Tensor"]:
+    """
+    Resolve audio files from paths and load them as torch tensors.
+    
+    Args:
+        audio_inputs: Single file, list of files, or directory path
+        sr: Target sample rate for loaded audio (default: 16000 Hz)
+        mono: Whether to convert to mono (default: True)
+        recursive: Whether to recursively search directories (default: False)
+        includes: Optional list of glob patterns to filter files (e.g., ['**/sound.wav', '*.mp3'])
+        device: Target device for the tensors (default: "cpu")
+    
+    Returns:
+        List of torch tensors containing audio data for each file
+        
+    Raises:
+        ImportError: If torch is not installed
+        ValueError: If no valid audio files are found
+        RuntimeError: If any audio file fails to load
+    """
+    # Get all audio file paths using resolve_audio_paths
+    audio_paths = resolve_audio_paths(audio_inputs, recursive=recursive, includes=includes)
+    
+    # Load each audio file into a numpy array first, then convert to tensor
+    audio_tensor_list = []
+    failed_files = []
+    
+    for audio_path in audio_paths:
+        try:
+            # Load audio as numpy array
+            audio_array, actual_sr = load_audio(audio_path, sr=sr, mono=mono)
+            
+            # Resample if the loaded sample rate doesn't match target
+            if actual_sr != sr:
+                audio_array = resample_audio(audio_array, actual_sr, target_sr=sr)
+            
+            # Convert numpy array to torch tensor
+            audio_tensor = torch.from_numpy(audio_array).to(device)
+            audio_tensor_list.append(audio_tensor)
+            
+        except Exception as e:
+            failed_files.append((audio_path, str(e)))
+    
+    # Report any failures
+    if failed_files:
+        error_msg = f"Failed to load {len(failed_files)} audio file(s):\n"
+        for file_path, error in failed_files:
+            error_msg += f"  - {file_path}: {error}\n"
+        raise RuntimeError(error_msg)
+    
+    if not audio_tensor_list:
+        raise ValueError("No audio data could be loaded from the provided inputs.")
+    
+    return audio_tensor_list
+
+
 def load_audio(
     audio: AudioInput,
     sr: int = 16_000,
     mono: bool = True,
-) -> np.ndarray:
+) -> tuple[np.ndarray, int]:
     """
-    Robust audio loader for ASR pipelines with correct datatype, normalization, layout, and resampling.
-    
+    Robust audio loader for ASR pipelines.
+
     Handles:
       - File paths
-      - In-memory WAV bytes
-      - NumPy arrays (any shape/layout/dtype/sr)
+      - In-memory audio bytes (container OR raw PCM)
+      - NumPy arrays
       - Torch tensors
-      - Automatically normalizes to [-1.0, 1.0] float32
-      - Always resamples to target_sr
-      - Correctly converts stereo → mono regardless of channel position
-    Returns
-    -------
-    np.ndarray
-        Shape (samples,), float32, [-1.0, 1.0], exactly `sr` Hz
+
+    Returns:
+        (audio: np.ndarray [samples], sr: int)
     """
-    # ─────── FIX 1: In-memory arrays/tensors have unknown original sr ───────
-    import io
-    current_sr: int | None
+
+    def _decode_raw_pcm(
+        data: bytes,
+        expected_sr: int,
+        channels: int = 1,
+        dtype: npt.DTypeLike = np.int16,
+    ) -> tuple[np.ndarray, int]:
+        """Decode raw PCM bytes into numpy array."""
+        itemsize = np.dtype(dtype).itemsize
+
+        if len(data) % (channels * itemsize) != 0:
+            raise ValueError(
+                f"Invalid raw PCM buffer: {len(data)} bytes not divisible by "
+                f"(channels={channels} × itemsize={itemsize})"
+            )
+
+        arr = np.frombuffer(data, dtype=dtype)
+
+        if channels > 1:
+            arr = arr.reshape(-1, channels).mean(axis=1)
+
+        # Normalize if integer
+        if np.issubdtype(arr.dtype, np.integer):
+            arr = arr.astype(np.float32) / np.iinfo(arr.dtype).max
+        else:
+            arr = arr.astype(np.float32)
+
+        return arr, expected_sr
+
+    current_sr: int | None = None
+
+    # ─────── Input handling ───────
     if isinstance(audio, (str, os.PathLike)):
         y, current_sr = librosa.load(audio, sr=None, mono=False)
+
     elif isinstance(audio, bytes):
-        y, current_sr = librosa.load(io.BytesIO(audio), sr=None, mono=False)
+        y = None
+
+        # Attempt container decode (wav, flac, etc.)
+        try:
+            y, current_sr = librosa.load(io.BytesIO(audio), sr=None, mono=False)
+        except Exception:
+            # Fallback → raw PCM
+            y, current_sr = _decode_raw_pcm(
+                data=audio,
+                expected_sr=sr,
+                channels=1,
+                dtype=np.int16,  # safest default for most streaming sources
+            )
+
     elif isinstance(audio, np.ndarray):
         y = audio.astype(np.float32, copy=False)
         current_sr = None
-    elif HAS_TORCH and isinstance(audio, torch.Tensor):
-        y = audio.float().cpu().numpy()
+
+    elif isinstance(audio, torch.Tensor):
+        y = audio.detach().float().cpu().numpy()
         current_sr = None
+
     else:
         raise TypeError(f"Unsupported audio input type: {type(audio)}")
 
-    # ─────── FIX 2: Correct normalization (NumPy, not torch) ───────
+    # ─────── Normalize (safety) ───────
     if np.issubdtype(y.dtype, np.integer):
-        y = y / (2 ** (np.iinfo(y.dtype).bits - 1))
-    elif np.abs(y).max() > 1.0 + 1e-6:
-        y = y / np.abs(y).max()
+        y = y.astype(np.float32) / np.iinfo(y.dtype).max
 
-    # ─────── FIX 3: Always make (channels, time) layout ───────
+    if y.size > 0:
+        max_val = np.abs(y).max()
+        if max_val > 1.0 + 1e-6:
+            y = y / max_val
+
+    # ─────── Ensure (channels, time) ───────
     if y.ndim == 1:
         y = y[None, :]
     elif y.ndim == 2:
@@ -189,15 +348,20 @@ def load_audio(
     else:
         raise ValueError(f"Audio must be 1D or 2D, got shape {y.shape}")
 
-    # Mono conversion
+    # ─────── Mono conversion ───────
     if mono and y.shape[0] > 1:
         y = np.mean(y, axis=0, keepdims=True)
 
-    # ─────── FIX 4: ALWAYS resample if current_sr is None or wrong ───────
-    if current_sr != sr:
-        y = librosa.resample(y, orig_sr=current_sr or sr, target_sr=sr)
+    # ─────── Sample rate handling ───────
+    effective_sr = current_sr or sr
 
-    return y.squeeze()
+    # ─────── Resample if needed ───────
+    if effective_sr != sr:
+        y = librosa.resample(y, orig_sr=effective_sr, target_sr=sr)
+        effective_sr = sr
+
+    return y.squeeze().astype(np.float32), effective_sr
+
 
 def resample_audio(
     audio: npt.NDArray[np.float32],
@@ -329,3 +493,42 @@ def load_audio_bytes(
         array = array.reshape(-1, channels).mean(axis=1).astype(np.float32)
     
     return array, expected_sample_rate
+
+
+def convert_audio_to_tensor(
+    audio_data: np.ndarray | list[np.ndarray], sr: int = 16000
+) -> torch.Tensor:
+    """
+    Convert numpy audio array or list of chunks to torch tensor suitable for Silero VAD.
+    - Ensures mono
+    - Converts to float32 in range [-1.0, 1.0]
+    - Requires 16kHz input!
+    """
+    # Accept either a single np.ndarray or a list of chunks
+    if isinstance(audio_data, list):
+        audio = np.concatenate(audio_data, axis=0)
+    else:
+        audio = np.asarray(audio_data)
+
+    # Normalize integer PCM to float32 in [-1, 1]
+    if np.issubdtype(audio.dtype, np.integer):
+        audio = audio.astype(np.float32) / np.iinfo(audio.dtype).max
+    elif audio.dtype == np.float64:
+        audio = audio.astype(np.float32)
+    # If already float, ensure [-1, 1]
+    elif np.issubdtype(audio.dtype, np.floating):
+        audio = np.clip(audio, -1.0, 1.0)
+    else:
+        raise ValueError("Unsupported audio dtype")
+
+    tensor = torch.from_numpy(audio)
+
+    # Convert to mono if multi-channel (average channels)
+    if tensor.ndim > 1:
+        tensor = tensor.mean(dim=1)
+
+    # Sanity checks
+    assert tensor.abs().max() <= 1.0 + 1e-5, "Audio not normalized!"
+    assert sr == 16000, "Wrong sample rate for Silero VAD: must be 16000 Hz"
+
+    return tensor  # shape: (N_samples,), float32, [-1, 1], 16kHz

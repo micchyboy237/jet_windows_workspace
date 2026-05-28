@@ -499,7 +499,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    speaker_paths = resolve_audio_paths(args.speakers, recursive=True)
+    speaker_paths = resolve_audio_paths(args.speakers, recursive=True, includes=["**/sound.wav"])
 
     if len(speaker_paths) < 2:
         console.print(

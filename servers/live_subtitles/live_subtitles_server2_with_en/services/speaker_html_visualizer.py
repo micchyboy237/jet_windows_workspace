@@ -11,7 +11,10 @@ import numpy as np
 from jinja2 import Template
 
 # Import your visualizer
-from services.speaker_visualizer import SpeakerVisualizer
+try:
+    from services.speaker_visualizer import SpeakerVisualizer
+except ImportError:
+    from speaker_visualizer import SpeakerVisualizer
 
 
 class SpeakerHTMLVisualizer:
