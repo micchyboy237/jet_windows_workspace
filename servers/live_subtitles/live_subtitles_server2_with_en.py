@@ -3,6 +3,7 @@ import json
 import logging
 import shutil
 import time
+import torch
 import uuid as uuid_module
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -30,6 +31,7 @@ from live_subtitles_server_utils import (
     prepare_segment_directory,
     save_segment_counter,
 )
+from audio_language_detector import AudioLanguageDetector
 
 console = Console(
     theme=Theme(
@@ -73,6 +75,10 @@ _embedding_model: Optional[Model] = None
 _embedding_inference: Optional[Inference] = None
 _current_speaker: Optional[str] = None
 _last_speaker_change_time: float = 0.0
+
+console.print("Initializing AudioLanguageDetector...")
+audio_language_detector = AudioLanguageDetector()
+console.print("Detector initialized successfully!\n")
 
 
 def _get_speaker_labeler() -> SegmentSpeakerLabeler:
@@ -177,7 +183,7 @@ def label_speakers_for_segment(
     labeler = _get_speaker_labeler()
     
     waveform_float = waveform.astype(np.float32) / 32768.0
-    waveform_tensor = __import__('torch').from_numpy(waveform_float)
+    waveform_tensor = torch.from_numpy(waveform_float)
     if waveform_tensor.dim() == 1:
         waveform_tensor = waveform_tensor.unsqueeze(0)
     
@@ -339,6 +345,30 @@ def blocking_process_audio(
     language = header.get("language", "auto")
     full_trans_result = None
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
+
+    # Detect language if "auto"
+    if not language or language == "auto":
+        console.print("[info]Detecting language with AudioLanguageDetector...[/info]")
+        try:
+            # Convert audio_np to float32 tensor for SpeechBrain
+            audio_tensor = torch.from_numpy(audio_np).float() / 32768.0
+            audio_tensor = audio_tensor.unsqueeze(0)  # Add batch dimension
+            detected_lang = audio_language_detector.detect_from_bytes(
+                audio_tensor, sample_rate=sample_rate
+            )
+            console.print(f"[success]Detected language: {detected_lang}[/success]")
+            # Map detected language to supported language codes
+            # SpeechBrain uses ISO 639-3 codes, map to your expected format
+            language = detected_lang
+            
+            # If you need to handle edge cases where detection fails:
+            # language = "ja" if detected_lang in ["ja", "jpn"] else detected_lang
+        except Exception as e:
+            console.print(f"[error]Language detection failed: {e}. Falling back to 'ja'[/error]")
+            language = "ja"  # Default fallback
+
+    # Log what language is actually being used for transcription
+    console.print(f"[info]Transcribing with language: {language}[/info]")
     
     if should_reset_context(header):
         context_buffer.reset()
@@ -393,8 +423,8 @@ def blocking_process_audio(
         f"[info]Full Duration:[/info] "
         f"[time]{actual_full_duration_sec:.2f}s[/time] / [time]{max_duration_sec:.2f}s[/time] max"
     )
-
-    # STEP 1: Transcribe
+    
+    # STEP 1: Transcribe with detected/specified language
     full_trans_result = transcribe_audio(
         audio_bytes=full_audio_bytes,
         language=language,
@@ -405,8 +435,9 @@ def blocking_process_audio(
     full_phrase_segments = full_trans_result.pop("phrase_segments")
     full_metadata = full_trans_result.pop("metadata")
 
-    if language == "auto":
-        language = full_metadata["language"]
+    # Override metadata language with detected one if auto mode
+    if header.get("language", "auto") == "auto":
+        full_metadata["language"] = language
 
     full_word_segments_text = "".join(s["word"] for s in full_word_segments)
     full_ja_text = full_word_segments_text
@@ -456,7 +487,7 @@ def blocking_process_audio(
         )
 
     # STEP 3: For English (or any non-JA language), skip translation and return early
-    if language == "en":
+    if language != "ja" and language != "jpn":
         en_text = full_word_segments_text.strip()
 
         context_buffer.add_audio_segment(audio_np, {
@@ -514,7 +545,8 @@ def blocking_process_audio(
             "segment_dir": None,
         }
 
-    # STEP 4: JA/auto path — context diffing and translation
+    # STEP 5: JA/jpn path — context diffing and translation
+    # [Rest of the function remains exactly the same as your original code]
     prev_full_ja_text = None
     prev_full_en_text = None
     unchanged_text = None
@@ -1221,7 +1253,7 @@ if __name__ == "__main__":
     logger.info("   POST /speakers/merge")
     logger.info("Press Ctrl+C to stop\n")
     uvicorn.run(
-        app="live_subtitles_server2_segment_speaker:app",
+        app="live_subtitles_server2_with_en:app",
         host="0.0.0.0",
         port=8000,
         reload=False,

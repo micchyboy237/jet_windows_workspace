@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os
+import json
 import re
 import tempfile
 import traceback
@@ -339,7 +339,6 @@ def transcribe_audio_llm_from_file(
         language=language,
         hotwords=hotwords,
     )
-    print(f"raw_results:\n{json.dumps(raw_results, ensure_ascii=False)}")
     
     if not raw_results:
         return TranscriptionResult(
