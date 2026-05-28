@@ -74,7 +74,21 @@ class SpeakerVisualizer:
     def _collect_centroids(
         self, labeler
     ) -> Tuple[np.ndarray, List[str], List[int], List[float]]:
-        """Collect valid centroids and metadata from labeler."""
+        """Collect valid centroids and metadata from labeler.
+        
+        Ensures output is always a 2D array of shape (n_speakers, n_features).
+        
+        Returns
+        -------
+        centroids_array : np.ndarray
+            2D array of shape (n_speakers, n_features) or empty array.
+        labels : List[str]
+            Speaker labels.
+        segment_counts : List[int]
+            Segment counts per speaker.
+        qualities : List[float]
+            Quality scores per speaker.
+        """
         centroids = []
         labels = []
         segment_counts = []
@@ -89,10 +103,31 @@ class SpeakerVisualizer:
                 qualities.append(info['centroid_quality'])
         
         if centroids:
-            centroids_array = np.array(centroids).squeeze()
-            # Remove extra dimension if present (1, N, D) -> (N, D)
+            # Convert list to numpy array
+            centroids_array = np.array(centroids)
+            
+            # Handle different input shapes consistently
+            # Case 1: List of 2D arrays [[[1,2,3]], [[4,5,6]]] -> (2, 1, 3)
+            # Case 2: List of 1D arrays [[1,2,3], [4,5,6]] -> (2, 3)
+            # Case 3: Single 2D array [[[1,2,3]]] -> (1, 1, 3)
+            # Case 4: Single 1D array [[1,2,3]] -> (1, 3)
+            
             if centroids_array.ndim == 3:
-                centroids_array = centroids_array[:, 0, :]
+                # Remove middle dimension: (N, 1, D) -> (N, D)
+                centroids_array = centroids_array.squeeze(axis=1)
+            elif centroids_array.ndim == 2 and centroids_array.shape[0] == 1:
+                # Single sample as 2D is fine: (1, D)
+                pass
+            elif centroids_array.ndim == 1:
+                # Single 1D array: (D,) -> (1, D)
+                centroids_array = centroids_array.reshape(1, -1)
+            
+            # Final validation: ensure 2D array (n_samples, n_features)
+            if centroids_array.ndim != 2:
+                raise ValueError(
+                    f"Expected 2D centroid array, got shape {centroids_array.shape}. "
+                    f"Centroids must have shape (n_speakers, n_features)."
+                )
         else:
             centroids_array = np.array([])
         
@@ -107,7 +142,7 @@ class SpeakerVisualizer:
         show_labels: bool = True,
         colormap: str = 'viridis',
         random_state: int = 42,
-    ) -> plt.Figure:
+    ) -> Optional[plt.Figure]:
         """Plot all speaker centroids in 2D space using dimensionality reduction.
         
         Parameters
@@ -129,29 +164,46 @@ class SpeakerVisualizer:
             
         Returns
         -------
-        matplotlib.figure.Figure
-            The created figure.
+        matplotlib.figure.Figure or None
+            The created figure, or None if insufficient data.
         """
         centroids_array, labels, segment_counts, qualities = self._collect_centroids(labeler)
         
-        if len(centroids_array) < 2:
-            console.print("[yellow]Need at least 2 speakers with valid centroids[/]")
+        if len(centroids_array) < 1:
+            console.print("[yellow]No valid centroids found[/]")
             return None
         
-        # Apply dimensionality reduction
-        if method == 'pca':
-            reducer = PCA(n_components=2, random_state=random_state)
-        elif method == 'tsne':
-            perplexity = min(30, len(centroids_array) - 1)
-            reducer = TSNE(
-                n_components=2, 
-                random_state=random_state, 
-                perplexity=perplexity
-            )
-        else:
-            raise ValueError(f"Unknown method: {method}. Use 'pca' or 'tsne'.")
+        if len(centroids_array) < 2 and method == 'tsne':
+            console.print("[yellow]Need at least 2 speakers for t-SNE, using PCA instead[/]")
+            method = 'pca'
         
-        centroids_2d = reducer.fit_transform(centroids_array)
+        # For single speaker with PCA, just plot the point directly
+        if len(centroids_array) == 1 and method == 'pca':
+            # Single point: place at origin with zero variance
+            centroids_2d = np.array([[0.0, 0.0]])
+            method_label = 'Single Speaker (no reduction)'
+        else:
+            # Apply dimensionality reduction
+            if method == 'pca':
+                n_components = min(2, centroids_array.shape[0], centroids_array.shape[1])
+                reducer = PCA(n_components=n_components, random_state=random_state)
+            elif method == 'tsne':
+                perplexity = min(30, len(centroids_array) - 1)
+                reducer = TSNE(
+                    n_components=2, 
+                    random_state=random_state, 
+                    perplexity=perplexity
+                )
+            else:
+                raise ValueError(f"Unknown method: {method}. Use 'pca' or 'tsne'.")
+            
+            centroids_2d = reducer.fit_transform(centroids_array)
+            
+            # Pad to 2D if PCA reduced to 1D
+            if centroids_2d.shape[1] == 1:
+                centroids_2d = np.hstack([centroids_2d, np.zeros_like(centroids_2d)])
+            
+            method_label = method.upper()
         
         # Create figure
         fig, ax = plt.subplots(
@@ -196,11 +248,17 @@ class SpeakerVisualizer:
         cbar.set_label('Centroid Quality', fontsize=11)
         
         if title is None:
-            title = f'Speaker Centroids Visualization ({method.upper()})'
+            title = f'Speaker Centroids Visualization ({method_label})'
         ax.set_title(title, fontsize=13, fontweight='bold')
-        ax.set_xlabel(f'{method.upper()} Component 1', fontsize=11)
-        ax.set_ylabel(f'{method.upper()} Component 2', fontsize=11)
+        ax.set_xlabel(f'{method_label} Component 1', fontsize=11)
+        ax.set_ylabel(f'{method_label} Component 2', fontsize=11)
         ax.grid(True, alpha=0.3)
+        
+        # Set equal aspect ratio for single point
+        if len(centroids_array) == 1:
+            ax.set_xlim(-1, 1)
+            ax.set_ylim(-1, 1)
+            ax.set_aspect('equal')
         
         plt.tight_layout()
         self._save_or_show(fig, f"centroids_2d_{method}")
@@ -213,7 +271,7 @@ class SpeakerVisualizer:
         annotate: bool = True,
         cmap: str = 'coolwarm',
         title: Optional[str] = None,
-    ) -> plt.Figure:
+    ) -> Optional[plt.Figure]:
         """Plot a heatmap of pairwise speaker similarities.
         
         Parameters
@@ -231,8 +289,8 @@ class SpeakerVisualizer:
             
         Returns
         -------
-        matplotlib.figure.Figure
-            The created figure.
+        matplotlib.figure.Figure or None
+            The created figure, or None if insufficient data.
         """
         matrix_data = labeler.get_speaker_similarity_matrix()
         
@@ -275,7 +333,7 @@ class SpeakerVisualizer:
         figsize: Tuple[int, int] = (14, 7),
         title: Optional[str] = None,
         color_palette: str = 'tab20',
-    ) -> plt.Figure:
+    ) -> Optional[plt.Figure]:
         """Plot speaker activity timeline.
         
         Parameters
@@ -291,8 +349,8 @@ class SpeakerVisualizer:
             
         Returns
         -------
-        matplotlib.figure.Figure
-            The created figure.
+        matplotlib.figure.Figure or None
+            The created figure, or None if no speakers.
         """
         speakers_info = labeler.get_all_speakers_info()
         
@@ -305,19 +363,25 @@ class SpeakerVisualizer:
                     figsize[1] * self.figsize_scale)
         )
         
-        colors = plt.cm.get_cmap(color_palette)(
-            np.linspace(0, 1, max(len(speakers_info), 1))
-        )
+        # Handle case where tab20 might not exist
+        try:
+            colors = plt.cm.get_cmap(color_palette)(
+                np.linspace(0, 1, max(len(speakers_info), 1))
+            )
+        except (ValueError, AttributeError):
+            colors = plt.cm.tab20(np.linspace(0, 1, max(len(speakers_info), 1)))
         
         # Sort speakers by first appearance
         sorted_speakers = sorted(
             speakers_info.items(),
-            key=lambda x: x[1]['first_seen'] if x[1]['first_seen'] is not None else 0
+            key=lambda x: x[1].get('first_seen', 0) if x[1].get('first_seen') is not None else 0
         )
         
         for i, (label, info) in enumerate(sorted_speakers):
-            first_seen = info['first_seen'] if info['first_seen'] is not None else 0.0
-            last_seen = info['last_seen']
+            first_seen = info.get('first_seen', 0)
+            if first_seen is None:
+                first_seen = 0.0
+            last_seen = info.get('last_seen', 0)
             duration = last_seen - first_seen
             
             if duration > 0:
@@ -336,8 +400,8 @@ class SpeakerVisualizer:
             ax.text(
                 last_seen + max(duration * 0.02, 0.1),
                 i,
-                f"{label} ({info['segment_count']} segs, "
-                f"Q: {info['centroid_quality']:.2f})",
+                f"{label} ({info.get('segment_count', 0)} segs, "
+                f"Q: {info.get('centroid_quality', 0):.2f})",
                 va='center',
                 fontsize=9,
             )
@@ -363,7 +427,7 @@ class SpeakerVisualizer:
         labeler,
         figsize: Tuple[int, int] = (16, 10),
         title: Optional[str] = None,
-    ) -> plt.Figure:
+    ) -> Optional[plt.Figure]:
         """Create a comprehensive dashboard of speaker statistics.
         
         Parameters
@@ -377,8 +441,8 @@ class SpeakerVisualizer:
             
         Returns
         -------
-        matplotlib.figure.Figure
-            The created figure.
+        matplotlib.figure.Figure or None
+            The created figure, or None if no speakers.
         """
         speakers_info = labeler.get_all_speakers_info()
         
@@ -393,12 +457,12 @@ class SpeakerVisualizer:
         )
         
         labels = list(speakers_info.keys())
-        counts = [info['segment_count'] for info in speakers_info.values()]
-        durations = [info['active_duration'] for info in speakers_info.values()]
-        qualities = [info['centroid_quality'] for info in speakers_info.values()]
+        counts = [info.get('segment_count', 0) for info in speakers_info.values()]
+        durations = [info.get('active_duration', 0) for info in speakers_info.values()]
+        qualities = [info.get('centroid_quality', 0) for info in speakers_info.values()]
         
         # Color mapping
-        colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(labels)))
+        colors = plt.cm.viridis(np.linspace(0.1, 0.9, max(len(labels), 1)))
         
         # 1. Segment count bar chart
         ax1 = axes[0, 0]
@@ -412,7 +476,7 @@ class SpeakerVisualizer:
         for bar, count in zip(bars1, counts):
             ax1.text(
                 bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + 0.5,
+                bar.get_height() + max(0.5, max(counts) * 0.02),
                 str(count),
                 ha='center',
                 va='bottom',
@@ -427,16 +491,17 @@ class SpeakerVisualizer:
         ax2.tick_params(axis='x', rotation=45)
         ax2.grid(True, alpha=0.3, axis='y')
         
-        for bar, dur in zip(bars2, durations):
-            if dur > 0:
-                ax2.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + max(durations) * 0.01,
-                    f'{dur:.1f}s',
-                    ha='center',
-                    va='bottom',
-                    fontsize=9,
-                )
+        if durations and max(durations) > 0:
+            for bar, dur in zip(bars2, durations):
+                if dur > 0:
+                    ax2.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + max(durations) * 0.01,
+                        f'{dur:.1f}s',
+                        ha='center',
+                        va='bottom',
+                        fontsize=9,
+                    )
         
         # 3. Centroid quality
         ax3 = axes[1, 0]
@@ -484,9 +549,9 @@ class SpeakerVisualizer:
         ─────────────────────────
         Total Speakers:      {len(labels):>4d}
         Total Segments:      {sum(counts):>4d}
-        Avg Seg/Speaker:     {np.mean(counts):>6.1f}
-        Avg Duration:        {np.mean(durations):>6.1f}s
-        Avg Quality:         {np.mean(qualities):>6.2f}
+        Avg Seg/Speaker:     {np.mean(counts) if counts else 0:>6.1f}
+        Avg Duration:        {np.mean(durations) if durations else 0:>6.1f}s
+        Avg Quality:         {np.mean(qualities) if qualities else 0:>6.2f}
         
         📈 Categories
         ─────────────────────────
@@ -496,9 +561,9 @@ class SpeakerVisualizer:
         
         ⏱️ Temporal
         ─────────────────────────
-        Total Span:          {max(durations):>6.1f}s
-        Max Duration:        {max(durations):>6.1f}s
-        Min Duration:        {min(durations):>6.1f}s
+        Total Span:          {max(durations) if durations else 0:>6.1f}s
+        Max Duration:        {max(durations) if durations else 0:>6.1f}s
+        Min Duration:        {min(durations) if durations else 0:>6.1f}s
         
         🔍 Quality
         ─────────────────────────
@@ -569,7 +634,8 @@ class SpeakerVisualizer:
         
         # Reduce to 3D
         if method == 'pca':
-            reducer = PCA(n_components=3, random_state=random_state)
+            n_components = min(3, centroids_array.shape[0], centroids_array.shape[1])
+            reducer = PCA(n_components=n_components, random_state=random_state)
         elif method == 'tsne':
             perplexity = min(30, len(centroids_array) - 1)
             reducer = TSNE(
@@ -581,6 +647,11 @@ class SpeakerVisualizer:
             raise ValueError(f"Unknown method: {method}")
         
         centroids_3d = reducer.fit_transform(centroids_array)
+        
+        # Pad to 3D if reduced to fewer dimensions
+        if centroids_3d.shape[1] < 3:
+            padding = np.zeros((centroids_3d.shape[0], 3 - centroids_3d.shape[1]))
+            centroids_3d = np.hstack([centroids_3d, padding])
         
         # Create DataFrame
         df = pd.DataFrame({
@@ -654,24 +725,34 @@ class SpeakerVisualizer:
         
         # 2D centroids (PCA)
         console.print("  → PCA centroids plot...")
-        figures['centroids_pca'] = self.plot_centroids_2d(labeler, method='pca')
+        fig_pca = self.plot_centroids_2d(labeler, method='pca')
+        if fig_pca:
+            figures['centroids_pca'] = fig_pca
         
         # 2D centroids (t-SNE)
         if len(labeler.known_speakers) >= 3:
             console.print("  → t-SNE centroids plot...")
-            figures['centroids_tsne'] = self.plot_centroids_2d(labeler, method='tsne')
+            fig_tsne = self.plot_centroids_2d(labeler, method='tsne')
+            if fig_tsne:
+                figures['centroids_tsne'] = fig_tsne
         
         # Similarity heatmap
         console.print("  → Similarity heatmap...")
-        figures['heatmap'] = self.plot_similarity_heatmap(labeler)
+        fig_heatmap = self.plot_similarity_heatmap(labeler)
+        if fig_heatmap:
+            figures['heatmap'] = fig_heatmap
         
         # Timeline
         console.print("  → Activity timeline...")
-        figures['timeline'] = self.plot_timeline(labeler)
+        fig_timeline = self.plot_timeline(labeler)
+        if fig_timeline:
+            figures['timeline'] = fig_timeline
         
         # Dashboard
         console.print("  → Dashboard...")
-        figures['dashboard'] = self.plot_dashboard(labeler)
+        fig_dashboard = self.plot_dashboard(labeler)
+        if fig_dashboard:
+            figures['dashboard'] = fig_dashboard
         
         # 3D interactive (optional)
         if include_3d:
@@ -680,80 +761,3 @@ class SpeakerVisualizer:
         
         console.print(f"[bold green]✓ Generated {len(figures)} plots[/]")
         return figures
-
-
-# Example usage and integration with SegmentSpeakerLabeler
-if __name__ == "__main__":
-    # Example with mock data
-    from unittest.mock import MagicMock
-    
-    # Create a mock labeler for demonstration
-    # In real usage, you'd pass your actual SegmentSpeakerLabeler instance
-    labeler = MagicMock()
-    
-    # Setup mock data
-    labeler.known_speakers = ['SPEAKER_01', 'SPEAKER_02', 'SPEAKER_03']
-    
-    def mock_get_speaker_info(label):
-        info_map = {
-            'SPEAKER_01': {
-                'centroid_coordinates': [[0.1, 0.2, 0.3, 0.4]],
-                'segment_count': 15,
-                'centroid_quality': 1.0,
-                'first_seen': 0.5,
-                'last_seen': 25.0,
-                'active_duration': 24.5,
-            },
-            'SPEAKER_02': {
-                'centroid_coordinates': [[0.8, 0.7, 0.6, 0.5]],
-                'segment_count': 8,
-                'centroid_quality': 0.8,
-                'first_seen': 2.0,
-                'last_seen': 20.0,
-                'active_duration': 18.0,
-            },
-            'SPEAKER_03': {
-                'centroid_coordinates': [[0.5, 0.5, 0.5, 0.5]],
-                'segment_count': 2,
-                'centroid_quality': 0.3,
-                'first_seen': 10.0,
-                'last_seen': 15.0,
-                'active_duration': 5.0,
-            },
-        }
-        return info_map.get(label)
-    
-    labeler.get_speaker_info = mock_get_speaker_info
-    
-    def mock_get_all_speakers_info():
-        return {label: mock_get_speaker_info(label) for label in labeler.known_speakers}
-    
-    labeler.get_all_speakers_info = mock_get_all_speakers_info
-    
-    def mock_similarity_matrix():
-        return {
-            'labels': ['SPEAKER_01', 'SPEAKER_02', 'SPEAKER_03'],
-            'similarities': [
-                [1.0, 0.15, 0.45],
-                [0.15, 1.0, 0.62],
-                [0.45, 0.62, 1.0],
-            ],
-            'segment_counts': [15, 8, 2],
-        }
-    
-    labeler.get_speaker_similarity_matrix = mock_similarity_matrix
-    
-    # Create visualizer with save directory
-    visualizer = SpeakerVisualizer(
-        save_dir="./speaker_plots",
-        dpi=150,
-    )
-    
-    # Generate all plots
-    figures = visualizer.plot_all(labeler, include_3d=False)
-    
-    # Or generate individual plots
-    # visualizer.plot_centroids_2d(labeler, method='pca')
-    # visualizer.plot_similarity_heatmap(labeler)
-    # visualizer.plot_timeline(labeler)
-    # visualizer.plot_dashboard(labeler)
