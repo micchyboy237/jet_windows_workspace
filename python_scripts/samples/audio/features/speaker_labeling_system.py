@@ -2,10 +2,11 @@
 generic_speaker_labeling.py
 Fully generic speaker labeling system - starts with generic labels in messages
 Progressively improves through unsupervised and zero-shot methods
+Enhanced with rich logging, terminal file links, and organized outputs
 """
-
 import numpy as np
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Any
 from enum import Enum
@@ -14,27 +15,53 @@ from collections import defaultdict, Counter
 from datetime import datetime
 import re
 import os
-
 from sklearn.cluster import SpectralClustering, AgglomerativeClustering
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import NMF, LatentDirichletAllocation
 from sklearn.metrics import silhouette_score
-
 import librosa
-
 import openai
 
-# ============================================================================
-# DATA CLASSES
-# ============================================================================
+
+def setup_logger(output_dir):
+    """Setup rich logging with file and console output"""
+    log_file = Path(output_dir) / "speaker_labeling.log"
+    
+    # Create logger
+    logger = logging.getLogger('SpeakerLabeler')
+    logger.setLevel(logging.DEBUG)
+    
+    # Clear existing handlers to avoid duplicates
+    logger.handlers.clear()
+    
+    # File handler - detailed debug logging
+    fh = logging.FileHandler(log_file, encoding='utf-8')
+    fh.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    fh.setFormatter(file_formatter)
+    
+    # Console handler - info and above for clean output
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    console_formatter = logging.Formatter('%(message)s')
+    ch.setFormatter(console_formatter)
+    
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    
+    return logger
+
 
 class LabelQuality(Enum):
     """Progressive label quality levels"""
-    GENERIC = 1       # speaker_0, speaker_1
-    DESCRIPTIVE = 2   # detailed_discusses_order, concise_asks_questions
-    RELATIONAL = 3    # helper_responds_to_requests, requester_seeks_assistance
-    PROPER_NAME = 4   # Sarah, John, Dr. Patel
+    GENERIC = 1
+    DESCRIPTIVE = 2
+    RELATIONAL = 3
+    PROPER_NAME = 4
 
 
 @dataclass
@@ -44,22 +71,16 @@ class SpeakerIdentity:
     current_label: str
     quality: LabelQuality = LabelQuality.GENERIC
     confidence: float = 0.0
-    
-    # Accumulated evidence from each stage
     acoustic_signature: Optional[np.ndarray] = None
     linguistic_profile: Dict[str, float] = field(default_factory=dict)
     topic_distribution: Dict[int, float] = field(default_factory=dict)
     name_candidates: Dict[str, float] = field(default_factory=dict)
-    
-    # Behavior patterns
     avg_turn_length: float = 0.0
     question_ratio: float = 0.0
     interaction_patterns: Dict[str, int] = field(default_factory=dict)
-    
-    # Label evolution tracking
     label_history: List[Dict] = field(default_factory=list)
     
-    def upgrade_label(self, new_label: str, quality: LabelQuality, 
+    def upgrade_label(self, new_label: str, quality: LabelQuality,
                      confidence: float, evidence: Dict = None):
         """Record label progression with evidence"""
         self.label_history.append({
@@ -86,20 +107,20 @@ class SpeakerIdentity:
             'name_candidates': self.name_candidates,
             'behavior_patterns': {
                 'avg_turn_length': self.avg_turn_length,
-                'question_ratio': self.question_ratio
+                'question_ratio': self.question_ratio,
+                'linguistic_profile': self.linguistic_profile,
+                'topic_distribution': {str(k): v for k, v in self.topic_distribution.items()}
             }
         }
 
-
-# ============================================================================
-# AUDIO PROCESSING (Generic, no assumptions)
-# ============================================================================
 
 class GenericAudioProcessor:
     """
     Process audio features without gender/emotion/speaker assumptions.
     All characteristics are discovered from the raw signal.
     """
+    def __init__(self):
+        self.logger = logging.getLogger('SpeakerLabeler')
     
     def extract_features(self, audio_path: str) -> Dict[str, float]:
         """Extract comprehensive audio features"""
@@ -115,7 +136,6 @@ class GenericAudioProcessor:
         
         try:
             y, sr = librosa.load(audio_path, sr=None, duration=10.0)
-            
             if len(y) == 0:
                 return features
             
@@ -138,16 +158,17 @@ class GenericAudioProcessor:
                 np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
             )
             
-            # MFCCs (first 13 coefficients)
+            # MFCC features
             mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
             for i in range(13):
                 features[f'mfcc_{i}_mean'] = float(np.mean(mfccs[i]))
                 features[f'mfcc_{i}_std'] = float(np.std(mfccs[i]))
             
+            self.logger.debug(f"    Extracted {len(features)} features from {Path(audio_path).name}")
             return features
             
         except Exception as e:
-            print(f"  Warning: Could not process {audio_path}: {e}")
+            self.logger.warning(f"    Could not process {Path(audio_path).name}: {e}")
             return features
     
     def _load_wav_basic(self, audio_path: str) -> Tuple[np.ndarray, int]:
@@ -155,15 +176,14 @@ class GenericAudioProcessor:
         import wave
         with wave.open(audio_path, 'rb') as wav:
             sr = wav.getframerate()
-            n_frames = min(wav.getnframes(), sr * 10)  # Max 10 seconds
+            n_frames = min(wav.getnframes(), sr * 10)
             signal = np.frombuffer(wav.readframes(n_frames), dtype=np.int16)
-            signal = signal / 32768.0  # Normalize to [-1, 1]
+            signal = signal / 32768.0
         return signal, sr
     
     def compute_embedding(self, features: Dict[str, float]) -> np.ndarray:
         """Convert features to embedding vector for clustering"""
-        # Use consistent feature ordering
-        feature_keys = sorted([k for k in features.keys() 
+        feature_keys = sorted([k for k in features.keys()
                               if isinstance(features[k], (int, float))])
         return np.array([features[k] for k in feature_keys])
     
@@ -176,20 +196,16 @@ class GenericAudioProcessor:
             return [0] * len(embeddings)
         
         embeddings_array = np.array(embeddings)
-        
-        # Determine possible number of speakers
         max_clusters = min(len(embeddings), 10)
-        
         best_labels = None
         best_score = -1
         
         for n_clusters in range(1, max_clusters + 1):
             if n_clusters == 1:
                 labels = np.zeros(len(embeddings), dtype=int)
-                score = 0.5  # Neutral score for single cluster
+                score = 0.5
             else:
                 try:
-                    # Use spectral clustering for non-linear boundaries
                     clustering = SpectralClustering(
                         n_clusters=n_clusters,
                         affinity='nearest_neighbors',
@@ -198,17 +214,13 @@ class GenericAudioProcessor:
                         assign_labels='kmeans'
                     )
                     labels = clustering.fit_predict(embeddings_array)
-                    
-                    # Score clustering quality
                     if len(set(labels)) > 1:
                         score = silhouette_score(embeddings_array, labels)
                     else:
                         score = 0.5
-                        
                 except Exception:
                     continue
             
-            # Penalize too many clusters (prefer simpler explanations)
             complexity_penalty = n_clusters / max_clusters * 0.2
             adjusted_score = score - complexity_penalty
             
@@ -220,40 +232,33 @@ class GenericAudioProcessor:
     
     def _simple_clustering(self, embeddings: np.ndarray) -> List[int]:
         """Simple distance-based clustering fallback"""
-        # Calculate pairwise distances
         n = len(embeddings)
         if n <= 2:
             return [0] * n
         
-        # Use first feature dimension for simple splitting
         values = embeddings[:, 0] if embeddings.shape[1] > 0 else np.arange(n)
         median = np.median(values)
         return [0 if v < median else 1 for v in values]
 
-
-# ============================================================================
-# UNSUPERVISED TOPIC & PATTERN DISCOVERY
-# ============================================================================
 
 class UnsupervisedPatternDiscoverer:
     """
     Discover topics, patterns, and relationships from text without predefined categories.
     Uses NMF topic modeling and statistical pattern analysis.
     """
-    
     def __init__(self, n_topics: int = 3):
         self.n_topics = n_topics
         self.vectorizer = None
         self.topic_model = None
         self.topic_keywords = {}
         self.feature_names = []
+        self.logger = logging.getLogger('SpeakerLabeler')
     
     def discover_topics(self, all_texts: List[str]) -> Dict[int, List[str]]:
         """Discover topics automatically from text corpus"""
         if len(all_texts) < 3:
             return {}
         
-        # Vectorize texts
         self.vectorizer = TfidfVectorizer(
             max_features=500,
             stop_words='english',
@@ -266,12 +271,10 @@ class UnsupervisedPatternDiscoverer:
             X = self.vectorizer.fit_transform(all_texts)
             self.feature_names = self.vectorizer.get_feature_names_out()
             
-            # Adjust number of topics
             actual_n_topics = min(self.n_topics, X.shape[0] - 1, X.shape[1] - 1)
             if actual_n_topics < 2:
                 return {}
             
-            # NMF for topic discovery
             self.topic_model = NMF(
                 n_components=actual_n_topics,
                 random_state=42,
@@ -279,7 +282,6 @@ class UnsupervisedPatternDiscoverer:
             )
             self.topic_model.fit(X)
             
-            # Extract keywords per topic
             for topic_idx in range(actual_n_topics):
                 top_indices = np.argsort(
                     self.topic_model.components_[topic_idx]
@@ -288,10 +290,11 @@ class UnsupervisedPatternDiscoverer:
                     self.feature_names[i] for i in top_indices
                 ]
             
+            self.logger.debug(f"    Discovered {actual_n_topics} topics from {len(all_texts)} texts")
             return self.topic_keywords
             
         except Exception as e:
-            print(f"  Topic discovery skipped: {e}")
+            self.logger.debug(f"    Topic discovery skipped: {e}")
             return {}
     
     def get_speaker_topic_distribution(self, speaker_texts: List[str]) -> Dict[int, float]:
@@ -316,12 +319,12 @@ class UnsupervisedPatternDiscoverer:
         
         patterns = {}
         
-        # Turn length statistics
+        # Word count patterns
         word_counts = [len(t.split()) for t in texts]
         patterns['avg_words_per_turn'] = float(np.mean(word_counts)) if word_counts else 0
         patterns['std_words_per_turn'] = float(np.std(word_counts)) if word_counts else 0
         
-        # Question frequency
+        # Question patterns
         patterns['question_ratio'] = float(
             sum(1 for t in texts if '?' in t) / len(texts)
         )
@@ -329,27 +332,25 @@ class UnsupervisedPatternDiscoverer:
         # Politeness markers
         polite_words = ['please', 'thank', 'could', 'would', 'may', 'appreciate']
         politeness_count = sum(
-            1 for t in texts 
-            for w in polite_words 
+            1 for t in texts
+            for w in polite_words
             if w in t.lower()
         )
         patterns['politeness_ratio'] = float(politeness_count / len(texts))
         
-        # Urgency/emotion markers
+        # Urgency markers
         urgency_markers = ['!', 'urgent', 'asap', 'immediately', 'right now']
         urgency_count = sum(
-            1 for t in texts 
-            for m in urgency_markers 
+            1 for t in texts
+            for m in urgency_markers
             if m in t.lower()
         )
         patterns['urgency_ratio'] = float(urgency_count / len(texts))
         
-        # First person usage
+        # Personal pronoun usage
         patterns['first_person_ratio'] = float(
             sum(1 for t in texts if re.search(r'\b(i|me|my|mine)\b', t.lower())) / len(texts)
         )
-        
-        # Second person usage (addressing others)
         patterns['second_person_ratio'] = float(
             sum(1 for t in texts if re.search(r'\b(you|your|yours)\b', t.lower())) / len(texts)
         )
@@ -357,34 +358,28 @@ class UnsupervisedPatternDiscoverer:
         return patterns
 
 
-# ============================================================================
-# LLM-BASED ZERO-SHOT IDENTITY DETECTION
-# ============================================================================
-
 class ZeroShotIdentityDetector:
     """
     Use LLM for zero-shot speaker identity detection.
     No training data, no predefined roles - pure semantic understanding.
     """
+    def __init__(self):
+        self.logger = logging.getLogger('SpeakerLabeler')
     
     def analyze_conversation(self, messages: List[Dict]) -> Dict[str, Dict]:
         """
         Analyze entire conversation to understand speaker identities.
         Returns discovered roles, relationships, and name candidates.
         """
-        
-        # Build conversation transcript
         transcript = self._build_transcript(messages)
         
         prompt = f"""
 Analyze this conversation transcript. Identify who each speaker is based on what they say and how they interact.
-
 For each speaker, determine:
 1. What they appear to be doing in this conversation (their functional role)
 2. How they relate to other speakers (power dynamics, relationship type)
 3. Any names, titles, or identifiers that likely belong to them
 4. The likely context/setting of this conversation
-
 Be specific and observant. Don't use generic categories like "speaker_0" - describe what you actually observe.
 
 Transcript:
@@ -405,47 +400,43 @@ Output ONLY valid JSON, no other text. Example format:
         try:
             client = openai.OpenAI(
                 base_url=os.getenv("LLAMA_CPP_LLM_URL", "http://localhost:8080/v1"),
-        api_key="sk-1234",
+                api_key="sk-1234",
             )
+            
             stream: openai.Stream[openai.types.chat.ChatCompletionChunk] = client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model="Qwen/Qwen3.5-2B",
                 max_tokens=2000,
                 temperature=0.3,
-                # temperature=1.0,
-                # top_p=1.0,
-                # presence_penalty=2.0,
                 extra_body={
-                    # "top_k": 20,
                     "chat_template_kwargs": {
                         "enable_thinking": False,
                     },
                 },
                 stream=True,
             )
-
+            
             content = ""
             for part in stream:
                 if part.choices and part.choices[0].delta:
                     delta = part.choices[0].delta
-
-                    # Check for reasoning_content first
                     if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                         print(delta.reasoning_content, flush=True, end="")
-                    # Then check for regular content
                     elif hasattr(delta, "content") and delta.content:
                         content += delta.content
                         print(delta.content, flush=True, end="")
             
-            # Remove markdown code blocks if present
+            # Clean up response
             if content.startswith('```'):
                 content = re.sub(r'```\w*\n?', '', content)
                 content = content.replace('```', '')
             
-            return json.loads(content)
+            result = json.loads(content)
+            self.logger.debug(f"    LLM analysis completed for {len(result)} speakers")
+            return result
             
         except Exception as e:
-            print(f"  LLM analysis failed: {e}")
+            self.logger.warning(f"    LLM analysis failed: {e}, using local analysis")
             return self._local_analysis(messages)
     
     def _build_transcript(self, messages: List[Dict]) -> str:
@@ -462,7 +453,6 @@ Output ONLY valid JSON, no other text. Example format:
         Local analysis without LLM API.
         Uses statistical patterns to discover speaker identities.
         """
-        # Group messages by speaker
         speaker_texts = defaultdict(list)
         speaker_turns = defaultdict(list)
         
@@ -472,7 +462,7 @@ Output ONLY valid JSON, no other text. Example format:
             speaker_turns[speaker].append(i)
         
         # Analyze turn-taking patterns
-        turn_order = [msg.get('speaker', f'speaker_{i}') 
+        turn_order = [msg.get('speaker', f'speaker_{i}')
                      for i, msg in enumerate(messages)]
         transitions = Counter()
         for i in range(len(turn_order) - 1):
@@ -480,35 +470,32 @@ Output ONLY valid JSON, no other text. Example format:
                 transitions[(turn_order[i], turn_order[i + 1])] += 1
         
         results = {}
-        
         for speaker, texts in speaker_texts.items():
             combined = ' '.join(texts)
             
-            # Discover patterns
+            # Calculate metrics
             question_ratio = sum(1 for t in texts if '?' in t) / len(texts)
             avg_length = np.mean([len(t.split()) for t in texts])
             
-            # Look for self-introductions
+            # Extract name candidates
             name_matches = re.findall(
                 r'(?:my name(?:\'s| is)|I(?:\'m| am)|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)',
                 combined, re.IGNORECASE
             )
             
-            # Look for names used by others when addressing this speaker
+            # Find names others use to address this speaker
             others_addressing = []
             for other_speaker, other_texts in speaker_texts.items():
                 if other_speaker != speaker:
                     for text in other_texts:
-                        # Names often appear at start or before questions
                         name_match = re.match(r'^([A-Z][a-z]+)[,!]', text.strip())
                         if name_match and name_match.group(1) not in ['I', 'You', 'We', 'It']:
                             others_addressing.append(name_match.group(1))
             
-            # Determine interaction pattern
+            # Determine role based on patterns
             speaks_first = speaker_turns[speaker][0] == 0 if speaker_turns[speaker] else False
             speaks_last = speaker_turns[speaker][-1] == len(messages) - 1 if speaker_turns[speaker] else False
             
-            # Infer role from patterns
             if speaks_first and question_ratio > 0.3:
                 observed_role = "initiates_conversation_with_questions"
             elif speaks_first and question_ratio < 0.2:
@@ -522,7 +509,7 @@ Output ONLY valid JSON, no other text. Example format:
             else:
                 observed_role = "active_conversation_participant"
             
-            # Infer relationship
+            # Determine relationship dynamics
             outgoing = sum(1 for (s1, s2) in transitions if s1 == speaker)
             incoming = sum(1 for (s1, s2) in transitions if s2 == speaker)
             
@@ -552,7 +539,6 @@ Output ONLY valid JSON, no other text. Example format:
         
         word_freq = Counter(all_words)
         
-        # Context signals (discovered, not predefined)
         context_signals = {
             'customer_service': ['help', 'issue', 'problem', 'order', 'account'],
             'medical': ['symptom', 'pain', 'doctor', 'medicine', 'feel'],
@@ -570,25 +556,36 @@ Output ONLY valid JSON, no other text. Example format:
         return "general_conversation"
 
 
-# ============================================================================
-# MAIN LABELING ENGINE
-# ============================================================================
-
 class GenericSpeakerLabeler:
     """
     Main labeling engine.
     Starts with generic labels (speaker_0, speaker_1) already in messages.
     Progressively improves using unsupervised methods and zero-shot LLM.
+    Enhanced with rich logging and organized output capabilities.
     """
-    
-    def __init__(self):
+    def __init__(self, log_dir=None):
+        """Initialize with optional logging directory"""
         self.audio_processor = GenericAudioProcessor()
         self.pattern_discoverer = UnsupervisedPatternDiscoverer()
         self.identity_detector = ZeroShotIdentityDetector()
-        
         self.speaker_identities: Dict[str, SpeakerIdentity] = {}
+        
+        # Setup logging
+        if log_dir:
+            self.logger = setup_logger(log_dir)
+        else:
+            self.logger = logging.getLogger('SpeakerLabeler')
+            if not self.logger.handlers:
+                # Basic console logging if no directory specified
+                handler = logging.StreamHandler()
+                handler.setFormatter(logging.Formatter('%(message)s'))
+                self.logger.addHandler(handler)
+                self.logger.setLevel(logging.INFO)
+        
+        # Store audio features per speaker for visualization
+        self._stage1_audio_features = {}
     
-    def process_conversation(self, 
+    def process_conversation(self,
                             messages: List[Dict],
                             audio_files: Optional[List[str]] = None
                             ) -> Dict[str, SpeakerIdentity]:
@@ -598,96 +595,107 @@ class GenericSpeakerLabeler:
         Args:
             messages: List of messages, each with 'speaker' key (e.g., 'speaker_0')
             audio_files: Optional list of audio file paths
+        
+        Returns:
+            Dictionary mapping speaker IDs to their SpeakerIdentity objects
         """
+        self.logger.info("=" * 60)
+        self.logger.info("STARTING GENERIC SPEAKER LABELING")
+        self.logger.info("=" * 60)
         
-        print("=" * 60)
-        print("STARTING GENERIC SPEAKER LABELING")
-        print("=" * 60)
-        
-        # Extract unique speakers from messages
+        # Count unique speakers
         unique_speakers = set()
         for msg in messages:
             speaker = msg.get('speaker', 'unknown')
             unique_speakers.add(speaker)
         
-        print(f"\n📋 Input: {len(messages)} messages from {len(unique_speakers)} speakers")
-        print(f"   Initial labels: {sorted(unique_speakers)}")
+        self.logger.info(f"\n📋 Input: {len(messages)} messages from {len(unique_speakers)} speakers")
+        self.logger.info(f"   Initial labels: {sorted(unique_speakers)}")
         
-        # Initialize identities with generic labels
+        # Initialize identities
         self.speaker_identities = {}
         for speaker in sorted(unique_speakers):
             self.speaker_identities[speaker] = SpeakerIdentity(
                 speaker_id=speaker,
-                current_label=speaker,  # Already generic: speaker_0, speaker_1, etc.
+                current_label=speaker,
                 quality=LabelQuality.GENERIC,
                 confidence=0.5
             )
+            self.logger.debug(f"   Initialized identity for {speaker}")
         
-        # Stage 1: Unsupervised pattern discovery
-        print("\n" + "=" * 40)
-        print("STAGE 1: Unsupervised Pattern Discovery")
-        print("=" * 40)
+        # Stage 1: Unsupervised Pattern Discovery
+        self.logger.info("\n" + "=" * 40)
+        self.logger.info("STAGE 1: Unsupervised Pattern Discovery")
+        self.logger.info("=" * 40)
         self._stage1_descriptive_labels(messages, audio_files)
         
-        # Stage 2: Zero-shot identity detection
-        print("\n" + "=" * 40)
-        print("STAGE 2: Zero-Shot Identity Detection")
-        print("=" * 40)
+        # Stage 2: Zero-Shot Identity Detection
+        self.logger.info("\n" + "=" * 40)
+        self.logger.info("STAGE 2: Zero-Shot Identity Detection")
+        self.logger.info("=" * 40)
         self._stage2_relational_labels(messages)
         
-        # Stage 3: Name extraction
-        print("\n" + "=" * 40)
-        print("STAGE 3: Name Extraction")
-        print("=" * 40)
+        # Stage 3: Name Extraction
+        self.logger.info("\n" + "=" * 40)
+        self.logger.info("STAGE 3: Name Extraction")
+        self.logger.info("=" * 40)
         self._stage3_proper_names(messages)
         
-        # Display final results
-        print("\n" + "=" * 60)
-        print("FINAL RESULTS")
-        print("=" * 60)
+        # Final Results
+        self.logger.info("\n" + "=" * 60)
+        self.logger.info("FINAL RESULTS")
+        self.logger.info("=" * 60)
         
         for speaker, identity in self.speaker_identities.items():
-            print(f"\n{speaker}:")
-            print(f"  Final Label: '{identity.current_label}'")
-            print(f"  Quality: {identity.quality.name}")
-            print(f"  Confidence: {identity.confidence:.2f}")
+            self.logger.info(f"\n{speaker}:")
+            self.logger.info(f"  Final Label: '{identity.current_label}'")
+            self.logger.info(f"  Quality: {identity.quality.name}")
+            self.logger.info(f"  Confidence: {identity.confidence:.2f}")
+            
             if identity.label_history:
-                print(f"  Progression:")
+                self.logger.info(f"  Progression:")
                 for step in identity.label_history:
-                    print(f"    {step['from_quality']} → {step['to_quality']}: "
-                          f"'{step['from_label']}' → '{step['to_label']}'")
+                    self.logger.info(f"    {step['from_quality']} → {step['to_quality']}: "
+                                   f"'{step['from_label']}' → '{step['to_label']}'")
         
+        self.logger.debug(f"Processing complete. {len(self.speaker_identities)} speakers labeled")
         return self.speaker_identities
     
     def _stage1_descriptive_labels(self, messages: List[Dict],
                                    audio_files: Optional[List[str]] = None):
         """Stage 1: Discover descriptive patterns from text and audio"""
-        
-        # Group messages by speaker
         speaker_texts = defaultdict(list)
         for msg in messages:
             speaker = msg.get('speaker', 'unknown')
             speaker_texts[speaker].append(msg.get('text', ''))
         
-        # Discover topics across all messages
+        # Discover topics from all text
         all_texts = [msg.get('text', '') for msg in messages if msg.get('text', '').strip()]
         topics = self.pattern_discoverer.discover_topics(all_texts)
         
         if topics:
-            print(f"  Discovered {len(topics)} topics:")
+            self.logger.info(f"  Discovered {len(topics)} topics:")
             for topic_id, keywords in topics.items():
-                print(f"    Topic {topic_id}: {', '.join(keywords[:5])}")
+                self.logger.info(f"    Topic {topic_id}: {', '.join(keywords[:5])}")
         
-        # Process audio if available
-        audio_features = {}
+        # Process audio features if available
         if audio_files:
-            print(f"\n  Processing {len(audio_files)} audio files...")
+            self.logger.info(f"\n  Processing {len(audio_files)} audio files...")
             for i, audio_file in enumerate(audio_files):
                 if os.path.exists(audio_file):
                     features = self.audio_processor.extract_features(audio_file)
-                    audio_features[i] = features
+                    
+                    # Map audio file to speaker
+                    for msg in messages:
+                        if msg.get('audio_file') == audio_file:
+                            speaker = msg.get('speaker')
+                            if speaker:
+                                self._stage1_audio_features[speaker] = features
+                                break
+                    
+                    self.logger.debug(f"    Audio features extracted: {Path(audio_file).name}")
         
-        # Build descriptive labels for each speaker
+        # Analyze each speaker's patterns
         for speaker, texts in speaker_texts.items():
             identity = self.speaker_identities.get(speaker)
             if not identity:
@@ -695,14 +703,11 @@ class GenericSpeakerLabeler:
             
             # Discover speech patterns
             patterns = self.pattern_discoverer.discover_speech_patterns(texts)
-            
-            # Get topic distribution
             topic_dist = self.pattern_discoverer.get_speaker_topic_distribution(texts)
             
-            # Build descriptive label from discovered patterns
+            # Build descriptive label from patterns
             descriptor_parts = []
             
-            # Turn length pattern
             avg_words = patterns.get('avg_words_per_turn', 0)
             if avg_words > 20:
                 descriptor_parts.append("detailed")
@@ -711,14 +716,12 @@ class GenericSpeakerLabeler:
             else:
                 descriptor_parts.append("concise")
             
-            # Question pattern
             question_ratio = patterns.get('question_ratio', 0)
             if question_ratio > 0.4:
                 descriptor_parts.append("inquiring")
             elif question_ratio < 0.1:
                 descriptor_parts.append("declarative")
             
-            # Interaction pattern
             politeness = patterns.get('politeness_ratio', 0)
             if politeness > 0.3:
                 descriptor_parts.append("polite")
@@ -727,26 +730,24 @@ class GenericSpeakerLabeler:
             if urgency > 0.1:
                 descriptor_parts.append("urgent")
             
-            # Topic focus
+            # Add topic focus if available
             if topic_dist:
                 best_topic = max(topic_dist, key=topic_dist.get)
                 if best_topic in topics and topics[best_topic]:
                     top_word = topics[best_topic][0]
                     descriptor_parts.append(f"focuses_on_{top_word}")
             
-            # Use discovered patterns to build label
             if descriptor_parts:
-                new_label = '_'.join(descriptor_parts[:3])  # Limit to 3 parts
+                new_label = '_'.join(descriptor_parts[:3])
             else:
                 new_label = "conversational_participant"
             
-            # Store patterns for later stages
+            # Update identity
             identity.linguistic_profile = patterns
             identity.topic_distribution = topic_dist
             identity.avg_turn_length = avg_words
             identity.question_ratio = question_ratio
             
-            # Upgrade label
             identity.upgrade_label(
                 new_label=new_label,
                 quality=LabelQuality.DESCRIPTIVE,
@@ -757,35 +758,32 @@ class GenericSpeakerLabeler:
                 }
             )
             
-            print(f"\n  {speaker}:")
-            print(f"    Patterns: avg_words={avg_words:.1f}, questions={question_ratio:.2f}")
-            print(f"    Label: '{speaker}' → '{new_label}'")
+            self.logger.info(f"\n  {speaker}:")
+            self.logger.info(f"    Patterns: avg_words={avg_words:.1f}, questions={question_ratio:.2f}")
+            self.logger.info(f"    Label: '{speaker}' → '{new_label}'")
+            self.logger.debug(f"    Full patterns: {json.dumps(patterns, indent=2)}")
     
     def _stage2_relational_labels(self, messages: List[Dict]):
         """Stage 2: Zero-shot identity and relationship detection"""
-        
-        # Get LLM analysis
-        print("  Analyzing conversation with zero-shot detection...")
+        self.logger.info("  Analyzing conversation with zero-shot detection...")
         analysis = self.identity_detector.analyze_conversation(messages)
         
         if not analysis:
-            print("  No analysis available, keeping descriptive labels")
+            self.logger.info("  No analysis available, keeping descriptive labels")
             return
         
-        # Update each speaker's label based on discovered relationships
         for speaker, identity in self.speaker_identities.items():
             if speaker not in analysis:
                 continue
             
             speaker_analysis = analysis[speaker]
-            
             observed_role = speaker_analysis.get('observed_role', '')
             relationship = speaker_analysis.get('relationship_to_others', '')
             name_candidates = speaker_analysis.get('name_candidates', [])
             context = speaker_analysis.get('conversation_context', '')
             confidence = speaker_analysis.get('confidence', 0.7)
             
-            # Build relational label
+            # Build new label based on analysis
             if observed_role:
                 new_label = observed_role.replace(' ', '_')
             elif relationship:
@@ -793,12 +791,13 @@ class GenericSpeakerLabeler:
             else:
                 new_label = identity.current_label
             
-            # Store name candidates for next stage
+            # Store name candidates
             if name_candidates:
                 identity.name_candidates = {
                     name: 0.7 for name in name_candidates
                 }
             
+            # Upgrade label
             identity.upgrade_label(
                 new_label=new_label,
                 quality=LabelQuality.RELATIONAL,
@@ -811,35 +810,35 @@ class GenericSpeakerLabeler:
                 }
             )
             
-            print(f"\n  {speaker}:")
-            print(f"    Observed role: {observed_role}")
-            print(f"    Relationship: {relationship}")
+            self.logger.info(f"\n  {speaker}:")
+            self.logger.info(f"    Observed role: {observed_role}")
+            self.logger.info(f"    Relationship: {relationship}")
             if name_candidates:
-                print(f"    Possible names: {name_candidates}")
-            print(f"    Label: → '{new_label}'")
+                self.logger.info(f"    Possible names: {name_candidates}")
+            self.logger.info(f"    Label: → '{new_label}'")
+            self.logger.debug(f"    Full analysis: {json.dumps(speaker_analysis, indent=2)}")
     
     def _stage3_proper_names(self, messages: List[Dict]):
         """Stage 3: Extract and validate proper names"""
-        
         for speaker, identity in self.speaker_identities.items():
             if not identity.name_candidates:
                 continue
             
-            # Get messages for this speaker
             speaker_msgs = [m for m in messages if m.get('speaker') == speaker]
             speaker_texts = [m.get('text', '') for m in speaker_msgs]
             
             best_name = None
             best_score = 0.0
             
+            # Validate each name candidate
             for name in identity.name_candidates:
-                # Validate: does this name make sense for this speaker?
                 score = self._validate_name(name, messages, speaker, speaker_texts)
-                
+                self.logger.debug(f"    Name '{name}' validation score: {score:.2f}")
                 if score > best_score:
                     best_score = score
                     best_name = name
             
+            # Apply best name if confidence is high enough
             if best_name and best_score > 0.5:
                 identity.upgrade_label(
                     new_label=best_name,
@@ -852,9 +851,11 @@ class GenericSpeakerLabeler:
                     }
                 )
                 
-                print(f"\n  {speaker}:")
-                print(f"    Best name: '{best_name}' (score: {best_score:.2f})")
-                print(f"    Label: → '{best_name}'")
+                self.logger.info(f"\n  {speaker}:")
+                self.logger.info(f"    Best name: '{best_name}' (score: {best_score:.2f})")
+                self.logger.info(f"    Label: → '{best_name}'")
+            else:
+                self.logger.debug(f"  {speaker}: No name met validation threshold")
     
     def _validate_name(self, name: str, messages: List[Dict],
                       target_speaker: str, speaker_texts: List[str]) -> float:
@@ -871,7 +872,6 @@ class GenericSpeakerLabeler:
         for msg in messages:
             if msg.get('speaker') != target_speaker:
                 text = msg.get('text', '')
-                # Name at beginning of turn often indicates addressing
                 if re.match(rf'^{name}[,!]', text.strip(), re.IGNORECASE):
                     score += 0.3
         

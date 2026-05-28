@@ -122,6 +122,7 @@ INCLUDE_FILE_STRUCTURE = False
 DEFAULT_QUERY_MESSAGE = r"""
 Improve with rich logging and terminal file source links.
 All result files should be saved under output dir in _main_speaker_labeling_system. Include insights, plots, etc.
+Keep the updates minimal and without new files.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
