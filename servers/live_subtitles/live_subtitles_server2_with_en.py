@@ -276,13 +276,13 @@ def get_speaker_diarization() -> Dict:
         key=lambda x: x[1].get("last_seen", 0),
         reverse=True,
     )
-    
+
     return {
         "current_speaker": _current_speaker,
+        "total_segments_processed": labeler.total_segments_processed,
         "known_speakers": labeler.known_speakers,
         "speaker_count": labeler.speaker_count,
         "speakers_info": dict(sorted_speakers),
-        "total_segments_processed": labeler.total_segments_processed,
     }
 
 
@@ -291,7 +291,7 @@ def should_reset_context(header: dict) -> bool:
     return True
 
 
-def should_label_speaker(text: str, min_chars: int = 5) -> bool:
+def should_label_speaker(text: str, min_chars: int = 2) -> bool:
     """
     Determine if speaker labeling should be performed based on text content.
 
@@ -461,7 +461,7 @@ def blocking_process_audio(
         console.print(f"[dim]Language: {language} | Words: {len(full_word_segments)}[/dim]")
         
         # Speaker labeling
-        text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=5)
+        text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=2)
         speaker_results = []
         primary_label = None
         primary_confidence = 0.0
@@ -717,7 +717,7 @@ def blocking_process_audio(
     console.print(f"[dim]Sentences: {len(full_ja_sents)}[/dim]")
     
     # Speaker labeling
-    text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=5)
+    text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=2)
     speaker_results = []
     primary_label = None
     primary_confidence = 0.0
@@ -1319,6 +1319,52 @@ async def get_speakers():
     return get_speaker_diarization()
 
 
+@app.get("/speakers/status")
+def get_status() -> Dict:
+    """Get current speakers status."""
+    labeler = _speaker_labeler
+    
+    health_status = labeler.get_health_status()
+
+    return dict(health_status)
+
+
+@app.get("/speakers/similarities")
+def get_speaker_similarity_matrix() -> Dict:
+    """Get current speakers similarity matrix."""
+    labeler = _speaker_labeler
+    
+    speaker_similarity_matrix = labeler.get_speaker_similarity_matrix()
+
+    return dict(speaker_similarity_matrix)
+
+
+@app.post("/speakers/consolidate")
+async def consolidate_speakers_endpoint(
+    threshold: float = Form(0.85),
+    dry_run: bool = Form(False),
+):
+    """Consolidate similar speakers by merging those above similarity threshold.
+    
+    Parameters
+    ----------
+    threshold : float
+        Similarity threshold above which speakers are merged (0.0 to 1.0).
+    dry_run : bool
+        If true, returns proposed merges without executing them.
+    """
+    labeler = _speaker_labeler
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    result = labeler.consolidate_speakers(threshold=threshold, dry_run=dry_run)
+    if not dry_run:
+        save_speaker_state()
+    return {
+        "success": True,
+        **result,
+    }
+
+
 @app.post("/speakers/reset")
 async def reset_speakers():
     """Reset speaker labeler state - fully clears all speaker tracking.
@@ -1366,32 +1412,6 @@ async def merge_speakers(label1: str = Form(...), label2: str = Form(...)):
         raise HTTPException(status_code=400, detail=f"Could not merge {label1} and {label2}")
     save_speaker_state()
     return {"success": True, "merged_label": result}
-
-
-@app.post("/speakers/consolidate")
-async def consolidate_speakers_endpoint(
-    threshold: float = Form(0.85),
-    dry_run: bool = Form(False),
-):
-    """Consolidate similar speakers by merging those above similarity threshold.
-    
-    Parameters
-    ----------
-    threshold : float
-        Similarity threshold above which speakers are merged (0.0 to 1.0).
-    dry_run : bool
-        If true, returns proposed merges without executing them.
-    """
-    labeler = _speaker_labeler
-    if not labeler:
-        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
-    result = labeler.consolidate_speakers(threshold=threshold, dry_run=dry_run)
-    if not dry_run:
-        save_speaker_state()
-    return {
-        "success": True,
-        **result,
-    }
 
 
 class TranscribeRequest(BaseModel):
