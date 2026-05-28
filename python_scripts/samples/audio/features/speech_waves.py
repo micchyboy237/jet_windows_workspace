@@ -1015,7 +1015,8 @@ if __name__ == "__main__":
     top5_path = (args.output_dir / "top_5_waves.json").resolve()
 
     console.print(
-        f"[bold green]✓[/bold green] All wave files saved under : [cyan]{waves_dir}[/cyan]"
+        f"[bold green]✓[/bold green] All wave files saved under : "
+        f"[cyan][link=file://{waves_dir}]{waves_dir}[/link][/cyan]"
     )
     console.print(
         f"[bold green]✓[/bold green] summary.json              : "
