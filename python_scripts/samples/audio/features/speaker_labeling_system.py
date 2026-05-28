@@ -655,8 +655,8 @@ class GenericSpeakerLabeler:
             if identity.label_history:
                 self.logger.info(f"  Progression:")
                 for step in identity.label_history:
-                    self.logger.info(f"    {step['from_quality']} → {step['to_quality']}: "
-                                   f"'{step['from_label']}' → '{step['to_label']}'")
+                    self.logger.info(f"    {step['from_quality']} -> {step['to_quality']}: "
+                                   f"'{step['from_label']}' -> '{step['to_label']}'")
         
         self.logger.debug(f"Processing complete. {len(self.speaker_identities)} speakers labeled")
         return self.speaker_identities
@@ -760,7 +760,7 @@ class GenericSpeakerLabeler:
             
             self.logger.info(f"\n  {speaker}:")
             self.logger.info(f"    Patterns: avg_words={avg_words:.1f}, questions={question_ratio:.2f}")
-            self.logger.info(f"    Label: '{speaker}' → '{new_label}'")
+            self.logger.info(f"    Label: '{speaker}' -> '{new_label}'")
             self.logger.debug(f"    Full patterns: {json.dumps(patterns, indent=2)}")
     
     def _stage2_relational_labels(self, messages: List[Dict]):
@@ -815,7 +815,7 @@ class GenericSpeakerLabeler:
             self.logger.info(f"    Relationship: {relationship}")
             if name_candidates:
                 self.logger.info(f"    Possible names: {name_candidates}")
-            self.logger.info(f"    Label: → '{new_label}'")
+            self.logger.info(f"    Label: -> '{new_label}'")
             self.logger.debug(f"    Full analysis: {json.dumps(speaker_analysis, indent=2)}")
     
     def _stage3_proper_names(self, messages: List[Dict]):
@@ -853,7 +853,7 @@ class GenericSpeakerLabeler:
                 
                 self.logger.info(f"\n  {speaker}:")
                 self.logger.info(f"    Best name: '{best_name}' (score: {best_score:.2f})")
-                self.logger.info(f"    Label: → '{best_name}'")
+                self.logger.info(f"    Label: -> '{best_name}'")
             else:
                 self.logger.debug(f"  {speaker}: No name met validation threshold")
     

@@ -274,8 +274,8 @@ def save_insights_report(results, messages, audio_files, insights_dir):
             if identity.label_history:
                 f.write(f"  Label Progression:\n")
                 for step in identity.label_history:
-                    f.write(f"    {step['from_quality']} → {step['to_quality']}: "
-                           f"'{step['from_label']}' → '{step['to_label']}'\n")
+                    f.write(f"    {step['from_quality']} -> {step['to_quality']}: "
+                           f"'{step['from_label']}' -> '{step['to_label']}'\n")
     
     logger.info(f"  ✅ Saved summary: {terminal_link(summary_path)}")
     
@@ -352,8 +352,8 @@ def main():
     for speaker, identity in results.items():
         logger.info(f"\n{speaker}:")
         for step in identity.label_history:
-            logger.info(f"  {step['from_quality']} → {step['to_quality']}: "
-                       f"'{step['from_label']}' → '{step['to_label']}'")
+            logger.info(f"  {step['from_quality']} -> {step['to_quality']}: "
+                       f"'{step['from_label']}' -> '{step['to_label']}'")
         logger.info(f"  Final: '{identity.current_label}' "
                    f"({identity.quality.name}, confidence: {identity.confidence:.2f})")
     
