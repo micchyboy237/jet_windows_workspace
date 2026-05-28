@@ -21,6 +21,8 @@ from norm_speech_loudness import normalize_audio_for_vad
 
 WaveState = Literal["below", "above"]
 
+DEFAULT_THRESHOLD = 0.3
+
 
 @dataclasses.dataclass
 class WaveShapeConfig:
@@ -102,7 +104,7 @@ def is_prominent_wave(
 def get_speech_waves(
     audio: AudioInput,
     speech_probs: List[float],
-    threshold: float = 0.5,
+    threshold: float = DEFAULT_THRESHOLD,
     sampling_rate: int = SAMPLE_RATE,
     shape_cfg: Optional[WaveShapeConfig] = None,
 ) -> List[SpeechWave]:
@@ -135,7 +137,7 @@ def get_speech_waves(
 
 def check_speech_waves(
     speech_probs: List[float],
-    threshold: float = 0.5,
+    threshold: float = DEFAULT_THRESHOLD,
     sampling_rate: int = SAMPLE_RATE,
     shape_cfg: Optional[WaveShapeConfig] = None,
 ) -> List[SpeechWave]:
@@ -186,7 +188,10 @@ def check_speech_waves(
                 # ── Preroll: walk back from rise_frame_idx until we find a
                 #    frame strictly below baseline_threshold (or hit index 0).
                 preroll_start = rise_frame_idx
-                while preroll_start > 0 and speech_probs[preroll_start - 1] >= shape_cfg.baseline_threshold:
+                while (
+                    preroll_start > 0
+                    and speech_probs[preroll_start - 1] >= shape_cfg.baseline_threshold
+                ):
                     preroll_start -= 1
                 preroll_start_sec = preroll_start * HOP_SIZE / sampling_rate
 
@@ -363,7 +368,7 @@ def save_wave_plot(
     wave_num: int,
     seg_num: int,
     wave: Optional[SpeechWave] = None,
-    threshold: float = 0.5,
+    threshold: float = DEFAULT_THRESHOLD,
     hop_size: int = HOP_SIZE,
     sampling_rate: int = SAMPLE_RATE,
     shape_cfg: Optional[WaveShapeConfig] = None,
@@ -387,7 +392,7 @@ def save_wave_plot(
     """
     if shape_cfg is None:
         shape_cfg = WaveShapeConfig()
-    
+
     baseline_threshold = shape_cfg.baseline_threshold
 
     # --- align arrays --------------------------------------------------------
@@ -575,7 +580,7 @@ def save_wave_data(
     seg_num: int,
     wave_num: int,
     hop_size: int = HOP_SIZE,
-    threshold: float = 0.5,
+    threshold: float = DEFAULT_THRESHOLD,
     shape_cfg: Optional[WaveShapeConfig] = None,
 ) -> None:
     """Save all wave-related data to the specified directory."""
@@ -636,15 +641,15 @@ def _find_parent_segment(wave: SpeechWave, segments: list) -> int:
     """
     wave_start = wave["start_sec"]
     wave_end = wave["end_sec"]
-    
+
     for seg in segments:
         seg_start = seg.get("start_sec", 0.0)
         seg_end = seg.get("end_sec", 0.0)
-        
+
         # Check for any time overlap between wave and segment
         if wave_start <= seg_end and wave_end >= seg_start:
             return seg.get("num", seg.get("segment_num", 1))
-    
+
     # Fallback to first segment if no match found
     return 1
 
@@ -778,7 +783,7 @@ if __name__ == "__main__":
         "-t",
         "--threshold",
         type=float,
-        default=0.5,
+        default=DEFAULT_THRESHOLD,
         help="VAD probability threshold (above = speech).",
     )
     parser.add_argument(
@@ -971,6 +976,7 @@ if __name__ == "__main__":
     table.add_column("End (s)", style="white", justify="right", no_wrap=True)
     table.add_column("Dur (s)", style="yellow", justify="right", no_wrap=True)
     table.add_column("Prominence", style="magenta", justify="right", no_wrap=True)
+    table.add_column("Excursion", style="magenta", justify="right", no_wrap=True)
     table.add_column("Composite", style="bright_cyan", justify="right", no_wrap=True)
     table.add_column("Baseline", style="blue", justify="right", no_wrap=True)
     table.add_column("Peak prob", style="green", justify="right", no_wrap=True)
@@ -993,6 +999,7 @@ if __name__ == "__main__":
             f"{r['end_sec']:.2f}",
             f"{r['dur_sec']:.2f}",
             f"{r['scores']['prominence']:.3f}",
+            f"{r['scores']['excursion']:.3f}",
             f"{r['scores']['composite']:.4f}",
             f"{r['scores']['baseline']:.3f}",
             f"{r['scores']['max_prob']:.3f}",
