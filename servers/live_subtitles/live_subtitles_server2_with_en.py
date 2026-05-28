@@ -345,31 +345,25 @@ def blocking_process_audio(
     language = header.get("language", "auto")
     full_trans_result = None
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
-
-    # Detect language if "auto"
+    
+    # Language detection
     if not language or language == "auto":
         console.print("[info]Detecting language with AudioLanguageDetector...[/info]")
         try:
-            # Convert audio_np to float32 tensor for SpeechBrain
             audio_tensor = torch.from_numpy(audio_np).float() / 32768.0
-            audio_tensor = audio_tensor.unsqueeze(0)  # Add batch dimension
+            audio_tensor = audio_tensor.unsqueeze(0)
             detected_lang = audio_language_detector.detect_from_bytes(
                 audio_tensor, sample_rate=sample_rate
             )
             console.print(f"[success]Detected language: {detected_lang}[/success]")
-            # Map detected language to supported language codes
-            # SpeechBrain uses ISO 639-3 codes, map to your expected format
             language = detected_lang
-            
-            # If you need to handle edge cases where detection fails:
-            # language = "ja" if detected_lang in ["ja", "jpn"] else detected_lang
         except Exception as e:
             console.print(f"[error]Language detection failed: {e}. Falling back to 'ja'[/error]")
-            language = "ja"  # Default fallback
-
-    # Log what language is actually being used for transcription
+            language = "ja"
+    
     console.print(f"[info]Transcribing with language: {language}[/info]")
     
+    # Context buffer management
     if should_reset_context(header):
         context_buffer.reset()
     else:
@@ -393,6 +387,7 @@ def blocking_process_audio(
             f"Using {segments_used} segment(s) = {actual_context_sec:.2f}s context.[/warning]"
         )
     
+    # Build full audio
     if context_audio_int16.size > 0:
         full_audio_int16 = np.concatenate([context_audio_int16, audio_np])
     else:
@@ -408,6 +403,7 @@ def blocking_process_audio(
     
     full_audio_bytes = full_audio_int16.tobytes()
     
+    # Log audio info
     console.print(
         f"[info]VAD Reason:[/info] [value]{header['vad_reason']}[/value]"
     )
@@ -424,7 +420,7 @@ def blocking_process_audio(
         f"[time]{actual_full_duration_sec:.2f}s[/time] / [time]{max_duration_sec:.2f}s[/time] max"
     )
     
-    # STEP 1: Transcribe with detected/specified language
+    # Transcribe
     full_trans_result = transcribe_audio(
         audio_bytes=full_audio_bytes,
         language=language,
@@ -434,62 +430,216 @@ def blocking_process_audio(
     full_word_segments = full_trans_result.pop("word_segments")
     full_phrase_segments = full_trans_result.pop("phrase_segments")
     full_metadata = full_trans_result.pop("metadata")
-
-    # Override metadata language with detected one if auto mode
+    
     if header.get("language", "auto") == "auto":
         full_metadata["language"] = language
-
-    full_word_segments_text = "".join(s["word"] for s in full_word_segments)
-    full_ja_text = full_word_segments_text
-    full_ja_sents = split_sentences_ja(full_ja_text)
-
-    # STEP 2: Speaker labeling — language-agnostic
-    text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=10)
-
-    speaker_results = []
-    primary_label = None
-    primary_confidence = 0.0
-    speaker_metadata = {"match_type": "skipped_no_text"}
-
-    if text_has_sufficient_content:
-        segment_timestamp = header.get("start_sec", time.time())
-        segment_duration = header.get("duration_sec", len(audio_np) / sample_rate)
-        use_multiple = segment_duration >= 3.0
-
-        speaker_results, primary_label, primary_confidence, speaker_metadata = (
-            label_speakers_for_segment(
-                waveform=audio_np,
-                sample_rate=sample_rate,
-                timestamp=segment_timestamp,
-                return_multiple=use_multiple,
+    
+    # === FIX: Proper word joining based on language ===
+    # Determine if the language uses spaces between words
+    SPACELESS_LANGUAGES = {"ja", "jpn", "zh", "chi", "zho", "ko", "kor", "th", "tha"}
+    is_spaceless = language in SPACELESS_LANGUAGES
+    
+    if is_spaceless:
+        full_word_segments_text = "".join(s["word"] for s in full_word_segments)
+    else:
+        # For space-separated languages, join with spaces
+        full_word_segments_text = " ".join(s["word"] for s in full_word_segments)
+    
+    # === ADD LOGGING: Log transcribed text ===
+    console.print("[bold green]📝 Transcribed Text:[/bold green]")
+    console.print(f"[bright_white]{full_word_segments_text}[/bright_white]")
+    console.print(f"[dim]Language: {language} | Words: {len(full_word_segments)}[/dim]")
+    
+    # === NON-JAPANESE LANGUAGE PATH (FIXED) ===
+    if language != "ja" and language != "jpn":
+        # For non-Japanese languages, use the transcribed text directly as en_text
+        en_text = full_word_segments_text.strip()
+        
+        # === ADD LOGGING: Log transcribed text ===
+        console.print("[bold green]📝 Non-Japanese Transcribed Text:[/bold green]")
+        console.print(f"[bright_white]{en_text}[/bright_white]")
+        console.print(f"[dim]Language: {language} | Words: {len(full_word_segments)}[/dim]")
+        
+        # Speaker labeling
+        text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=10)
+        speaker_results = []
+        primary_label = None
+        primary_confidence = 0.0
+        speaker_metadata = {"match_type": "skipped_no_text"}
+        
+        if text_has_sufficient_content:
+            segment_timestamp = header.get("start_sec", time.time())
+            segment_duration = header.get("duration_sec", len(audio_np) / sample_rate)
+            use_multiple = segment_duration >= 3.0
+            speaker_results, primary_label, primary_confidence, speaker_metadata = (
+                label_speakers_for_segment(
+                    waveform=audio_np,
+                    sample_rate=sample_rate,
+                    timestamp=segment_timestamp,
+                    return_multiple=use_multiple,
+                )
             )
-        )
-
-        if len(speaker_results) > 1:
-            speakers_str = ", ".join(
-                f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
-            )
-            console.print(
-                f"[speaker]Speakers: [{speakers_str}] "
-                f"(primary: {primary_label}, type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
-            )
+            if len(speaker_results) > 1:
+                speakers_str = ", ".join(
+                    f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
+                )
+                console.print(
+                    f"[speaker]Speakers: [{speakers_str}] "
+                    f"(primary: {primary_label}, type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+                )
+            else:
+                console.print(
+                    f"[speaker]Speaker: {primary_label} "
+                    f"(confidence: {primary_confidence:.3f}, "
+                    f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+                )
         else:
             console.print(
-                f"[speaker]Speaker: {primary_label} "
-                f"(confidence: {primary_confidence:.3f}, "
-                f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+                f"[warning]Skipping speaker labeling - insufficient text content "
+                f"(text: '{full_word_segments_text[:50]}{'...' if len(full_word_segments_text) > 50 else ''}', "
+                f"length: {len(full_word_segments_text)} chars)[/warning]"
             )
-    else:
-        console.print(
-            f"[warning]Skipping speaker labeling - insufficient text content "
-            f"(text: '{full_word_segments_text[:50]}{'...' if len(full_word_segments_text) > 50 else ''}', "
-            f"length: {len(full_word_segments_text)} chars)[/warning]"
+        
+        # === FIX: Save segment files (was missing from non-Japanese path) ===
+        segment_num = get_next_segment_number()
+        segment_dir = prepare_segment_directory(
+            segment_num,
+            segments_dir=LAST_N_SEGMENTS_DIR,
+            segment_index_path=_SEGMENT_INDEX_PATH,
+            n_results=N_SEGMENT_RESULTS,
         )
-
-    # STEP 3: For English (or any non-JA language), skip translation and return early
-    if language != "ja" and language != "jpn":
-        en_text = full_word_segments_text.strip()
-
+        segment_dir_name = f"segment_{segment_num:03d}"
+        console.print(
+            f"[info]Segment directory:[/info] [uuid]{segment_dir_name}[/uuid] "
+            f"(#{segment_num}, keeping last {N_SEGMENT_RESULTS})"
+        )
+        
+        # Save header
+        with open(segment_dir / "header.json", "w", encoding="utf-8") as f:
+            json.dump(header, f, ensure_ascii=False, indent=2)
+        
+        # Save audio files
+        audio_np_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
+        wavfile.write(str(segment_dir / "sound.wav"), sample_rate, audio_np_int16)
+        wavfile.write(str(segment_dir / "full_sound.wav"), sample_rate, full_audio_int16)
+        
+        # Save sentence files (empty for JA, use EN text for EN)
+        with open(segment_dir / "ja_sents.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "old_ja_sents": [],
+                "new_ja_sents": [],
+            }, f, ensure_ascii=False, indent=2)
+        
+        with open(segment_dir / "en_sents.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "old_en_sents": [],
+                "new_en_sents": [en_text] if en_text else [],
+            }, f, ensure_ascii=False, indent=2)
+        
+        # Save speaker info
+        with open(segment_dir / "speaker_info.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "speaker_label": primary_label,
+                "speaker_confidence": primary_confidence,
+                "speaker_metadata": speaker_metadata,
+                "speakers": speaker_results,
+                "diarization": get_speaker_diarization(),
+            }, f, ensure_ascii=False, indent=2)
+        
+        # Save results markdown
+        if len(speaker_results) > 1:
+            speaker_lines = []
+            for r in speaker_results[:5]:
+                speaker_lines.append(
+                    f"- {r['label']} ({r['confidence']:.3f}, {r['match_type']})"
+                )
+            speaker_md = "\n".join(speaker_lines)
+            md_results = (
+                f"**Segment:** {segment_dir_name} (#{segment_num})\n\n"
+                f"**Language:** {language}\n\n"
+                f"**Speakers:**\n{speaker_md}\n\n"
+                f"**Primary:** {primary_label} (confidence: {primary_confidence:.3f})\n\n"
+                f"**Transcribed Text:**\n{en_text}\n"
+            )
+        else:
+            md_results = (
+                f"**Segment:** {segment_dir_name} (#{segment_num})\n\n"
+                f"**Language:** {language}\n\n"
+                f"**Speaker:** {primary_label} (confidence: {primary_confidence:.3f})\n\n"
+                f"**Transcribed Text:**\n{en_text}\n"
+            )
+        
+        with open(segment_dir / "results.md", "w", encoding="utf-8") as f:
+            f.write(md_results)
+        
+        # Save metadata
+        metadata_out = {
+            "uuid": uuid_,
+            "segment_number": segment_num,
+            "segment_dir": segment_dir_name,
+            "duration_sec": header.get("duration_sec"),
+            "started_at": header.get("started_at"),
+            "transcribed_at": datetime.now().isoformat(),
+            "language": language,
+            "speaker_label": primary_label,
+            "speaker_confidence": primary_confidence,
+            "speakers": speaker_results,
+            "speaker_count": len(speaker_results),
+        }
+        
+        with open(segment_dir / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(metadata_out, f, ensure_ascii=False, indent=2)
+        
+        # Save full audio files (for the live buffer, not segment-specific)
+        full_audio_dir = LIVE_AUDIO_BUFFER_DIR
+        if full_audio_int16.size > 0:
+            wavfile.write(
+                str(full_audio_dir / "full_sound.wav"),
+                context_buffer.sample_rate,
+                full_audio_int16,
+            )
+        
+        context_summary = {
+            "total_duration_sec": round(context_buffer.get_total_duration(), 3),
+            "num_chunks": len(context_buffer.segments),
+            "max_duration_sec": context_buffer.max_duration_sec,
+            "sample_rate": context_buffer.sample_rate,
+            "last_updated": datetime.now().isoformat(),
+            "context_includes_current_segment": True,
+            "current_speaker": _current_speaker,
+            "speaker_count": _speaker_labeler.speaker_count if _speaker_labeler else 0,
+        }
+        
+        with open(full_audio_dir / "summary.json", "w", encoding="utf-8") as f:
+            json.dump(context_summary, f, ensure_ascii=False, indent=2)
+        
+        full_audio_metadata = context_buffer.get_list_metadata()
+        with open(full_audio_dir / "full_audio_metadata.json", "w", encoding="utf-8") as f:
+            json.dump(full_audio_metadata, f, ensure_ascii=False, indent=2)
+        
+        with open(full_audio_dir / "full_transcription.json", "w", encoding="utf-8") as f:
+            json.dump(full_trans_result, f, ensure_ascii=False, indent=2)
+        
+        with open(full_audio_dir / "full_metadata.json", "w", encoding="utf-8") as f:
+            json.dump(full_metadata, f, ensure_ascii=False, indent=2)
+        
+        with open(full_audio_dir / "full_word_segments.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "level": "word",
+                "count": len(full_word_segments),
+                "text": full_word_segments_text,
+                "segments": full_word_segments
+            }, f, ensure_ascii=False, indent=2)
+        
+        with open(full_audio_dir / "full_phrase_segments.json", "w", encoding="utf-8") as f:
+            json.dump({
+                "level": "phrase",
+                "count": len(full_phrase_segments),
+                "phrases": [p["phrase"] for p in full_phrase_segments],
+                "segments": full_phrase_segments
+            }, f, ensure_ascii=False, indent=2)
+        
+        # Store in context buffer
         context_buffer.add_audio_segment(audio_np, {
             "uuid": header["uuid"],
             "forced": header["forced"],
@@ -506,7 +656,19 @@ def blocking_process_audio(
             "speaker_confidence": primary_confidence,
             "speakers": speaker_results,
         })
-
+        
+        # Save speaker state periodically
+        if _speaker_labeler and _speaker_labeler.total_segments_processed % 5 == 0:
+            save_speaker_state()
+        
+        # === ADD LOGGING: Final response summary ===
+        console.print("[bold green]✅ Non-Japanese Response Summary:[/bold green]")
+        console.print(f"  UUID: [uuid]{uuid_[-6:]}[/uuid]")
+        console.print(f"  Language: [value]{language}[/value]")
+        console.print(f"  Text length: [number]{len(en_text)}[/number] chars")
+        console.print(f"  Speaker: [speaker]{primary_label}[/speaker]")
+        console.print(f"  Segment: [uuid]{segment_dir_name}[/uuid] (#{segment_num})")
+        
         return {
             "uuid": uuid_,
             "new_duration": header["duration_sec"],
@@ -541,12 +703,60 @@ def blocking_process_audio(
             "phrase_segments": full_phrase_segments,
             "new_ja_similarity": None,
             "new_ja_start_index": None,
-            "segment_number": None,
-            "segment_dir": None,
+            "segment_number": segment_num,
+            "segment_dir": segment_dir_name,
         }
 
-    # STEP 5: JA/jpn path — context diffing and translation
-    # [Rest of the function remains exactly the same as your original code]
+    # === JAPANESE PATH (existing code with added logging) ===
+    full_ja_text = full_word_segments_text
+    full_ja_sents = split_sentences_ja(full_ja_text)
+    
+    # === ADD LOGGING: Log Japanese transcribed text ===
+    console.print("[bold green]📝 Japanese Transcribed Text:[/bold green]")
+    console.print(f"[bright_white]{full_ja_text}[/bright_white]")
+    console.print(f"[dim]Sentences: {len(full_ja_sents)}[/dim]")
+    
+    # Speaker labeling
+    text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=10)
+    speaker_results = []
+    primary_label = None
+    primary_confidence = 0.0
+    speaker_metadata = {"match_type": "skipped_no_text"}
+    
+    if text_has_sufficient_content:
+        segment_timestamp = header.get("start_sec", time.time())
+        segment_duration = header.get("duration_sec", len(audio_np) / sample_rate)
+        use_multiple = segment_duration >= 3.0
+        speaker_results, primary_label, primary_confidence, speaker_metadata = (
+            label_speakers_for_segment(
+                waveform=audio_np,
+                sample_rate=sample_rate,
+                timestamp=segment_timestamp,
+                return_multiple=use_multiple,
+            )
+        )
+        if len(speaker_results) > 1:
+            speakers_str = ", ".join(
+                f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
+            )
+            console.print(
+                f"[speaker]Speakers: [{speakers_str}] "
+                f"(primary: {primary_label}, type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+            )
+        else:
+            console.print(
+                f"[speaker]Speaker: {primary_label} "
+                f"(confidence: {primary_confidence:.3f}, "
+                f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+            )
+    else:
+        console.print(
+            f"[warning]Skipping speaker labeling - insufficient text content "
+            f"(text: '{full_word_segments_text[:50]}{'...' if len(full_word_segments_text) > 50 else ''}', "
+            f"length: {len(full_word_segments_text)} chars)[/warning]"
+        )
+    
+    # Existing Japanese processing continues...
     prev_full_ja_text = None
     prev_full_en_text = None
     unchanged_text = None
@@ -554,7 +764,7 @@ def blocking_process_audio(
     new_ja_start_index = None
     new_ja_similarity = None
     history = None
-
+    
     if context_buffer.segments:
         _, last_meta = context_buffer.get_last_segment()
         prev_full_ja_text = last_meta.get("full_ja_text", "")
@@ -564,8 +774,8 @@ def blocking_process_audio(
         new_ja_text = new_ja_text_res["new_text"]
         new_ja_start_index = new_ja_text_res["start_index"]
         new_ja_similarity = new_ja_text_res["similarity"]
-
         last_ja_sentence, last_en_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
+        
         MATCH_SCORE_CUTOFF = 75
         match_result = fuzzy_shortest_best_match_contains(
             query=new_ja_text,
@@ -573,6 +783,7 @@ def blocking_process_audio(
             score_cutoff=MATCH_SCORE_CUTOFF,
             max_extra_chars=30,
         )
+        
         if match_result["score"] >= MATCH_SCORE_CUTOFF and match_result["start"] != -1:
             console.print("[success bold]✅ Accepted[/success bold]")
             new_text_start = match_result["end"]
@@ -586,7 +797,7 @@ def blocking_process_audio(
                 f"[warning]Translating the full text.[/warning]"
             )
             new_text = full_ja_text.strip()
-
+        
         new_clean = new_text.rstrip('.。！？、…・「」『』').rstrip()
         if not new_clean:
             return {
@@ -598,29 +809,30 @@ def blocking_process_audio(
                 "success": False,
                 "message": "Same text as previous",
             }
-
+        
         old_ja_sents = split_sentences_ja(prev_full_ja_text)
         old_ja_text = prev_full_ja_text
         old_en_sents = split_sentences_ja(prev_full_en_text)
         old_en_text = prev_full_en_text
         new_ja_sents = split_sentences_ja(new_text)
         ja_text = "".join(new_ja_sents).strip()
-
+        
         last_sentence_pos = match_result["start"] if match_result["score"] >= MATCH_SCORE_CUTOFF else -1
         last_sentence_clean = match_result["match"].strip() if match_result["score"] >= MATCH_SCORE_CUTOFF else None
-
+        
         if ja_text:
             hist_result = context_buffer.get_context_history_by_duration(
                 max_duration_sec=context_buffer.max_duration_sec,
                 reserved_duration_sec=new_audio_duration_sec,
             )
-            history          = hist_result["history"]
+            history = hist_result["history"]
             included_indices = hist_result["included_indices"]
-            history_pairs      = len(history) // 2
-            max_dur            = context_buffer.max_duration_sec
-            inc_dur            = hist_result["included_duration_sec"]
-            total_history_dur  = inc_dur + new_audio_duration_sec
-            over_budget        = total_history_dur > max_dur
+            history_pairs = len(history) // 2
+            max_dur = context_buffer.max_duration_sec
+            inc_dur = hist_result["included_duration_sec"]
+            total_history_dur = inc_dur + new_audio_duration_sec
+            over_budget = total_history_dur > max_dur
+            
             console.print(
                 f"[info]History:[/info] "
                 f"[number]{history_pairs}[/number] pairs "
@@ -636,6 +848,7 @@ def blocking_process_audio(
                 f"  /  [time]{max_dur:.2f}s[/time] max"
                 + (" [error]⚠ EXCEEDS BUDGET[/error]" if over_budget else "")
             )
+            
             for i, (_, meta) in enumerate(list(context_buffer.segments)):
                 seg_en = (meta.get("en_text") or "").strip()[:60]
                 seg_dur = float(meta.get("duration_sec") or 0.0)
@@ -649,14 +862,19 @@ def blocking_process_audio(
                     f"[{text_tag}]{seg_en}{'…' if seg_en else '(no text)'}[/{text_tag}]"
                     + (f"  [dim]+{seg_dur:.2f}s[/dim]" if i in included_indices else "")
                 )
+            
             trans_en = translate_japanese_to_english(
                 text=ja_text,
                 history=history,
             )
             en_text = trans_en["text"].strip()
+            
+            # === ADD LOGGING: Log translation result ===
+            console.print("[bold cyan]🌐 English Translation:[/bold cyan]")
+            console.print(f"[bright_white]{en_text}[/bright_white]")
         else:
             en_text = ""
-
+        
         if prev_full_en_text:
             if new_ja_text_res["start_index"] == 0:
                 full_en_text = en_text.strip()
@@ -676,6 +894,10 @@ def blocking_process_audio(
             new_ja_sents = ja_sents
             full_en_text = full_trans_en["text"].strip()
             en_text = full_en_text
+            
+            # === ADD LOGGING: Log translation result ===
+            console.print("[bold cyan]🌐 English Translation (First Segment):[/bold cyan]")
+            console.print(f"[bright_white]{en_text}[/bright_white]")
         else:
             return {
                 "uuid": uuid_,
@@ -690,26 +912,39 @@ def blocking_process_audio(
         old_en_sents = []
         last_sentence_clean = None
         last_sentence_pos = -1
-
+    
+    # === ADD LOGGING: Summary of all texts ===
+    console.print("[bold yellow]📊 Text Processing Summary:[/bold yellow]")
+    console.print(f"  Original JA text: [bright_white]{full_ja_text[:100]}{'...' if len(full_ja_text) > 100 else ''}[/bright_white]")
+    console.print(f"  New JA text: [bright_white]{new_ja_text[:100]}{'...' if len(new_ja_text) > 100 else ''}[/bright_white]")
+    console.print(f"  EN text: [bright_white]{en_text[:100]}{'...' if len(en_text) > 100 else ''}[/bright_white]")
+    
     if history:
         console.print(f"[bold yellow]History ({len(history)}):[/bold yellow]")
         console.print(f"[bold cyan]{history!r}[/bold cyan]")
+    
     if last_sentence_clean:
         console.print(f"[success]Last Sentence (utt_id={last_utt_id[-6:]} | sent_idx={last_sent_idx}):[/success]")
         console.print(f"[bright_white]{last_sentence_clean}[/bright_white]")
+    
     if last_sentence_pos != -1:
         console.print(f"[success]New Text (utt_id={header['uuid'][-6:]} | pos={last_sentence_pos} | start={new_text_start}):[/success]")
         console.print(f"[bright_white]{new_text}[/bright_white]")
+    
     if old_ja_sents:
         console.print(f"[success]Old JA ({len(old_ja_sents)} sents):[/success]")
         console.print(f"[bright_white]{old_ja_text}[/bright_white]")
+    
     console.print(f"[success]New JA ({len(new_ja_text)} chars):[/success]")
     console.print(f"[bold cyan]{new_ja_text}[/bold cyan]")
+    
     if old_en_sents:
         console.print(f"[success]Old EN ({len(old_en_sents)} sents):[/success]")
         console.print(f"[bright_white]{old_en_text}[/bright_white]")
+    
     console.print(f"[success]New EN ({len(en_text)} chars):[/success]")
     console.print(f"[bold cyan]{en_text}[/bold cyan]")
+    
     if new_ja_text:
         if unchanged_text is not None:
             console.print(f"[success]Unchanged JA ({len(unchanged_text)} chars):[/success]")
@@ -718,14 +953,16 @@ def blocking_process_audio(
             console.print(f"[success]Start index:[/success] [bold cyan]{new_ja_start_index}[/bold cyan]")
         if new_ja_similarity is not None:
             console.print(f"[success]Matched Similarity:[/success] [bold cyan]{new_ja_similarity}[/bold cyan]")
+    
     console.print(f"[success]Full JA ({len(full_ja_sents)} sents):[/success]")
     console.print(f"[bright_white]{full_ja_text}[/bright_white]")
+    
     if en_text.strip():
         console.print("[success]Full EN:[/success]")
         console.print(f"[bold white]{en_text}[/bold white]")
     else:
         console.print("[dim italic]No new translation[/dim italic]")
-
+    
     if prev_full_ja_text and full_ja_text != prev_full_ja_text:
         console.print("[info]Diff (previous full JA → current full JA):[/info]")
         console_diff_highlight(
@@ -734,6 +971,7 @@ def blocking_process_audio(
             "Prev JA",
             "Curr JA",
         )
+    
     if prev_full_en_text and full_en_text != prev_full_en_text:
         console.print("[info]Diff (previous full EN → current full EN):[/info]")
         console_diff_highlight(
@@ -742,7 +980,7 @@ def blocking_process_audio(
             "Prev EN",
             "Curr EN",
         )
-
+    
     prefix_result = fuzzy_match_prefix_texts({
         "prev_ja": prev_full_ja_text,
         "prev_en": prev_full_en_text,
@@ -752,11 +990,11 @@ def blocking_process_audio(
     console.print(
         f"[info]Prefix match is_continuation:[/info] [value]{prefix_result['is_continuation']}[/value]"
     )
+    
     ja_text = prefix_result["new_ja"]
     en_text = prefix_result["new_en"]
     new_en_sents = split_sentences_ja(full_en_text)
-
-    # === SEQUENTIAL SEGMENT DIRECTORY MANAGEMENT ===
+    
     segment_num = get_next_segment_number()
     segment_dir = prepare_segment_directory(
         segment_num,
@@ -765,31 +1003,31 @@ def blocking_process_audio(
         n_results=N_SEGMENT_RESULTS,
     )
     segment_dir_name = f"segment_{segment_num:03d}"
-
     console.print(
         f"[info]Segment directory:[/info] [uuid]{segment_dir_name}[/uuid] "
         f"(#{segment_num}, keeping last {N_SEGMENT_RESULTS})"
     )
-
+    
+    # Save files (existing code...)
     with open(segment_dir / "header.json", "w", encoding="utf-8") as f:
         json.dump(header, f, ensure_ascii=False, indent=2)
-
+    
     audio_np_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
     wavfile.write(str(segment_dir / "sound.wav"), sample_rate, audio_np_int16)
     wavfile.write(str(segment_dir / "full_sound.wav"), sample_rate, full_audio_int16)
-
+    
     with open(segment_dir / "ja_sents.json", "w", encoding="utf-8") as f:
         json.dump({
             "old_ja_sents": old_ja_sents,
             "new_ja_sents": new_ja_sents,
         }, f, ensure_ascii=False, indent=2)
-
+    
     with open(segment_dir / "en_sents.json", "w", encoding="utf-8") as f:
         json.dump({
             "old_en_sents": old_en_sents,
             "new_en_sents": new_en_sents,
         }, f, ensure_ascii=False, indent=2)
-
+    
     with open(segment_dir / "speaker_info.json", "w", encoding="utf-8") as f:
         json.dump({
             "speaker_label": primary_label,
@@ -798,7 +1036,7 @@ def blocking_process_audio(
             "speakers": speaker_results,
             "diarization": get_speaker_diarization(),
         }, f, ensure_ascii=False, indent=2)
-
+    
     if len(speaker_results) > 1:
         speaker_lines = []
         for r in speaker_results[:5]:
@@ -820,10 +1058,10 @@ def blocking_process_audio(
             f"JA: {ja_text}\n\n"
             f"EN: {en_text}\n"
         )
-
+    
     with open(segment_dir / "results.md", "w", encoding="utf-8") as f:
         f.write(md_results)
-
+    
     metadata_out = {
         "uuid": uuid_,
         "segment_number": segment_num,
@@ -836,11 +1074,13 @@ def blocking_process_audio(
         "speakers": speaker_results,
         "speaker_count": len(speaker_results),
     }
+    
     with open(segment_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata_out, f, ensure_ascii=False, indent=2)
-
+    
     context_duration = context_buffer.get_total_duration()
     context_uuid = context_buffer.get_context_uuid() or uuid_
+    
     context_buffer.add_audio_segment(audio_np, {
         "uuid": header["uuid"],
         "forced": header["forced"],
@@ -863,7 +1103,8 @@ def blocking_process_audio(
         "speaker_confidence": primary_confidence,
         "speakers": speaker_results,
     })
-
+    
+    # Save audio files (existing code...)
     full_audio_dir = LIVE_AUDIO_BUFFER_DIR
     if full_audio_int16.size > 0:
         wavfile.write(
@@ -873,7 +1114,7 @@ def blocking_process_audio(
         )
     else:
         (full_audio_dir / "full_sound.wav").write_bytes(b"")
-
+    
     context_summary = {
         "total_duration_sec": round(context_buffer.get_total_duration(), 3),
         "num_chunks": len(context_buffer.segments),
@@ -884,19 +1125,20 @@ def blocking_process_audio(
         "current_speaker": _current_speaker,
         "speaker_count": _speaker_labeler.speaker_count if _speaker_labeler else 0,
     }
+    
     with open(full_audio_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(context_summary, f, ensure_ascii=False, indent=2)
-
+    
     full_audio_metadata = context_buffer.get_list_metadata()
     with open(full_audio_dir / "full_audio_metadata.json", "w", encoding="utf-8") as f:
         json.dump(full_audio_metadata, f, ensure_ascii=False, indent=2)
-
+    
     with open(full_audio_dir / "full_transcription.json", "w", encoding="utf-8") as f:
         json.dump(full_trans_result, f, ensure_ascii=False, indent=2)
-
+    
     with open(full_audio_dir / "full_metadata.json", "w", encoding="utf-8") as f:
         json.dump(full_metadata, f, ensure_ascii=False, indent=2)
-
+    
     with open(full_audio_dir / "full_word_segments.json", "w", encoding="utf-8") as f:
         json.dump({
             "level": "word",
@@ -904,7 +1146,7 @@ def blocking_process_audio(
             "text": full_word_segments_text,
             "segments": full_word_segments
         }, f, ensure_ascii=False, indent=2)
-
+    
     with open(full_audio_dir / "full_phrase_segments.json", "w", encoding="utf-8") as f:
         json.dump({
             "level": "phrase",
@@ -912,13 +1154,21 @@ def blocking_process_audio(
             "phrases": [p["phrase"] for p in full_phrase_segments],
             "segments": full_phrase_segments
         }, f, ensure_ascii=False, indent=2)
-
+    
     with open(full_audio_dir / "full_ja_sents.json", "w", encoding="utf-8") as f:
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
-
+    
     if _speaker_labeler and _speaker_labeler.total_segments_processed % 5 == 0:
         save_speaker_state()
-
+    
+    # === ADD LOGGING: Final response summary ===
+    console.print("[bold green]✅ Japanese Response Summary:[/bold green]")
+    console.print(f"  UUID: [uuid]{uuid_[-6:]}[/uuid]")
+    console.print(f"  Language: [value]{language}[/value]")
+    console.print(f"  JA text: [number]{len(ja_text)}[/number] chars")
+    console.print(f"  EN text: [number]{len(en_text)}[/number] chars")
+    console.print(f"  Speaker: [speaker]{primary_label}[/speaker]")
+    
     response = {
         "uuid": uuid_,
         "new_duration": header['duration_sec'],
@@ -956,7 +1206,7 @@ def blocking_process_audio(
         "segment_number": segment_num,
         "segment_dir": segment_dir_name,
     }
-
+    
     return response
 
 
