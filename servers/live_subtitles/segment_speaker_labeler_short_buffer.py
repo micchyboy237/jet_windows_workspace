@@ -1345,6 +1345,6 @@ class SegmentSpeakerLabeler:
 
 
 if __name__ == "__main__":
-    from _main_segment_speaker_labeler import main
+    from _main_segment_speaker_labeler_short_buffer import main
 
     main()

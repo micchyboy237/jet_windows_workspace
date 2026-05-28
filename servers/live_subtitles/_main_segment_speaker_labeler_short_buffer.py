@@ -21,7 +21,7 @@ DEFAULT_AUDIO = str(
 def main():
     from audio_utils import resolve_audio_paths, resolve_audio_paths_as_tensor_list
     from pyannote.audio import Inference, Model
-    from segment_speaker_labeler import (
+    from segment_speaker_labeler_short_buffer import (
         SegmentSpeakerLabeler,
         DEFAULT_THRESHOLD_SAME,
         DEFAULT_THRESHOLD_POSSIBLE,
