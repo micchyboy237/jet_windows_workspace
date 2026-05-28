@@ -42,12 +42,12 @@ class TranscriptionMetadata(TypedDict, total=False):
     transcribed_duration_sec: float
     transcribed_duration_pctg: float
     coverage_label: str
+    language: Optional[str]          # NEW: detected language (auto, zh, en, ja, ko, yue)
+    emo: Optional[str]               # NEW: dominant emotion (HAPPY, SAD, ANGRY, etc.)
+    event: Optional[str]             # NEW: detected events (BGM, Applause, Laughter, etc.)
 
 class TranscriptionResult(TypedDict):
     text: str
-    language: Optional[str]          # NEW: detected language (zh, en, ja, ko, yue)
-    emo: Optional[str]               # NEW: dominant emotion (HAPPY, SAD, ANGRY, etc.)
-    event: Optional[str]             # NEW: detected events (BGM, Applause, Laughter, etc.)
     confidence: float
     quality_label: str
     avg_logprob: Optional[float]
@@ -409,6 +409,9 @@ def transcribe_audio_llm_from_file(
         "transcribed_duration_sec": round(transcribed_duration_sec, 3),
         "transcribed_duration_pctg": round(transcribed_percentage, 2),
         "coverage_label": coverage_label,
+        "language": detected_language,   # ✅ NEW
+        "emo": detected_emotion,         # ✅ NEW
+        "event": detected_event,         # ✅ NEW
     }
     
     phrase_segments: list[PhraseSegment] = []
@@ -422,9 +425,6 @@ def transcribe_audio_llm_from_file(
     
     return {
         "text": ja_text,
-        "language": detected_language,   # ✅ NEW
-        "emo": detected_emotion,         # ✅ NEW
-        "event": detected_event,         # ✅ NEW
         "confidence": None,
         "quality_label": None,
         "avg_logprob": None,

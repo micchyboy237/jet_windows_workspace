@@ -20,7 +20,7 @@ from rich.logging import RichHandler
 from rich.theme import Theme
 from sentence_matcher_ja import fuzzy_shortest_best_match_contains, fuzzy_match_prefix_texts
 from sentence_utils import split_sentences_ja
-from transcribe_jp_funasr import TranscriptionResult, transcribe_japanese
+from transcribe_funasr import TranscriptionResult, transcribe_audio
 from translate_jp_en_llm_prefixed import translate_japanese_to_english
 from segment_speaker_labeler import SegmentSpeakerLabeler
 from pyannote.audio import Inference, Model
@@ -288,36 +288,38 @@ def should_reset_context(header: dict) -> bool:
 def should_label_speaker(text: str, min_chars: int = 10) -> bool:
     """
     Determine if speaker labeling should be performed based on text content.
-    
+
     Parameters
     ----------
     text : str
-        Transcribed Japanese text
+        Transcribed text (any language)
     min_chars : int
         Minimum number of meaningful characters required
-    
+
     Returns
     -------
     bool
         True if speaker labeling should proceed
     """
-    # Strip whitespace and punctuation
-    clean_text = text.strip().rstrip('.。！？、…・「」『』').strip()
-    
-    # Count only Japanese characters (hiragana, katakana, kanji)
-    ja_chars = sum(1 for c in clean_text if (
-        '\u3040' <= c <= '\u309f' or  # Hiragana
-        '\u30a0' <= c <= '\u30ff' or  # Katakana
-        '\u4e00' <= c <= '\u9fff' or  # Kanji
-        '\u3400' <= c <= '\u4dbf'     # Kanji Extension A
-    ))
-    
-    # Also count meaningful non-Japanese characters (letters, digits)
-    meaningful_chars = sum(1 for c in clean_text if c.isalnum())
-    
-    total_meaningful = ja_chars + meaningful_chars
-    
-    return total_meaningful >= min_chars
+    clean_text = text.strip()
+
+    # Count any alphanumeric or CJK character as meaningful
+    meaningful_chars = sum(
+        1 for c in clean_text
+        if c.isalnum()                          # Latin, digits, etc.
+        or '\u3040' <= c <= '\u309f'            # Hiragana
+        or '\u30a0' <= c <= '\u30ff'            # Katakana
+        or '\u4e00' <= c <= '\u9fff'            # CJK Unified Ideographs
+        or '\u3400' <= c <= '\u4dbf'            # CJK Extension A
+        or '\uac00' <= c <= '\ud7af'            # Hangul syllables
+        or '\u0600' <= c <= '\u06ff'            # Arabic
+        or '\u0900' <= c <= '\u097f'            # Devanagari
+        or '\u0400' <= c <= '\u04ff'            # Cyrillic
+        or '\u0370' <= c <= '\u03ff'            # Greek
+        or '\u0e00' <= c <= '\u0e7f'            # Thai
+    )
+
+    return meaningful_chars >= min_chars
 
 
 def blocking_process_audio(
@@ -334,6 +336,7 @@ def blocking_process_audio(
         return {"message": "missing uuid", "success": False}
     
     sample_rate = header.get("sample_rate", 16000)
+    language = header.get("language", "auto")
     full_trans_result = None
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
     
@@ -391,27 +394,27 @@ def blocking_process_audio(
         f"[time]{actual_full_duration_sec:.2f}s[/time] / [time]{max_duration_sec:.2f}s[/time] max"
     )
 
-    # STEP 1: Transcribe first (before speaker labeling)
-    full_trans_result = transcribe_japanese(
+    # STEP 1: Transcribe
+    full_trans_result = transcribe_audio(
         audio_bytes=full_audio_bytes,
+        language=language,
         sample_rate=sample_rate,
     )
     full_trans_result = full_trans_result.copy()
     full_word_segments = full_trans_result.pop("word_segments")
     full_phrase_segments = full_trans_result.pop("phrase_segments")
     full_metadata = full_trans_result.pop("metadata")
-    
+
+    if language == "auto":
+        language = full_metadata["language"]
+
     full_word_segments_text = "".join(s["word"] for s in full_word_segments)
     full_ja_text = full_word_segments_text
     full_ja_sents = split_sentences_ja(full_ja_text)
 
-    # STEP 2: Check if text content is sufficient for speaker labeling
-    text_has_sufficient_content = should_label_speaker(
-        full_ja_text, 
-        min_chars=10  # Configurable threshold
-    )
+    # STEP 2: Speaker labeling — language-agnostic
+    text_has_sufficient_content = should_label_speaker(full_word_segments_text, min_chars=10)
 
-    # STEP 3: Only perform speaker labeling if text has enough content
     speaker_results = []
     primary_label = None
     primary_confidence = 0.0
@@ -421,7 +424,7 @@ def blocking_process_audio(
         segment_timestamp = header.get("start_sec", time.time())
         segment_duration = header.get("duration_sec", len(audio_np) / sample_rate)
         use_multiple = segment_duration >= 3.0
-        
+
         speaker_results, primary_label, primary_confidence, speaker_metadata = (
             label_speakers_for_segment(
                 waveform=audio_np,
@@ -433,8 +436,7 @@ def blocking_process_audio(
 
         if len(speaker_results) > 1:
             speakers_str = ", ".join(
-                f"{r['label']}({r['confidence']:.2f})"
-                for r in speaker_results[:3]
+                f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
             )
             console.print(
                 f"[speaker]Speakers: [{speakers_str}] "
@@ -449,10 +451,67 @@ def blocking_process_audio(
     else:
         console.print(
             f"[warning]Skipping speaker labeling - insufficient text content "
-            f"(text: '{full_ja_text[:50]}{'...' if len(full_ja_text) > 50 else ''}', "
-            f"length: {len(full_ja_text)} chars)[/warning]"
+            f"(text: '{full_word_segments_text[:50]}{'...' if len(full_word_segments_text) > 50 else ''}', "
+            f"length: {len(full_word_segments_text)} chars)[/warning]"
         )
-    
+
+    # STEP 3: For English (or any non-JA language), skip translation and return early
+    if language == "en":
+        en_text = full_word_segments_text.strip()
+
+        context_buffer.add_audio_segment(audio_np, {
+            "uuid": header["uuid"],
+            "forced": header["forced"],
+            "vad_reason": header["vad_reason"],
+            "start_sec": header["start_sec"],
+            "end_sec": header["end_sec"],
+            "duration_sec": header["duration_sec"],
+            "started_at": header["started_at"],
+            "full_ja_text": "",
+            "full_en_text": en_text,
+            "ja_text": "",
+            "en_text": en_text,
+            "speaker_label": primary_label,
+            "speaker_confidence": primary_confidence,
+            "speakers": speaker_results,
+        })
+
+        return {
+            "uuid": uuid_,
+            "new_duration": header["duration_sec"],
+            "context_uuid": context_buffer.get_context_uuid() or uuid_,
+            "context_duration": context_buffer.get_total_duration(),
+            "success": bool(en_text),
+            "ja_text": "",
+            "en_text": en_text,
+            "transcribed_duration_sec": full_metadata["transcribed_duration_sec"],
+            "transcribed_duration_pctg": full_metadata["transcribed_duration_pctg"],
+            "coverage_label": full_metadata["coverage_label"],
+            "speaker_label": primary_label,
+            "speaker_confidence": primary_confidence,
+            "speaker_match_type": speaker_metadata.get("match_type", "skipped"),
+            "speakers": speaker_results,
+            "diarization": get_speaker_diarization() if text_has_sufficient_content else {
+                "current_speaker": _current_speaker,
+                "known_speakers": [],
+                "speaker_count": 0,
+                "speakers_info": {},
+                "total_segments_processed": 0,
+                "note": "Speaker labeling skipped - insufficient text content",
+            },
+            "speaker_labeling_performed": text_has_sufficient_content,
+            "old_ja_sents": [],
+            "new_ja_sents": [],
+            "old_en_sents": [],
+            "new_en_sents": [en_text] if en_text else [],
+            "phrase_segments": full_phrase_segments,
+            "new_ja_similarity": None,
+            "new_ja_start_index": None,
+            "segment_number": None,
+            "segment_dir": None,
+        }
+
+    # STEP 4: JA/auto path — context diffing and translation
     prev_full_ja_text = None
     prev_full_en_text = None
     unchanged_text = None
@@ -460,7 +519,7 @@ def blocking_process_audio(
     new_ja_start_index = None
     new_ja_similarity = None
     history = None
-    
+
     if context_buffer.segments:
         _, last_meta = context_buffer.get_last_segment()
         prev_full_ja_text = last_meta.get("full_ja_text", "")
@@ -470,7 +529,7 @@ def blocking_process_audio(
         new_ja_text = new_ja_text_res["new_text"]
         new_ja_start_index = new_ja_text_res["start_index"]
         new_ja_similarity = new_ja_text_res["similarity"]
-        
+
         last_ja_sentence, last_en_sentence, last_utt_id, last_sent_idx = context_buffer.get_last_sentence()
         MATCH_SCORE_CUTOFF = 75
         match_result = fuzzy_shortest_best_match_contains(
@@ -492,29 +551,29 @@ def blocking_process_audio(
                 f"[warning]Translating the full text.[/warning]"
             )
             new_text = full_ja_text.strip()
-        
+
         new_clean = new_text.rstrip('.。！？、…・「」『』').rstrip()
         if not new_clean:
             return {
                 "uuid": uuid_,
-                "transcription_ja": "",
-                "translation_en": "",
+                "ja_text": "",
+                "en_text": "",
                 "speaker_label": primary_label,
                 "speaker_confidence": primary_confidence,
                 "success": False,
                 "message": "Same text as previous",
             }
-        
+
         old_ja_sents = split_sentences_ja(prev_full_ja_text)
         old_ja_text = prev_full_ja_text
         old_en_sents = split_sentences_ja(prev_full_en_text)
         old_en_text = prev_full_en_text
         new_ja_sents = split_sentences_ja(new_text)
         ja_text = "".join(new_ja_sents).strip()
-        
+
         last_sentence_pos = match_result["start"] if match_result["score"] >= MATCH_SCORE_CUTOFF else -1
         last_sentence_clean = match_result["match"].strip() if match_result["score"] >= MATCH_SCORE_CUTOFF else None
-        
+
         if ja_text:
             hist_result = context_buffer.get_context_history_by_duration(
                 max_duration_sec=context_buffer.max_duration_sec,
@@ -562,7 +621,7 @@ def blocking_process_audio(
             en_text = trans_en["text"].strip()
         else:
             en_text = ""
-        
+
         if prev_full_en_text:
             if new_ja_text_res["start_index"] == 0:
                 full_en_text = en_text.strip()
@@ -585,8 +644,8 @@ def blocking_process_audio(
         else:
             return {
                 "uuid": uuid_,
-                "transcription_ja": "",
-                "translation_en": "",
+                "ja_text": "",
+                "en_text": "",
                 "speaker_label": primary_label,
                 "speaker_confidence": primary_confidence,
                 "success": False,
@@ -596,7 +655,7 @@ def blocking_process_audio(
         old_en_sents = []
         last_sentence_clean = None
         last_sentence_pos = -1
-    
+
     if history:
         console.print(f"[bold yellow]History ({len(history)}):[/bold yellow]")
         console.print(f"[bold cyan]{history!r}[/bold cyan]")
@@ -631,7 +690,7 @@ def blocking_process_audio(
         console.print(f"[bold white]{en_text}[/bold white]")
     else:
         console.print("[dim italic]No new translation[/dim italic]")
-    
+
     if prev_full_ja_text and full_ja_text != prev_full_ja_text:
         console.print("[info]Diff (previous full JA → current full JA):[/info]")
         console_diff_highlight(
@@ -648,7 +707,7 @@ def blocking_process_audio(
             "Prev EN",
             "Curr EN",
         )
-    
+
     prefix_result = fuzzy_match_prefix_texts({
         "prev_ja": prev_full_ja_text,
         "prev_en": prev_full_en_text,
@@ -661,9 +720,8 @@ def blocking_process_audio(
     ja_text = prefix_result["new_ja"]
     en_text = prefix_result["new_en"]
     new_en_sents = split_sentences_ja(full_en_text)
-    
+
     # === SEQUENTIAL SEGMENT DIRECTORY MANAGEMENT ===
-    # Get next segment number and prepare the directory
     segment_num = get_next_segment_number()
     segment_dir = prepare_segment_directory(
         segment_num,
@@ -672,32 +730,31 @@ def blocking_process_audio(
         n_results=N_SEGMENT_RESULTS,
     )
     segment_dir_name = f"segment_{segment_num:03d}"
-    
+
     console.print(
         f"[info]Segment directory:[/info] [uuid]{segment_dir_name}[/uuid] "
         f"(#{segment_num}, keeping last {N_SEGMENT_RESULTS})"
     )
-    
-    # Write segment files
+
     with open(segment_dir / "header.json", "w", encoding="utf-8") as f:
         json.dump(header, f, ensure_ascii=False, indent=2)
-    
+
     audio_np_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
     wavfile.write(str(segment_dir / "sound.wav"), sample_rate, audio_np_int16)
     wavfile.write(str(segment_dir / "full_sound.wav"), sample_rate, full_audio_int16)
-    
+
     with open(segment_dir / "ja_sents.json", "w", encoding="utf-8") as f:
         json.dump({
             "old_ja_sents": old_ja_sents,
             "new_ja_sents": new_ja_sents,
         }, f, ensure_ascii=False, indent=2)
-    
+
     with open(segment_dir / "en_sents.json", "w", encoding="utf-8") as f:
         json.dump({
             "old_en_sents": old_en_sents,
             "new_en_sents": new_en_sents,
         }, f, ensure_ascii=False, indent=2)
-    
+
     with open(segment_dir / "speaker_info.json", "w", encoding="utf-8") as f:
         json.dump({
             "speaker_label": primary_label,
@@ -706,7 +763,7 @@ def blocking_process_audio(
             "speakers": speaker_results,
             "diarization": get_speaker_diarization(),
         }, f, ensure_ascii=False, indent=2)
-    
+
     if len(speaker_results) > 1:
         speaker_lines = []
         for r in speaker_results[:5]:
@@ -728,10 +785,10 @@ def blocking_process_audio(
             f"JA: {ja_text}\n\n"
             f"EN: {en_text}\n"
         )
-    
+
     with open(segment_dir / "results.md", "w", encoding="utf-8") as f:
         f.write(md_results)
-    
+
     metadata_out = {
         "uuid": uuid_,
         "segment_number": segment_num,
@@ -746,8 +803,7 @@ def blocking_process_audio(
     }
     with open(segment_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata_out, f, ensure_ascii=False, indent=2)
-    
-    # Continue with context buffer and response (unchanged from here down)
+
     context_duration = context_buffer.get_total_duration()
     context_uuid = context_buffer.get_context_uuid() or uuid_
     context_buffer.add_audio_segment(audio_np, {
@@ -772,7 +828,7 @@ def blocking_process_audio(
         "speaker_confidence": primary_confidence,
         "speakers": speaker_results,
     })
-    
+
     full_audio_dir = LIVE_AUDIO_BUFFER_DIR
     if full_audio_int16.size > 0:
         wavfile.write(
@@ -782,7 +838,7 @@ def blocking_process_audio(
         )
     else:
         (full_audio_dir / "full_sound.wav").write_bytes(b"")
-    
+
     context_summary = {
         "total_duration_sec": round(context_buffer.get_total_duration(), 3),
         "num_chunks": len(context_buffer.segments),
@@ -795,17 +851,17 @@ def blocking_process_audio(
     }
     with open(full_audio_dir / "summary.json", "w", encoding="utf-8") as f:
         json.dump(context_summary, f, ensure_ascii=False, indent=2)
-    
+
     full_audio_metadata = context_buffer.get_list_metadata()
     with open(full_audio_dir / "full_audio_metadata.json", "w", encoding="utf-8") as f:
         json.dump(full_audio_metadata, f, ensure_ascii=False, indent=2)
-    
+
     with open(full_audio_dir / "full_transcription.json", "w", encoding="utf-8") as f:
         json.dump(full_trans_result, f, ensure_ascii=False, indent=2)
-    
+
     with open(full_audio_dir / "full_metadata.json", "w", encoding="utf-8") as f:
         json.dump(full_metadata, f, ensure_ascii=False, indent=2)
-    
+
     with open(full_audio_dir / "full_word_segments.json", "w", encoding="utf-8") as f:
         json.dump({
             "level": "word",
@@ -813,7 +869,7 @@ def blocking_process_audio(
             "text": full_word_segments_text,
             "segments": full_word_segments
         }, f, ensure_ascii=False, indent=2)
-    
+
     with open(full_audio_dir / "full_phrase_segments.json", "w", encoding="utf-8") as f:
         json.dump({
             "level": "phrase",
@@ -821,14 +877,13 @@ def blocking_process_audio(
             "phrases": [p["phrase"] for p in full_phrase_segments],
             "segments": full_phrase_segments
         }, f, ensure_ascii=False, indent=2)
-    
+
     with open(full_audio_dir / "full_ja_sents.json", "w", encoding="utf-8") as f:
         json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
-    
+
     if _speaker_labeler and _speaker_labeler.total_segments_processed % 5 == 0:
         save_speaker_state()
-    
-    # Build response with speaker info (even if skipped)
+
     response = {
         "uuid": uuid_,
         "new_duration": header['duration_sec'],
@@ -837,8 +892,8 @@ def blocking_process_audio(
         "success": bool(ja_text and en_text),
         "new_ja_similarity": new_ja_similarity,
         "new_ja_start_index": new_ja_start_index,
-        "transcription_ja": new_ja_text,
-        "translation_en": en_text,
+        "ja_text": new_ja_text,
+        "en_text": en_text,
         "transcribed_duration_sec": full_metadata["transcribed_duration_sec"],
         "transcribed_duration_pctg": full_metadata["transcribed_duration_pctg"],
         "coverage_label": full_metadata["coverage_label"],
@@ -852,7 +907,7 @@ def blocking_process_audio(
             "speaker_count": 0,
             "speakers_info": {},
             "total_segments_processed": 0,
-            "note": "Speaker labeling skipped - insufficient text content"
+            "note": "Speaker labeling skipped - insufficient text content",
         },
         "speaker_labeling_performed": text_has_sufficient_content,
         "old_ja_sents": old_ja_sents,
@@ -948,8 +1003,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     "uuid": header_dict.get("uuid", "unknown"),
                     "error": str(proc_err),
                     "success": False,
-                    "transcription_ja": "",
-                    "translation_en": "",
+                    "ja_text": "",
+                    "en_text": "",
                     "speaker_label": "SPEAKER_UNKNOWN",
                     "speaker_confidence": 0.0,
                     "speakers": [],
@@ -1059,7 +1114,7 @@ class TranscribeRequest(BaseModel):
 
 class TranscribeResponse(BaseModel):
     success: bool
-    transcription_ja: str
+    transcription: str
     speaker_label: str = "SPEAKER_UNKNOWN"
     speaker_confidence: float = 0.0
     metadata: Dict[str, Any]
@@ -1075,7 +1130,7 @@ class TranslateRequest(BaseModel):
 
 class TranslateResponse(BaseModel):
     success: bool
-    translation_en: str
+    en_text: str
     quality: str = "N/A"
     log_prob: Optional[float] = None
     confidence: Optional[float] = None
@@ -1086,22 +1141,28 @@ async def transcribe_endpoint(
     audio_file: UploadFile = File(..., description="Japanese audio file (WAV, PCM int16 recommended)"),
     sample_rate: int = Form(16000, description="Sample rate of the audio"),
     hotwords: Optional[str] = Form(None, description="Optional hotwords for better recognition"),
+    language: str = Form(
+        "auto",
+        description="Language code (e.g., 'ja' for Japanese, 'en' for English, 'auto' for auto-detect)",
+    ),
 ):
-    """Transcribe Japanese audio → Japanese text (REST API)"""
+    """Transcribe Japanese or English audio → text (REST API)"""
     try:
         console.print(f"[info]Received file upload: {audio_file.filename} ({audio_file.content_type})[/info]")
         audio_bytes = await audio_file.read()
         if len(audio_bytes) == 0:
             raise HTTPException(status_code=400, detail="Uploaded audio file is empty")
         console.print(f"[info]Audio size: {len(audio_bytes)/1024:.1f} KB | Sample rate: {sample_rate} Hz[/info]")
-        result: TranscriptionResult = transcribe_japanese(
+        result: TranscriptionResult = transcribe_audio(
             audio_bytes=audio_bytes,
+            language=language,
             sample_rate=sample_rate,
             hotwords=hotwords,
         )
+   
         return {
             "success": True,
-            "transcription_ja": result.get("text", ""),
+            "transcription": result.get("text", ""),
             "metadata": result.get("metadata", {}),
             "word_segments": result.get("word_segments", []),
             "phrase_segments": result.get("phrase_segments", []),
@@ -1126,7 +1187,7 @@ async def translate_endpoint(request: TranslateRequest):
         )
         return {
             "success": True,
-            "translation_en": result["text"],
+            "en_text": result["text"],
             "quality": result.get("quality", "N/A"),
             "log_prob": result.get("log_prob"),
             "confidence": result.get("confidence"),
