@@ -3,6 +3,7 @@
 import sys
 import torchaudio
 from pathlib import Path
+from typing import Literal
 from speechbrain.inference.classifiers import EncoderClassifier
 from speechbrain.utils.fetching import LocalStrategy
 
@@ -11,7 +12,11 @@ class AudioLanguageDetector:
     A reusable class for detecting spoken language from audio using
     SpeechBrain's ECAPA-TDNN models.
     """
-    def __init__(self, model_source="speechbrain/lang-id-voxlingua107-ecapa"):
+    def __init__(
+        self,
+        model_source: str = "speechbrain/lang-id-voxlingua107-ecapa",
+        device: Literal["cpu", "cuda"] = "cpu",
+    ):
         """
         Initializes the language detector with a pre-trained model.
 
@@ -23,11 +28,11 @@ class AudioLanguageDetector:
         self.classifier = EncoderClassifier.from_hparams(
             source=model_source,
             savedir=Path("~/.cache/pretrained_models").expanduser() / model_source.split('/')[-1],
-            run_opts={"device": "cpu"},
+            run_opts={"device": device},
             local_strategy=LocalStrategy.COPY
         )
 
-    def detect_from_file(self, audio_path):
+    def detect_from_file(self, audio_path: str):
         """
         Detects language from an audio file path.
 
