@@ -904,6 +904,14 @@ class SegmentSpeakerLabeler:
         if label not in self._speakers:
             return None
         ref = self._speakers[label]
+        
+        # Extract centroid data for serialization
+        centroid_coordinates = None
+        centroid_shape = None
+        if ref.centroid is not None:
+            centroid_coordinates = ref.centroid.tolist()
+            centroid_shape = list(ref.centroid.shape)
+        
         return {
             "label": ref.label,
             "segment_count": ref.segment_count,
@@ -911,6 +919,9 @@ class SegmentSpeakerLabeler:
             "last_seen": ref.last_seen,
             "active_duration": ref.active_duration,
             "has_valid_centroid": ref.has_valid_centroid,
+            "centroid_quality": ref.centroid_quality,
+            "centroid_coordinates": centroid_coordinates,  # The actual centroid vector
+            "centroid_shape": centroid_shape,              # Its dimensions
         }
 
     def get_all_speakers_info(self) -> Dict[str, Dict]:
