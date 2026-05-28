@@ -70,18 +70,23 @@ class AudioLanguageDetector:
 
 # Example Usage
 if __name__ == "__main__":
+    import argparse
+
+    # Argument parsing
+    default_audio_path = "C:/Users/druiv/Desktop/Jet_Files/Cloned_Repos/FunAudioLLM_SenseVoice/example/en.wav"
+    parser = argparse.ArgumentParser(description="Japanese ASR demo.")
+    parser.add_argument(
+        "audio_path",
+        nargs="?",
+        default=default_audio_path,
+        help="Japanese audio to transcribe (optional, defaults to sample audio path)",
+    )
+    args = parser.parse_args()
+
     print("Initializing AudioLanguageDetector...")
     detector = AudioLanguageDetector()
     print("Detector initialized successfully!\n")
 
     # Detect 'en' from file
-    audio_path = "C:/Users/druiv/Desktop/Jet_Files/Cloned_Repos/FunAudioLLM_SenseVoice/example/en.wav"
-    if Path(audio_path).exists():
-        language = detector.detect_from_file(audio_path)
-        print(f"English audio - Detected language: {language}")
-
-    # Detect 'ja' from file
-    audio_path = "C:/Users/druiv/Desktop/Jet_Files/Cloned_Repos/FunAudioLLM_SenseVoice/example/ja.wav"
-    if Path(audio_path).exists():
-        language = detector.detect_from_file(audio_path)
-        print(f"Japanese audio - Detected language: {language}")
+    language = detector.detect_from_file(args.audio_path)
+    print(f"Detected language: {language}")
