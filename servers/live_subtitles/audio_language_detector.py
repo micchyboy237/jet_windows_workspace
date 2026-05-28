@@ -1,3 +1,5 @@
+# audio_language_detector.py
+
 import sys
 import torchaudio
 from pathlib import Path
@@ -18,12 +20,11 @@ class AudioLanguageDetector:
                 - "speechbrain/lang-id-voxlingua107-ecapa": Supports 107 languages.
                 - "speechbrain/lang-id-commonlanguage_ecapa": Supports 45 languages.
         """
-        # The key fix: explicitly pass local_strategy to avoid symlinks on Windows
         self.classifier = EncoderClassifier.from_hparams(
             source=model_source,
             savedir=Path("~/.cache/pretrained_models").expanduser() / model_source.split('/')[-1],
             run_opts={"device": "cpu"},
-            local_strategy=LocalStrategy.COPY  # This is the crucial parameter
+            local_strategy=LocalStrategy.COPY
         )
 
     def detect_from_file(self, audio_path):
@@ -34,13 +35,15 @@ class AudioLanguageDetector:
             audio_path (str): Path to the audio file.
 
         Returns:
-            str: Detected language label.
+            str: 2-character ISO language code (e.g., 'en', 'ja').
         """
         if not Path(audio_path).exists():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
         
         out_prob, score, index, text_lab = self.classifier.classify_file(audio_path)
-        return text_lab[0]
+        # text_lab[0] returns format like "en: English"
+        # Split on ': ' and take the first part (the 2-char code)
+        return text_lab[0].split(": ")[0]
 
     def detect_from_bytes(self, audio_bytes, sample_rate=16000):
         """
@@ -51,23 +54,22 @@ class AudioLanguageDetector:
             sample_rate (int): Sample rate of the audio.
 
         Returns:
-            str: Detected language label.
+            str: 2-character ISO language code (e.g., 'en', 'ja').
         """
-        # Ensure tensor is 2D (batch, samples)
         if audio_bytes.dim() == 1:
             audio_bytes = audio_bytes.unsqueeze(0)
         
-        # Ensure correct format: normalize to 16kHz mono if needed
         if sample_rate != 16000:
             resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
             audio_bytes = resampler(audio_bytes)
 
         out_prob, score, index, text_lab = self.classifier.classify_batch(audio_bytes)
-        return text_lab[0]
+        # Same parsing as detect_from_file
+        return text_lab[0].split(": ")[0]
+
 
 # Example Usage
 if __name__ == "__main__":
-    # Initialize once (the model will be downloaded and cached)
     print("Initializing AudioLanguageDetector...")
     detector = AudioLanguageDetector()
     print("Detector initialized successfully!\n")
