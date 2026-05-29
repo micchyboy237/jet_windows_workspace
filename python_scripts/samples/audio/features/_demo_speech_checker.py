@@ -90,14 +90,27 @@ class DemoRunner:
         self.results: Dict[str, Dict[str, SpeechCheckResult]] = {}
         self.start_time = datetime.now()
         
+    # def _find_test_wavs(self) -> Path:
+    #     """Find the test_wavs directory from the Zipformer model."""
+    #     # Try standard model first
+    #     test_wavs_dir = BASE_DIR / "sherpa-onnx-zipformer-audio-tagging-2024-04-09" / "test_wavs"
+        
+    #     for test_dir in [test_wavs_dir]:
+    #         if test_dir.exists() and any(test_dir.glob("*.wav")):
+    #             console.print(f"[green]✓ Found test WAVs in:[/green] {test_dir}")
+    #             return test_dir
+        
+    #     raise FileNotFoundError(
+    #         "No test_wavs directory found. Please download the Zipformer model from:\n"
+    #         "https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models"
+    #     )
+
     def _find_test_wavs(self) -> Path:
         """Find the test_wavs directory from the Zipformer model."""
-        # Try standard model first
-        standard_dir = BASE_DIR / "sherpa-onnx-zipformer-audio-tagging-2024-04-09" / "test_wavs"
-        small_dir = BASE_DIR / "sherpa-onnx-zipformer-small-audio-tagging-2024-04-15" / "test_wavs"
+        test_wavs_dir = Path(r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\generated\last_20_segments")
         
-        for test_dir in [standard_dir, small_dir]:
-            if test_dir.exists() and any(test_dir.glob("*.wav")):
+        for test_dir in [test_wavs_dir]:
+            if test_dir.exists() and any(test_dir.rglob("sound.wav")):
                 console.print(f"[green]✓ Found test WAVs in:[/green] {test_dir}")
                 return test_dir
         
@@ -107,8 +120,8 @@ class DemoRunner:
         )
     
     def get_test_files(self) -> List[Path]:
-        """Get all WAV files from the test directory."""
-        wav_files = sorted(self.test_wavs_dir.glob("*.wav"))
+        """Get all WAV files from the test directory recursively."""
+        wav_files = sorted(self.test_wavs_dir.rglob("*.wav"))
         console.print(f"[cyan]Found {len(wav_files)} test WAV files[/cyan]")
         return wav_files
     
