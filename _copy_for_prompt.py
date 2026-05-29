@@ -90,8 +90,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Can we refactor audio_tagger_zipformer and audio_tagger_ced to use audio_tagger_base?
-You may update audio_tagger_base if needed.
+Can we also save a chunk_results.json that contains results per chunk?
+Also generate and save some plots.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

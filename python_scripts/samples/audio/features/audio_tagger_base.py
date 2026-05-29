@@ -33,6 +33,12 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+# Add this import at the top with other imports
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend for file saving
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from matplotlib.figure import Figure
 
 # FireRed alignment imports
 from fireredvad.core.constants import (
@@ -431,11 +437,24 @@ def print_perf_table(result: TaggingResult) -> None:
     console.print(perf)
 
 
-def save_results(result: TaggingResult, output_dir: Path) -> None:
-    """Persist results.json + metadata.json and print all summary tables."""
+def save_results(
+    result: TaggingResult, 
+    output_dir: Path,
+    chunk_events: Optional[List[dict]] = None
+) -> None:
+    """
+    Persist results.json + metadata.json + chunk_results.json + plots.
+    Prints all summary tables and saves visualizations.
+    
+    Args:
+        result: The aggregated TaggingResult
+        output_dir: Directory to save all output files
+        chunk_events: Optional raw chunk events for saving per-chunk results and plots
+    """
     print_results_table(result.events, result.chunk_count, result.backend_name)
     print_perf_table(result)
     
+    # --- Save aggregated results.json ---
     events_as_dicts = [
         {
             "rank": i + 1,
@@ -456,6 +475,7 @@ def save_results(result: TaggingResult, output_dir: Path) -> None:
     with open(results_json, "w", encoding="utf-8") as f:
         json.dump(events_as_dicts, f, indent=2, ensure_ascii=False)
     
+    # --- Save metadata.json ---
     metadata = {
         "audio_file": result.audio_path,
         "sample_rate": result.sample_rate,
@@ -477,12 +497,267 @@ def save_results(result: TaggingResult, output_dir: Path) -> None:
     with open(metadata_json, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
     
-    console.print(Panel(
-        f"[cyan]Results:[/cyan]  {results_json}\n"
+    # --- Save chunk_results.json if chunk events available ---
+    saved_files = [
+        f"[cyan]Results:[/cyan]  {results_json}",
         f"[cyan]Metadata:[/cyan] {metadata_json}",
+    ]
+    
+    if chunk_events:
+        chunk_results_path = save_chunk_results(chunk_events, output_dir, result.top_k)
+        saved_files.append(f"[cyan]Chunks:[/cyan]   {chunk_results_path}")
+        
+        # --- Generate and save plots ---
+        try:
+            timeline_path, bar_path = generate_and_save_plots(
+                chunk_events=chunk_events,
+                aggregated_events=result.events,
+                output_dir=output_dir,
+                backend_name=result.backend_name,
+                audio_path=result.audio_path,
+            )
+            saved_files.extend([
+                f"[cyan]Timeline:[/cyan] {timeline_path}",
+                f"[cyan]Bar chart:[/cyan] {bar_path}",
+            ])
+        except Exception as e:
+            log.warning(f"Could not generate plots: {e}")
+            log.debug("Plot generation failed", exc_info=True)
+    
+    console.print(Panel(
+        "\n".join(saved_files),
         title="💾 Saved files",
         border_style="green",
     ))
+
+
+def save_chunk_results(
+    chunk_events: List[dict],
+    output_dir: Path,
+    top_k: int = 5
+) -> Path:
+    """
+    Save per-chunk results to chunk_results.json.
+    
+    Groups events by chunk_index and saves the raw probabilities for each chunk,
+    allowing detailed analysis of how predictions change over time.
+    
+    Args:
+        chunk_events: List of raw event dicts from process_audio_chunks
+        output_dir: Directory to save the JSON file
+        top_k: Number of top events to include per chunk
+    
+    Returns:
+        Path to the saved file
+    """
+    # Group events by chunk
+    chunks_by_index: Dict[int, List[dict]] = {}
+    for event in chunk_events:
+        chunk_idx = event["chunk_index"]
+        if chunk_idx not in chunks_by_index:
+            chunks_by_index[chunk_idx] = []
+        chunks_by_index[chunk_idx].append(event)
+    
+    # Build per-chunk structure
+    chunk_results = []
+    for chunk_idx in sorted(chunks_by_index.keys()):
+        events = chunks_by_index[chunk_idx]
+        chunk_data = {
+            "chunk_index": chunk_idx,
+            "chunk_start": events[0]["chunk_start"],
+            "chunk_end": events[0]["chunk_end"],
+            "time_utc_start": events[0]["time_utc_start"].isoformat() 
+                              if events[0].get("time_utc_start") else None,
+            "time_utc_end": events[0]["time_utc_end"].isoformat() 
+                            if events[0].get("time_utc_end") else None,
+            "total_events": len(events),
+            "top_events": sorted(
+                [
+                    {
+                        "name": e["name"],
+                        "index": e["index"],
+                        "prob": e["prob"],
+                    }
+                    for e in events
+                ],
+                key=lambda x: x["prob"],
+                reverse=True
+            )[:top_k],
+            "all_events": sorted(
+                [
+                    {
+                        "name": e["name"],
+                        "index": e["index"],
+                        "prob": e["prob"],
+                    }
+                    for e in events
+                ],
+                key=lambda x: x["prob"],
+                reverse=True
+            )
+        }
+        chunk_results.append(chunk_data)
+    
+    # Save to file
+    chunk_results_path = output_dir / "chunk_results.json"
+    with open(chunk_results_path, "w", encoding="utf-8") as f:
+        json.dump(chunk_results, f, indent=2, ensure_ascii=False)
+    
+    log.info(f"Saved [cyan]{len(chunk_results)}[/cyan] chunk results to [cyan]{chunk_results_path}[/cyan]")
+    return chunk_results_path
+
+
+def generate_and_save_plots(
+    chunk_events: List[dict],
+    aggregated_events: List[TaggingEvent],
+    output_dir: Path,
+    backend_name: str,
+    audio_path: str,
+) -> Tuple[Path, Path]:
+    """
+    Generate and save visualization plots for audio tagging results.
+    
+    Creates two plots:
+    1. chunk_timeline.png - Shows how top event probabilities change over chunks
+    2. results_bar.png - Bar chart of final aggregated results
+    
+    Args:
+        chunk_events: Raw per-chunk events from process_audio_chunks
+        aggregated_events: Aggregated TaggingEvent objects
+        output_dir: Directory to save plot files
+        backend_name: Name of the backend (CED, Zipformer)
+        audio_path: Path to the audio file (for title)
+    
+    Returns:
+        Tuple of (chunk_timeline_path, results_bar_path)
+    """
+    # Style configuration
+    plt.style.use('seaborn-v0_8-darkgrid')
+    colors = plt.cm.viridis(np.linspace(0.1, 0.9, max(len(aggregated_events), 1)))
+    
+    # =========================================================================
+    # Plot 1: Chunk Timeline - Top events probability over time
+    # =========================================================================
+    fig1, ax1 = plt.subplots(figsize=(12, 6))
+    
+    # Get unique top event names across all chunks
+    top_event_names = [e.name for e in aggregated_events[:5] if e.name]
+    
+    # For each top event, track its probability across chunks
+    chunks_by_index: Dict[int, List[dict]] = {}
+    for event in chunk_events:
+        chunk_idx = event["chunk_index"]
+        if chunk_idx not in chunks_by_index:
+            chunks_by_index[chunk_idx] = []
+        chunks_by_index[chunk_idx].append(event)
+    
+    chunk_indices = sorted(chunks_by_index.keys())
+    chunk_midpoints = [
+        (chunks_by_index[i][0]["chunk_start"] + chunks_by_index[i][0]["chunk_end"]) / 2
+        for i in chunk_indices
+    ]
+    
+    # Plot timeline for each top event
+    for idx, event_name in enumerate(top_event_names):
+        probs = []
+        for chunk_idx in chunk_indices:
+            chunk_events_list = chunks_by_index[chunk_idx]
+            # Find this event in the chunk
+            found = False
+            for e in chunk_events_list:
+                if e["name"] == event_name:
+                    probs.append(e["prob"])
+                    found = True
+                    break
+            if not found:
+                probs.append(0.0)
+        
+        ax1.plot(
+            chunk_midpoints, 
+            probs, 
+            marker='o', 
+            linewidth=2, 
+            markersize=4,
+            color=colors[idx],
+            label=event_name[:50],  # Truncate long names
+            alpha=0.8
+        )
+    
+    ax1.set_xlabel('Time (seconds)', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Probability', fontsize=12, fontweight='bold')
+    ax1.set_title(
+        f'Event Probabilities Over Time - {backend_name}\n{Path(audio_path).name}',
+        fontsize=14, 
+        fontweight='bold'
+    )
+    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
+    ax1.set_ylim(0, 1.05)
+    ax1.grid(True, alpha=0.3)
+    ax1.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1))
+    
+    plt.tight_layout()
+    
+    # Save chunk timeline
+    chunk_timeline_path = output_dir / "chunk_timeline.png"
+    fig1.savefig(chunk_timeline_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close(fig1)
+    
+    # =========================================================================
+    # Plot 2: Aggregated Results Bar Chart
+    # =========================================================================
+    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    
+    event_names_display = [
+        (e.name[:60] + '...') if e.name and len(e.name) > 60 else (e.name or 'Unknown')
+        for e in aggregated_events
+    ]
+    avg_probs = [e.prob for e in aggregated_events]
+    max_probs = [e.max_prob for e in aggregated_events]
+    
+    y_pos = range(len(aggregated_events))
+    
+    # Create horizontal bars
+    bars = ax2.barh(y_pos, avg_probs, height=0.6, color=colors, alpha=0.8, label='Average Probability')
+    ax2.barh(y_pos, max_probs, height=0.3, color='lightgray', alpha=0.5, label='Max Probability')
+    
+    # Add probability labels
+    for i, (avg, max_p) in enumerate(zip(avg_probs, max_probs)):
+        ax2.text(
+            avg + 0.02, i, 
+            f'{avg*100:.1f}% (max: {max_p*100:.1f}%)',
+            va='center', 
+            fontsize=9,
+            fontweight='bold'
+        )
+    
+    ax2.set_yticks(y_pos)
+    ax2.set_yticklabels(event_names_display, fontsize=10)
+    ax2.set_xlabel('Probability', fontsize=12, fontweight='bold')
+    ax2.set_title(
+        f'Aggregated Audio Tagging Results - {backend_name}\n{Path(audio_path).name}',
+        fontsize=14, 
+        fontweight='bold'
+    )
+    ax2.set_xlim(0, 1.1)
+    ax2.xaxis.set_major_formatter(ticker.PercentFormatter(xmax=1))
+    ax2.legend(loc='lower right', fontsize=10)
+    ax2.grid(True, alpha=0.2, axis='x')
+    ax2.invert_yaxis()  # Highest probability on top
+    
+    plt.tight_layout()
+    
+    # Save bar chart
+    results_bar_path = output_dir / "results_bar.png"
+    fig2.savefig(results_bar_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close(fig2)
+    
+    log.info(
+        f"Saved plots:\n"
+        f"  [cyan]Chunk timeline:[/cyan] {chunk_timeline_path}\n"
+        f"  [cyan]Results bar:[/cyan]    {results_bar_path}"
+    )
+    
+    return chunk_timeline_path, results_bar_path
 
 
 class BaseAudioTagger(ABC):
@@ -574,17 +849,17 @@ class BaseAudioTagger(ABC):
         """
         if self._tagger is None:
             raise RuntimeError("Call .build() before .tag_file()")
-        
+
         samples, orig_sr = read_audio(audio_path)
         samples = resample_if_needed(samples, orig_sr, SAMPLE_RATE)
         sample_rate = SAMPLE_RATE
         audio_duration = len(samples) / sample_rate
-        
+
         log.info(
             f"Audio loaded: [cyan]{len(samples):,}[/cyan] samples | "
             f"[cyan]{sample_rate} Hz[/cyan] | [cyan]{audio_duration:.2f}s[/cyan]"
         )
-        
+
         start_time = time.time()
         chunk_events = process_audio_chunks(
             audio_tagger=self._tagger,
@@ -594,8 +869,9 @@ class BaseAudioTagger(ABC):
         )
         aggregated = aggregate_chunk_results(chunk_events, self.top_k)
         elapsed = time.time() - start_time
-        
+
         chunk_count = len({e["chunk_index"] for e in chunk_events})
+
         result = TaggingResult(
             audio_path=audio_path,
             sample_rate=sample_rate,
@@ -608,10 +884,11 @@ class BaseAudioTagger(ABC):
             top_k=self.top_k,
             is_speech_segment=False,
         )
-        
-        save_results(result, output_dir)
+
+        # Pass chunk_events for saving per-chunk data and plots
+        save_results(result, output_dir, chunk_events=chunk_events)
         return result
-    
+
     def tag_speech_segment(
         self,
         segment_audio: np.ndarray,
@@ -621,50 +898,23 @@ class BaseAudioTagger(ABC):
     ) -> TaggingResult:
         """
         Tag a single speech segment from FireRed VAD pipeline.
-        
-        This method is designed to be called directly from the recording loop
-        in speech_detector.py. It processes the segment with proper alignment
-        to FireRed's frame boundaries and preserves absolute UTC timestamps.
-        
-        Args:
-            segment_audio: Audio samples for the speech segment (mono, float32, 16kHz)
-            segment_start_utc: UTC timestamp when speech started
-            segment_end_utc: UTC timestamp when speech ended
-            segment_id: Optional identifier for this segment
-            
-        Returns:
-            TaggingResult with absolute UTC timestamps preserved
-            
-        Example usage in speech_detector.py:
-            tagger = CEDAudioTagger(variant="base", top_k=5).build()
-            for segment, audio in record_from_mic():
-                result = tagger.tag_speech_segment(
-                    segment_audio=audio,
-                    segment_start_utc=segment["start_time_utc"],
-                    segment_end_utc=segment["end_time_utc"],
-                    segment_id=segment_index
-                )
-                # Process result.events with time_utc_start/time_utc_end
+        ...
         """
         if self._tagger is None:
             raise RuntimeError("Call .build() before .tag_speech_segment()")
-        
-        # Ensure correct shape
+
         if segment_audio.ndim > 1:
             segment_audio = segment_audio.squeeze()
         segment_audio = segment_audio.astype(np.float32)
-        
+
         segment_duration = len(segment_audio) / SAMPLE_RATE
-        
         log.debug(
             f"Tagging speech segment {segment_id}: "
             f"{segment_duration:.2f}s audio, "
             f"UTC [{segment_start_utc.isoformat()} → {segment_end_utc.isoformat()}]"
         )
-        
+
         start_time = time.time()
-        
-        # Process with segment-level UTC timestamps
         chunk_events = process_audio_chunks(
             audio_tagger=self._tagger,
             samples=segment_audio,
@@ -672,12 +922,11 @@ class BaseAudioTagger(ABC):
             expected_frames=self.EXPECTED_FRAMES,
             segment_start_utc=segment_start_utc,
         )
-        
         aggregated = aggregate_chunk_results(chunk_events, self.top_k)
         elapsed = time.time() - start_time
-        
+
         chunk_count = len({e["chunk_index"] for e in chunk_events})
-        
+
         result = TaggingResult(
             audio_path=f"speech_segment_{segment_id or 'unknown'}",
             sample_rate=SAMPLE_RATE,
@@ -692,15 +941,18 @@ class BaseAudioTagger(ABC):
             segment_start_utc=segment_start_utc,
             segment_end_utc=segment_end_utc,
         )
-        
+
         log.info(
             f"Segment {segment_id}: tagged in {elapsed:.3f}s "
             f"(RTF: {result.real_time_factor:.3f}) | "
             f"Top event: {aggregated[0].name if aggregated else 'none'}"
         )
-        
+
+        # Note: For speech segments, we don't auto-save to avoid I/O in real-time loop.
+        # The caller can save manually if needed:
+        # save_results(result, output_dir, chunk_events=chunk_events)
         return result
-    
+
     @property
     def default_test_wav(self) -> Path:
         """Return the path to the bundled test wav for this backend/variant."""
