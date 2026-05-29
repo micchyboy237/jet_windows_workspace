@@ -1,30 +1,24 @@
 """
 Audio tagging using sherpa-onnx CED (Conformer-based Event Detector) models.
-
 Available CED models:
 - mini:  sherpa-onnx-ced-mini-audio-tagging-2024-04-19  (~30 MB)
 - small: sherpa-onnx-ced-small-audio-tagging-2024-04-19 (~60 MB)
 - base:  sherpa-onnx-ced-base-audio-tagging-2024-04-19  (~120 MB)
-
 Download from: https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models
-
 Key difference from Zipformer:
   Zipformer uses:  model=AudioTaggingModelConfig(zipformer=OfflineZipformerAudioTaggingModelConfig(model=...))
   CED uses:        model=AudioTaggingModelConfig(ced=str(model_file))  ← direct string, no wrapper class
-
 FireRed VAD Alignment:
   - Uses FRAME_SHIFT_SAMPLE (160 samples, 10ms) as fundamental unit
   - Window: 100 frames × 160 samples = 16,000 samples (1.0s) ← CORRECTED
   - Hop: 8,000 samples (0.5s, 50% overlap)
   - Perfect alignment with FireRed speech segments
 """
-
 import argparse
 import logging
 import shutil
 from pathlib import Path
 from typing import Dict
-
 import sherpa_onnx
 from audio_tagger_base import BaseAudioTagger
 from audio_tagger_core import (
@@ -40,26 +34,24 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 console = Console()
 log = logging.getLogger(__name__)
 
-# CORRECTED: Audio tagging models use 1-second windows
-# With 10ms frame shift: 1.0s / 0.010s = 100 frames
 CED_MODELS: Dict[str, dict] = {
     "mini": {
         "name": "sherpa-onnx-ced-mini-audio-tagging-2024-04-19",
         "size": "~30 MB",
         "description": "Mini (fastest, lightest)",
-        "expected_frames": 100,  # CORRECTED: 1.0s window = 100 frames × 10ms
+        "expected_frames": 100,
     },
     "small": {
         "name": "sherpa-onnx-ced-small-audio-tagging-2024-04-19",
         "size": "~60 MB",
         "description": "Small (balanced speed/accuracy)",
-        "expected_frames": 100,  # CORRECTED: 1.0s window = 100 frames × 10ms
+        "expected_frames": 100,
     },
     "base": {
         "name": "sherpa-onnx-ced-base-audio-tagging-2024-04-19",
         "size": "~120 MB",
         "description": "Base (most accurate)",
-        "expected_frames": 100,  # CORRECTED: 1.0s window = 100 frames × 10ms
+        "expected_frames": 100,
     },
 }
 
@@ -67,22 +59,27 @@ CED_MODELS: Dict[str, dict] = {
 class CEDAudioTagger(BaseAudioTagger):
     """
     Audio tagger using sherpa-onnx CED models.
-
+    Auto-builds in __init__ — no need to call build() manually.
     Aligned with FireRed VAD:
         - Window size is multiple of FRAME_SHIFT_SAMPLE (160 samples)
         - 1-second windows (100 frames) for optimal model performance
         - Supports both file-based and per-segment tagging
         - Preserves absolute UTC timestamps for speech segments
-
     Usage:
-        # File-based tagging (offline)
+        # File-based tagging (offline) — auto-builds
         tagger = CEDAudioTagger(variant="base", top_k=5)
-        tagger.build()
-        result = tagger.tag_file("audio.wav", Path("output"))
-
+        result = tagger.tag_audio("audio.wav", Path("output"))
+        
+        # Tag from numpy array
+        audio_array = np.random.randn(16000).astype(np.float32)
+        result = tagger.tag_audio(audio_array)
+        
+        # Process long audio in chunks
+        results = tagger.tag_audio_chunks("long_recording.wav", 
+                                          chunk_duration_s=30.0,
+                                          output_dir=Path("output"))
+        
         # Speech segment tagging (live, with FireRed VAD)
-        tagger = CEDAudioTagger(variant="base", top_k=5)
-        tagger.build()
         result = tagger.tag_speech_segment(
             segment_audio=audio_np,
             segment_start_utc=datetime(...),
@@ -90,25 +87,18 @@ class CEDAudioTagger(BaseAudioTagger):
             segment_id=0
         )
     """
-
     BACKEND_NAME = "CED"
     DEFAULT_VARIANT = "base"
     VALID_VARIANTS = tuple(CED_MODELS.keys())
 
     def __init__(self, variant: str = "base", top_k: int = 5):
-        # Validate variant before super().__init__
         if variant not in self.VALID_VARIANTS:
             raise ValueError(
                 f"Unknown variant {variant!r}. Valid: {', '.join(self.VALID_VARIANTS)}"
             )
-
-        # Store model info before super init so _get_model_paths can use it
         self._model_info = CED_MODELS[variant]
         self.EXPECTED_FRAMES = self._model_info["expected_frames"]
-
         super().__init__(variant=variant, top_k=top_k)
-
-        # Log alignment verification
         window_samples = self.EXPECTED_FRAMES * HOP_LENGTH
         hop_samples = window_samples // 2
         log.debug(
@@ -139,7 +129,6 @@ class CEDAudioTagger(BaseAudioTagger):
     ) -> sherpa_onnx.AudioTaggingConfig:
         """
         Build CED-specific AudioTaggingConfig.
-
         CED models use a direct string path (no wrapper class),
         unlike Zipformer which uses OfflineZipformerAudioTaggingModelConfig.
         """
@@ -158,7 +147,6 @@ class CEDAudioTagger(BaseAudioTagger):
 def main() -> None:
     """CLI entry point for CED audio tagging."""
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Audio Tagging with CED - tag audio files using sherpa-onnx CED models",
@@ -175,7 +163,6 @@ def main() -> None:
             + "\n\nDownload: https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models"
         ),
     )
-
     parser.add_argument(
         "audio_path",
         nargs="?",
@@ -206,11 +193,11 @@ def main() -> None:
         dest="output_dir",
         help=f"Directory for output files (default: {OUTPUT_DIR})",
     )
-
     args = parser.parse_args()
 
+    # Auto-builds in __init__
     tagger = CEDAudioTagger(variant=args.variant, top_k=args.top_k)
-
+    
     if args.audio_path is None:
         default_wav = tagger.default_test_wav
         if default_wav.is_file():
@@ -233,11 +220,9 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     model_info = CED_MODELS[args.variant]
-
-    # Calculate alignment info for display - CORRECTED
     window_samples = model_info["expected_frames"] * HOP_LENGTH
-    window_sec = window_samples / SAMPLE_RATE  # Now 1.0 seconds
-    hop_sec = window_sec / 2  # Now 0.5 seconds
+    window_sec = window_samples / SAMPLE_RATE
+    hop_sec = window_sec / 2
 
     console.print(
         Panel.fit(
@@ -250,17 +235,9 @@ def main() -> None:
         )
     )
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as p:
-        task = p.add_task(f"[cyan]Initialising CED-{args.variant} tagger…", total=None)
-        tagger.build()
-        p.update(task, completed=True, description="[green]✓ Tagger ready")
-
+    # Use new tag_audio method (no explicit build needed)
     try:
-        result = tagger.tag_file(args.audio_path, output_dir)
+        result = tagger.tag_audio(args.audio_path, output_dir)
         console.print("[bold green]✓ Done![/bold green]")
     except Exception as e:
         log.exception("Fatal error during audio tagging")

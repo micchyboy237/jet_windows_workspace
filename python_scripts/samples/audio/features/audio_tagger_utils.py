@@ -4,14 +4,12 @@ audio_tagger_utils.py
 Standalone utility functions for sherpa-onnx audio tagging.
 Extracted from audio_tagger_base.py to keep the base module focused on
 the BaseAudioTagger abstract class and its core dataclasses.
-
 Saves 5 output files:
   1. results.json        — Aggregated top-K predictions
   2. metadata.json       — Processing metadata and performance metrics
   3. chunk_results.json  — Per-chunk raw probabilities
   4. chunk_timeline.png  — Event probability timeline plot
   5. results_bar.png     — Aggregated results bar chart
-
 Aligned with FireRed VAD:
     - Uses FRAME_SHIFT_SAMPLE (160 samples) as the fundamental unit
     - Windows are multiples of FireRed frames (100 frames = 1s window)
@@ -43,6 +41,9 @@ def read_audio(audio_path: str) -> tuple[np.ndarray, int]:
     """
     Read any soundfile-supported file.
     Returns (mono float32 samples, original sample rate).
+    
+    Note: New code should use load_audio() from audio_utils.py for broader
+    input type support. This function is kept for backward compatibility.
     """
     p = Path(audio_path)
     if not p.is_file():
@@ -329,16 +330,13 @@ def save_results(
 ) -> None:
     """
     Persist all 5 output files and print summary tables.
-
     Always saves:
       1. results.json       — Aggregated top-K predictions
       2. metadata.json      — Processing metadata and performance metrics
-
     When chunk_events is provided, also saves:
       3. chunk_results.json — Per-chunk raw probabilities
       4. chunk_timeline.png — Event probability timeline plot
       5. results_bar.png    — Aggregated results bar chart
-
     Args:
         result: The aggregated TaggingResult
         output_dir: Directory to save all output files
@@ -347,11 +345,7 @@ def save_results(
     """
     print_results_table(result.events, result.chunk_count, result.backend_name)
     print_perf_table(result)
-
-    # Resolve output_dir to absolute path for terminal links
     output_dir = output_dir.resolve()
-
-    # --- 1. Save results.json ---
     events_as_dicts = [
         {
             "rank": i + 1,
@@ -369,13 +363,10 @@ def save_results(
         }
         for i, ev in enumerate(result.events)
     ]
-
     results_json = output_dir / "results.json"
     with open(results_json, "w", encoding="utf-8") as f:
         json.dump(events_as_dicts, f, indent=2, ensure_ascii=False)
     log.debug(f"Saved: {results_json}")
-
-    # --- 2. Save metadata.json ---
     metadata = {
         "audio_file": result.audio_path,
         "sample_rate": result.sample_rate,
@@ -396,32 +387,25 @@ def save_results(
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "aggregation_method": "average_probability_with_max",
     }
-
     metadata_json = output_dir / "metadata.json"
     with open(metadata_json, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
     log.debug(f"Saved: {metadata_json}")
 
-    # Helper to format terminal source link: file:///absolute/path
     def _link(path: Path, label: str) -> str:
         """Create a Rich-compatible terminal link with file:// URI."""
-        uri = path.as_uri()  # file:///C:/Users/... or file:///home/...
+        uri = path.as_uri()
         return f"[link={uri}]{label}[/link]"
 
-    # Collect paths for summary panel with terminal links
     saved_files = [
         f"[cyan]1. Results:[/cyan]  {_link(results_json, results_json.name)}",
         f"[cyan]2. Metadata:[/cyan] {_link(metadata_json, metadata_json.name)}",
     ]
-
-    # --- 3, 4, 5. Save chunk_results.json and plots (if chunk_events provided) ---
     if chunk_events:
         log.debug(
             f"save_results: received {len(chunk_events)} raw chunk events — "
             f"generating per-chunk JSON and plots"
         )
-
-        # 3. Save chunk_results.json
         try:
             chunk_path = _save_chunk_results(chunk_events, output_dir, result.top_k)
             saved_files.append(
@@ -430,8 +414,6 @@ def save_results(
         except Exception as e:
             log.error(f"Failed to save chunk_results.json: {e}", exc_info=True)
             saved_files.append("[red]3. Chunks:[/red]   FAILED — see log")
-
-        # 4 & 5. Generate and save plots
         try:
             timeline_path, bar_path = _generate_and_save_plots(
                 chunk_events=chunk_events,
@@ -453,7 +435,6 @@ def save_results(
             "skipping chunk_results.json and plots"
         )
         saved_files.append("[dim]3-5. (no chunk data — skipping plots)[/dim]")
-
     console.print(
         Panel(
             "\n".join(saved_files),
@@ -470,31 +451,25 @@ def _save_chunk_results(
 ) -> Path:
     """
     Save per-chunk results to chunk_results.json.
-
     Groups events by chunk_index and saves the raw probabilities for each chunk,
     allowing detailed analysis of how predictions change over time.
-
     Args:
         chunk_events: List of raw event dicts from process_audio_chunks
         output_dir: Directory to save the JSON file
         top_k: Number of top events to include per chunk
-
     Returns:
         Path to the saved file
     """
-    # Group events by chunk index
     chunks_by_index: Dict[int, List[dict]] = {}
     for event in chunk_events:
         chunk_idx = event["chunk_index"]
         if chunk_idx not in chunks_by_index:
             chunks_by_index[chunk_idx] = []
         chunks_by_index[chunk_idx].append(event)
-
     log.debug(
         f"_save_chunk_results: {len(chunk_events)} events across "
         f"{len(chunks_by_index)} chunks"
     )
-
     chunk_results = []
     for chunk_idx in sorted(chunks_by_index.keys()):
         events = chunks_by_index[chunk_idx]
@@ -535,11 +510,9 @@ def _save_chunk_results(
             ),
         }
         chunk_results.append(chunk_data)
-
     chunk_results_path = output_dir / "chunk_results.json"
     with open(chunk_results_path, "w", encoding="utf-8") as f:
         json.dump(chunk_results, f, indent=2, ensure_ascii=False)
-
     log.info(
         f"Saved [cyan]{len(chunk_results)}[/cyan] chunk results to "
         f"[cyan]{chunk_results_path}[/cyan]"
@@ -556,75 +529,55 @@ def _generate_and_save_plots(
 ) -> Tuple[Path, Path]:
     """
     Generate and save visualization plots for audio tagging results.
-
     Creates two plots:
     1. chunk_timeline.png — How top event probabilities change over time/chunks
     2. results_bar.png    — Bar chart of final aggregated results
-
     Args:
         chunk_events: Raw per-chunk events from process_audio_chunks
         aggregated_events: Aggregated TaggingEvent objects
         output_dir: Directory to save plot files
         backend_name: Name of the backend (CED, Zipformer)
         audio_path: Path to the audio file (for plot titles)
-
     Returns:
         Tuple of (chunk_timeline_path, results_bar_path)
     """
     import matplotlib
-    matplotlib.use('Agg')  # Non-interactive backend for file saving
+    matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     import matplotlib.ticker as ticker
-
     log.debug(
         f"_generate_and_save_plots: {len(chunk_events)} chunk events, "
         f"{len(aggregated_events)} aggregated events"
     )
-
-    # Style configuration
     plt.style.use('seaborn-v0_8-darkgrid')
     colors = plt.cm.viridis(np.linspace(0.1, 0.9, max(len(aggregated_events), 1)))
-
-    # =====================================================================
-    # Plot 1: Chunk Timeline — Top events probability over time
-    # =====================================================================
     fig1, ax1 = plt.subplots(figsize=(12, 6))
-
-    # Get unique top event names (up to 5 for readability)
     top_event_names = [e.name for e in aggregated_events[:5] if e.name]
-
-    # Group events by chunk
     chunks_by_index: Dict[int, List[dict]] = {}
     for event in chunk_events:
         chunk_idx = event["chunk_index"]
         if chunk_idx not in chunks_by_index:
             chunks_by_index[chunk_idx] = []
         chunks_by_index[chunk_idx].append(event)
-
     chunk_indices = sorted(chunks_by_index.keys())
     chunk_midpoints = [
         (chunks_by_index[i][0]["chunk_start"] + chunks_by_index[i][0]["chunk_end"]) / 2
         for i in chunk_indices
     ]
-
     log.debug(
         f"Timeline plot: {len(chunk_indices)} chunks, "
         f"{len(top_event_names)} event traces"
     )
-
-    # Plot timeline for each top event
     for idx, event_name in enumerate(top_event_names):
         probs = []
         for chunk_idx in chunk_indices:
             chunk_events_list = chunks_by_index[chunk_idx]
-            # Find this event in the chunk, default to 0.0 if absent
             found_prob = 0.0
             for e in chunk_events_list:
                 if e["name"] == event_name:
                     found_prob = e["prob"]
                     break
             probs.append(found_prob)
-
         ax1.plot(
             chunk_midpoints,
             probs,
@@ -632,10 +585,9 @@ def _generate_and_save_plots(
             linewidth=2,
             markersize=4,
             color=colors[idx],
-            label=event_name[:50],  # Truncate long names for legend
+            label=event_name[:50],
             alpha=0.8,
         )
-
     ax1.set_xlabel('Time (seconds)', fontsize=12, fontweight='bold')
     ax1.set_ylabel('Probability', fontsize=12, fontweight='bold')
     ax1.set_title(
@@ -648,22 +600,14 @@ def _generate_and_save_plots(
     ax1.set_ylim(0, 1.05)
     ax1.grid(True, alpha=0.3)
     ax1.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1))
-
     plt.tight_layout()
-
-    # Save chunk timeline
     chunk_timeline_path = output_dir / "chunk_timeline.png"
     fig1.savefig(
         chunk_timeline_path, dpi=150, bbox_inches='tight', facecolor='white'
     )
     plt.close(fig1)
     log.debug(f"Saved timeline plot: {chunk_timeline_path}")
-
-    # =====================================================================
-    # Plot 2: Aggregated Results Bar Chart
-    # =====================================================================
     fig2, ax2 = plt.subplots(figsize=(10, 6))
-
     event_names_display = [
         (e.name[:60] + '...') if e.name and len(e.name) > 60
         else (e.name or 'Unknown')
@@ -671,10 +615,7 @@ def _generate_and_save_plots(
     ]
     avg_probs = [e.prob for e in aggregated_events]
     max_probs = [e.max_prob for e in aggregated_events]
-
     y_pos = range(len(aggregated_events))
-
-    # Create horizontal bars
     ax2.barh(
         y_pos, avg_probs, height=0.6, color=colors, alpha=0.8,
         label='Average Probability'
@@ -683,8 +624,6 @@ def _generate_and_save_plots(
         y_pos, max_probs, height=0.3, color='lightgray', alpha=0.5,
         label='Max Probability'
     )
-
-    # Add probability labels on bars
     for i, (avg, max_p) in enumerate(zip(avg_probs, max_probs)):
         ax2.text(
             avg + 0.02, i,
@@ -693,7 +632,6 @@ def _generate_and_save_plots(
             fontsize=9,
             fontweight='bold',
         )
-
     ax2.set_yticks(y_pos)
     ax2.set_yticklabels(event_names_display, fontsize=10)
     ax2.set_xlabel('Probability', fontsize=12, fontweight='bold')
@@ -707,22 +645,17 @@ def _generate_and_save_plots(
     ax2.xaxis.set_major_formatter(ticker.PercentFormatter(xmax=1))
     ax2.legend(loc='lower right', fontsize=10)
     ax2.grid(True, alpha=0.2, axis='x')
-    ax2.invert_yaxis()  # Highest probability on top
-
+    ax2.invert_yaxis()
     plt.tight_layout()
-
-    # Save bar chart
     results_bar_path = output_dir / "results_bar.png"
     fig2.savefig(
         results_bar_path, dpi=150, bbox_inches='tight', facecolor='white'
     )
     plt.close(fig2)
     log.debug(f"Saved bar chart: {results_bar_path}")
-
     log.info(
         f"Saved plots:\n"
         f"  [cyan]Chunk timeline:[/cyan] {chunk_timeline_path}\n"
         f"  [cyan]Results bar:[/cyan]    {results_bar_path}"
     )
-
     return chunk_timeline_path, results_bar_path

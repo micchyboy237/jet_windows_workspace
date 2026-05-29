@@ -51,6 +51,45 @@ DEFAULT_PAD_START_FRAME = 5
 DEFAULT_MAX_BUFFER_SEC = 1.2
 
 
+# Single global cached instance to avoid repeated model loading
+_global_vad_cache: Optional["FireRedVAD"] = None
+
+
+def get_global_vad(
+    threshold: float = DEFAULT_THRESHOLD,
+    min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_SEC,
+    min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_SEC,
+    max_speech_duration_sec: float = DEFAULT_MAX_SPEECH_SEC,
+    smooth_window_size: int = DEFAULT_SMOOTH_WINDOW_SIZE,
+    max_buffer_sec: float = DEFAULT_MAX_BUFFER_SEC,
+    **model_kwargs,
+) -> "FireRedVAD":
+    """Get or create the global cached VAD instance."""
+    global _global_vad_cache
+
+    if _global_vad_cache is None:
+        with console.status(
+            "[bold blue]Loading FireRedVAD model (global cache)...[/bold blue]"
+        ):
+            _global_vad_cache = FireRedVAD(
+                model_dir=SAVE_DIR,
+                threshold=threshold,
+                min_silence_duration_sec=min_silence_duration_sec,
+                min_speech_duration_sec=min_speech_duration_sec,
+                max_speech_duration_sec=max_speech_duration_sec,
+                smooth_window_size=smooth_window_size,
+                max_buffer_sec=max_buffer_sec,
+                **model_kwargs,
+            )
+    else:
+        # Optional: update parameters if they differ significantly
+        _global_vad_cache.threshold = threshold
+        _global_vad_cache.min_silence_duration_sec = min_silence_duration_sec
+        # Add other param updates as needed
+
+    return _global_vad_cache
+
+
 class FireRedVAD:
     """Wrapper for FireRedVAD with simple streaming-like API."""
 
@@ -173,7 +212,7 @@ def extract_speech_timestamps(
     if sr != 16000:
         raise ValueError(f"FireRedVAD requires 16000 Hz, got {sr}")
 
-    vad = FireRedVAD(
+    vad = get_global_vad(
         model_dir=SAVE_DIR,
         threshold=threshold,
         min_silence_duration_sec=min_silence_duration_sec,
