@@ -68,9 +68,11 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\audio-tagging-from-a-file.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\audio-tagging-from-a-file.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\audio-tagging-from-a-file-ced.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_zipformer.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_ced.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_base.py",
     r"",
 ]
 
@@ -88,77 +90,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_zipformer.py "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\generated\last_20_segments\segment_074\sound.wav"
-[18:42:26] INFO     Using provided audio file                                                               audio_tagger_zipformer.py:311
-           INFO     Cleaning output directory:                                                              audio_tagger_zipformer.py:316
-                    [cyan]C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\aud
-                    io\features\generated\audio_tagger_zipformer[/cyan]
-╭─────────────────────────────────────╮
-│ 🎵 Audio Tagging Tool               │
-│ Model: Standard (288 MB) | Top-K: 5 │
-╰─────────────────────────────────────╯
-           INFO     Using int8 quantized model                                                               audio_tagger_zipformer.py:76
-                                                      🎯 Audio Tagger Configuration
-┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Parameter     ┃ Value                                                                                                                 ┃
-┡━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ Model Variant │ Standard (larger, more accurate)                                                                                      │
-│ Model Size    │ 288 MB                                                                                                                │
-│ Model Path    │ C:\Users\druiv\.cache\pretrained_models\sherpa-onnx\sherpa-onnx-zipformer-audio-tagging-2024-04-09\model.int8.onnx    │
-│ Labels Path   │ C:\Users\druiv\.cache\pretrained_models\sherpa-onnx\sherpa-onnx-zipformer-audio-tagging-2024-04-09\class_labels_indi… │
-│ Top K         │ 5                                                                                                                     │
-│ Provider      │ cpu                                                                                                                   │
-│ Debug         │ True                                                                                                                  │
-│ Threads       │ 1                                                                                                                     │
-└───────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-⠸ Initializing standard audio tagger...D:\a\sherpa-onnx\sherpa-onnx\sherpa-onnx\csrc\offline-ced-model.cc:Init:68 model_author=k2-fsa
-onnx.infer=onnxruntime.quant
-version=1
-model_type=zipformer2
-url=https://github.com/k2-fsa/icefall/tree/master/egs/audioset/AT/zipformer
-comment=zipformer2 audio tagger
-
-
-⠼ ✓ Audio tagger initialized
-[18:42:27] INFO     Reading audio file:                                                                     audio_tagger_zipformer.py:344
-                    [link=file://C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtit
-                    les\live_subtitles_server2_with_en\generated\last_20_segments\segment_074\sound.wav]C:\
-                    Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitl
-                    es_server2_with_en\generated\last_20_segments\segment_074\sound.wav[/link]
-           INFO     Audio loaded: [cyan]53,440[/cyan] samples, [cyan]16000Hz[/cyan], [cyan]3.34s[/cyan]     audio_tagger_zipformer.py:348
-           INFO     Processing audio...                                                                     audio_tagger_zipformer.py:354
-           ERROR    An error occurred during audio tagging                                                  audio_tagger_zipformer.py:418
-                    ╭───────────────────────── Traceback (most recent call last) ─────────────────────────╮
-                    │ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio │
-                    │ \features\audio_tagger_zipformer.py:413 in <module>                                 │
-                    │                                                                                     │
-                    │   410                                                                               │
-                    │   411 if __name__ == "__main__":                                                    │
-                    │   412 │   try:                                                                      │
-                    │ ❱ 413 │   │   main()                                                                │
-                    │   414 │   except KeyboardInterrupt:                                                 │
-                    │   415 │   │   console.print("\n[yellow]⚠ Processing interrupted by user[/yellow]")  │
-                    │   416 │   │   exit(130)                                                             │
-                    │                                                                                     │
-                    │ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio │
-                    │ \features\audio_tagger_zipformer.py:359 in main                                     │
-                    │                                                                                     │
-                    │   356 │                                                                             │
-                    │   357 │   stream = audio_tagger.create_stream()                                     │
-                    │   358 │   stream.accept_waveform(sample_rate=sample_rate, waveform=samples)         │
-                    │ ❱ 359 │   result = audio_tagger.compute(stream)                                     │
-                    │   360 │                                                                             │
-                    │   361 │   end_time = time.time()                                                    │
-                    │   362 │   elapsed_seconds = end_time - start_time                                   │
-                    ╰─────────────────────────────────────────────────────────────────────────────────────╯
-                    RuntimeError: Got invalid dimensions for input: x for the following indices
-                     index: 2 Got: 334 Expected: 80
-                     Please fix either the inputs/outputs or the model.
-
-Error: Got invalid dimensions for input: x for the following indices
- index: 2 Got: 334 Expected: 80
- Please fix either the inputs/outputs or the model.
+Can we refactor audio_tagger_zipformer and audio_tagger_ced to use audio_tagger_base?
+You may update audio_tagger_base if needed.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
