@@ -13,6 +13,7 @@ Generates:
 
 from __future__ import annotations
 import json
+import shutil
 import time
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,7 @@ console = Console()
 
 # Output base directory as specified
 DEMO_OUTPUT_BASE = Path(__file__).parent / "generated" / Path(__file__).stem
+shutil.rmtree(DEMO_OUTPUT_BASE, ignore_errors=True)
 
 # Test configurations to compare
 TEST_CONFIGURATIONS = {
