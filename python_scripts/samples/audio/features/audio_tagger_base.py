@@ -201,6 +201,8 @@ class BaseAudioTagger(ABC):
     ) -> TaggingResult:
         """
         Full pipeline: load audio → chunk → infer → aggregate → save.
+        Saves all 5 output files: results.json, metadata.json, 
+        chunk_results.json, chunk_timeline.png, results_bar.png.
         Returns TaggingResult for programmatic use.
         """
         if self._tagger is None:
@@ -217,12 +219,18 @@ class BaseAudioTagger(ABC):
         )
 
         start_time = time.time()
-        aggregated = self.process_audio(
+
+        # --- Get raw chunk events directly (before aggregation) ---
+        # We bypass process_audio() here to capture the raw events
+        chunk_events = process_audio_chunks(
+            audio_tagger=self._tagger,
             samples=samples,
             sample_rate=sample_rate,
             expected_frames=self.EXPECTED_FRAMES,
-            show_progress=True,
         )
+
+        # Aggregate for the result
+        aggregated = aggregate_chunk_results(chunk_events, self.top_k)
         elapsed = time.time() - start_time
 
         window_samples = self.EXPECTED_FRAMES * HOP_LENGTH
@@ -243,7 +251,8 @@ class BaseAudioTagger(ABC):
             is_speech_segment=False,
         )
 
-        save_results(result, output_dir)
+        # Pass chunk_events so all 5 files can be saved
+        save_results(result, output_dir, chunk_events=chunk_events)
         return result
 
     def tag_speech_segment(

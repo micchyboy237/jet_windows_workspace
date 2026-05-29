@@ -70,9 +70,11 @@ include_files = [
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\audio-tagging-from-a-file.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\audio-tagging-from-a-file-ced.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_zipformer.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_ced.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_base.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_ced.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_core.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_zipformer.py",
     r"",
 ]
 
@@ -90,8 +92,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Can we also save a chunk_results.json that contains results per chunk?
-Also generate and save some plots.
+Sorry I just refactored my code.
+Update so that it saves all the 5 files properly.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
