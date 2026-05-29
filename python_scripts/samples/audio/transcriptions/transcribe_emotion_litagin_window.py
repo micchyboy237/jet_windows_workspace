@@ -10,7 +10,7 @@ import argparse
 
 from transformers import AutoModelForAudioClassification, AutoFeatureExtractor
 
-DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
+DEFAULT_AUDIO = r"C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav"
 
 parser = argparse.ArgumentParser(description="Run speech emotion analysis.")
 parser.add_argument(

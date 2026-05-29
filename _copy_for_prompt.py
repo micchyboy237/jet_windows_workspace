@@ -37,7 +37,7 @@ exclude_files = [
     # "**/.cache/",
     "**/_git_stats.json",
     "**/stats_results/",
-    # "**/generated/",
+    "**/generated/",
     # "**/.*",
 
     # Custom
@@ -45,6 +45,7 @@ exclude_files = [
     # "**/__init__.py",
     # "*.md",
     "**/context.py",
+    "speaker_dashboard_builder.py",
 ]
 include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Examples\.vscode\launch.json",
@@ -60,65 +61,20 @@ include_files = [
     # r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler_example.py",
     r"",
-    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\pyannote\core\segment.py",
-    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\pyannote\pipeline\pipeline.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\pipeline.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\utils\signal.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\__init__.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\multilabel.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\speech_separation.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\pipelines\voice_activity_detection.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\speaker_labeler.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_speaker_labeler.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\io.py",
-    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\_metadata.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_segment_speaker_labeler.py",
-    r"",
-    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\funasr_onnx\sensevoice_bin.py",
-    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\funasr_onnx\utils\utils.py",
-    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\runtime\python\onnxruntime\funasr_onnx\sensevoice_bin.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\runtime\python\onnxruntime\funasr_onnx\utils\utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\demo_onnx.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunAudioLLM_SenseVoice\jet_funasr_onnx_model_fixer.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\funasr_onnx_result_analyzer.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr_onnx_with_analysis.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr_onnx.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_jp_funasr.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FunASR\funasr\utils\postprocess_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\transcribe_funasr.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_segment_speaker.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_segment_speaker_labeler.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\api_schema_live_subtitles_server2_with_en.yaml",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speaker_labeling_system.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\_main_speaker_labeling_system.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\short_embedding_buffer.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\_main_segment_speaker_labeler_short_buffer.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler_short_buffer.py",
-    r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_html_visualizer.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_visualizer.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speech_waves.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speech_waves.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\audio-tagging-from-a-file.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\audio-tagging-from-a-file-ced.py",
     r"",
 ]
 
 structure_include = [
-    # r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--separation-ami-1.0\snapshots\4d38e95cfd067c894b8b60b00761831fb01e4a8c",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en",
     # r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9",
 ]
 structure_exclude = []
@@ -131,7 +87,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Create a extract_pure_speech_audio function that accepts list of speech_waves then returns a combined audio numpy. Use it as a step in label_speakers_for_segment so that waveform will only contain speech with high probs.
+How to setup and use on windows?
+Browse provided github links then provide actual source link for me to download
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
@@ -141,7 +98,8 @@ Use visuals, diagrams, or tables when helpful.
 Show full code for new files, then show full function code for new or updated functions.
 Keep explanations simple and clear.
 
-Write smart, flexible, reusable, maintainable, and robust code.
+Write smart, flexible, reusable, maintainable, optimal and robust code.
+If issues are encountered, immediately include debug logs to trace all relevant steps.
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """
