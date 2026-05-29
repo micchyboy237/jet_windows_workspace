@@ -53,30 +53,30 @@ TEST_CONFIGURATIONS = {
         "variant": "standard",
         "description": "Standard speech detection (default)"
     },
-    "sensitive": {
-        "threshold": 0.15,
-        "speech_indices": DEFAULT_SPEECH_INDICES,
-        "variant": "standard",
-        "description": "Sensitive detection (low threshold)"
-    },
+    # "sensitive": {
+    #     "threshold": 0.15,
+    #     "speech_indices": DEFAULT_SPEECH_INDICES,
+    #     "variant": "standard",
+    #     "description": "Sensitive detection (low threshold)"
+    # },
     "strict": {
         "threshold": 0.6,
         "speech_indices": DEFAULT_SPEECH_INDICES,
         "variant": "standard",
         "description": "Strict detection (high threshold)"
     },
-    "conversation_only": {
-        "threshold": 0.4,
-        "speech_indices": [4],  # Only conversation
-        "variant": "standard",
-        "description": "Conversation detection only"
-    },
-    "all_speech_types": {
-        "threshold": 0.3,
-        "speech_indices": list(range(8)),  # All speech-related indices
-        "variant": "standard",
-        "description": "All speech types (including babbling, synthesizer)"
-    },
+    # "conversation_only": {
+    #     "threshold": 0.4,
+    #     "speech_indices": [4],  # Only conversation
+    #     "variant": "standard",
+    #     "description": "Conversation detection only"
+    # },
+    # "all_speech_types": {
+    #     "threshold": 0.3,
+    #     "speech_indices": list(range(8)),  # All speech-related indices
+    #     "variant": "standard",
+    #     "description": "All speech types (including babbling, synthesizer)"
+    # },
 }
 
 
@@ -91,33 +91,26 @@ class DemoRunner:
         self.output_base = DEMO_OUTPUT_BASE
         self.results: Dict[str, Dict[str, SpeechCheckResult]] = {}
         self.start_time = datetime.now()
-        
-    # def _find_test_wavs(self) -> Path:
-    #     """Find the test_wavs directory from the Zipformer model."""
-    #     # Try standard model first
-    #     test_wavs_dir = BASE_DIR / "sherpa-onnx-zipformer-audio-tagging-2024-04-09" / "test_wavs"
-        
-    #     for test_dir in [test_wavs_dir]:
-    #         if test_dir.exists() and any(test_dir.glob("*.wav")):
-    #             console.print(f"[green]✓ Found test WAVs in:[/green] {test_dir}")
-    #             return test_dir
-        
-    #     raise FileNotFoundError(
-    #         "No test_wavs directory found. Please download the Zipformer model from:\n"
-    #         "https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models"
-    #     )
+        self.failed_files: List[Tuple[str, str, str]] = []  # Track failures
 
     def _find_test_wavs(self) -> Path:
-        """Find the test_wavs directory from the Zipformer model."""
-        test_wavs_dir = Path(r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\generated\last_20_segments")
+        """Find the test_wavs directory containing WAV files."""
+        test_wavs_dir = Path(r"C:\Users\druiv\.cache\_temp\last_20_segments_spyx1_all_high_speech")
         
-        for test_dir in [test_wavs_dir]:
-            if test_dir.exists() and any(test_dir.rglob("sound.wav")):
-                console.print(f"[green]✓ Found test WAVs in:[/green] {test_dir}")
-                return test_dir
+        # Check if directory exists and contains WAV files (recursively)
+        if test_wavs_dir.exists():
+            wav_files = list(test_wavs_dir.rglob("*.wav"))
+            if wav_files:
+                console.print(f"[green]✓ Found test WAVs directory:[/green] {test_wavs_dir}")
+                console.print(f"[green]✓ Contains {len(wav_files)} WAV files (including subdirectories)[/green]")
+                return test_wavs_dir
+            else:
+                console.print(f"[yellow]⚠ Directory exists but contains no WAV files: {test_wavs_dir}[/yellow]")
+        else:
+            console.print(f"[red]✗ Directory does not exist: {test_wavs_dir}[/red]")
         
         raise FileNotFoundError(
-            "No test_wavs directory found. Please download the Zipformer model from:\n"
+            "No test_wavs directory with WAV files found. Please download the Zipformer model from:\n"
             "https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models"
         )
     
@@ -125,6 +118,20 @@ class DemoRunner:
         """Get all WAV files from the test directory recursively."""
         wav_files = sorted(self.test_wavs_dir.rglob("*.wav"))
         console.print(f"[cyan]Found {len(wav_files)} test WAV files[/cyan]")
+        
+        # Show distribution if files are in subdirectories
+        if wav_files:
+            # Count files per directory
+            dir_counts = {}
+            for wav_file in wav_files:
+                parent = str(wav_file.parent.relative_to(self.test_wavs_dir))
+                dir_counts[parent] = dir_counts.get(parent, 0) + 1
+            
+            if len(dir_counts) > 1:
+                console.print("[cyan]File distribution:[/cyan]")
+                for dir_name, count in sorted(dir_counts.items()):
+                    console.print(f"  • {dir_name}: {count} files")
+        
         return wav_files
     
     def run_all_configurations(
@@ -154,6 +161,13 @@ class DemoRunner:
             border_style="blue"
         ))
         
+        # Show which files will be processed
+        if len(test_files) <= 10:  # Only show if manageable number
+            console.print("\n[bold]Files to process:[/bold]")
+            for i, wav_file in enumerate(test_files, 1):
+                rel_path = wav_file.relative_to(self.test_wavs_dir)
+                console.print(f"  {i}. {rel_path}")
+        
         overall_start = time.time()
         
         with Progress(
@@ -176,6 +190,7 @@ class DemoRunner:
                 )
                 
                 # Initialize checker for this configuration
+                console.print(f"\n[bold]Initializing {config_name} checker...[/bold]")
                 checker = SpeechChecker(
                     threshold=config["threshold"],
                     speech_indices=config["speech_indices"],
@@ -184,6 +199,7 @@ class DemoRunner:
                 checker.build()
                 
                 config_results = {}
+                config_failures = 0
                 
                 for wav_file in test_files:
                     progress.update(
@@ -210,16 +226,38 @@ class DemoRunner:
                         config_results[wav_file.stem] = result
                         
                     except Exception as e:
+                        config_failures += 1
+                        error_msg = str(e)
                         log.error(f"Error processing {wav_file.name}: {e}")
-                        console.print(f"[red]✗ Failed: {wav_file.name} - {e}[/red]")
+                        console.print(f"[red]✗ Failed: {wav_file.name} - {error_msg[:100]}[/red]")
+                        self.failed_files.append((config_name, str(wav_file), error_msg))
                     
                     progress.advance(overall_task)
+                
+                # Report configuration results
+                if config_failures > 0:
+                    console.print(f"[yellow]⚠ {config_name}: {config_failures}/{len(test_files)} files failed[/yellow]")
                 
                 self.results[config_name] = config_results
         
         overall_elapsed = time.time() - overall_start
         
+        # Summary of processing
+        total_successful = sum(len(results) for results in self.results.values())
         console.print(f"\n[green]✓ All configurations completed in {overall_elapsed:.1f}s[/green]")
+        console.print(f"[green]✓ Successfully processed: {total_successful} file-configuration combinations[/green]")
+        
+        if self.failed_files:
+            console.print(f"[red]✗ Failed: {len(self.failed_files)} combinations[/red]")
+            # Save failures to file
+            failures_path = self.output_base / "processing_failures.json"
+            failures_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(failures_path, "w") as f:
+                json.dump([
+                    {"config": config, "file": file, "error": error}
+                    for config, file, error in self.failed_files
+                ], f, indent=2)
+            console.print(f"[yellow]Failure details saved to: {failures_path}[/yellow]")
     
     def generate_reports(self) -> None:
         """Generate comprehensive reports from all results."""
@@ -312,7 +350,7 @@ class DemoRunner:
         """Print formatted table for a configuration's results."""
         
         table = Table(
-            title=f"📋 Results: {config['description']}",
+            title=f"📋 Results: {config['description']} ({len(results)} files)",
             box=box.ROUNDED,
             show_header=True,
             header_style="bold magenta",
@@ -434,8 +472,12 @@ class DemoRunner:
         if n_files == 0:
             return
         
+        # Adjust figure size based on number of files
+        fig_width = max(16, n_files * 0.3)
+        fig_height = max(12, n_configs * 0.5)
+        
         # 1. Speech Probability Heatmap
-        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig, axes = plt.subplots(2, 2, figsize=(fig_width, fig_height))
         
         # Heatmap data
         heatmap_data = np.zeros((n_configs, n_files))
@@ -450,16 +492,17 @@ class DemoRunner:
         ax1.set_xticklabels([f[:10] for f in all_files], rotation=45, ha='right', fontsize=8)
         ax1.set_yticks(range(n_configs))
         ax1.set_yticklabels([c.replace('_', ' ').title() for c in configs], fontsize=9)
-        ax1.set_title('Speech Probability by Configuration and File', fontweight='bold')
+        ax1.set_title(f'Speech Probability by Configuration and File ({n_files} files)', fontweight='bold')
         plt.colorbar(im, ax=ax1, label='Probability')
         
-        # Add text annotations
-        for i in range(n_configs):
-            for j in range(n_files):
-                text = ax1.text(j, i, f'{heatmap_data[i, j]:.2f}',
-                              ha="center", va="center", 
-                              color="white" if heatmap_data[i, j] < 0.5 else "black",
-                              fontsize=7)
+        # Add text annotations (only if not too many files)
+        if n_files <= 50:
+            for i in range(n_configs):
+                for j in range(n_files):
+                    text = ax1.text(j, i, f'{heatmap_data[i, j]:.2f}',
+                                  ha="center", va="center", 
+                                  color="white" if heatmap_data[i, j] < 0.5 else "black",
+                                  fontsize=7)
         
         # 2. Speech Detection Count Bar Chart
         ax2 = axes[0, 1]
@@ -475,7 +518,7 @@ class DemoRunner:
         ax2.set_xticks(range(n_configs))
         ax2.set_xticklabels([c.replace('_', ' ').title() for c in configs], rotation=45, ha='right')
         ax2.set_ylabel('Number of Files with Speech')
-        ax2.set_title('Speech Detection Count by Configuration', fontweight='bold')
+        ax2.set_title(f'Speech Detection Count by Configuration (total: {n_files})', fontweight='bold')
         ax2.set_ylim(0, n_files + 1)
         
         # Add count labels
@@ -543,6 +586,11 @@ class DemoRunner:
                 "test_wavs_directory": str(self.test_wavs_dir),
                 "configurations_tested": list(TEST_CONFIGURATIONS.keys()),
                 "total_test_files": len(self.get_test_files()),
+                "actual_files_processed": len(set().union(*[
+                    set(config_results.keys()) 
+                    for config_results in self.results.values()
+                ])),
+                "failed_files": len(self.failed_files),
             },
             "overall_statistics": {
                 "total_processing_runs": len(all_has_speech),
@@ -640,6 +688,12 @@ class DemoRunner:
         table.add_row("Average Duration/File", f"{stats['average_speech_duration']:.1f}s")
         
         console.print(table)
+        
+        # File processing summary
+        info = summary["demo_info"]
+        console.print(f"\n[cyan]Files found: {info['total_test_files']} | "
+                     f"Files processed: {info['actual_files_processed']} | "
+                     f"Failed: {info['failed_files']}[/cyan]")
         
         # Best configuration
         best = summary["best_configuration"]
@@ -834,8 +888,15 @@ def main():
         
         # Show what we're about to do
         console.print("\n[bold]Test Files:[/bold]")
-        for i, wav_file in enumerate(test_files, 1):
-            console.print(f"  {i}. {wav_file.name}")
+        if len(test_files) <= 20:  # Only show all if manageable
+            for i, wav_file in enumerate(test_files, 1):
+                rel_path = wav_file.relative_to(demo.test_wavs_dir)
+                console.print(f"  {i}. {rel_path}")
+        else:
+            for i, wav_file in enumerate(test_files[:10], 1):
+                rel_path = wav_file.relative_to(demo.test_wavs_dir)
+                console.print(f"  {i}. {rel_path}")
+            console.print(f"  ... and {len(test_files) - 10} more files")
         
         console.print(f"\n[bold]Configurations to Test:[/bold]")
         for config_name, config in TEST_CONFIGURATIONS.items():
@@ -844,7 +905,7 @@ def main():
             console.print(f"    Threshold: {config['threshold']}, Types: {', '.join(speech_types[:3])}{'...' if len(speech_types) > 3 else ''}")
         
         # Confirm before running
-        console.print("\n[yellow]Starting demo processing...[/yellow]\n")
+        console.print(f"\n[yellow]Starting demo processing with {len(test_files)} files...[/yellow]\n")
         
         # Run all configurations
         demo.run_all_configurations(test_files)
@@ -858,15 +919,20 @@ def main():
         
         # Final summary
         elapsed = (datetime.now() - demo.start_time).total_seconds()
+        total_processed = sum(len(results) for results in demo.results.values())
+        
         console.print(Panel.fit(
             f"[bold green]✅ Demo Complete![/bold green]\n"
             f"[dim]Total time: {elapsed:.1f}s | "
-            f"Files processed: {len(test_files)} | "
+            f"Files found: {len(test_files)} | "
             f"Configurations: {len(TEST_CONFIGURATIONS)} | "
-            f"Total runs: {len(test_files) * len(TEST_CONFIGURATIONS)}[/dim]\n"
+            f"Successful runs: {total_processed}[/dim]\n"
             f"[dim]All results saved to: {DEMO_OUTPUT_BASE}[/dim]",
             border_style="green"
         ))
+        
+        if demo.failed_files:
+            console.print(f"\n[yellow]⚠ {len(demo.failed_files)} files failed processing[/yellow]")
         
     except KeyboardInterrupt:
         console.print("\n[yellow]⚠ Demo interrupted by user[/yellow]")
