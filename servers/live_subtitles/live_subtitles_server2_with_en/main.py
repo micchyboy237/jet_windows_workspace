@@ -20,6 +20,7 @@ from routes.speakers import router as speakers_router
 from routes.transcribe import router as transcribe_router
 from routes.translate import router as translate_router
 from routes.tagger import router as tagger_router
+from routes.global_reset import router as global_reset_router
 
 console = Console(
     theme=Theme(
@@ -52,6 +53,7 @@ app.include_router(speakers_router)
 app.include_router(transcribe_router)
 app.include_router(translate_router)
 app.include_router(tagger_router)  # NEW: Audio tagging routes
+app.include_router(global_reset_router)
 
 def initialize_detector():
     """Initialize the audio language detector."""
@@ -146,6 +148,8 @@ if __name__ == "__main__":
     logger.info("📋 REST endpoints:")
     logger.info("   POST /transcribe")
     logger.info("   POST /translate")
+    logger.info("")
+    logger.info("📋 Speaker Labeling endpoints:")
     logger.info("   GET  /speakers")
     logger.info("   GET  /speakers/status")
     logger.info("   GET  /speakers/similarities")
@@ -166,6 +170,10 @@ if __name__ == "__main__":
     logger.info("   POST /tags/chunks")
     logger.info("   POST /tags/speech-check")
     logger.info("   POST /tags/config/update")
+    logger.info("")
+    logger.info("🔄 Global Reset endpoints:")           # <-- NEW SECTION
+    logger.info("   POST /global/reset")
+    logger.info("   GET  /global/status")
     logger.info("")
     logger.info("Press Ctrl+C to stop\n")
     
