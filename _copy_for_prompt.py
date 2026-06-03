@@ -91,16 +91,17 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger_chunk_plots.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_audio_tagger.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\state.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\__init__.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\models\schemas.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\websocket.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\save_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\live_subtitles_server_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\save_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\live_subtitles_server_utils.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\tagger.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\plots.html",
     r"",
 ]
 
@@ -118,10 +119,254 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-I want to update dashboard html in tagger routes /dashboard endpoint so that 
-Add or update the ff in tagger routes:
-Add GET endpoint for /chunks (last_n_segments_dir / "all_tag_events.json").
-Update /dashboard to display saved chunks data.
+[06/03/26 15:38:21] INFO     192.168.68.100:53852 - "GET /tag/plots HTTP/1.1" 500                                         h11_impl.py:473
+                    ERROR    Exception in ASGI application                                                                h11_impl.py:408
+
+                             ╭─────────────────────────── Traceback (most recent call last) ────────────────────────────╮
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\protocols\http\h11 │
+                             │ _impl.py:403 in run_asgi                                                                 │
+                             │                                                                                          │
+                             │   400 │   # ASGI exception wrapper                                                       │
+                             │   401 │   async def run_asgi(self, app: ASGI3Application) -> None:                       │
+                             │   402 │   │   try:                                                                       │
+                             │ ❱ 403 │   │   │   result = await app(  # type: ignore[func-returns-value]                │
+                             │   404 │   │   │   │   self.scope, self.receive, self.send                                │
+                             │   405 │   │   │   )                                                                      │
+                             │   406 │   │   except BaseException as exc:                                               │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\uvicorn\middleware\proxy_h │
+                             │ eaders.py:60 in __call__                                                                 │
+                             │                                                                                          │
+                             │    57 │   │   │   │   │   port = 0                                                       │
+                             │    58 │   │   │   │   │   scope["client"] = (host, port)                                 │
+                             │    59 │   │                                                                              │
+                             │ ❱  60 │   │   return await self.app(scope, receive, send)                                │
+                             │    61                                                                                    │
+                             │    62                                                                                    │
+                             │    63 def _parse_raw_hosts(value: str) -> list[str]:                                     │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\fastapi\applications.py:11 │
+                             │ 34 in __call__                                                                           │
+                             │                                                                                          │
+                             │   1131 │   async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None: │
+                             │   1132 │   │   if self.root_path:                                                        │
+                             │   1133 │   │   │   scope["root_path"] = self.root_path                                   │
+                             │ ❱ 1134 │   │   await super().__call__(scope, receive, send)                              │
+                             │   1135 │                                                                                 │
+                             │   1136 │   def add_api_route(                                                            │
+                             │   1137 │   │   self,                                                                     │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\applications.py: │
+                             │ 113 in __call__                                                                          │
+                             │                                                                                          │
+                             │   110 │   │   scope["app"] = self                                                        │
+                             │   111 │   │   if self.middleware_stack is None:                                          │
+                             │   112 │   │   │   self.middleware_stack = self.build_middleware_stack()                  │
+                             │ ❱ 113 │   │   await self.middleware_stack(scope, receive, send)                          │
+                             │   114 │                                                                                  │
+                             │   115 │   def on_event(self, event_type: str) -> Callable:  # type: ignore[type-arg]     │
+                             │   116 │   │   return self.router.on_event(event_type)  # pragma: no cover                │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\middleware\error │
+                             │ s.py:186 in __call__                                                                     │
+                             │                                                                                          │
+                             │   183 │   │   │   # We always continue to raise the exception.                           │
+                             │   184 │   │   │   # This allows servers to log the error, or allows test clients         │
+                             │   185 │   │   │   # to optionally raise the error within the test case.                  │
+                             │ ❱ 186 │   │   │   raise exc                                                              │
+                             │   187 │                                                                                  │
+                             │   188 │   def format_line(self, index: int, line: str, frame_lineno: int, frame_index: i │
+                             │       str:                                                                               │
+                             │   189 │   │   values = {                                                                 │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\middleware\error │
+                             │ s.py:164 in __call__                                                                     │
+                             │                                                                                          │
+                             │   161 │   │   │   await send(message)                                                    │
+                             │   162 │   │                                                                              │
+                             │   163 │   │   try:                                                                       │
+                             │ ❱ 164 │   │   │   await self.app(scope, receive, _send)                                  │
+                             │   165 │   │   except Exception as exc:                                                   │
+                             │   166 │   │   │   request = Request(scope)                                               │
+                             │   167 │   │   │   if self.debug:                                                         │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\middleware\excep │
+                             │ tions.py:63 in __call__                                                                  │
+                             │                                                                                          │
+                             │   60 │   │   else:                                                                       │
+                             │   61 │   │   │   conn = WebSocket(scope, receive, send)                                  │
+                             │   62 │   │                                                                               │
+                             │ ❱ 63 │   │   await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)    │
+                             │   64 │                                                                                   │
+                             │   65 │   async def http_exception(self, request: Request, exc: Exception) -> Response:   │
+                             │   66 │   │   assert isinstance(exc, HTTPException)                                       │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\_exception_handl │
+                             │ er.py:53 in wrapped_app                                                                  │
+                             │                                                                                          │
+                             │   50 │   │   │   │   handler = _lookup_exception_handler(exception_handlers, exc)        │
+                             │   51 │   │   │                                                                           │
+                             │   52 │   │   │   if handler is None:                                                     │
+                             │ ❱ 53 │   │   │   │   raise exc                                                           │
+                             │   54 │   │   │                                                                           │
+                             │   55 │   │   │   if response_started:                                                    │
+                             │   56 │   │   │   │   raise RuntimeError("Caught handled exception, but response already  │
+                             │      started.") from exc                                                                 │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\_exception_handl │
+                             │ er.py:42 in wrapped_app                                                                  │
+                             │                                                                                          │
+                             │   39 │   │   │   await send(message)                                                     │
+                             │   40 │   │                                                                               │
+                             │   41 │   │   try:                                                                        │
+                             │ ❱ 42 │   │   │   await app(scope, receive, sender)                                       │
+                             │   43 │   │   except Exception as exc:                                                    │
+                             │   44 │   │   │   handler = None                                                          │
+                             │   45                                                                                     │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\fastapi\middleware\asyncex │
+                             │ itstack.py:18 in __call__                                                                │
+                             │                                                                                          │
+                             │   15 │   async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:   │
+                             │   16 │   │   async with AsyncExitStack() as stack:                                       │
+                             │   17 │   │   │   scope[self.context_name] = stack                                        │
+                             │ ❱ 18 │   │   │   await self.app(scope, receive, send)                                    │
+                             │   19                                                                                     │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\routing.py:716   │
+                             │ in __call__                                                                              │
+                             │                                                                                          │
+                             │   713 │   │   \"\"\"                                                                        │
+                             │   714 │   │   The main entry point to the Router class.                                  │
+                             │   715 │   │   \"\"\"                                                                        │
+                             │ ❱ 716 │   │   await self.middleware_stack(scope, receive, send)                          │
+                             │   717 │                                                                                  │
+                             │   718 │   async def app(self, scope: Scope, receive: Receive, send: Send) -> None:       │
+                             │   719 │   │   assert scope["type"] in ("http", "websocket", "lifespan")                  │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\routing.py:736   │
+                             │ in app                                                                                   │
+                             │                                                                                          │
+                             │   733 │   │   │   match, child_scope = route.matches(scope)                              │
+                             │   734 │   │   │   if match == Match.FULL:                                                │
+                             │   735 │   │   │   │   scope.update(child_scope)                                          │
+                             │ ❱ 736 │   │   │   │   await route.handle(scope, receive, send)                           │
+                             │   737 │   │   │   │   return                                                             │
+                             │   738 │   │   │   elif match == Match.PARTIAL and partial is None:                       │
+                             │   739 │   │   │   │   partial = route                                                    │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\routing.py:290   │
+                             │ in handle                                                                                │
+                             │                                                                                          │
+                             │   287 │   │   │   │   response = PlainTextResponse("Method Not Allowed", status_code=405 │
+                             │       headers=headers)                                                                   │
+                             │   288 │   │   │   await response(scope, receive, send)                                   │
+                             │   289 │   │   else:                                                                      │
+                             │ ❱ 290 │   │   │   await self.app(scope, receive, send)                                   │
+                             │   291 │                                                                                  │
+                             │   292 │   def __eq__(self, other: Any) -> bool:                                          │
+                             │   293 │   │   return (                                                                   │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\fastapi\routing.py:124 in  │
+                             │ app                                                                                      │
+                             │                                                                                          │
+                             │    121 │   │   │   │   )                                                                 │
+                             │    122 │   │                                                                             │
+                             │    123 │   │   # Same as in Starlette                                                    │
+                             │ ❱  124 │   │   await wrap_app_handling_exceptions(app, request)(scope, receive, send)    │
+                             │    125 │                                                                                 │
+                             │    126 │   return app                                                                    │
+                             │    127                                                                                   │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\_exception_handl │
+                             │ er.py:53 in wrapped_app                                                                  │
+                             │                                                                                          │
+                             │   50 │   │   │   │   handler = _lookup_exception_handler(exception_handlers, exc)        │
+                             │   51 │   │   │                                                                           │
+                             │   52 │   │   │   if handler is None:                                                     │
+                             │ ❱ 53 │   │   │   │   raise exc                                                           │
+                             │   54 │   │   │                                                                           │
+                             │   55 │   │   │   if response_started:                                                    │
+                             │   56 │   │   │   │   raise RuntimeError("Caught handled exception, but response already  │
+                             │      started.") from exc                                                                 │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\starlette\_exception_handl │
+                             │ er.py:42 in wrapped_app                                                                  │
+                             │                                                                                          │
+                             │   39 │   │   │   await send(message)                                                     │
+                             │   40 │   │                                                                               │
+                             │   41 │   │   try:                                                                        │
+                             │ ❱ 42 │   │   │   await app(scope, receive, sender)                                       │
+                             │   43 │   │   except Exception as exc:                                                    │
+                             │   44 │   │   │   handler = None                                                          │
+                             │   45                                                                                     │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\fastapi\routing.py:110 in  │
+                             │ app                                                                                      │
+                             │                                                                                          │
+                             │    107 │   │   │   async with AsyncExitStack() as stack:                                 │
+                             │    108 │   │   │   │   scope["fastapi_inner_astack"] = stack                             │
+                             │    109 │   │   │   │   # Same as in Starlette                                            │
+                             │ ❱  110 │   │   │   │   response = await f(request)                                       │
+                             │    111 │   │   │   │   await response(scope, receive, send)                              │
+                             │    112 │   │   │   │   # Continues customization                                         │
+                             │    113 │   │   │   │   response_awaited = True                                           │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\fastapi\routing.py:390 in  │
+                             │ app                                                                                      │
+                             │                                                                                          │
+                             │    387 │   │   )                                                                         │
+                             │    388 │   │   errors = solved_result.errors                                             │
+                             │    389 │   │   if not errors:                                                            │
+                             │ ❱  390 │   │   │   raw_response = await run_endpoint_function(                           │
+                             │    391 │   │   │   │   dependant=dependant,                                              │
+                             │    392 │   │   │   │   values=solved_result.values,                                      │
+                             │    393 │   │   │   │   is_coroutine=is_coroutine,                                        │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\fastapi\routing.py:289 in  │
+                             │ run_endpoint_function                                                                    │
+                             │                                                                                          │
+                             │    286 │   assert dependant.call is not None, "dependant.call must be a function"        │
+                             │    287 │                                                                                 │
+                             │    288 │   if is_coroutine:                                                              │
+                             │ ❱  289 │   │   return await dependant.call(**values)                                     │
+                             │    290 │   else:                                                                         │
+                             │    291 │   │   return await run_in_threadpool(dependant.call, **values)                  │
+                             │    292                                                                                   │
+                             │                                                                                          │
+                             │ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subti │
+                             │ tles_server2_with_en\routes\tagger.py:959 in get_tagger_plots                            │
+                             │                                                                                          │
+                             │   956 │   - Speech probability trend line                                                │
+                             │   957 │   \"\"\"                                                                            │
+                             │   958 │   template_path = TEMPLATES_DIR / "plots.html"                                   │
+                             │ ❱ 959 │   template = Template(template_path.read_text())                                 │
+                             │   960 │   return HTMLResponse(content=template.render())                                 │
+                             │   961                                                                                    │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\pathlib.py:1028 in read_text        │
+                             │                                                                                          │
+                             │   1025 │   │   \"\"\"                                                                       │
+                             │   1026 │   │   encoding = io.text_encoding(encoding)                                     │
+                             │   1027 │   │   with self.open(mode='r', encoding=encoding, errors=errors) as f:          │
+                             │ ❱ 1028 │   │   │   return f.read()                                                       │
+                             │   1029 │                                                                                 │
+                             │   1030 │   def write_bytes(self, data):                                                  │
+                             │   1031 │   │   \"\"\"                                                                       │
+                             │                                                                                          │
+                             │ C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\encodings\cp1252.py:23 in decode    │
+                             │                                                                                          │
+                             │    20                                                                                    │
+                             │    21 class IncrementalDecoder(codecs.IncrementalDecoder):                               │
+                             │    22 │   def decode(self, input, final=False):                                          │
+                             │ ❱  23 │   │   return codecs.charmap_decode(input,self.errors,decoding_table)[0]          │
+                             │    24                                                                                    │
+                             │    25 class StreamWriter(Codec,codecs.StreamWriter):                                     │
+                             │    26 │   pass                                                                           │
+                             ╰──────────────────────────────────────────────────────────────────────────────────────────╯
+                             UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d in position 13494: character maps
+                             to <undefined>
+                    INFO     192.168.68.100:53853 - "GET /favicon.ico HTTP/1.1" 404    
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

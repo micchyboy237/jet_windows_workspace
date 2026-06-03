@@ -555,3 +555,28 @@ def save_full_audio_files(
     if full_ja_sents is not None:
         with open(full_audio_dir / "full_ja_sents.json", "w", encoding="utf-8") as f:
             json.dump(full_ja_sents, f, ensure_ascii=False, indent=2)
+
+
+def save_tagging_results(filename: str, results: dict, output_dir: str | Path) -> Optional[Path]:
+    """Save tagging results to output directory."""
+    try:
+        output_dir = Path(output_dir) / "tagging_results"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = Path(filename).stem.replace(" ", "_")
+        output_file = output_dir / f"{safe_filename}_{timestamp}.json"
+        
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        
+        console.print(f"[success]Results saved to: {output_file}[/success]")
+        return output_file
+    except Exception as e:
+        console.print(f"[warning]Failed to save results: {e}[/warning]")
+        return None
+
+
+def save_chunked_results(filename: str, results: dict, output_dir: str | Path) -> Optional[Path]:
+    """Save chunked tagging results to output directory."""
+    return save_tagging_results(filename, results, output_dir)

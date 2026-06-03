@@ -1,9 +1,9 @@
 """
 Audio tagging routes for sound event detection and analysis.
 """
-import base64
 import json
 import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -19,8 +19,13 @@ from services.audio_tagger import AudioTagger, TaggingResult, AudioChunksTagging
 from core.state import (
     get_audio_tagger,
     set_audio_tagger,
+    get_last_n_segments_dir,
 )
-from config import OUTPUT_DIR
+from services.save_utils import (
+    save_tagging_results,
+    save_chunked_results,
+)
+from config import OUTPUT_DIR, TEMPLATES_DIR
 
 console = Console()
 router = APIRouter(prefix="/tag", tags=["audio-tagging"])
@@ -141,7 +146,7 @@ async def tag_audio_endpoint(
             }
         
         # Save results if output directory exists
-        save_results = _save_tagging_results(file.filename, response)
+        save_results = save_tagging_results(file.filename, response, OUTPUT_DIR)
         if save_results:
             response["saved_to"] = str(save_results)
         
@@ -222,7 +227,7 @@ async def tag_audio_chunks_endpoint(
         }
         
         # Save results
-        save_results = _save_chunked_results(file.filename, response)
+        save_results = save_chunked_results(file.filename, response, OUTPUT_DIR)
         if save_results:
             response["saved_to"] = str(save_results)
         
@@ -778,25 +783,177 @@ async def get_tagger_dashboard():
     
     return HTMLResponse(content=dashboard_template.render(config=config))
 
-def _save_tagging_results(filename: str, results: dict) -> Optional[Path]:
-    """Save tagging results to output directory."""
+@router.get("/chunks", response_class=JSONResponse)
+async def get_saved_chunks(
+    limit: Optional[int] = Query(100, description="Maximum number of chunks to return", ge=1, le=500),
+    offset: Optional[int] = Query(0, description="Number of chunks to skip", ge=0),
+    speech_only: Optional[bool] = Query(False, description="Filter to only show segments with speech detected"),
+):
+    """
+    Get saved audio tagging chunk data from the global all_tag_events.json file.
+    
+    This endpoint reads the accumulated tag events stored in the last_n_segments_dir
+    and returns them with optional filtering and pagination.
+    
+    Parameters:
+    - limit: Maximum number of entries to return (1-500, default 100)
+    - offset: Number of entries to skip for pagination (default 0)
+    - speech_only: If true, only return segments where speech was detected
+    
+    Returns:
+    - total_entries: Total number of entries in the file
+    - returned_entries: Number of entries in this response
+    - offset: Current offset
+    - limit: Current limit
+    - chunks: Array of tag event entries
+    - stats: Summary statistics about the tag events
+    """
+    console.print(f"[info]📊 Fetching saved chunks data[/info]")
+    console.print(f"[dim]Parameters: limit={limit}, offset={offset}, speech_only={speech_only}[/dim]")
+    
+    last_n_segments_dir = get_last_n_segments_dir()
+    tag_events_path = last_n_segments_dir / "all_tag_events.json"
+    
+    console.print(f"[dim]Reading from: {tag_events_path}[/dim]")
+    
+    if not tag_events_path.exists():
+        console.print(f"[warning]No tag events file found at {tag_events_path}[/warning]")
+        return JSONResponse(content={
+            "success": True,
+            "total_entries": 0,
+            "returned_entries": 0,
+            "offset": offset,
+            "limit": limit,
+            "chunks": [],
+            "stats": {
+                "total_segments": 0,
+                "speech_segments": 0,
+                "non_speech_segments": 0,
+                "speech_percentage": 0.0,
+                "avg_speech_probability": 0.0,
+                "processing_modes": {},
+                "top_predictions": [],
+                "timestamp": datetime.now().isoformat(),
+            },
+            "message": "No tag events recorded yet. Process some audio segments first.",
+        })
+    
     try:
-        output_dir = OUTPUT_DIR / "tagging_results"
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # Read the tag events file
+        with open(tag_events_path, 'r', encoding='utf-8') as f:
+            all_entries = json.load(f)
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_filename = Path(filename).stem.replace(" ", "_")
-        output_file = output_dir / f"{safe_filename}_{timestamp}.json"
+        console.print(f"[dim]Read {len(all_entries)} total entries from file[/dim]")
         
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+        if not isinstance(all_entries, list):
+            console.print(f"[warning]Tag events file is not a list, resetting[/warning]")
+            all_entries = []
         
-        console.print(f"[success]Results saved to: {output_file}[/success]")
-        return output_file
+        # Calculate statistics on all entries before filtering
+        total_segments = len(all_entries)
+        speech_segments = sum(1 for entry in all_entries if entry.get("speech_detected", False))
+        non_speech_segments = total_segments - speech_segments
+        
+        # Calculate average speech probability
+        speech_probs = [entry.get("speech_probability", 0.0) for entry in all_entries if entry.get("speech_probability") is not None]
+        avg_speech_prob = sum(speech_probs) / len(speech_probs) if speech_probs else 0.0
+        
+        # Count processing modes
+        processing_modes = {}
+        for entry in all_entries:
+            mode = entry.get("processing_mode", "unknown")
+            processing_modes[mode] = processing_modes.get(mode, 0) + 1
+        
+        # Aggregate top predictions across all entries
+        prediction_counts = {}
+        for entry in all_entries:
+            for pred in entry.get("top_predictions", []):
+                name = pred.get("name", "Unknown")
+                if name not in prediction_counts:
+                    prediction_counts[name] = {
+                        "count": 0,
+                        "total_prob": 0.0,
+                    }
+                prediction_counts[name]["count"] += 1
+                prediction_counts[name]["total_prob"] += pred.get("prob", 0.0)
+        
+        # Sort predictions by frequency
+        sorted_predictions = sorted(
+            prediction_counts.items(),
+            key=lambda x: x[1]["count"],
+            reverse=True
+        )
+        top_predictions = [
+            {
+                "name": name,
+                "count": stats["count"],
+                "avg_probability": round(stats["total_prob"] / stats["count"], 4),
+            }
+            for name, stats in sorted_predictions[:10]
+        ]
+        
+        # Apply filters
+        filtered_entries = all_entries
+        if speech_only:
+            filtered_entries = [entry for entry in all_entries if entry.get("speech_detected", False)]
+            console.print(f"[dim]Filtered to {len(filtered_entries)} speech-only entries[/dim]")
+        
+        # Apply pagination
+        paginated_entries = filtered_entries[offset:offset + limit]
+        
+        console.print(f"[dim]Returning {len(paginated_entries)} entries (offset={offset}, limit={limit})[/dim]")
+        
+        response = {
+            "success": True,
+            "total_entries": len(filtered_entries),
+            "returned_entries": len(paginated_entries),
+            "offset": offset,
+            "limit": limit,
+            "chunks": paginated_entries,
+            "stats": {
+                "total_segments": total_segments,
+                "speech_segments": speech_segments,
+                "non_speech_segments": non_speech_segments,
+                "speech_percentage": round(speech_segments / max(total_segments, 1) * 100, 1),
+                "avg_speech_probability": round(avg_speech_prob, 4),
+                "processing_modes": processing_modes,
+                "top_predictions": top_predictions,
+                "timestamp": datetime.now().isoformat(),
+            },
+        }
+        
+        console.print(f"[success]✅ Returned {len(paginated_entries)} chunks with statistics[/success]")
+        return JSONResponse(content=response)
+        
+    except json.JSONDecodeError as e:
+        console.print(f"[error]Failed to parse tag events file: {e}[/error]")
+        raise HTTPException(status_code=500, detail=f"Failed to parse tag events data: {str(e)}")
     except Exception as e:
-        console.print(f"[warning]Failed to save results: {e}[/warning]")
-        return None
+        console.print(f"[error]Error reading tag events: {e}[/error]")
+        console.print(f"[dim]Traceback: {traceback.format_exc()}[/dim]")
+        raise HTTPException(status_code=500, detail=f"Error reading tag events: {str(e)}")
 
-def _save_chunked_results(filename: str, results: dict) -> Optional[Path]:
-    """Save chunked tagging results to output directory."""
-    return _save_tagging_results(filename, results)
+
+@router.get("/dashboard", response_class=HTMLResponse)
+async def get_tagger_dashboard():
+    tagger_config = await get_tagger_config()
+    template_path = TEMPLATES_DIR / "dashboard.html"
+    template = Template(template_path.read_text(encoding='utf-8'))
+    return HTMLResponse(content=template.render(config=tagger_config))
+
+
+@router.get("/plots", response_class=HTMLResponse)
+async def get_tagger_plots():
+    """
+    Display audio tagging data visualizations using Chart.js.
+    Shows:
+    - Summary statistics at the top
+    - Speech probability distribution over segments
+    - Top predictions frequency bar chart
+    - Speech vs non-speech timeline
+    - Processing mode distribution
+    - Speech probability trend line
+    """
+    template_path = TEMPLATES_DIR / "plots.html"
+    template = Template(template_path.read_text(encoding='utf-8'))
+    return HTMLResponse(content=template.render())
