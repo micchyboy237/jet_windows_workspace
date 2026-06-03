@@ -6,7 +6,7 @@ to avoid circular imports and provide clean access patterns.
 import json
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 import numpy as np
 import torch
 from pyannote.audio import Inference, Model
@@ -15,7 +15,7 @@ from services.segment_speaker_labeler import SegmentSpeakerLabeler
 from services.audio_language_detector import AudioLanguageDetector
 from services.live_subtitles_server_utils import load_segment_counter
 
-N_SEGMENT_RESULTS = 20
+N_SEGMENT_RESULTS = 50
 LAST_N_SEGMENTS_DIR = OUTPUT_DIR / f"last_{N_SEGMENT_RESULTS}_segments"
 LAST_N_SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
 LIVE_AUDIO_BUFFER_DIR = OUTPUT_DIR
@@ -143,6 +143,32 @@ def set_embedding_inference(inference: Inference) -> None:
     """Set the embedding inference instance."""
     global _embedding_inference
     _embedding_inference = inference
+
+def get_speaker_diarization() -> Dict:
+    """Get current speaker diarization summary with speaker list support."""
+    labeler = get_speaker_labeler()
+    if labeler is None:
+        return {
+            "current_speaker": None,
+            "known_speakers": [],
+            "speaker_count": 0,
+            "speakers_info": {},
+            "total_segments_processed": 0,
+        }
+
+    all_info = labeler.get_all_speakers_info()
+    sorted_speakers = sorted(
+        all_info.items(),
+        key=lambda x: x[1].get("last_seen", 0),
+        reverse=True,
+    )
+    return {
+        "current_speaker": get_current_speaker(),
+        "total_segments_processed": labeler.total_segments_processed,
+        "known_speakers": labeler.known_speakers,
+        "speaker_count": labeler.speaker_count,
+        "speakers_info": dict(sorted_speakers),
+    }
 
 def save_speaker_state() -> None:
     """Persist the current speaker labeler state to disk."""
