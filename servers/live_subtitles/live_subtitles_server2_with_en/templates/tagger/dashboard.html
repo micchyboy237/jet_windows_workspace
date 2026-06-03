@@ -522,7 +522,7 @@
         const limit = parseInt(limitSelect.value);
 
         try {
-          const url = `/tag/chunks?limit=${limit}&offset=0&speech_only=${speechOnly}`;
+          const url = `/tags/chunks?limit=${limit}&offset=0&speech_only=${speechOnly}`;
           console.log("Fetching chunks from:", url);
 
           const response = await fetch(url);
@@ -673,7 +673,7 @@
         const formData = new FormData();
         formData.append("file", selectedFile);
         const isChunked = document.getElementById("chunkedMode").checked;
-        const endpoint = isChunked ? "/tag/chunks" : "/tag/audio";
+        const endpoint = isChunked ? "/tags/chunks" : "/tags/audio";
         if (isChunked) {
           formData.append(
             "chunk_duration",
@@ -707,7 +707,7 @@
         formData.append("file", selectedFile);
         showProgress("Checking speech...");
         try {
-          const response = await fetch("/tag/speech-check", {
+          const response = await fetch("/tags/speech-check", {
             method: "POST",
             body: formData,
           });
