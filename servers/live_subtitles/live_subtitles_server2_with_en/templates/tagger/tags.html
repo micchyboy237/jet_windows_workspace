@@ -3,7 +3,6 @@
   <head>
     <title>Audio Tagger - Chunk Analytics Plots</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <!-- Chart.js Matrix plugin for heatmap -->
     <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
     <style>
       * {
@@ -53,11 +52,15 @@
         cursor: pointer;
         font-size: 0.95em;
         text-decoration: none;
-        transition: background 0.3s;
+        transition: background 0.3s, transform 0.15s;
         display: inline-block;
       }
       .btn:hover {
         background: #764ba2;
+        transform: translateY(-1px);
+      }
+      .btn:active {
+        transform: translateY(0);
       }
       .btn-secondary {
         background: #6c757d;
@@ -73,6 +76,11 @@
       .btn-outline:hover {
         background: #667eea;
         color: white;
+      }
+      .btn-outline.active {
+        background: #667eea;
+        color: white;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
       }
       .btn-warning {
         background: #ff9800;
@@ -116,6 +124,10 @@
         text-align: center;
         position: relative;
         overflow: hidden;
+        transition: transform 0.2s;
+      }
+      .summary-card:hover {
+        transform: translateY(-2px);
       }
       .summary-card::before {
         content: "";
@@ -224,7 +236,7 @@
         justify-content: space-between;
         align-items: center;
         margin-bottom: 15px;
-        gap: 10px;
+        gap: 15px;
         flex-wrap: wrap;
         background: white;
         border-radius: 10px;
@@ -247,6 +259,73 @@
         padding: 8px 20px;
         font-size: 0.9em;
       }
+
+      /* NEW: Segment count filter group */
+      .segment-filter-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .segment-filter-group .filter-label {
+        font-size: 0.85em;
+        color: #666;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .segment-filter-group .preset-buttons {
+        display: flex;
+        gap: 4px;
+      }
+      .segment-filter-group .preset-buttons .btn {
+        padding: 6px 14px;
+        font-size: 0.8em;
+        border-radius: 4px;
+      }
+      .segment-filter-group .custom-input-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        position: relative;
+      }
+      .segment-filter-group .custom-input {
+        width: 70px;
+        padding: 6px 10px;
+        border: 2px solid #ddd;
+        border-radius: 4px;
+        font-size: 0.85em;
+        text-align: center;
+        transition: border-color 0.2s;
+      }
+      .segment-filter-group .custom-input:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+      }
+      .segment-filter-group .custom-input.active {
+        border-color: #667eea;
+        background: #f8f9ff;
+      }
+      .segment-filter-group .apply-custom-btn {
+        padding: 6px 12px;
+        font-size: 0.8em;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .segment-filter-group .apply-custom-btn:hover {
+        background: #764ba2;
+      }
+      .segment-filter-group .segment-info {
+        font-size: 0.8em;
+        color: #999;
+        white-space: nowrap;
+        margin-left: 8px;
+      }
+
       .detail-table {
         width: 100%;
         border-collapse: collapse;
@@ -297,7 +376,6 @@
       .prob-fill.speech {
         background: linear-gradient(90deg, #4caf50, #45a049);
       }
-      /* Heatmap legend */
       .heatmap-legend {
         display: flex;
         align-items: center;
@@ -309,7 +387,7 @@
       .heatmap-gradient {
         width: 200px;
         height: 15px;
-        background: linear-gradient(to right, #ffffff, #648fff, #1a1a6e);
+        background: linear-gradient(to right, #FFFFFF, #648FFF, #1A1A6E);
         border-radius: 3px;
         border: 1px solid #ddd;
       }
@@ -320,6 +398,14 @@
         .summary-cards {
           grid-template-columns: repeat(2, 1fr);
         }
+        .controls {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .segment-filter-group {
+          flex-direction: column;
+          align-items: flex-start;
+        }
       }
     </style>
   </head>
@@ -327,16 +413,11 @@
     <div class="container">
       <div class="header">
         <h1>📊 Audio Tagger - Chunk Analytics Plots</h1>
-        <p>
-          Visual analysis of chunked audio tagging results (matching
-          audio_tagger_chunk_plots.py)
-        </p>
+        <p>Visual analysis of chunked audio tagging results (matching audio_tagger_chunk_plots.py)</p>
         <div class="nav-buttons">
           <a href="/tags" class="btn" id="navHome">📊 Home</a>
           <a href="/tags/dashboard" class="btn btn-secondary">📋 Dashboard</a>
-          <a href="/tags/chunks" class="btn btn-secondary" target="_blank"
-            >🔌 API: Chunks</a
-          >
+          <a href="/tags/chunks" class="btn btn-secondary" target="_blank">🔌 API: Chunks</a>
         </div>
       </div>
 
@@ -348,41 +429,36 @@
         </span>
         <div>
           <a href="/tags" class="btn btn-warning btn-small">✕ Clear Filter</a>
-          <a
-            href="/tags/dashboard"
-            class="btn btn-secondary btn-small"
-            style="margin-left: 10px"
-            >📋 Back to Dashboard</a
-          >
+          <a href="/tags/dashboard" class="btn btn-secondary btn-small" style="margin-left: 10px">📋 Back to Dashboard</a>
         </div>
       </div>
 
       <!-- Summary Cards -->
       <div class="summary-cards" id="summaryCards">
         <div class="summary-card">
+          <div class="label">Unique Segments</div>
+          <div class="value" id="cardSegments">-</div>
+          <div class="subtitle">Distinct audio segments</div>
+        </div>
+        <div class="summary-card">
           <div class="label">Total Chunks</div>
           <div class="value" id="cardTotal">-</div>
-          <div class="subtitle">Audio chunks processed</div>
+          <div class="subtitle">Across all segments</div>
         </div>
         <div class="summary-card">
-          <div class="label">Total Duration</div>
-          <div class="value" id="cardDuration">-</div>
-          <div class="subtitle">Seconds of audio</div>
-        </div>
-        <div class="summary-card">
-          <div class="label">Speech Chunks</div>
+          <div class="label">Speech Segments</div>
           <div class="value" id="cardSpeech">-</div>
           <div class="subtitle" id="cardSpeechPct">-</div>
         </div>
         <div class="summary-card">
-          <div class="label">Chunk Duration</div>
-          <div class="value" id="cardChunkDur">-</div>
-          <div class="subtitle">Seconds per chunk</div>
+          <div class="label">Avg Chunks/Seg</div>
+          <div class="value" id="cardAvgChunks">-</div>
+          <div class="subtitle">Per segment</div>
         </div>
         <div class="summary-card">
-          <div class="label">Overlap</div>
-          <div class="value" id="cardOverlap">-</div>
-          <div class="subtitle">Seconds overlap</div>
+          <div class="label">Avg Prob</div>
+          <div class="value" id="cardAvgProb">-</div>
+          <div class="subtitle">Speech confidence</div>
         </div>
         <div class="summary-card">
           <div class="label">Top Event</div>
@@ -393,26 +469,45 @@
 
       <!-- Controls -->
       <div class="controls" id="globalControls">
-        <div>
+        <!-- NEW: Segment count filter with preset buttons + custom input -->
+        <div class="segment-filter-group">
+          <span class="filter-label">📅 Last N Segments:</span>
+          <div class="preset-buttons" id="presetButtons">
+            <button class="btn btn-outline btn-small active" data-count="10" onclick="setSegmentCount(10, this)">10</button>
+            <button class="btn btn-outline btn-small" data-count="20" onclick="setSegmentCount(20, this)">20</button>
+            <button class="btn btn-outline btn-small" data-count="50" onclick="setSegmentCount(50, this)">50</button>
+            <button class="btn btn-outline btn-small" data-count="100" onclick="setSegmentCount(100, this)">100</button>
+            <button class="btn btn-outline btn-small" data-count="200" onclick="setSegmentCount(200, this)">200</button>
+          </div>
+          <div class="custom-input-wrapper">
+            <input
+              type="number"
+              class="custom-input"
+              id="customSegmentCount"
+              placeholder="Custom"
+              min="1"
+              max="10000"
+              onkeydown="if(event.key==='Enter')applyCustomSegmentCount()"
+              onfocus="highlightCustomInput(true)"
+              onblur="highlightCustomInput(false)"
+            />
+            <button class="apply-custom-btn" onclick="applyCustomSegmentCount()" title="Apply custom count">
+              Go
+            </button>
+          </div>
+          <span class="segment-info" id="segmentInfo"></span>
+        </div>
+
+        <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
           <label>
-            📅 Data Range:
-            <select id="limitSelect" onchange="refreshPlots()">
-              <option value="20">Last 20 chunks</option>
-              <option value="50" selected>Last 50 chunks</option>
-              <option value="100">Last 100 chunks</option>
-              <option value="200">Last 200 chunks</option>
-              <option value="500">Last 500 chunks</option>
-            </select>
-          </label>
-          <label style="margin-left: 20px">
             🎯 Filter:
             <select id="filterSelect" onchange="refreshPlots()">
-              <option value="all">All Chunks</option>
+              <option value="all">All Segments</option>
               <option value="speech">Speech Only</option>
               <option value="non-speech">Non-Speech Only</option>
             </select>
           </label>
-          <label style="margin-left: 20px">
+          <label>
             🔝 Top N Events:
             <select id="topNSelect" onchange="refreshPlots()">
               <option value="3">Top 3</option>
@@ -421,10 +516,8 @@
               <option value="10">Top 10</option>
             </select>
           </label>
+          <button class="btn btn-small" onclick="refreshPlots()">🔄 Refresh Data</button>
         </div>
-        <button class="btn btn-small" onclick="refreshPlots()">
-          🔄 Refresh Data
-        </button>
       </div>
 
       <!-- Plots Grid -->
@@ -434,22 +527,15 @@
     </div>
 
     <script>
-      // Track all chart instances for cleanup
+      // ===== State =====
       let charts = {};
       let activeSegmentFilter = null;
+      let currentSegmentCount = 10; // Default: last 10 segments
 
       // Color palette - matching Python COLORS
       const EVENT_COLORS = [
-        "#648FFF",
-        "#785EF0",
-        "#DC267F",
-        "#FE6100",
-        "#FFB000",
-        "#009E73",
-        "#56B4E9",
-        "#E69F00",
-        "#F0E442",
-        "#0072B2",
+        "#648FFF", "#785EF0", "#DC267F", "#FE6100", "#FFB000",
+        "#009E73", "#56B4E9", "#E69F00", "#F0E442", "#0072B2"
       ];
 
       // Thresholds matching Python constants
@@ -471,15 +557,12 @@
         const navHome = document.getElementById("navHome");
 
         if (activeSegmentFilter) {
-          console.log(
-            `[applySegmentFilterFromUrl] Active filter: ${activeSegmentFilter}`,
-          );
+          console.log(`[applySegmentFilterFromUrl] Active filter: ${activeSegmentFilter}`);
           filterBanner.classList.remove("hidden");
-          document.getElementById("filterBannerSegmentName").textContent =
-            activeSegmentFilter;
+          document.getElementById("filterBannerSegmentName").textContent = activeSegmentFilter;
           globalControls.style.display = "none";
           navHome.href = "/tags";
-          navHome.textContent = "📊 All Chunks";
+          navHome.textContent = "📊 All Segments";
         } else {
           console.log("[applySegmentFilterFromUrl] No active filter");
           filterBanner.classList.add("hidden");
@@ -490,7 +573,9 @@
       }
 
       function destroyCharts() {
-        Object.values(charts).forEach((chart) => chart.destroy());
+        Object.values(charts).forEach((chart) => {
+          try { chart.destroy(); } catch (e) { /* ignore */ }
+        });
         charts = {};
       }
 
@@ -501,78 +586,303 @@
         return div.innerHTML;
       }
 
-      // ===== Data Fetching =====
-      async function fetchData() {
-        if (activeSegmentFilter) {
-          console.log(
-            `[fetchData] Segment filter active: ${activeSegmentFilter}, fetching all data`,
-          );
-          const url = `/tags/chunks?limit=500&offset=0`;
-          try {
-            const response = await fetch(url);
-            if (!response.ok)
-              throw new Error(
-                `HTTP ${response.status}: ${response.statusText}`,
-              );
-            const data = await response.json();
-            const allChunks = data.chunks || [];
-            const filteredChunks = allChunks.filter((chunk) => {
-              const segmentDir = chunk.segment_dir || "";
-              const segmentNumber = chunk.segment_number;
-              const segmentIdFromNumber = segmentNumber
-                ? `seg_${String(segmentNumber).padStart(3, "0")}`
-                : "";
-              return (
-                segmentDir === activeSegmentFilter ||
-                segmentIdFromNumber === activeSegmentFilter ||
-                String(segmentNumber) === activeSegmentFilter
-              );
-            });
-            console.log(
-              `[fetchData] Found ${filteredChunks.length} matching chunks for segment: ${activeSegmentFilter}`,
-            );
-            return {
-              chunks: filteredChunks,
-              stats: data.stats,
-              isFiltered: true,
-              filteredSegment: activeSegmentFilter,
-            };
-          } catch (error) {
-            console.error("Error fetching data:", error);
-            throw error;
-          }
+      // ===== NEW: Segment Count Filter Logic =====
+
+      /**
+       * Set the segment count and update UI.
+       * @param {number} count - Number of last segments to show
+       * @param {HTMLElement} buttonElement - The clicked preset button (or null)
+       */
+      function setSegmentCount(count, buttonElement) {
+        console.log(`[setSegmentCount] Setting segment count to: ${count}`);
+        currentSegmentCount = count;
+
+        // Update preset button active states
+        document.querySelectorAll("#presetButtons .btn").forEach((btn) => {
+          btn.classList.remove("active");
+        });
+        if (buttonElement) {
+          buttonElement.classList.add("active");
         }
 
-        const limit = document.getElementById("limitSelect").value;
-        const filter = document.getElementById("filterSelect").value;
-        let url = `/tags/chunks?limit=${limit}&offset=0`;
-        if (filter === "speech") url += "&speech_only=true";
+        // Clear custom input and remove active styling
+        const customInput = document.getElementById("customSegmentCount");
+        customInput.value = "";
+        customInput.classList.remove("active");
 
+        // Update segment info display
+        updateSegmentInfo();
+
+        // Refresh plots with new count
+        refreshPlots();
+      }
+
+      /**
+       * Apply custom segment count from the text input.
+       */
+      function applyCustomSegmentCount() {
+        const customInput = document.getElementById("customSegmentCount");
+        const rawValue = customInput.value.trim();
+
+        if (!rawValue) {
+          console.log("[applyCustomSegmentCount] Empty input, ignoring");
+          return;
+        }
+
+        const count = parseInt(rawValue, 10);
+        if (isNaN(count) || count < 1) {
+          console.warn(`[applyCustomSegmentCount] Invalid count: ${rawValue}`);
+          customInput.style.borderColor = "#f44336";
+          setTimeout(() => { customInput.style.borderColor = "#ddd"; }, 1500);
+          return;
+        }
+
+        // Cap at reasonable maximum
+        const cappedCount = Math.min(count, 10000);
+        if (cappedCount !== count) {
+          console.log(`[applyCustomSegmentCount] Capped ${count} to ${cappedCount}`);
+        }
+
+        console.log(`[applyCustomSegmentCount] Applying custom count: ${cappedCount}`);
+        currentSegmentCount = cappedCount;
+
+        // Update UI
+        customInput.value = cappedCount;
+        customInput.classList.add("active");
+        document.querySelectorAll("#presetButtons .btn").forEach((btn) => {
+          btn.classList.remove("active");
+        });
+
+        updateSegmentInfo();
+        refreshPlots();
+      }
+
+      /**
+       * Highlight/unhighlight the custom input when focused.
+       */
+      function highlightCustomInput(isFocused) {
+        const customInput = document.getElementById("customSegmentCount");
+        if (isFocused) {
+          customInput.classList.add("active");
+        } else if (!customInput.value.trim()) {
+          customInput.classList.remove("active");
+        }
+      }
+
+      /**
+       * Update the segment info text showing what's being displayed.
+       */
+      function updateSegmentInfo() {
+        const infoEl = document.getElementById("segmentInfo");
+        const filterSelect = document.getElementById("filterSelect");
+        const filterMode = filterSelect ? filterSelect.value : "all";
+        const filterLabel = filterMode === "speech" ? " (speech only)" :
+                            filterMode === "non-speech" ? " (non-speech only)" : "";
+        infoEl.textContent = `Showing last ${currentSegmentCount} segments${filterLabel}`;
+      }
+
+      /**
+       * Group chunks into segments based on segment_dir or segment_number.
+       * Returns an array of segment objects, each containing its chunks.
+       */
+      function groupChunksBySegment(chunks) {
+        console.log(`[groupChunksBySegment] Grouping ${chunks.length} chunks into segments...`);
+        const segmentMap = new Map();
+
+        chunks.forEach((chunk, idx) => {
+          // Determine segment key: prefer segment_dir, fall back to segment_number
+          const segmentDir = chunk.segment_dir || "";
+          const segmentNumber = chunk.segment_number;
+          let segmentKey;
+
+          if (segmentDir) {
+            segmentKey = segmentDir;
+          } else if (segmentNumber !== undefined && segmentNumber !== null) {
+            segmentKey = `seg_${String(segmentNumber).padStart(3, "0")}`;
+          } else {
+            // No segment identifier - treat each chunk as its own segment
+            segmentKey = `chunk_${idx}`;
+            console.warn(`[groupChunksBySegment] Chunk ${idx} has no segment identifier, using fallback: ${segmentKey}`);
+          }
+
+          if (!segmentMap.has(segmentKey)) {
+            segmentMap.set(segmentKey, {
+              segmentKey: segmentKey,
+              segmentDir: segmentDir,
+              segmentNumber: segmentNumber,
+              chunks: [],
+              // Aggregate stats
+              totalSpeechProb: 0,
+              speechChunks: 0,
+              firstTimestamp: chunk.timestamp || null,
+              lastTimestamp: chunk.timestamp || null,
+            });
+          }
+
+          const segment = segmentMap.get(segmentKey);
+          segment.chunks.push(chunk);
+
+          // Update stats
+          if (chunk.speech_probability !== undefined && chunk.speech_probability !== null) {
+            segment.totalSpeechProb += chunk.speech_probability;
+          }
+          if (chunk.speech_detected) {
+            segment.speechChunks++;
+          }
+          if (chunk.timestamp) {
+            if (!segment.firstTimestamp || chunk.timestamp < segment.firstTimestamp) {
+              segment.firstTimestamp = chunk.timestamp;
+            }
+            if (!segment.lastTimestamp || chunk.timestamp > segment.lastTimestamp) {
+              segment.lastTimestamp = chunk.timestamp;
+            }
+          }
+        });
+
+        // Convert map to array and sort by segment key (chronological order)
+        const segments = Array.from(segmentMap.values());
+        segments.sort((a, b) => {
+          // Try to sort numerically if segment keys follow seg_NNN pattern
+          const aNum = parseInt(a.segmentKey.replace(/\D/g, ""), 10);
+          const bNum = parseInt(b.segmentKey.replace(/\D/g, ""), 10);
+          if (!isNaN(aNum) && !isNaN(bNum)) {
+            return aNum - bNum;
+          }
+          // Fall back to string comparison
+          return a.segmentKey.localeCompare(b.segmentKey);
+        });
+
+        console.log(`[groupChunksBySegment] Found ${segments.length} unique segments`);
+        if (segments.length > 0) {
+          console.log(`[groupChunksBySegment] Sample segment keys: ${segments.slice(0, 5).map(s => s.segmentKey).join(", ")}${segments.length > 5 ? "..." : ""}`);
+        }
+
+        return segments;
+      }
+
+      /**
+       * Apply segment-level filtering: keep only the last N segments.
+       * Also applies speech/non-speech filter if active.
+       */
+      function filterSegments(segments, count, speechFilter) {
+        console.log(`[filterSegments] Input: ${segments.length} segments, count=${count}, filter=${speechFilter}`);
+
+        let filtered = [...segments];
+
+        // Apply speech filter at segment level
+        if (speechFilter === "speech") {
+          filtered = filtered.filter((seg) => {
+            // A segment has speech if any of its chunks have speech detected
+            return seg.chunks.some((c) => c.speech_detected);
+          });
+          console.log(`[filterSegments] After speech filter: ${filtered.length} segments`);
+        } else if (speechFilter === "non-speech") {
+          filtered = filtered.filter((seg) => {
+            return !seg.chunks.some((c) => c.speech_detected);
+          });
+          console.log(`[filterSegments] After non-speech filter: ${filtered.length} segments`);
+        }
+
+        // Take last N segments
+        if (filtered.length > count) {
+          filtered = filtered.slice(-count);
+          console.log(`[filterSegments] Sliced to last ${count} segments: ${filtered.length}`);
+        }
+
+        return filtered;
+      }
+
+      /**
+       * Flatten filtered segments back to chunks for the existing plotting functions.
+       */
+      function flattenSegmentsToChunks(segments) {
+        const allChunks = [];
+        segments.forEach((seg) => {
+          // Tag each chunk with its segment info for reference
+          seg.chunks.forEach((chunk) => {
+            allChunks.push({
+              ...chunk,
+              _segmentKey: seg.segmentKey,
+              _segmentDir: seg.segmentDir,
+            });
+          });
+        });
+        console.log(`[flattenSegmentsToChunks] Flattened ${segments.length} segments into ${allChunks.length} chunks`);
+        return allChunks;
+      }
+
+      // ===== Data Fetching =====
+      async function fetchAllData() {
+        console.log("[fetchAllData] Fetching all chunk data (limit=500)...");
+        const url = `/tags/chunks?limit=500&offset=0`;
         try {
           const response = await fetch(url);
-          if (!response.ok)
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           const data = await response.json();
+          console.log(`[fetchAllData] Received ${(data.chunks || []).length} chunks`);
           return {
             chunks: data.chunks || [],
             stats: data.stats || {},
-            isFiltered: false,
-            filteredSegment: null,
           };
         } catch (error) {
-          console.error("Error fetching data:", error);
+          console.error("[fetchAllData] Error:", error);
           throw error;
         }
       }
 
+      /**
+       * Main data pipeline: fetch → group by segment → filter → flatten
+       */
+      async function fetchAndProcessData() {
+        // If segment filter active, fetch all and filter by segment name
+        if (activeSegmentFilter) {
+          console.log(`[fetchAndProcessData] Segment filter active: ${activeSegmentFilter}`);
+          const { chunks: allChunks, stats } = await fetchAllData();
+
+          const filteredChunks = allChunks.filter((chunk) => {
+            const segmentDir = chunk.segment_dir || "";
+            const segmentNumber = chunk.segment_number;
+            const segmentIdFromNumber = segmentNumber
+              ? `seg_${String(segmentNumber).padStart(3, "0")}`
+              : "";
+            return (
+              segmentDir === activeSegmentFilter ||
+              segmentIdFromNumber === activeSegmentFilter ||
+              String(segmentNumber) === activeSegmentFilter
+            );
+          });
+
+          console.log(`[fetchAndProcessData] Found ${filteredChunks.length} chunks for segment: ${activeSegmentFilter}`);
+          return {
+            chunks: filteredChunks,
+            segments: groupChunksBySegment(filteredChunks),
+            stats,
+            isFiltered: true,
+          };
+        }
+
+        // Normal mode: fetch all, group by segment, filter by count
+        const { chunks: allChunks, stats } = await fetchAllData();
+        const allSegments = groupChunksBySegment(allChunks);
+        const filterMode = document.getElementById("filterSelect")?.value || "all";
+
+        const filteredSegments = filterSegments(allSegments, currentSegmentCount, filterMode);
+        const filteredChunks = flattenSegmentsToChunks(filteredSegments);
+
+        updateSegmentInfo();
+
+        return {
+          chunks: filteredChunks,
+          segments: filteredSegments,
+          allSegments: allSegments,
+          stats,
+          isFiltered: false,
+        };
+      }
+
       // ===== Data Processing Functions (matching Python logic) =====
 
-      /**
-       * Extract top-N event names from chunks data.
-       * Mirrors _get_top_event_names() in audio_tagger_chunk_plots.py
-       */
       function getTopEventNames(chunks, topN) {
-        // Aggregate predictions across all chunks
         const eventStats = {};
         chunks.forEach((chunk) => {
           const predictions = chunk.top_predictions || [];
@@ -583,14 +893,10 @@
             }
             eventStats[pred.name].count += 1;
             eventStats[pred.name].totalProb += pred.prob;
-            eventStats[pred.name].maxProb = Math.max(
-              eventStats[pred.name].maxProb,
-              pred.prob,
-            );
+            eventStats[pred.name].maxProb = Math.max(eventStats[pred.name].maxProb, pred.prob);
           });
         });
 
-        // Sort by frequency (count) descending
         const sorted = Object.entries(eventStats)
           .sort((a, b) => b[1].count - a[1].count)
           .slice(0, topN);
@@ -603,9 +909,6 @@
         }));
       }
 
-      /**
-       * Build heatmap data matrix: rows=events, cols=chunks
-       */
       function buildHeatmapData(chunks, topEventNames) {
         const nEvents = topEventNames.length;
         const nChunks = chunks.length;
@@ -625,9 +928,6 @@
         return matrix;
       }
 
-      /**
-       * Get color for probability value (matching HEATMAP_CMAP)
-       */
       function getHeatmapColor(prob) {
         if (prob >= 0.8) return "#1A1A6E";
         if (prob >= 0.5) return "#648FFF";
@@ -636,16 +936,10 @@
         return "#FFFFFF";
       }
 
-      /**
-       * Get text color based on background darkness
-       */
       function getTextColor(prob) {
         return prob >= 0.5 ? "#FFFFFF" : "#333333";
       }
 
-      /**
-       * Get marker size based on probability (matching _get_marker_size_and_alpha)
-       */
       function getMarkerSize(prob) {
         if (prob >= HIGH_PROBABILITY_THRESHOLD) return 12;
         if (prob >= MEDIUM_PROBABILITY_THRESHOLD) return 8;
@@ -653,98 +947,71 @@
         return 4;
       }
 
-      /**
-       * Get bar styling based on probability
-       */
       function getBarStyle(prob) {
         if (prob >= HIGH_PROBABILITY_THRESHOLD) {
-          return {
-            color: "#1A1A6E",
-            borderColor: "#FFD700",
-            borderWidth: 2,
-            alpha: 1.0,
-            hatch: false,
-          };
+          return { color: "#1A1A6E", borderColor: "#FFD700", borderWidth: 2, alpha: 1.0 };
         }
         if (prob >= MEDIUM_PROBABILITY_THRESHOLD) {
-          return {
-            color: "#DC267F",
-            borderColor: "#FFFFFF",
-            borderWidth: 1,
-            alpha: 0.9,
-            hatch: false,
-          };
+          return { color: "#DC267F", borderColor: "#FFFFFF", borderWidth: 1, alpha: 0.9 };
         }
         if (prob >= DEFAULT_PROBABILITY_THRESHOLD) {
-          return {
-            color: "#648FFF",
-            borderColor: "#FFFFFF",
-            borderWidth: 1,
-            alpha: 0.8,
-            hatch: false,
-          };
+          return { color: "#648FFF", borderColor: "#FFFFFF", borderWidth: 1, alpha: 0.8 };
         }
-        return {
-          color: "#AAAAAA",
-          borderColor: "#888888",
-          borderWidth: 1,
-          alpha: 0.6,
-          hatch: true,
-        };
+        return { color: "#AAAAAA", borderColor: "#888888", borderWidth: 1, alpha: 0.6 };
       }
 
-      // ===== Summary Cards Update =====
-      function updateSummaryCards(stats, chunks, isFiltered) {
+      // ===== Summary Cards Update (segment-aware) =====
+      function updateSummaryCards(stats, chunks, segments, isFiltered) {
         if (isFiltered && chunks.length === 1) {
           const seg = chunks[0];
+          document.getElementById("cardSegments").textContent = "1";
           document.getElementById("cardTotal").textContent = "1";
-          document.getElementById("cardDuration").textContent = "-";
-          document.getElementById("cardSpeech").textContent =
-            seg.speech_detected ? "✅ Yes" : "❌ No";
-          document.getElementById("cardSpeechPct").textContent =
-            "Single chunk view";
-          document.getElementById("cardChunkDur").textContent = "-";
-          document.getElementById("cardOverlap").textContent = "-";
+          document.getElementById("cardSpeech").textContent = seg.speech_detected ? "✅ Yes" : "❌ No";
+          document.getElementById("cardSpeechPct").textContent = "Single chunk view";
+          document.getElementById("cardAvgChunks").textContent = "1";
+          document.getElementById("cardAvgProb").textContent = (seg.speech_probability || 0).toFixed(3);
           if (seg.top_predictions && seg.top_predictions.length > 0) {
-            document.getElementById("cardTopEvent").textContent =
-              seg.top_predictions[0].name;
+            document.getElementById("cardTopEvent").textContent = seg.top_predictions[0].name;
             document.getElementById("cardTopEventProb").textContent =
               `${(seg.top_predictions[0].prob * 100).toFixed(1)}% probability`;
           } else {
             document.getElementById("cardTopEvent").textContent = "N/A";
-            document.getElementById("cardTopEventProb").textContent =
-              "No predictions";
+            document.getElementById("cardTopEventProb").textContent = "No predictions";
           }
           return;
         }
 
-        document.getElementById("cardTotal").textContent = chunks.length;
-        document.getElementById("cardSpeech").textContent = chunks.filter(
-          (c) => c.speech_detected,
-        ).length;
+        const segCount = segments ? segments.length : 0;
+        const chunkCount = chunks.length;
+
+        document.getElementById("cardSegments").textContent = segCount;
+        document.getElementById("cardTotal").textContent = chunkCount;
+
+        // Speech segments (segments with at least one speech chunk)
+        const speechSegs = segments
+          ? segments.filter((s) => s.chunks.some((c) => c.speech_detected)).length
+          : chunks.filter((c) => c.speech_detected).length;
+        document.getElementById("cardSpeech").textContent = speechSegs;
         document.getElementById("cardSpeechPct").textContent =
-          `${((chunks.filter((c) => c.speech_detected).length / Math.max(chunks.length, 1)) * 100).toFixed(1)}% of total`;
+          segCount > 0 ? `${((speechSegs / segCount) * 100).toFixed(1)}% of segments` : "-";
 
-        // Calculate total duration from chunk timestamps
-        if (chunks.length > 0) {
-          const startTimes = chunks.map((c) => c.start_time || 0);
-          const endTimes = chunks.map((c) => c.end_time || 0);
-          const minStart = Math.min(...startTimes);
-          const maxEnd = Math.max(...endTimes);
-          document.getElementById("cardDuration").textContent =
-            (maxEnd - minStart).toFixed(1) + "s";
-        } else {
-          document.getElementById("cardDuration").textContent = "-";
-        }
+        // Avg chunks per segment
+        const avgChunks = segCount > 0 ? (chunkCount / segCount).toFixed(1) : "-";
+        document.getElementById("cardAvgChunks").textContent = avgChunks;
 
-        document.getElementById("cardChunkDur").textContent = "-";
-        document.getElementById("cardOverlap").textContent = "-";
+        // Avg speech probability
+        const speechProbs = chunks
+          .map((c) => c.speech_probability)
+          .filter((p) => p !== undefined && p !== null);
+        const avgProb = speechProbs.length > 0
+          ? (speechProbs.reduce((a, b) => a + b, 0) / speechProbs.length).toFixed(3)
+          : "-";
+        document.getElementById("cardAvgProb").textContent = avgProb;
 
         // Top event
         const topEvents = getTopEventNames(chunks, 1);
         if (topEvents.length > 0) {
-          document.getElementById("cardTopEvent").textContent =
-            topEvents[0].name;
+          document.getElementById("cardTopEvent").textContent = topEvents[0].name;
           document.getElementById("cardTopEventProb").textContent =
             `${(topEvents[0].avgProb * 100).toFixed(1)}% avg (${topEvents[0].count} chunks)`;
         } else {
@@ -755,10 +1022,6 @@
 
       // ===== Chart Creation Functions =====
 
-      /**
-       * Plot 1: Chunk Heatmap
-       * Mirrors _plot_chunk_heatmap() - heatmap showing top-K event probabilities across chunks
-       */
       function createChunkHeatmap(chunks, topEventNames) {
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
@@ -767,59 +1030,45 @@
 
         const nEvents = topEventNames.length;
         const nChunks = chunks.length;
-        const matrix = buildHeatmapData(
-          chunks,
-          topEventNames.map((e) => e.name),
-        );
+        const matrix = buildHeatmapData(chunks, topEventNames.map((e) => e.name));
 
-        // Use Chart.js matrix chart for heatmap
         const datasets = [];
         for (let rowIdx = 0; rowIdx < nEvents; rowIdx++) {
           for (let colIdx = 0; colIdx < nChunks; colIdx++) {
-            const prob = matrix[rowIdx][colIdx];
-            datasets.push({
-              x: colIdx,
-              y: rowIdx,
-              v: prob,
-            });
+            datasets.push({ x: colIdx, y: rowIdx, v: matrix[rowIdx][colIdx] });
           }
         }
 
         charts.heatmap = new Chart(ctx, {
           type: "matrix",
           data: {
-            datasets: [
-              {
-                label: "Probability",
-                data: datasets,
-                backgroundColor(ctx) {
-                  const value = ctx.dataset.data[ctx.dataIndex].v;
-                  return getHeatmapColor(value);
-                },
-                borderColor: "#DDD",
-                borderWidth: 1,
-                width: ({ chart }) =>
-                  (chart.chartArea || {}).width / nChunks - 1,
-                height: ({ chart }) =>
-                  (chart.chartArea || {}).height / nEvents - 1,
+            datasets: [{
+              label: "Probability",
+              data: datasets,
+              backgroundColor(ctx) {
+                return getHeatmapColor(ctx.dataset.data[ctx.dataIndex].v);
               },
-            ],
+              borderColor: "#DDD",
+              borderWidth: 1,
+              width: ({ chart }) => (chart.chartArea || {}).width / Math.max(nChunks, 1) - 1,
+              height: ({ chart }) => (chart.chartArea || {}).height / Math.max(nEvents, 1) - 1,
+            }],
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-              legend: {
-                display: false,
-              },
+              legend: { display: false },
               tooltip: {
                 callbacks: {
                   title: (items) => {
                     const item = items[0];
                     const chunkIdx = item.dataset.data[item.dataIndex].x;
-                    const eventIdx = item.dataset.data[item.dataIndex].y;
                     const chunk = chunks[chunkIdx];
-                    return `Chunk ${chunk.chunk_index || chunkIdx}: ${(chunk.start_time || 0).toFixed(1)}s-${(chunk.end_time || 0).toFixed(1)}s`;
+                    const segLabel = chunk._segmentDir
+                      ? ` [${chunk._segmentDir}]`
+                      : "";
+                    return `Chunk ${chunk.chunk_index || chunkIdx}${segLabel}: ${(chunk.start_time || 0).toFixed(1)}s-${(chunk.end_time || 0).toFixed(1)}s`;
                   },
                   label: (item) => {
                     const eventIdx = item.dataset.data[item.dataIndex].y;
@@ -839,16 +1088,20 @@
                     const idx = Math.round(value);
                     if (idx >= 0 && idx < nChunks) {
                       const chunk = chunks[idx];
-                      return `${(chunk.start_time || 0).toFixed(1)}s`;
+                      // Show segment info in x-axis labels
+                      const segLabel = chunk._segmentKey
+                        ? `${chunk._segmentKey}/`
+                        : "";
+                      return `${segLabel}${(chunk.start_time || 0).toFixed(1)}s`;
                     }
                     return "";
                   },
-                  font: { size: 9 },
-                  maxRotation: 45,
+                  font: { size: 8 },
+                  maxRotation: 60,
                 },
                 title: {
                   display: true,
-                  text: "Chunk Start Time (seconds)",
+                  text: "Segment / Chunk Start Time",
                   font: { weight: "bold" },
                 },
                 grid: { display: false },
@@ -862,9 +1115,7 @@
                     const idx = Math.round(value);
                     if (idx >= 0 && idx < nEvents) {
                       const name = topEventNames[idx].name;
-                      return name.length > 40
-                        ? name.substring(0, 40) + "…"
-                        : name;
+                      return name.length > 40 ? name.substring(0, 40) + "…" : name;
                     }
                     return "";
                   },
@@ -880,71 +1131,50 @@
               },
             },
           },
-          plugins: [
-            {
-              id: "heatmapLabels",
-              afterDraw(chart) {
-                const {
-                  ctx,
-                  scales: { x, y },
-                  data,
-                } = chart;
-                const dataset = data.datasets[0];
-                ctx.save();
-                ctx.font = "9px -apple-system, BlinkMacSystemFont, sans-serif";
-                ctx.textAlign = "center";
-                ctx.textBaseline = "middle";
+          plugins: [{
+            id: "heatmapLabels",
+            afterDraw(chart) {
+              const { ctx, scales: { x, y }, data } = chart;
+              const dataset = data.datasets[0];
+              ctx.save();
+              ctx.font = "9px -apple-system, BlinkMacSystemFont, sans-serif";
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
 
-                dataset.data.forEach((point) => {
-                  const xPos = x.getPixelForValue(point.x);
-                  const yPos = y.getPixelForValue(point.y);
-                  const prob = point.v;
-                  const barWidth =
-                    x.getPixelForValue(point.x + 0.5) -
-                    x.getPixelForValue(point.x - 0.5);
-                  const barHeight = Math.abs(
-                    y.getPixelForValue(point.y + 0.5) -
-                      y.getPixelForValue(point.y - 0.5),
-                  );
+              dataset.data.forEach((point) => {
+                const xPos = x.getPixelForValue(point.x);
+                const yPos = y.getPixelForValue(point.y);
+                const prob = point.v;
+                const barWidth = x.getPixelForValue(point.x + 0.5) - x.getPixelForValue(point.x - 0.5);
+                const barHeight = Math.abs(y.getPixelForValue(point.y + 0.5) - y.getPixelForValue(point.y - 0.5));
 
-                  if (prob > 0 && barWidth > 20 && barHeight > 15) {
-                    ctx.fillStyle = getTextColor(prob);
-                    if (prob >= HIGH_PROBABILITY_THRESHOLD) {
-                      ctx.font =
-                        "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
-                    } else if (prob >= MEDIUM_PROBABILITY_THRESHOLD) {
-                      ctx.font =
-                        "bold 10px -apple-system, BlinkMacSystemFont, sans-serif";
-                    }
-                    ctx.fillText((prob * 100).toFixed(0) + "%", xPos, yPos);
-
-                    // Highlight border for high probability
-                    if (prob >= HIGH_PROBABILITY_THRESHOLD) {
-                      ctx.strokeStyle = "#FFD700";
-                      ctx.lineWidth = 2;
-                      ctx.strokeRect(
-                        xPos - barWidth / 2,
-                        yPos - barHeight / 2,
-                        barWidth,
-                        barHeight,
-                      );
-                    }
-                  } else if (prob === 0 && barWidth > 15 && barHeight > 10) {
-                    ctx.fillStyle = "#CCCCCC";
-                    ctx.font =
-                      "8px -apple-system, BlinkMacSystemFont, sans-serif";
-                    ctx.fillText("—", xPos, yPos);
+                if (prob > 0 && barWidth > 20 && barHeight > 15) {
+                  ctx.fillStyle = getTextColor(prob);
+                  if (prob >= HIGH_PROBABILITY_THRESHOLD) {
+                    ctx.font = "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
+                  } else if (prob >= MEDIUM_PROBABILITY_THRESHOLD) {
+                    ctx.font = "bold 10px -apple-system, BlinkMacSystemFont, sans-serif";
                   }
-                });
-                ctx.restore();
-              },
+                  ctx.fillText((prob * 100).toFixed(0) + "%", xPos, yPos);
+
+                  if (prob >= HIGH_PROBABILITY_THRESHOLD) {
+                    ctx.strokeStyle = "#FFD700";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(xPos - barWidth / 2, yPos - barHeight / 2, barWidth, barHeight);
+                  }
+                } else if (prob === 0 && barWidth > 15 && barHeight > 10) {
+                  ctx.fillStyle = "#CCCCCC";
+                  ctx.font = "8px -apple-system, BlinkMacSystemFont, sans-serif";
+                  ctx.fillText("—", xPos, yPos);
+                }
+              });
+              ctx.restore();
             },
-          ],
+          }],
         });
 
         container.appendChild(canvas);
 
-        // Add legend
         const legend = document.createElement("div");
         legend.className = "heatmap-legend";
         legend.innerHTML = `
@@ -958,17 +1188,11 @@
         return container;
       }
 
-      /**
-       * Plot 2: Events Timeline
-       * Mirrors _plot_events_timeline() - line plot with marker sizes proportional to probability
-       */
       function createEventsTimeline(chunks, topEventNames) {
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
 
-        const chunkTimes = chunks.map(
-          (c) => ((c.start_time || 0) + (c.end_time || 0)) / 2,
-        );
+        const chunkTimes = chunks.map((c) => ((c.start_time || 0) + (c.end_time || 0)) / 2);
         const datasets = [];
 
         topEventNames.forEach((event, idx) => {
@@ -979,17 +1203,13 @@
             return pred ? pred.prob : null;
           });
 
-          // Main line dataset
           datasets.push({
-            label:
-              event.name.length > 50
-                ? event.name.substring(0, 50) + "…"
-                : event.name,
+            label: event.name.length > 50 ? event.name.substring(0, 50) + "…" : event.name,
             data: probs.map((p, i) => ({ x: chunkTimes[i], y: p })),
             borderColor: color,
             backgroundColor: color,
             borderWidth: 2,
-            pointRadius: probs.map((p) => (p !== null ? getMarkerSize(p) : 0)),
+            pointRadius: probs.map((p) => p !== null ? getMarkerSize(p) : 0),
             pointBackgroundColor: color,
             pointBorderColor: "#FFFFFF",
             pointBorderWidth: 1,
@@ -998,7 +1218,6 @@
             fill: false,
           });
 
-          // High probability glow points
           const highProbPoints = [];
           probs.forEach((p, i) => {
             if (p !== null && p >= HIGH_PROBABILITY_THRESHOLD) {
@@ -1011,9 +1230,7 @@
               data: highProbPoints,
               backgroundColor: color + "33",
               borderColor: "transparent",
-              pointRadius: highProbPoints.map(
-                () => getMarkerSize(HIGH_PROBABILITY_THRESHOLD) * 2,
-              ),
+              pointRadius: highProbPoints.map(() => getMarkerSize(HIGH_PROBABILITY_THRESHOLD) * 2),
               pointBackgroundColor: color + "33",
               pointBorderWidth: 0,
               showLine: false,
@@ -1022,12 +1239,15 @@
           }
         });
 
-        // Threshold lines
+        const allTimes = chunkTimes.filter((t) => t !== undefined && t !== null);
+        const minTime = allTimes.length > 0 ? Math.min(...allTimes) : 0;
+        const maxTime = allTimes.length > 0 ? Math.max(...allTimes) : 1;
+
         datasets.push({
           label: `Threshold (${(DEFAULT_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)`,
           data: [
-            { x: Math.min(...chunkTimes), y: DEFAULT_PROBABILITY_THRESHOLD },
-            { x: Math.max(...chunkTimes), y: DEFAULT_PROBABILITY_THRESHOLD },
+            { x: minTime, y: DEFAULT_PROBABILITY_THRESHOLD },
+            { x: maxTime, y: DEFAULT_PROBABILITY_THRESHOLD },
           ],
           borderColor: "#FF9800",
           borderDash: [5, 5],
@@ -1040,8 +1260,8 @@
         datasets.push({
           label: `High prob (${(HIGH_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)`,
           data: [
-            { x: Math.min(...chunkTimes), y: HIGH_PROBABILITY_THRESHOLD },
-            { x: Math.max(...chunkTimes), y: HIGH_PROBABILITY_THRESHOLD },
+            { x: minTime, y: HIGH_PROBABILITY_THRESHOLD },
+            { x: maxTime, y: HIGH_PROBABILITY_THRESHOLD },
           ],
           borderColor: "#F44336",
           borderDash: [2, 4],
@@ -1068,16 +1288,8 @@
               tooltip: {
                 callbacks: {
                   label: (context) => {
-                    if (
-                      context.dataset.label &&
-                      context.dataset.label.includes("Threshold")
-                    )
-                      return null;
-                    if (
-                      context.dataset.label &&
-                      context.dataset.label.includes("High prob")
-                    )
-                      return null;
+                    if (context.dataset.label?.includes("Threshold")) return null;
+                    if (context.dataset.label?.includes("High prob")) return null;
                     if (context.raw.y === null) return "No data";
                     return `${context.dataset.label}: ${(context.raw.y * 100).toFixed(1)}%`;
                   },
@@ -1088,21 +1300,11 @@
               y: {
                 min: -0.05,
                 max: 1.05,
-                ticks: {
-                  callback: (value) => `${(value * 100).toFixed(0)}%`,
-                },
-                title: {
-                  display: true,
-                  text: "Probability",
-                  font: { weight: "bold" },
-                },
+                ticks: { callback: (value) => `${(value * 100).toFixed(0)}%` },
+                title: { display: true, text: "Probability", font: { weight: "bold" } },
               },
               x: {
-                title: {
-                  display: true,
-                  text: "Time (seconds)",
-                  font: { weight: "bold" },
-                },
+                title: { display: true, text: "Time (seconds)", font: { weight: "bold" } },
               },
             },
           },
@@ -1111,49 +1313,38 @@
         return canvas;
       }
 
-      /**
-       * Plot 3: Results Bar Chart
-       * Mirrors _plot_results_bar() - horizontal bar chart of aggregated results
-       */
       function createResultsBar(topEventNames) {
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
 
-        // Reverse for horizontal display (bottom to top)
         const reversed = [...topEventNames].reverse();
         const labels = reversed.map((e) =>
-          e.name.length > 60 ? e.name.substring(0, 60) + "…" : e.name,
+          e.name.length > 60 ? e.name.substring(0, 60) + "…" : e.name
         );
         const probs = reversed.map((e) => e.avgProb);
-
         const backgroundColors = probs.map((p) => getBarStyle(p).color);
         const borderColors = probs.map((p) => getBarStyle(p).borderColor);
         const borderWidths = probs.map((p) => getBarStyle(p).borderWidth);
-        const alphas = probs.map((p) => getBarStyle(p).alpha);
 
         charts.resultsBar = new Chart(ctx, {
           type: "bar",
           data: {
             labels,
-            datasets: [
-              {
-                label: "Mean Probability Across Chunks",
-                data: probs,
-                backgroundColor: backgroundColors,
-                borderColor: borderColors,
-                borderWidth: borderWidths,
-                borderRadius: 3,
-              },
-            ],
+            datasets: [{
+              label: "Mean Probability Across Chunks",
+              data: probs,
+              backgroundColor: backgroundColors,
+              borderColor: borderColors,
+              borderWidth: borderWidths,
+              borderRadius: 3,
+            }],
           },
           options: {
             indexAxis: "y",
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-              legend: {
-                display: false,
-              },
+              legend: { display: false },
               tooltip: {
                 callbacks: {
                   label: (context) => {
@@ -1171,127 +1362,80 @@
               x: {
                 min: 0,
                 max: 1.15,
-                ticks: {
-                  callback: (value) => `${(value * 100).toFixed(0)}%`,
-                },
-                title: {
-                  display: true,
-                  text: "Mean Probability Across Chunks",
-                  font: { weight: "bold" },
-                },
+                ticks: { callback: (value) => `${(value * 100).toFixed(0)}%` },
+                title: { display: true, text: "Mean Probability Across Chunks", font: { weight: "bold" } },
                 grid: { color: "#F0F0F0" },
               },
-              y: {
-                ticks: {
-                  font: { size: 10 },
-                },
-              },
+              y: { ticks: { font: { size: 10 } } },
             },
           },
-          plugins: [
-            {
-              id: "thresholdLine",
-              afterDraw(chart) {
-                const {
-                  ctx,
-                  scales: { x, y },
-                } = chart;
-                const thresholdX = x.getPixelForValue(
-                  DEFAULT_PROBABILITY_THRESHOLD,
-                );
-                ctx.save();
-                ctx.strokeStyle = "#FF9800";
-                ctx.lineWidth = 1.5;
-                ctx.setLineDash([5, 5]);
-                ctx.beginPath();
-                ctx.moveTo(thresholdX, y.top);
-                ctx.lineTo(thresholdX, y.bottom);
-                ctx.stroke();
-                ctx.restore();
-
-                // Label for threshold
-                ctx.save();
-                ctx.fillStyle = "#FF9800";
+          plugins: [{
+            id: "thresholdLine",
+            afterDraw(chart) {
+              const { ctx, scales: { x, y } } = chart;
+              const thresholdX = x.getPixelForValue(DEFAULT_PROBABILITY_THRESHOLD);
+              ctx.save();
+              ctx.strokeStyle = "#FF9800";
+              ctx.lineWidth = 1.5;
+              ctx.setLineDash([5, 5]);
+              ctx.beginPath();
+              ctx.moveTo(thresholdX, y.top);
+              ctx.lineTo(thresholdX, y.bottom);
+              ctx.stroke();
+              ctx.fillStyle = "#FF9800";
+              ctx.font = "8px -apple-system, BlinkMacSystemFont, sans-serif";
+              ctx.fillText(`Threshold (${(DEFAULT_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)`, thresholdX + 5, y.top + 12);
+              ctx.restore();
+            },
+          }, {
+            id: "barLabels",
+            afterDraw(chart) {
+              const { ctx, scales: { x }, data } = chart;
+              const meta = chart.getDatasetMeta(0);
+              ctx.save();
+              meta.data.forEach((bar, i) => {
+                const prob = data.datasets[0].data[i];
+                let label, fontStyle, color;
+                if (prob >= HIGH_PROBABILITY_THRESHOLD) {
+                  label = `★ ${(prob * 100).toFixed(0)}%`;
+                  fontStyle = "bold 12px -apple-system, BlinkMacSystemFont, sans-serif";
+                  color = "#1A1A6E";
+                } else if (prob >= MEDIUM_PROBABILITY_THRESHOLD) {
+                  label = `${(prob * 100).toFixed(0)}%`;
+                  fontStyle = "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
+                  color = "#333333";
+                } else if (prob >= DEFAULT_PROBABILITY_THRESHOLD) {
+                  label = `${(prob * 100).toFixed(0)}%`;
+                  fontStyle = "10px -apple-system, BlinkMacSystemFont, sans-serif";
+                  color = "#555555";
+                } else {
+                  label = `${(prob * 100).toFixed(0)}%`;
+                  fontStyle = "9px -apple-system, BlinkMacSystemFont, sans-serif";
+                  color = "#888888";
+                }
+                ctx.font = fontStyle;
+                ctx.fillStyle = color;
+                ctx.textBaseline = "middle";
+                ctx.fillText(label, bar.x + 8, bar.y);
+                const rank = data.labels.length - i;
                 ctx.font = "8px -apple-system, BlinkMacSystemFont, sans-serif";
-                ctx.fillText(
-                  `Threshold (${(DEFAULT_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)`,
-                  thresholdX + 5,
-                  y.top + 12,
-                );
-                ctx.restore();
-              },
+                ctx.fillStyle = prob >= HIGH_PROBABILITY_THRESHOLD ? "#F44336" : "#999999";
+                ctx.textAlign = "right";
+                ctx.fillText(`#${rank}`, bar.x - 35, bar.y);
+              });
+              ctx.restore();
             },
-            {
-              id: "barLabels",
-              afterDraw(chart) {
-                const {
-                  ctx,
-                  scales: { x, y },
-                  data,
-                } = chart;
-                const meta = chart.getDatasetMeta(0);
-                ctx.save();
-
-                meta.data.forEach((bar, i) => {
-                  const prob = data.datasets[0].data[i];
-                  let label, fontStyle, color;
-
-                  if (prob >= HIGH_PROBABILITY_THRESHOLD) {
-                    label = `★ ${(prob * 100).toFixed(0)}%`;
-                    fontStyle =
-                      "bold 12px -apple-system, BlinkMacSystemFont, sans-serif";
-                    color = "#1A1A6E";
-                  } else if (prob >= MEDIUM_PROBABILITY_THRESHOLD) {
-                    label = `${(prob * 100).toFixed(0)}%`;
-                    fontStyle =
-                      "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
-                    color = "#333333";
-                  } else if (prob >= DEFAULT_PROBABILITY_THRESHOLD) {
-                    label = `${(prob * 100).toFixed(0)}%`;
-                    fontStyle =
-                      "10px -apple-system, BlinkMacSystemFont, sans-serif";
-                    color = "#555555";
-                  } else {
-                    label = `${(prob * 100).toFixed(0)}%`;
-                    fontStyle =
-                      "9px -apple-system, BlinkMacSystemFont, sans-serif";
-                    color = "#888888";
-                  }
-
-                  ctx.font = fontStyle;
-                  ctx.fillStyle = color;
-                  ctx.textBaseline = "middle";
-                  ctx.fillText(label, bar.x + 8, bar.y);
-
-                  // Rank label
-                  const rank = data.labels.length - i;
-                  ctx.font =
-                    "8px -apple-system, BlinkMacSystemFont, sans-serif";
-                  ctx.fillStyle =
-                    prob >= HIGH_PROBABILITY_THRESHOLD ? "#F44336" : "#999999";
-                  ctx.textAlign = "right";
-                  ctx.fillText(`#${rank}`, bar.x - 35, bar.y);
-                });
-
-                ctx.restore();
-              },
-            },
-          ],
+          }],
         });
 
         return canvas;
       }
 
-      /**
-       * Plot 4: Chunks Summary Grid
-       * Mirrors _plot_chunk_summary() - per-chunk mini bar charts
-       */
       function createChunksSummary(chunks, topN) {
         const container = document.createElement("div");
         container.className = "plot-container xlarge";
         container.style.display = "grid";
-        container.style.gridTemplateColumns =
-          "repeat(auto-fill, minmax(250px, 1fr))";
+        container.style.gridTemplateColumns = "repeat(auto-fill, minmax(250px, 1fr))";
         container.style.gap = "10px";
         container.style.overflowY = "auto";
 
@@ -1308,12 +1452,8 @@
           miniCard.style.minHeight = "150px";
 
           const predictions = (chunk.top_predictions || []).slice(0, topN);
-          const maxProb =
-            predictions.length > 0
-              ? Math.max(...predictions.map((p) => p.prob))
-              : 0;
+          const maxProb = predictions.length > 0 ? Math.max(...predictions.map((p) => p.prob)) : 0;
 
-          // Border color based on max probability
           if (maxProb >= HIGH_PROBABILITY_THRESHOLD) {
             miniCard.style.borderColor = "#FFD700";
             miniCard.style.borderWidth = "2px";
@@ -1327,13 +1467,13 @@
             miniCard.style.borderColor = "#DDDDDD";
           }
 
-          // Title
           const title = document.createElement("div");
           title.style.fontWeight = "bold";
           title.style.fontSize = "10px";
           title.style.marginBottom = "5px";
           title.style.color = "#333";
-          title.textContent = `C${chunk.chunk_index || idx + 1}: ${(chunk.start_time || 0).toFixed(1)}-${(chunk.end_time || 0).toFixed(1)}s`;
+          const segLabel = chunk._segmentKey ? `[${chunk._segmentKey}] ` : "";
+          title.textContent = `${segLabel}C${chunk.chunk_index || idx + 1}: ${(chunk.start_time || 0).toFixed(1)}-${(chunk.end_time || 0).toFixed(1)}s`;
           miniCard.appendChild(title);
 
           if (predictions.length === 0) {
@@ -1353,7 +1493,7 @@
             const miniCtx = miniCanvas.getContext("2d");
             const reversedPreds = [...predictions].reverse();
             const names = reversedPreds.map((p) =>
-              p.name.length > 25 ? p.name.substring(0, 25) + "…" : p.name,
+              p.name.length > 25 ? p.name.substring(0, 25) + "…" : p.name
             );
             const probs = reversedPreds.map((p) => p.prob);
 
@@ -1361,15 +1501,13 @@
               type: "bar",
               data: {
                 labels: names,
-                datasets: [
-                  {
-                    data: probs,
-                    backgroundColor: probs.map((p) => getBarStyle(p).color),
-                    borderColor: probs.map((p) => getBarStyle(p).borderColor),
-                    borderWidth: probs.map((p) => getBarStyle(p).borderWidth),
-                    borderRadius: 2,
-                  },
-                ],
+                datasets: [{
+                  data: probs,
+                  backgroundColor: probs.map((p) => getBarStyle(p).color),
+                  borderColor: probs.map((p) => getBarStyle(p).borderColor),
+                  borderWidth: probs.map((p) => getBarStyle(p).borderWidth),
+                  borderRadius: 2,
+                }],
               },
               options: {
                 indexAxis: "y",
@@ -1377,32 +1515,19 @@
                 maintainAspectRatio: false,
                 plugins: {
                   legend: { display: false },
-                  tooltip: {
-                    callbacks: {
-                      label: (ctx) => `${(ctx.parsed.x * 100).toFixed(1)}%`,
-                    },
-                  },
+                  tooltip: { callbacks: { label: (ctx) => `${(ctx.parsed.x * 100).toFixed(1)}%` } },
                 },
                 scales: {
                   x: {
                     min: 0,
                     max: 1.1,
-                    ticks: {
-                      callback: (v) => (v === 0 ? "0%" : v === 1 ? "100%" : ""),
-                      font: { size: 7 },
-                    },
+                    ticks: { callback: (v) => v === 0 ? "0%" : v === 1 ? "100%" : "", font: { size: 7 } },
                   },
-                  y: {
-                    ticks: {
-                      font: { size: 7 },
-                      autoSkip: false,
-                    },
-                  },
+                  y: { ticks: { font: { size: 7 }, autoSkip: false } },
                 },
               },
             });
 
-            // Top probability label
             if (probs.length > 0) {
               const topProb = probs[probs.length - 1];
               const label = document.createElement("div");
@@ -1410,14 +1535,9 @@
               label.style.top = "30px";
               label.style.right = "5px";
               label.style.fontSize = "9px";
-              label.style.fontWeight =
-                topProb >= HIGH_PROBABILITY_THRESHOLD ? "bold" : "normal";
-              label.style.color =
-                topProb >= HIGH_PROBABILITY_THRESHOLD ? "#1A1A6E" : "#555";
-              label.textContent =
-                (topProb >= HIGH_PROBABILITY_THRESHOLD ? "★ " : "") +
-                (topProb * 100).toFixed(0) +
-                "%";
+              label.style.fontWeight = topProb >= HIGH_PROBABILITY_THRESHOLD ? "bold" : "normal";
+              label.style.color = topProb >= HIGH_PROBABILITY_THRESHOLD ? "#1A1A6E" : "#555";
+              label.textContent = (topProb >= HIGH_PROBABILITY_THRESHOLD ? "★ " : "") + (topProb * 100).toFixed(0) + "%";
               miniCard.appendChild(label);
             }
           }
@@ -1439,29 +1559,21 @@
         return container;
       }
 
-      /**
-       * Create single-segment detail card (when viewing filtered segment)
-       */
       function createSegmentDetailCard(chunk) {
         const card = document.createElement("div");
         card.className = "plot-card full-width";
-
         const segmentDir = chunk.segment_dir || "N/A";
         const speechDetected = chunk.speech_detected;
         const speechProb = chunk.speech_probability || 0;
         const processingMode = chunk.processing_mode || "unknown";
-
         const predictions = chunk.top_predictions || [];
+
         let predictionsHtml = "";
         predictions.forEach((pred) => {
           predictionsHtml += `
             <tr>
               <td>${escapeHtml(pred.name)}</td>
-              <td>
-                <div class="prob-bar">
-                  <div class="prob-fill" style="width: ${pred.prob * 100}%"></div>
-                </div>
-              </td>
+              <td><div class="prob-bar"><div class="prob-fill" style="width: ${pred.prob * 100}%"></div></div></td>
               <td><strong>${(pred.prob * 100).toFixed(1)}%</strong></td>
             </tr>
           `;
@@ -1477,17 +1589,13 @@
             <tr><th>Speech Probability</th><td><div class="prob-bar"><div class="prob-fill ${speechDetected ? "speech" : ""}" style="width: ${speechProb * 100}%"></div></div><small>${(speechProb * 100).toFixed(1)}%</small></td></tr>
             <tr><th>Processing Mode</th><td><span class="badge badge-info">${escapeHtml(processingMode)}</span></td></tr>
           </table>
-          ${
-            predictions.length > 0
-              ? `
+          ${predictions.length > 0 ? `
             <h3 style="margin-top: 15px; color: #667eea;">🔝 Top Predictions</h3>
             <table class="detail-table">
               <thead><tr><th>Label</th><th>Probability Bar</th><th>Value</th></tr></thead>
               <tbody>${predictionsHtml}</tbody>
             </table>
-          `
-              : '<p style="margin-top: 15px; color: #666;">No predictions available</p>'
-          }
+          ` : '<p style="margin-top: 15px; color: #666;">No predictions available</p>'}
         `;
         return card;
       }
@@ -1495,20 +1603,18 @@
       // ===== Main Render Function =====
       async function refreshPlots() {
         const plotsGrid = document.getElementById("plotsGrid");
-        plotsGrid.innerHTML =
-          '<div class="loading">Loading visualizations</div>';
+        plotsGrid.innerHTML = '<div class="loading">Loading visualizations</div>';
         destroyCharts();
 
         try {
-          const data = await fetchData();
+          const data = await fetchAndProcessData();
           const chunks = data.chunks || [];
+          const segments = data.segments || [];
           const stats = data.stats || {};
           const isFiltered = data.isFiltered || false;
-          const topN = parseInt(
-            document.getElementById("topNSelect")?.value || "5",
-          );
+          const topN = parseInt(document.getElementById("topNSelect")?.value || "5");
 
-          updateSummaryCards(stats, chunks, isFiltered);
+          updateSummaryCards(stats, chunks, segments, isFiltered);
 
           // Handle filtered single-segment view
           if (isFiltered) {
@@ -1518,26 +1624,20 @@
                   <div class="error-message">
                     <h3>🔍 Segment Not Found</h3>
                     <p>The segment "<strong>${escapeHtml(activeSegmentFilter)}</strong>" was not found.</p>
-                    <a href="/tags" class="btn btn-small" style="margin-top: 10px;">📊 View All Chunks</a>
+                    <a href="/tags" class="btn btn-small" style="margin-top: 10px;">📊 View All Segments</a>
                   </div>
                 </div>
               `;
               return;
             }
-
             plotsGrid.innerHTML = "";
             plotsGrid.appendChild(createSegmentDetailCard(chunks[0]));
-
-            // Show available charts for single chunk
             const topEvents = getTopEventNames(chunks, topN);
             if (topEvents.length > 0) {
               const plot1 = document.createElement("div");
               plot1.className = "plot-card full-width";
-              plot1.innerHTML =
-                '<h2>🔝 Top Predictions for This Chunk</h2><div class="plot-container"></div>';
-              plot1
-                .querySelector(".plot-container")
-                .appendChild(createResultsBar(topEvents));
+              plot1.innerHTML = '<h2>🔝 Top Predictions for This Chunk</h2><div class="plot-container"></div>';
+              plot1.querySelector(".plot-container").appendChild(createResultsBar(topEvents));
               plotsGrid.appendChild(plot1);
             }
             return;
@@ -1547,9 +1647,9 @@
           if (chunks.length === 0) {
             plotsGrid.innerHTML = `
               <div class="plot-card full-width">
-                <div class="error-message">
+                <div class="info-message">
                   <h3>📭 No Data Available</h3>
-                  <p>Process some audio chunks to see visualizations.</p>
+                  <p>No chunks found for the selected filter. Try adjusting the segment count or filter settings.</p>
                 </div>
               </div>
             `;
@@ -1577,7 +1677,7 @@
           plot1.innerHTML = `
             <h2>🔥 Event Probability Heatmap Across Chunks</h2>
             <p style="color: #666; font-size: 0.85em; margin-bottom: 10px;">
-              Chunks: ${chunks.length} | Top Events: ${topN} | Gold border = High prob (≥${(HIGH_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)
+              Segments: ${segments.length} | Chunks: ${chunks.length} | Top Events: ${topN} | Gold border = High prob (≥${(HIGH_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)
             </p>
           `;
           plot1.appendChild(createChunkHeatmap(chunks, topEvents));
@@ -1593,9 +1693,7 @@
             </p>
             <div class="plot-container large"></div>
           `;
-          plot2
-            .querySelector(".plot-container")
-            .appendChild(createEventsTimeline(chunks, topEvents));
+          plot2.querySelector(".plot-container").appendChild(createEventsTimeline(chunks, topEvents));
           plotsGrid.appendChild(plot2);
 
           // Plot 3: Results Bar Chart
@@ -1608,9 +1706,7 @@
             </p>
             <div class="plot-container"></div>
           `;
-          plot3
-            .querySelector(".plot-container")
-            .appendChild(createResultsBar(topEvents));
+          plot3.querySelector(".plot-container").appendChild(createResultsBar(topEvents));
           plotsGrid.appendChild(plot3);
 
           // Plot 4: Chunks Summary Grid (full width)
@@ -1624,6 +1720,7 @@
           `;
           plot4.appendChild(createChunksSummary(chunks, Math.min(topN, 3)));
           plotsGrid.appendChild(plot4);
+
         } catch (error) {
           console.error("[refreshPlots] Error:", error);
           plotsGrid.innerHTML = `
@@ -1640,10 +1737,9 @@
 
       // ===== Initialization =====
       document.addEventListener("DOMContentLoaded", () => {
-        console.log(
-          "[DOMContentLoaded] Initializing tags.html (chunk plots version)",
-        );
+        console.log("[DOMContentLoaded] Initializing tags.html (segment-level filter version)");
         applySegmentFilterFromUrl();
+        updateSegmentInfo();
         refreshPlots();
 
         // Auto-refresh every 60 seconds (only when not filtered)
@@ -1655,7 +1751,9 @@
       });
 
       window.addEventListener("resize", () => {
-        Object.values(charts).forEach((chart) => chart.resize());
+        Object.values(charts).forEach((chart) => {
+          try { chart.resize(); } catch (e) { /* ignore */ }
+        });
       });
     </script>
   </body>
