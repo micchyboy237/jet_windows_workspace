@@ -22,12 +22,27 @@ MODEL_PATH = (
     r"\shisa-v2.1-llama3.2-3b.Q4_K_M.gguf"
 )
 
+MODEL_SETTINGS = {
+    "n_ctx": 2048,
+    "n_gpu_layers": -1,
+    "flash_attn": True,
+    "logits_all": False,
+    "type_k": 8,
+    "type_v": 8,
+    "tokenizer_kwargs": {"add_bos_token": False},
+    "n_batch": 128,
+    "n_threads": 6,
+    "n_threads_batch": 6,
+    "use_mlock": True,
+    "use_mmap": True,
+    "verbose": False,
+}
+
 DEFAULT_MAX_TOKENS = 256
 DEFAULT_TEMPERATURE = 0.6
 DEFAULT_TOP_P = 0.9
 DEFAULT_TOP_K = 40
 DEFAULT_REPEAT_PENALTY = 1.05
-N_CTX = 8192
 
 SYSTEM_PROMPT = (
     "You are a professional Japanese-to-English translator. "
@@ -51,13 +66,7 @@ def _get_llm() -> Llama:
     old_stderr = sys.stderr
     sys.stderr = open(os.devnull, 'w')
     try:
-        llm = Llama(
-            model_path=MODEL_PATH,
-            n_ctx=N_CTX,
-            n_gpu_layers=-1,       # offload all layers to GPU if available
-            offload_kqv=True,      # keep KV cache on GPU for faster re-use
-            verbose=False,         # suppress llama.cpp startup noise
-        )
+        llm = Llama(model_path=MODEL_PATH, **MODEL_SETTINGS)
     finally:
         sys.stderr = old_stderr
 
