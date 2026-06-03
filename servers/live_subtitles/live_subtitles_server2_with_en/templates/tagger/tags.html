@@ -1,8 +1,10 @@
 <!doctype html>
 <html>
   <head>
-    <title>Audio Tagger - Analytics Plots</title>
+    <title>Audio Tagger - Chunk Analytics Plots</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- Chart.js Matrix plugin for heatmap -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
     <style>
       * {
         margin: 0;
@@ -40,6 +42,7 @@
         justify-content: center;
         gap: 10px;
         margin-top: 15px;
+        flex-wrap: wrap;
       }
       .btn {
         background: #667eea;
@@ -61,6 +64,43 @@
       }
       .btn-secondary:hover {
         background: #5a6268;
+      }
+      .btn-outline {
+        background: transparent;
+        color: #667eea;
+        border: 2px solid #667eea;
+      }
+      .btn-outline:hover {
+        background: #667eea;
+        color: white;
+      }
+      .btn-warning {
+        background: #ff9800;
+      }
+      .btn-warning:hover {
+        background: #f57c00;
+      }
+      .filter-banner {
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        color: white;
+        border-radius: 10px;
+        padding: 15px 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .filter-banner.hidden {
+        display: none;
+      }
+      .filter-banner .filter-info {
+        font-size: 1em;
+      }
+      .filter-banner .filter-info strong {
+        font-size: 1.1em;
       }
       .summary-cards {
         display: grid;
@@ -128,10 +168,13 @@
       .plot-container {
         position: relative;
         width: 100%;
-        height: 350px;
+        height: 400px;
       }
       .plot-container.large {
-        height: 400px;
+        height: 500px;
+      }
+      .plot-container.xlarge {
+        height: 650px;
       }
       canvas {
         width: 100% !important;
@@ -168,6 +211,14 @@
         text-align: center;
         margin: 20px 0;
       }
+      .info-message {
+        background: #d1ecf1;
+        color: #0c5460;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        margin: 20px 0;
+      }
       .controls {
         display: flex;
         justify-content: space-between;
@@ -196,18 +247,71 @@
         padding: 8px 20px;
         font-size: 0.9em;
       }
-      .tooltip-info {
+      .detail-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+      .detail-table th,
+      .detail-table td {
+        padding: 10px;
+        text-align: left;
+        border-bottom: 1px solid #ddd;
+      }
+      .detail-table th {
+        background: #f5f5f5;
+        font-weight: bold;
+        width: 35%;
+      }
+      .badge {
         display: inline-block;
-        width: 16px;
-        height: 16px;
-        background: #667eea;
-        color: white;
-        border-radius: 50%;
-        text-align: center;
-        line-height: 16px;
-        font-size: 0.7em;
-        cursor: help;
-        margin-left: 5px;
+        padding: 3px 8px;
+        border-radius: 3px;
+        font-size: 0.8em;
+        font-weight: bold;
+      }
+      .badge-success {
+        background: #d4edda;
+        color: #155724;
+      }
+      .badge-danger {
+        background: #f8d7da;
+        color: #721c24;
+      }
+      .badge-info {
+        background: #d1ecf1;
+        color: #0c5460;
+      }
+      .prob-bar {
+        height: 10px;
+        background: #f0f0f0;
+        border-radius: 5px;
+        overflow: hidden;
+        margin-top: 5px;
+      }
+      .prob-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        border-radius: 5px;
+      }
+      .prob-fill.speech {
+        background: linear-gradient(90deg, #4caf50, #45a049);
+      }
+      /* Heatmap legend */
+      .heatmap-legend {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 10px;
+        font-size: 0.85em;
+      }
+      .heatmap-gradient {
+        width: 200px;
+        height: 15px;
+        background: linear-gradient(to right, #ffffff, #648fff, #1a1a6e);
+        border-radius: 3px;
+        border: 1px solid #ddd;
       }
       @media (max-width: 768px) {
         .plots-grid {
@@ -222,10 +326,13 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1>📊 Audio Tagger Analytics</h1>
-        <p>Visual analysis of audio segments and speech detection patterns</p>
+        <h1>📊 Audio Tagger - Chunk Analytics Plots</h1>
+        <p>
+          Visual analysis of chunked audio tagging results (matching
+          audio_tagger_chunk_plots.py)
+        </p>
         <div class="nav-buttons">
-          <a href="/tags" class="btn">📊 Home</a>
+          <a href="/tags" class="btn" id="navHome">📊 Home</a>
           <a href="/tags/dashboard" class="btn btn-secondary">📋 Dashboard</a>
           <a href="/tags/chunks" class="btn btn-secondary" target="_blank"
             >🔌 API: Chunks</a
@@ -233,59 +340,85 @@
         </div>
       </div>
 
+      <!-- Active filter banner (hidden by default) -->
+      <div class="filter-banner hidden" id="filterBanner">
+        <span class="filter-info">
+          🔍 <strong>Filtering by segment:</strong>
+          <span id="filterBannerSegmentName">-</span>
+        </span>
+        <div>
+          <a href="/tags" class="btn btn-warning btn-small">✕ Clear Filter</a>
+          <a
+            href="/tags/dashboard"
+            class="btn btn-secondary btn-small"
+            style="margin-left: 10px"
+            >📋 Back to Dashboard</a
+          >
+        </div>
+      </div>
+
       <!-- Summary Cards -->
       <div class="summary-cards" id="summaryCards">
         <div class="summary-card">
-          <div class="label">Total Segments</div>
+          <div class="label">Total Chunks</div>
           <div class="value" id="cardTotal">-</div>
-          <div class="subtitle">Audio segments processed</div>
+          <div class="subtitle">Audio chunks processed</div>
         </div>
         <div class="summary-card">
-          <div class="label">Speech Detected</div>
+          <div class="label">Total Duration</div>
+          <div class="value" id="cardDuration">-</div>
+          <div class="subtitle">Seconds of audio</div>
+        </div>
+        <div class="summary-card">
+          <div class="label">Speech Chunks</div>
           <div class="value" id="cardSpeech">-</div>
           <div class="subtitle" id="cardSpeechPct">-</div>
         </div>
         <div class="summary-card">
-          <div class="label">Avg Probability</div>
-          <div class="value" id="cardAvgProb">-</div>
-          <div class="subtitle">Speech confidence</div>
+          <div class="label">Chunk Duration</div>
+          <div class="value" id="cardChunkDur">-</div>
+          <div class="subtitle">Seconds per chunk</div>
         </div>
         <div class="summary-card">
-          <div class="label">Processing Modes</div>
-          <div class="value" id="cardModes">-</div>
-          <div class="subtitle">Distinct modes used</div>
+          <div class="label">Overlap</div>
+          <div class="value" id="cardOverlap">-</div>
+          <div class="subtitle">Seconds overlap</div>
         </div>
         <div class="summary-card">
-          <div class="label">Top Prediction</div>
-          <div class="value" id="cardTopPred">-</div>
-          <div class="subtitle" id="cardTopPredCount">-</div>
-        </div>
-        <div class="summary-card">
-          <div class="label">Last Updated</div>
-          <div class="value" id="cardUpdated" style="font-size: 1.2em">-</div>
-          <div class="subtitle">Latest segment time</div>
+          <div class="label">Top Event</div>
+          <div class="value" id="cardTopEvent" style="font-size: 1.2em">-</div>
+          <div class="subtitle" id="cardTopEventProb">-</div>
         </div>
       </div>
 
       <!-- Controls -->
-      <div class="controls">
+      <div class="controls" id="globalControls">
         <div>
           <label>
             📅 Data Range:
             <select id="limitSelect" onchange="refreshPlots()">
-              <option value="20">Last 20 segments</option>
-              <option value="50" selected>Last 50 segments</option>
-              <option value="100">Last 100 segments</option>
-              <option value="200">Last 200 segments</option>
-              <option value="500">Last 500 segments</option>
+              <option value="20">Last 20 chunks</option>
+              <option value="50" selected>Last 50 chunks</option>
+              <option value="100">Last 100 chunks</option>
+              <option value="200">Last 200 chunks</option>
+              <option value="500">Last 500 chunks</option>
             </select>
           </label>
           <label style="margin-left: 20px">
             🎯 Filter:
             <select id="filterSelect" onchange="refreshPlots()">
-              <option value="all">All Segments</option>
+              <option value="all">All Chunks</option>
               <option value="speech">Speech Only</option>
               <option value="non-speech">Non-Speech Only</option>
+            </select>
+          </label>
+          <label style="margin-left: 20px">
+            🔝 Top N Events:
+            <select id="topNSelect" onchange="refreshPlots()">
+              <option value="3">Top 3</option>
+              <option value="5" selected>Top 5</option>
+              <option value="8">Top 8</option>
+              <option value="10">Top 10</option>
             </select>
           </label>
         </div>
@@ -301,315 +434,374 @@
     </div>
 
     <script>
+      // Track all chart instances for cleanup
       let charts = {};
+      let activeSegmentFilter = null;
 
-      // Color palette
-      const colors = {
-        primary: "#667eea",
-        secondary: "#764ba2",
-        success: "#4caf50",
-        danger: "#f44336",
-        warning: "#ff9800",
-        info: "#2196f3",
-        gradient: [
-          "#667eea",
-          "#764ba2",
-          "#f093fb",
-          "#4facfe",
-          "#43e97b",
-          "#fa709a",
-        ],
-      };
+      // Color palette - matching Python COLORS
+      const EVENT_COLORS = [
+        "#648FFF",
+        "#785EF0",
+        "#DC267F",
+        "#FE6100",
+        "#FFB000",
+        "#009E73",
+        "#56B4E9",
+        "#E69F00",
+        "#F0E442",
+        "#0072B2",
+      ];
 
-      // Destroy existing charts
+      // Thresholds matching Python constants
+      const HIGH_PROBABILITY_THRESHOLD = 0.7;
+      const MEDIUM_PROBABILITY_THRESHOLD = 0.4;
+      const DEFAULT_PROBABILITY_THRESHOLD = 0.3;
+
+      // ===== Utility Functions =====
+      function getQueryParams() {
+        const params = new URLSearchParams(window.location.search);
+        return { segment: params.get("segment") };
+      }
+
+      function applySegmentFilterFromUrl() {
+        const { segment } = getQueryParams();
+        activeSegmentFilter = segment;
+        const filterBanner = document.getElementById("filterBanner");
+        const globalControls = document.getElementById("globalControls");
+        const navHome = document.getElementById("navHome");
+
+        if (activeSegmentFilter) {
+          console.log(
+            `[applySegmentFilterFromUrl] Active filter: ${activeSegmentFilter}`,
+          );
+          filterBanner.classList.remove("hidden");
+          document.getElementById("filterBannerSegmentName").textContent =
+            activeSegmentFilter;
+          globalControls.style.display = "none";
+          navHome.href = "/tags";
+          navHome.textContent = "📊 All Chunks";
+        } else {
+          console.log("[applySegmentFilterFromUrl] No active filter");
+          filterBanner.classList.add("hidden");
+          globalControls.style.display = "flex";
+          navHome.href = "/tags";
+          navHome.textContent = "📊 Home";
+        }
+      }
+
       function destroyCharts() {
         Object.values(charts).forEach((chart) => chart.destroy());
         charts = {};
       }
 
-      // Fetch data from API
+      function escapeHtml(str) {
+        if (!str) return "";
+        const div = document.createElement("div");
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+      }
+
+      // ===== Data Fetching =====
       async function fetchData() {
+        if (activeSegmentFilter) {
+          console.log(
+            `[fetchData] Segment filter active: ${activeSegmentFilter}, fetching all data`,
+          );
+          const url = `/tags/chunks?limit=500&offset=0`;
+          try {
+            const response = await fetch(url);
+            if (!response.ok)
+              throw new Error(
+                `HTTP ${response.status}: ${response.statusText}`,
+              );
+            const data = await response.json();
+            const allChunks = data.chunks || [];
+            const filteredChunks = allChunks.filter((chunk) => {
+              const segmentDir = chunk.segment_dir || "";
+              const segmentNumber = chunk.segment_number;
+              const segmentIdFromNumber = segmentNumber
+                ? `seg_${String(segmentNumber).padStart(3, "0")}`
+                : "";
+              return (
+                segmentDir === activeSegmentFilter ||
+                segmentIdFromNumber === activeSegmentFilter ||
+                String(segmentNumber) === activeSegmentFilter
+              );
+            });
+            console.log(
+              `[fetchData] Found ${filteredChunks.length} matching chunks for segment: ${activeSegmentFilter}`,
+            );
+            return {
+              chunks: filteredChunks,
+              stats: data.stats,
+              isFiltered: true,
+              filteredSegment: activeSegmentFilter,
+            };
+          } catch (error) {
+            console.error("Error fetching data:", error);
+            throw error;
+          }
+        }
+
         const limit = document.getElementById("limitSelect").value;
         const filter = document.getElementById("filterSelect").value;
-
         let url = `/tags/chunks?limit=${limit}&offset=0`;
-        if (filter === "speech") {
-          url += "&speech_only=true";
-        }
+        if (filter === "speech") url += "&speech_only=true";
 
         try {
           const response = await fetch(url);
-          if (!response.ok) {
+          if (!response.ok)
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
           const data = await response.json();
-          return data;
+          return {
+            chunks: data.chunks || [],
+            stats: data.stats || {},
+            isFiltered: false,
+            filteredSegment: null,
+          };
         } catch (error) {
           console.error("Error fetching data:", error);
           throw error;
         }
       }
 
-      // Update summary cards
-      function updateSummaryCards(stats, chunks) {
-        document.getElementById("cardTotal").textContent =
-          stats.total_segments || 0;
-        document.getElementById("cardSpeech").textContent =
-          stats.speech_segments || 0;
-        document.getElementById("cardSpeechPct").textContent =
-          `${stats.speech_percentage || 0}% of total`;
-        document.getElementById("cardAvgProb").textContent = (
-          stats.avg_speech_probability || 0
-        ).toFixed(3);
-        document.getElementById("cardModes").textContent = Object.keys(
-          stats.processing_modes || {},
+      // ===== Data Processing Functions (matching Python logic) =====
+
+      /**
+       * Extract top-N event names from chunks data.
+       * Mirrors _get_top_event_names() in audio_tagger_chunk_plots.py
+       */
+      function getTopEventNames(chunks, topN) {
+        // Aggregate predictions across all chunks
+        const eventStats = {};
+        chunks.forEach((chunk) => {
+          const predictions = chunk.top_predictions || [];
+          predictions.forEach((pred) => {
+            if (!pred.name) return;
+            if (!eventStats[pred.name]) {
+              eventStats[pred.name] = { count: 0, totalProb: 0, maxProb: 0 };
+            }
+            eventStats[pred.name].count += 1;
+            eventStats[pred.name].totalProb += pred.prob;
+            eventStats[pred.name].maxProb = Math.max(
+              eventStats[pred.name].maxProb,
+              pred.prob,
+            );
+          });
+        });
+
+        // Sort by frequency (count) descending
+        const sorted = Object.entries(eventStats)
+          .sort((a, b) => b[1].count - a[1].count)
+          .slice(0, topN);
+
+        return sorted.map(([name, stats]) => ({
+          name,
+          count: stats.count,
+          avgProb: stats.totalProb / stats.count,
+          maxProb: stats.maxProb,
+        }));
+      }
+
+      /**
+       * Build heatmap data matrix: rows=events, cols=chunks
+       */
+      function buildHeatmapData(chunks, topEventNames) {
+        const nEvents = topEventNames.length;
+        const nChunks = chunks.length;
+        const matrix = [];
+
+        for (let rowIdx = 0; rowIdx < nEvents; rowIdx++) {
+          const eventName = topEventNames[rowIdx];
+          const row = [];
+          for (let colIdx = 0; colIdx < nChunks; colIdx++) {
+            const chunk = chunks[colIdx];
+            const predictions = chunk.top_predictions || [];
+            const pred = predictions.find((p) => p.name === eventName);
+            row.push(pred ? pred.prob : 0);
+          }
+          matrix.push(row);
+        }
+        return matrix;
+      }
+
+      /**
+       * Get color for probability value (matching HEATMAP_CMAP)
+       */
+      function getHeatmapColor(prob) {
+        if (prob >= 0.8) return "#1A1A6E";
+        if (prob >= 0.5) return "#648FFF";
+        if (prob >= 0.2) return "#A8C4FF";
+        if (prob > 0) return "#D6E4FF";
+        return "#FFFFFF";
+      }
+
+      /**
+       * Get text color based on background darkness
+       */
+      function getTextColor(prob) {
+        return prob >= 0.5 ? "#FFFFFF" : "#333333";
+      }
+
+      /**
+       * Get marker size based on probability (matching _get_marker_size_and_alpha)
+       */
+      function getMarkerSize(prob) {
+        if (prob >= HIGH_PROBABILITY_THRESHOLD) return 12;
+        if (prob >= MEDIUM_PROBABILITY_THRESHOLD) return 8;
+        if (prob >= DEFAULT_PROBABILITY_THRESHOLD) return 6;
+        return 4;
+      }
+
+      /**
+       * Get bar styling based on probability
+       */
+      function getBarStyle(prob) {
+        if (prob >= HIGH_PROBABILITY_THRESHOLD) {
+          return {
+            color: "#1A1A6E",
+            borderColor: "#FFD700",
+            borderWidth: 2,
+            alpha: 1.0,
+            hatch: false,
+          };
+        }
+        if (prob >= MEDIUM_PROBABILITY_THRESHOLD) {
+          return {
+            color: "#DC267F",
+            borderColor: "#FFFFFF",
+            borderWidth: 1,
+            alpha: 0.9,
+            hatch: false,
+          };
+        }
+        if (prob >= DEFAULT_PROBABILITY_THRESHOLD) {
+          return {
+            color: "#648FFF",
+            borderColor: "#FFFFFF",
+            borderWidth: 1,
+            alpha: 0.8,
+            hatch: false,
+          };
+        }
+        return {
+          color: "#AAAAAA",
+          borderColor: "#888888",
+          borderWidth: 1,
+          alpha: 0.6,
+          hatch: true,
+        };
+      }
+
+      // ===== Summary Cards Update =====
+      function updateSummaryCards(stats, chunks, isFiltered) {
+        if (isFiltered && chunks.length === 1) {
+          const seg = chunks[0];
+          document.getElementById("cardTotal").textContent = "1";
+          document.getElementById("cardDuration").textContent = "-";
+          document.getElementById("cardSpeech").textContent =
+            seg.speech_detected ? "✅ Yes" : "❌ No";
+          document.getElementById("cardSpeechPct").textContent =
+            "Single chunk view";
+          document.getElementById("cardChunkDur").textContent = "-";
+          document.getElementById("cardOverlap").textContent = "-";
+          if (seg.top_predictions && seg.top_predictions.length > 0) {
+            document.getElementById("cardTopEvent").textContent =
+              seg.top_predictions[0].name;
+            document.getElementById("cardTopEventProb").textContent =
+              `${(seg.top_predictions[0].prob * 100).toFixed(1)}% probability`;
+          } else {
+            document.getElementById("cardTopEvent").textContent = "N/A";
+            document.getElementById("cardTopEventProb").textContent =
+              "No predictions";
+          }
+          return;
+        }
+
+        document.getElementById("cardTotal").textContent = chunks.length;
+        document.getElementById("cardSpeech").textContent = chunks.filter(
+          (c) => c.speech_detected,
         ).length;
+        document.getElementById("cardSpeechPct").textContent =
+          `${((chunks.filter((c) => c.speech_detected).length / Math.max(chunks.length, 1)) * 100).toFixed(1)}% of total`;
 
-        // Top prediction
-        if (stats.top_predictions && stats.top_predictions.length > 0) {
-          const topPred = stats.top_predictions[0];
-          document.getElementById("cardTopPred").textContent = topPred.name;
-          document.getElementById("cardTopPredCount").textContent =
-            `${topPred.count} occurrences`;
+        // Calculate total duration from chunk timestamps
+        if (chunks.length > 0) {
+          const startTimes = chunks.map((c) => c.start_time || 0);
+          const endTimes = chunks.map((c) => c.end_time || 0);
+          const minStart = Math.min(...startTimes);
+          const maxEnd = Math.max(...endTimes);
+          document.getElementById("cardDuration").textContent =
+            (maxEnd - minStart).toFixed(1) + "s";
         } else {
-          document.getElementById("cardTopPred").textContent = "N/A";
-          document.getElementById("cardTopPredCount").textContent = "No data";
+          document.getElementById("cardDuration").textContent = "-";
         }
 
-        // Last updated
-        if (chunks && chunks.length > 0) {
-          const latest = chunks[chunks.length - 1];
-          const timestamp = latest.timestamp
-            ? new Date(latest.timestamp).toLocaleString()
-            : "N/A";
-          document.getElementById("cardUpdated").textContent =
-            timestamp.split(",")[0];
+        document.getElementById("cardChunkDur").textContent = "-";
+        document.getElementById("cardOverlap").textContent = "-";
+
+        // Top event
+        const topEvents = getTopEventNames(chunks, 1);
+        if (topEvents.length > 0) {
+          document.getElementById("cardTopEvent").textContent =
+            topEvents[0].name;
+          document.getElementById("cardTopEventProb").textContent =
+            `${(topEvents[0].avgProb * 100).toFixed(1)}% avg (${topEvents[0].count} chunks)`;
         } else {
-          document.getElementById("cardUpdated").textContent = "N/A";
+          document.getElementById("cardTopEvent").textContent = "N/A";
+          document.getElementById("cardTopEventProb").textContent = "No data";
         }
       }
 
-      // Create speech probability distribution chart
-      function createSpeechProbChart(chunks) {
+      // ===== Chart Creation Functions =====
+
+      /**
+       * Plot 1: Chunk Heatmap
+       * Mirrors _plot_chunk_heatmap() - heatmap showing top-K event probabilities across chunks
+       */
+      function createChunkHeatmap(chunks, topEventNames) {
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
+        const container = document.createElement("div");
+        container.className = "plot-container xlarge";
 
-        const labels = chunks.map(
-          (chunk, i) =>
-            chunk.segment_dir || `Seg ${chunk.segment_number || i + 1}`,
+        const nEvents = topEventNames.length;
+        const nChunks = chunks.length;
+        const matrix = buildHeatmapData(
+          chunks,
+          topEventNames.map((e) => e.name),
         );
-        const probabilities = chunks.map(
-          (chunk) => chunk.speech_probability || 0,
-        );
-        const detected = chunks.map((chunk) => chunk.speech_detected);
 
-        charts.speechProb = new Chart(ctx, {
-          type: "bar",
+        // Use Chart.js matrix chart for heatmap
+        const datasets = [];
+        for (let rowIdx = 0; rowIdx < nEvents; rowIdx++) {
+          for (let colIdx = 0; colIdx < nChunks; colIdx++) {
+            const prob = matrix[rowIdx][colIdx];
+            datasets.push({
+              x: colIdx,
+              y: rowIdx,
+              v: prob,
+            });
+          }
+        }
+
+        charts.heatmap = new Chart(ctx, {
+          type: "matrix",
           data: {
-            labels: labels,
             datasets: [
               {
-                label: "Speech Probability",
-                data: probabilities,
-                backgroundColor: probabilities.map((prob, i) =>
-                  detected[i]
-                    ? `rgba(76, 175, 80, ${0.5 + prob * 0.5})`
-                    : `rgba(244, 67, 54, ${0.3 + prob * 0.3})`,
-                ),
-                borderColor: probabilities.map((prob, i) =>
-                  detected[i] ? "#4caf50" : "#f44336",
-                ),
+                label: "Probability",
+                data: datasets,
+                backgroundColor(ctx) {
+                  const value = ctx.dataset.data[ctx.dataIndex].v;
+                  return getHeatmapColor(value);
+                },
+                borderColor: "#DDD",
                 borderWidth: 1,
-                borderRadius: 4,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                display: true,
-                position: "top",
-              },
-              tooltip: {
-                callbacks: {
-                  label: (context) => {
-                    const prob = context.parsed.y;
-                    const isSpeech = detected[context.dataIndex];
-                    return [
-                      `Probability: ${(prob * 100).toFixed(1)}%`,
-                      `Speech Detected: ${isSpeech ? "✅ Yes" : "❌ No"}`,
-                    ];
-                  },
-                },
-              },
-            },
-            scales: {
-              y: {
-                beginAtZero: true,
-                max: 1,
-                ticks: {
-                  callback: (value) => `${(value * 100).toFixed(0)}%`,
-                },
-                title: {
-                  display: true,
-                  text: "Speech Probability",
-                },
-              },
-              x: {
-                ticks: {
-                  maxRotation: 45,
-                  minRotation: 45,
-                  font: {
-                    size: 10,
-                  },
-                },
-                title: {
-                  display: true,
-                  text: "Segments",
-                },
-              },
-            },
-          },
-        });
-
-        return canvas;
-      }
-
-      // Create top predictions frequency chart
-      function createTopPredictionsChart(stats) {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-
-        const predictions = (stats.top_predictions || []).slice(0, 15);
-        const labels = predictions.map((p) => p.name);
-        const counts = predictions.map((p) => p.count);
-        const avgProbs = predictions.map((p) => p.avg_probability);
-
-        charts.topPredictions = new Chart(ctx, {
-          type: "bar",
-          data: {
-            labels: labels,
-            datasets: [
-              {
-                label: "Occurrences",
-                data: counts,
-                backgroundColor: colors.gradient,
-                borderColor: colors.gradient,
-                borderWidth: 1,
-                borderRadius: 4,
-                yAxisID: "y",
-              },
-              {
-                label: "Avg Probability",
-                data: avgProbs,
-                type: "line",
-                borderColor: "#f44336",
-                backgroundColor: "rgba(244, 67, 54, 0.1)",
-                borderWidth: 2,
-                pointRadius: 4,
-                pointBackgroundColor: "#f44336",
-                tension: 0.3,
-                yAxisID: "y1",
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                display: true,
-                position: "top",
-              },
-              tooltip: {
-                callbacks: {
-                  label: (context) => {
-                    if (context.dataset.label === "Occurrences") {
-                      return `Occurrences: ${context.parsed.y}`;
-                    } else {
-                      return `Avg Probability: ${(context.parsed.y * 100).toFixed(1)}%`;
-                    }
-                  },
-                },
-              },
-            },
-            scales: {
-              y: {
-                type: "linear",
-                display: true,
-                position: "left",
-                title: {
-                  display: true,
-                  text: "Number of Occurrences",
-                },
-                beginAtZero: true,
-              },
-              y1: {
-                type: "linear",
-                display: true,
-                position: "right",
-                title: {
-                  display: true,
-                  text: "Average Probability",
-                },
-                min: 0,
-                max: 1,
-                ticks: {
-                  callback: (value) => `${(value * 100).toFixed(0)}%`,
-                },
-                grid: {
-                  drawOnChartArea: false,
-                },
-              },
-              x: {
-                ticks: {
-                  maxRotation: 45,
-                  minRotation: 45,
-                  font: {
-                    size: 10,
-                  },
-                },
-              },
-            },
-          },
-        });
-
-        return canvas;
-      }
-
-      // Create speech vs non-speech timeline
-      function createSpeechTimelineChart(chunks) {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-
-        const labels = chunks.map(
-          (chunk, i) =>
-            chunk.segment_dir || `Seg ${chunk.segment_number || i + 1}`,
-        );
-        const speechData = chunks.map((chunk) =>
-          chunk.speech_detected ? 1 : 0,
-        );
-
-        charts.speechTimeline = new Chart(ctx, {
-          type: "scatter",
-          data: {
-            datasets: [
-              {
-                label: "Speech Detected",
-                data: chunks.map((chunk, i) => ({
-                  x: i,
-                  y: chunk.speech_detected ? 1 : 0,
-                })),
-                backgroundColor: chunks.map((chunk) =>
-                  chunk.speech_detected ? "#4caf50" : "#f44336",
-                ),
-                borderColor: chunks.map((chunk) =>
-                  chunk.speech_detected ? "#4caf50" : "#f44336",
-                ),
-                pointRadius: 6,
-                pointHoverRadius: 8,
+                width: ({ chart }) =>
+                  (chart.chartArea || {}).width / nChunks - 1,
+                height: ({ chart }) =>
+                  (chart.chartArea || {}).height / nEvents - 1,
               },
             ],
           },
@@ -622,363 +814,846 @@
               },
               tooltip: {
                 callbacks: {
+                  title: (items) => {
+                    const item = items[0];
+                    const chunkIdx = item.dataset.data[item.dataIndex].x;
+                    const eventIdx = item.dataset.data[item.dataIndex].y;
+                    const chunk = chunks[chunkIdx];
+                    return `Chunk ${chunk.chunk_index || chunkIdx}: ${(chunk.start_time || 0).toFixed(1)}s-${(chunk.end_time || 0).toFixed(1)}s`;
+                  },
+                  label: (item) => {
+                    const eventIdx = item.dataset.data[item.dataIndex].y;
+                    const prob = item.dataset.data[item.dataIndex].v;
+                    return `${topEventNames[eventIdx].name}: ${(prob * 100).toFixed(1)}%`;
+                  },
+                },
+              },
+            },
+            scales: {
+              x: {
+                type: "linear",
+                offset: true,
+                ticks: {
+                  stepSize: 1,
+                  callback: (value) => {
+                    const idx = Math.round(value);
+                    if (idx >= 0 && idx < nChunks) {
+                      const chunk = chunks[idx];
+                      return `${(chunk.start_time || 0).toFixed(1)}s`;
+                    }
+                    return "";
+                  },
+                  font: { size: 9 },
+                  maxRotation: 45,
+                },
+                title: {
+                  display: true,
+                  text: "Chunk Start Time (seconds)",
+                  font: { weight: "bold" },
+                },
+                grid: { display: false },
+              },
+              y: {
+                type: "linear",
+                offset: true,
+                ticks: {
+                  stepSize: 1,
+                  callback: (value) => {
+                    const idx = Math.round(value);
+                    if (idx >= 0 && idx < nEvents) {
+                      const name = topEventNames[idx].name;
+                      return name.length > 40
+                        ? name.substring(0, 40) + "…"
+                        : name;
+                    }
+                    return "";
+                  },
+                  font: { size: 9 },
+                },
+                title: {
+                  display: true,
+                  text: "Event Label",
+                  font: { weight: "bold" },
+                },
+                grid: { display: false },
+                reverse: true,
+              },
+            },
+          },
+          plugins: [
+            {
+              id: "heatmapLabels",
+              afterDraw(chart) {
+                const {
+                  ctx,
+                  scales: { x, y },
+                  data,
+                } = chart;
+                const dataset = data.datasets[0];
+                ctx.save();
+                ctx.font = "9px -apple-system, BlinkMacSystemFont, sans-serif";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+
+                dataset.data.forEach((point) => {
+                  const xPos = x.getPixelForValue(point.x);
+                  const yPos = y.getPixelForValue(point.y);
+                  const prob = point.v;
+                  const barWidth =
+                    x.getPixelForValue(point.x + 0.5) -
+                    x.getPixelForValue(point.x - 0.5);
+                  const barHeight = Math.abs(
+                    y.getPixelForValue(point.y + 0.5) -
+                      y.getPixelForValue(point.y - 0.5),
+                  );
+
+                  if (prob > 0 && barWidth > 20 && barHeight > 15) {
+                    ctx.fillStyle = getTextColor(prob);
+                    if (prob >= HIGH_PROBABILITY_THRESHOLD) {
+                      ctx.font =
+                        "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
+                    } else if (prob >= MEDIUM_PROBABILITY_THRESHOLD) {
+                      ctx.font =
+                        "bold 10px -apple-system, BlinkMacSystemFont, sans-serif";
+                    }
+                    ctx.fillText((prob * 100).toFixed(0) + "%", xPos, yPos);
+
+                    // Highlight border for high probability
+                    if (prob >= HIGH_PROBABILITY_THRESHOLD) {
+                      ctx.strokeStyle = "#FFD700";
+                      ctx.lineWidth = 2;
+                      ctx.strokeRect(
+                        xPos - barWidth / 2,
+                        yPos - barHeight / 2,
+                        barWidth,
+                        barHeight,
+                      );
+                    }
+                  } else if (prob === 0 && barWidth > 15 && barHeight > 10) {
+                    ctx.fillStyle = "#CCCCCC";
+                    ctx.font =
+                      "8px -apple-system, BlinkMacSystemFont, sans-serif";
+                    ctx.fillText("—", xPos, yPos);
+                  }
+                });
+                ctx.restore();
+              },
+            },
+          ],
+        });
+
+        container.appendChild(canvas);
+
+        // Add legend
+        const legend = document.createElement("div");
+        legend.className = "heatmap-legend";
+        legend.innerHTML = `
+          <span>0%</span>
+          <div class="heatmap-gradient"></div>
+          <span>100%</span>
+          <span style="margin-left: 15px;">◆ Gold border = High prob (≥${(HIGH_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)</span>
+        `;
+        container.appendChild(legend);
+
+        return container;
+      }
+
+      /**
+       * Plot 2: Events Timeline
+       * Mirrors _plot_events_timeline() - line plot with marker sizes proportional to probability
+       */
+      function createEventsTimeline(chunks, topEventNames) {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        const chunkTimes = chunks.map(
+          (c) => ((c.start_time || 0) + (c.end_time || 0)) / 2,
+        );
+        const datasets = [];
+
+        topEventNames.forEach((event, idx) => {
+          const color = EVENT_COLORS[idx % EVENT_COLORS.length];
+          const probs = chunks.map((chunk) => {
+            const predictions = chunk.top_predictions || [];
+            const pred = predictions.find((p) => p.name === event.name);
+            return pred ? pred.prob : null;
+          });
+
+          // Main line dataset
+          datasets.push({
+            label:
+              event.name.length > 50
+                ? event.name.substring(0, 50) + "…"
+                : event.name,
+            data: probs.map((p, i) => ({ x: chunkTimes[i], y: p })),
+            borderColor: color,
+            backgroundColor: color,
+            borderWidth: 2,
+            pointRadius: probs.map((p) => (p !== null ? getMarkerSize(p) : 0)),
+            pointBackgroundColor: color,
+            pointBorderColor: "#FFFFFF",
+            pointBorderWidth: 1,
+            tension: 0.2,
+            spanGaps: false,
+            fill: false,
+          });
+
+          // High probability glow points
+          const highProbPoints = [];
+          probs.forEach((p, i) => {
+            if (p !== null && p >= HIGH_PROBABILITY_THRESHOLD) {
+              highProbPoints.push({ x: chunkTimes[i], y: p });
+            }
+          });
+          if (highProbPoints.length > 0) {
+            datasets.push({
+              label: null,
+              data: highProbPoints,
+              backgroundColor: color + "33",
+              borderColor: "transparent",
+              pointRadius: highProbPoints.map(
+                () => getMarkerSize(HIGH_PROBABILITY_THRESHOLD) * 2,
+              ),
+              pointBackgroundColor: color + "33",
+              pointBorderWidth: 0,
+              showLine: false,
+              order: 1,
+            });
+          }
+        });
+
+        // Threshold lines
+        datasets.push({
+          label: `Threshold (${(DEFAULT_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)`,
+          data: [
+            { x: Math.min(...chunkTimes), y: DEFAULT_PROBABILITY_THRESHOLD },
+            { x: Math.max(...chunkTimes), y: DEFAULT_PROBABILITY_THRESHOLD },
+          ],
+          borderColor: "#FF9800",
+          borderDash: [5, 5],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+          order: 0,
+        });
+
+        datasets.push({
+          label: `High prob (${(HIGH_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)`,
+          data: [
+            { x: Math.min(...chunkTimes), y: HIGH_PROBABILITY_THRESHOLD },
+            { x: Math.max(...chunkTimes), y: HIGH_PROBABILITY_THRESHOLD },
+          ],
+          borderColor: "#F44336",
+          borderDash: [2, 4],
+          borderWidth: 1,
+          pointRadius: 0,
+          fill: false,
+          order: 0,
+        });
+
+        charts.timeline = new Chart(ctx, {
+          type: "scatter",
+          data: { datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: "right",
+                labels: {
+                  font: { size: 9 },
+                  filter: (item) => item.text !== null,
+                },
+              },
+              tooltip: {
+                callbacks: {
                   label: (context) => {
-                    const chunk = chunks[context.parsed.x];
-                    const isSpeech = chunk.speech_detected;
-                    const prob = chunk.speech_probability || 0;
+                    if (
+                      context.dataset.label &&
+                      context.dataset.label.includes("Threshold")
+                    )
+                      return null;
+                    if (
+                      context.dataset.label &&
+                      context.dataset.label.includes("High prob")
+                    )
+                      return null;
+                    if (context.raw.y === null) return "No data";
+                    return `${context.dataset.label}: ${(context.raw.y * 100).toFixed(1)}%`;
+                  },
+                },
+              },
+            },
+            scales: {
+              y: {
+                min: -0.05,
+                max: 1.05,
+                ticks: {
+                  callback: (value) => `${(value * 100).toFixed(0)}%`,
+                },
+                title: {
+                  display: true,
+                  text: "Probability",
+                  font: { weight: "bold" },
+                },
+              },
+              x: {
+                title: {
+                  display: true,
+                  text: "Time (seconds)",
+                  font: { weight: "bold" },
+                },
+              },
+            },
+          },
+        });
+
+        return canvas;
+      }
+
+      /**
+       * Plot 3: Results Bar Chart
+       * Mirrors _plot_results_bar() - horizontal bar chart of aggregated results
+       */
+      function createResultsBar(topEventNames) {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        // Reverse for horizontal display (bottom to top)
+        const reversed = [...topEventNames].reverse();
+        const labels = reversed.map((e) =>
+          e.name.length > 60 ? e.name.substring(0, 60) + "…" : e.name,
+        );
+        const probs = reversed.map((e) => e.avgProb);
+
+        const backgroundColors = probs.map((p) => getBarStyle(p).color);
+        const borderColors = probs.map((p) => getBarStyle(p).borderColor);
+        const borderWidths = probs.map((p) => getBarStyle(p).borderWidth);
+        const alphas = probs.map((p) => getBarStyle(p).alpha);
+
+        charts.resultsBar = new Chart(ctx, {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Mean Probability Across Chunks",
+                data: probs,
+                backgroundColor: backgroundColors,
+                borderColor: borderColors,
+                borderWidth: borderWidths,
+                borderRadius: 3,
+              },
+            ],
+          },
+          options: {
+            indexAxis: "y",
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                display: false,
+              },
+              tooltip: {
+                callbacks: {
+                  label: (context) => {
+                    const event = reversed[context.dataIndex];
                     return [
-                      `Segment: ${chunk.segment_dir || chunk.segment_number}`,
-                      `Speech: ${isSpeech ? "✅ Yes" : "❌ No"}`,
-                      `Probability: ${(prob * 100).toFixed(1)}%`,
+                      `Avg Probability: ${(context.parsed.x * 100).toFixed(1)}%`,
+                      `Occurrences: ${event.count} chunks`,
+                      `Max: ${(event.maxProb * 100).toFixed(1)}%`,
                     ];
                   },
                 },
               },
             },
             scales: {
-              y: {
-                min: -0.1,
-                max: 1.1,
-                ticks: {
-                  stepSize: 1,
-                  callback: (value) =>
-                    value === 1
-                      ? "✅ Speech"
-                      : value === 0
-                        ? "❌ No Speech"
-                        : "",
-                },
-                title: {
-                  display: true,
-                  text: "Speech Detection",
-                },
-              },
               x: {
-                title: {
-                  display: true,
-                  text: "Segment Sequence",
-                },
-                ticks: {
-                  maxRotation: 45,
-                  minRotation: 45,
-                  font: {
-                    size: 9,
-                  },
-                  callback: (value) => labels[value] || "",
-                },
-              },
-            },
-          },
-        });
-
-        return canvas;
-      }
-
-      // Create processing mode distribution chart
-      function createProcessingModesChart(stats) {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-
-        const modes = stats.processing_modes || {};
-        const labels = Object.keys(modes);
-        const values = Object.values(modes);
-
-        charts.processingModes = new Chart(ctx, {
-          type: "doughnut",
-          data: {
-            labels: labels,
-            datasets: [
-              {
-                data: values,
-                backgroundColor: colors.gradient.slice(0, labels.length),
-                borderColor: "white",
-                borderWidth: 2,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                position: "bottom",
-              },
-              tooltip: {
-                callbacks: {
-                  label: (context) => {
-                    const total = values.reduce((a, b) => a + b, 0);
-                    const percentage = ((context.parsed / total) * 100).toFixed(
-                      1,
-                    );
-                    return `${context.label}: ${context.parsed} (${percentage}%)`;
-                  },
-                },
-              },
-            },
-          },
-        });
-
-        return canvas;
-      }
-
-      // Create speech probability trend line
-      function createSpeechTrendChart(chunks) {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
-
-        const labels = chunks.map(
-          (chunk, i) =>
-            chunk.segment_dir || `Seg ${chunk.segment_number || i + 1}`,
-        );
-        const probabilities = chunks.map(
-          (chunk) => chunk.speech_probability || 0,
-        );
-
-        // Calculate moving average
-        const windowSize = Math.min(5, Math.floor(chunks.length / 3));
-        const movingAvg = [];
-        for (let i = 0; i < probabilities.length; i++) {
-          const start = Math.max(0, i - windowSize + 1);
-          const window = probabilities.slice(start, i + 1);
-          const avg = window.reduce((sum, val) => sum + val, 0) / window.length;
-          movingAvg.push(avg);
-        }
-
-        charts.speechTrend = new Chart(ctx, {
-          type: "line",
-          data: {
-            labels: labels,
-            datasets: [
-              {
-                label: "Speech Probability",
-                data: probabilities,
-                borderColor: "rgba(102, 126, 234, 0.3)",
-                backgroundColor: "rgba(102, 126, 234, 0.1)",
-                borderWidth: 1,
-                pointRadius: 3,
-                pointBackgroundColor: "#667eea",
-                tension: 0.1,
-              },
-              {
-                label: `Moving Average (window: ${windowSize})`,
-                data: movingAvg,
-                borderColor: "#4caf50",
-                backgroundColor: "rgba(76, 175, 80, 0.1)",
-                borderWidth: 2,
-                pointRadius: 0,
-                fill: false,
-                tension: 0.4,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                display: true,
-                position: "top",
-              },
-              tooltip: {
-                callbacks: {
-                  label: (context) => {
-                    if (context.dataset.label.includes("Moving")) {
-                      return `Moving Avg: ${(context.parsed.y * 100).toFixed(1)}%`;
-                    }
-                    return `Probability: ${(context.parsed.y * 100).toFixed(1)}%`;
-                  },
-                },
-              },
-            },
-            scales: {
-              y: {
                 min: 0,
-                max: 1,
+                max: 1.15,
                 ticks: {
                   callback: (value) => `${(value * 100).toFixed(0)}%`,
                 },
                 title: {
                   display: true,
-                  text: "Speech Probability",
+                  text: "Mean Probability Across Chunks",
+                  font: { weight: "bold" },
                 },
+                grid: { color: "#F0F0F0" },
               },
-              x: {
+              y: {
                 ticks: {
-                  maxRotation: 45,
-                  minRotation: 45,
-                  font: {
-                    size: 10,
-                  },
-                },
-                title: {
-                  display: true,
-                  text: "Segments",
+                  font: { size: 10 },
                 },
               },
             },
           },
+          plugins: [
+            {
+              id: "thresholdLine",
+              afterDraw(chart) {
+                const {
+                  ctx,
+                  scales: { x, y },
+                } = chart;
+                const thresholdX = x.getPixelForValue(
+                  DEFAULT_PROBABILITY_THRESHOLD,
+                );
+                ctx.save();
+                ctx.strokeStyle = "#FF9800";
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.moveTo(thresholdX, y.top);
+                ctx.lineTo(thresholdX, y.bottom);
+                ctx.stroke();
+                ctx.restore();
+
+                // Label for threshold
+                ctx.save();
+                ctx.fillStyle = "#FF9800";
+                ctx.font = "8px -apple-system, BlinkMacSystemFont, sans-serif";
+                ctx.fillText(
+                  `Threshold (${(DEFAULT_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)`,
+                  thresholdX + 5,
+                  y.top + 12,
+                );
+                ctx.restore();
+              },
+            },
+            {
+              id: "barLabels",
+              afterDraw(chart) {
+                const {
+                  ctx,
+                  scales: { x, y },
+                  data,
+                } = chart;
+                const meta = chart.getDatasetMeta(0);
+                ctx.save();
+
+                meta.data.forEach((bar, i) => {
+                  const prob = data.datasets[0].data[i];
+                  let label, fontStyle, color;
+
+                  if (prob >= HIGH_PROBABILITY_THRESHOLD) {
+                    label = `★ ${(prob * 100).toFixed(0)}%`;
+                    fontStyle =
+                      "bold 12px -apple-system, BlinkMacSystemFont, sans-serif";
+                    color = "#1A1A6E";
+                  } else if (prob >= MEDIUM_PROBABILITY_THRESHOLD) {
+                    label = `${(prob * 100).toFixed(0)}%`;
+                    fontStyle =
+                      "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
+                    color = "#333333";
+                  } else if (prob >= DEFAULT_PROBABILITY_THRESHOLD) {
+                    label = `${(prob * 100).toFixed(0)}%`;
+                    fontStyle =
+                      "10px -apple-system, BlinkMacSystemFont, sans-serif";
+                    color = "#555555";
+                  } else {
+                    label = `${(prob * 100).toFixed(0)}%`;
+                    fontStyle =
+                      "9px -apple-system, BlinkMacSystemFont, sans-serif";
+                    color = "#888888";
+                  }
+
+                  ctx.font = fontStyle;
+                  ctx.fillStyle = color;
+                  ctx.textBaseline = "middle";
+                  ctx.fillText(label, bar.x + 8, bar.y);
+
+                  // Rank label
+                  const rank = data.labels.length - i;
+                  ctx.font =
+                    "8px -apple-system, BlinkMacSystemFont, sans-serif";
+                  ctx.fillStyle =
+                    prob >= HIGH_PROBABILITY_THRESHOLD ? "#F44336" : "#999999";
+                  ctx.textAlign = "right";
+                  ctx.fillText(`#${rank}`, bar.x - 35, bar.y);
+                });
+
+                ctx.restore();
+              },
+            },
+          ],
         });
 
         return canvas;
       }
 
-      // Create speech distribution pie chart
-      function createSpeechDistributionChart(stats) {
-        const canvas = document.createElement("canvas");
-        const ctx = canvas.getContext("2d");
+      /**
+       * Plot 4: Chunks Summary Grid
+       * Mirrors _plot_chunk_summary() - per-chunk mini bar charts
+       */
+      function createChunksSummary(chunks, topN) {
+        const container = document.createElement("div");
+        container.className = "plot-container xlarge";
+        container.style.display = "grid";
+        container.style.gridTemplateColumns =
+          "repeat(auto-fill, minmax(250px, 1fr))";
+        container.style.gap = "10px";
+        container.style.overflowY = "auto";
 
-        const speechCount = stats.speech_segments || 0;
-        const nonSpeechCount = stats.non_speech_segments || 0;
+        const MAX_DISPLAY = 24;
+        const displayChunks = chunks.slice(0, MAX_DISPLAY);
 
-        charts.speechDistribution = new Chart(ctx, {
-          type: "pie",
-          data: {
-            labels: ["Speech Detected", "No Speech"],
-            datasets: [
-              {
-                data: [speechCount, nonSpeechCount],
-                backgroundColor: ["#4caf50", "#f44336"],
-                borderColor: "white",
-                borderWidth: 2,
+        displayChunks.forEach((chunk, idx) => {
+          const miniCard = document.createElement("div");
+          miniCard.style.border = "1px solid #DDD";
+          miniCard.style.borderRadius = "5px";
+          miniCard.style.padding = "8px";
+          miniCard.style.background = "#FAFAFA";
+          miniCard.style.position = "relative";
+          miniCard.style.minHeight = "150px";
+
+          const predictions = (chunk.top_predictions || []).slice(0, topN);
+          const maxProb =
+            predictions.length > 0
+              ? Math.max(...predictions.map((p) => p.prob))
+              : 0;
+
+          // Border color based on max probability
+          if (maxProb >= HIGH_PROBABILITY_THRESHOLD) {
+            miniCard.style.borderColor = "#FFD700";
+            miniCard.style.borderWidth = "2px";
+            miniCard.style.boxShadow = "0 0 6px rgba(255, 215, 0, 0.3)";
+          } else if (maxProb >= MEDIUM_PROBABILITY_THRESHOLD) {
+            miniCard.style.borderColor = "#648FFF";
+            miniCard.style.borderWidth = "1.5px";
+          } else if (maxProb >= DEFAULT_PROBABILITY_THRESHOLD) {
+            miniCard.style.borderColor = "#888888";
+          } else {
+            miniCard.style.borderColor = "#DDDDDD";
+          }
+
+          // Title
+          const title = document.createElement("div");
+          title.style.fontWeight = "bold";
+          title.style.fontSize = "10px";
+          title.style.marginBottom = "5px";
+          title.style.color = "#333";
+          title.textContent = `C${chunk.chunk_index || idx + 1}: ${(chunk.start_time || 0).toFixed(1)}-${(chunk.end_time || 0).toFixed(1)}s`;
+          miniCard.appendChild(title);
+
+          if (predictions.length === 0) {
+            const noData = document.createElement("div");
+            noData.textContent = "No predictions";
+            noData.style.color = "#999";
+            noData.style.fontSize = "10px";
+            noData.style.textAlign = "center";
+            noData.style.padding = "20px";
+            miniCard.appendChild(noData);
+          } else {
+            const miniCanvas = document.createElement("canvas");
+            miniCanvas.style.width = "100%";
+            miniCanvas.style.height = "120px";
+            miniCard.appendChild(miniCanvas);
+
+            const miniCtx = miniCanvas.getContext("2d");
+            const reversedPreds = [...predictions].reverse();
+            const names = reversedPreds.map((p) =>
+              p.name.length > 25 ? p.name.substring(0, 25) + "…" : p.name,
+            );
+            const probs = reversedPreds.map((p) => p.prob);
+
+            new Chart(miniCtx, {
+              type: "bar",
+              data: {
+                labels: names,
+                datasets: [
+                  {
+                    data: probs,
+                    backgroundColor: probs.map((p) => getBarStyle(p).color),
+                    borderColor: probs.map((p) => getBarStyle(p).borderColor),
+                    borderWidth: probs.map((p) => getBarStyle(p).borderWidth),
+                    borderRadius: 2,
+                  },
+                ],
               },
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                position: "bottom",
-              },
-              tooltip: {
-                callbacks: {
-                  label: (context) => {
-                    const total = speechCount + nonSpeechCount;
-                    const percentage = ((context.parsed / total) * 100).toFixed(
-                      1,
-                    );
-                    return `${context.label}: ${context.parsed} (${percentage}%)`;
+              options: {
+                indexAxis: "y",
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    callbacks: {
+                      label: (ctx) => `${(ctx.parsed.x * 100).toFixed(1)}%`,
+                    },
+                  },
+                },
+                scales: {
+                  x: {
+                    min: 0,
+                    max: 1.1,
+                    ticks: {
+                      callback: (v) => (v === 0 ? "0%" : v === 1 ? "100%" : ""),
+                      font: { size: 7 },
+                    },
+                  },
+                  y: {
+                    ticks: {
+                      font: { size: 7 },
+                      autoSkip: false,
+                    },
                   },
                 },
               },
-            },
-          },
+            });
+
+            // Top probability label
+            if (probs.length > 0) {
+              const topProb = probs[probs.length - 1];
+              const label = document.createElement("div");
+              label.style.position = "absolute";
+              label.style.top = "30px";
+              label.style.right = "5px";
+              label.style.fontSize = "9px";
+              label.style.fontWeight =
+                topProb >= HIGH_PROBABILITY_THRESHOLD ? "bold" : "normal";
+              label.style.color =
+                topProb >= HIGH_PROBABILITY_THRESHOLD ? "#1A1A6E" : "#555";
+              label.textContent =
+                (topProb >= HIGH_PROBABILITY_THRESHOLD ? "★ " : "") +
+                (topProb * 100).toFixed(0) +
+                "%";
+              miniCard.appendChild(label);
+            }
+          }
+
+          container.appendChild(miniCard);
         });
 
-        return canvas;
+        if (chunks.length > MAX_DISPLAY) {
+          const note = document.createElement("div");
+          note.style.gridColumn = "1 / -1";
+          note.style.textAlign = "center";
+          note.style.color = "#999";
+          note.style.fontSize = "12px";
+          note.style.padding = "10px";
+          note.textContent = `Showing first ${MAX_DISPLAY} of ${chunks.length} chunks`;
+          container.appendChild(note);
+        }
+
+        return container;
       }
 
-      // Render all plots
+      /**
+       * Create single-segment detail card (when viewing filtered segment)
+       */
+      function createSegmentDetailCard(chunk) {
+        const card = document.createElement("div");
+        card.className = "plot-card full-width";
+
+        const segmentDir = chunk.segment_dir || "N/A";
+        const speechDetected = chunk.speech_detected;
+        const speechProb = chunk.speech_probability || 0;
+        const processingMode = chunk.processing_mode || "unknown";
+
+        const predictions = chunk.top_predictions || [];
+        let predictionsHtml = "";
+        predictions.forEach((pred) => {
+          predictionsHtml += `
+            <tr>
+              <td>${escapeHtml(pred.name)}</td>
+              <td>
+                <div class="prob-bar">
+                  <div class="prob-fill" style="width: ${pred.prob * 100}%"></div>
+                </div>
+              </td>
+              <td><strong>${(pred.prob * 100).toFixed(1)}%</strong></td>
+            </tr>
+          `;
+        });
+
+        card.innerHTML = `
+          <h2>📋 Chunk Detail: ${escapeHtml(segmentDir)}</h2>
+          <table class="detail-table">
+            <tr><th>Segment Directory</th><td><strong>${escapeHtml(segmentDir)}</strong></td></tr>
+            <tr><th>Start Time</th><td>${(chunk.start_time || 0).toFixed(2)}s</td></tr>
+            <tr><th>End Time</th><td>${(chunk.end_time || 0).toFixed(2)}s</td></tr>
+            <tr><th>Speech Detected</th><td><span class="badge ${speechDetected ? "badge-success" : "badge-danger"}">${speechDetected ? "✅ Yes" : "❌ No"}</span></td></tr>
+            <tr><th>Speech Probability</th><td><div class="prob-bar"><div class="prob-fill ${speechDetected ? "speech" : ""}" style="width: ${speechProb * 100}%"></div></div><small>${(speechProb * 100).toFixed(1)}%</small></td></tr>
+            <tr><th>Processing Mode</th><td><span class="badge badge-info">${escapeHtml(processingMode)}</span></td></tr>
+          </table>
+          ${
+            predictions.length > 0
+              ? `
+            <h3 style="margin-top: 15px; color: #667eea;">🔝 Top Predictions</h3>
+            <table class="detail-table">
+              <thead><tr><th>Label</th><th>Probability Bar</th><th>Value</th></tr></thead>
+              <tbody>${predictionsHtml}</tbody>
+            </table>
+          `
+              : '<p style="margin-top: 15px; color: #666;">No predictions available</p>'
+          }
+        `;
+        return card;
+      }
+
+      // ===== Main Render Function =====
       async function refreshPlots() {
         const plotsGrid = document.getElementById("plotsGrid");
         plotsGrid.innerHTML =
           '<div class="loading">Loading visualizations</div>';
-
         destroyCharts();
 
         try {
           const data = await fetchData();
           const chunks = data.chunks || [];
           const stats = data.stats || {};
+          const isFiltered = data.isFiltered || false;
+          const topN = parseInt(
+            document.getElementById("topNSelect")?.value || "5",
+          );
 
-          // Update summary cards
-          updateSummaryCards(stats, chunks);
+          updateSummaryCards(stats, chunks, isFiltered);
 
-          if (chunks.length === 0) {
-            plotsGrid.innerHTML = `
-                            <div class="plot-card full-width">
-                                <div class="error-message">
-                                    <h3>📭 No Data Available</h3>
-                                    <p>Process some audio segments to see visualizations.</p>
-                                </div>
-                            </div>
-                        `;
+          // Handle filtered single-segment view
+          if (isFiltered) {
+            if (chunks.length === 0) {
+              plotsGrid.innerHTML = `
+                <div class="plot-card full-width">
+                  <div class="error-message">
+                    <h3>🔍 Segment Not Found</h3>
+                    <p>The segment "<strong>${escapeHtml(activeSegmentFilter)}</strong>" was not found.</p>
+                    <a href="/tags" class="btn btn-small" style="margin-top: 10px;">📊 View All Chunks</a>
+                  </div>
+                </div>
+              `;
+              return;
+            }
+
+            plotsGrid.innerHTML = "";
+            plotsGrid.appendChild(createSegmentDetailCard(chunks[0]));
+
+            // Show available charts for single chunk
+            const topEvents = getTopEventNames(chunks, topN);
+            if (topEvents.length > 0) {
+              const plot1 = document.createElement("div");
+              plot1.className = "plot-card full-width";
+              plot1.innerHTML =
+                '<h2>🔝 Top Predictions for This Chunk</h2><div class="plot-container"></div>';
+              plot1
+                .querySelector(".plot-container")
+                .appendChild(createResultsBar(topEvents));
+              plotsGrid.appendChild(plot1);
+            }
             return;
           }
 
-          // Create plot grid
-          plotsGrid.innerHTML = "";
+          // Normal mode: all chunks
+          if (chunks.length === 0) {
+            plotsGrid.innerHTML = `
+              <div class="plot-card full-width">
+                <div class="error-message">
+                  <h3>📭 No Data Available</h3>
+                  <p>Process some audio chunks to see visualizations.</p>
+                </div>
+              </div>
+            `;
+            return;
+          }
 
-          // Row 1: Speech Probability Distribution + Speech Distribution Pie
+          plotsGrid.innerHTML = "";
+          const topEvents = getTopEventNames(chunks, topN);
+
+          if (topEvents.length === 0) {
+            plotsGrid.innerHTML = `
+              <div class="plot-card full-width">
+                <div class="info-message">
+                  <h3>📊 No Predictions Available</h3>
+                  <p>The chunks exist but contain no prediction data.</p>
+                </div>
+              </div>
+            `;
+            return;
+          }
+
+          // Plot 1: Chunk Heatmap (full width)
           const plot1 = document.createElement("div");
-          plot1.className = "plot-card";
-          plot1.innerHTML =
-            '<h2>📊 Speech Probability by Segment</h2><div class="plot-container"></div>';
-          plot1
-            .querySelector(".plot-container")
-            .appendChild(createSpeechProbChart(chunks));
+          plot1.className = "plot-card full-width";
+          plot1.innerHTML = `
+            <h2>🔥 Event Probability Heatmap Across Chunks</h2>
+            <p style="color: #666; font-size: 0.85em; margin-bottom: 10px;">
+              Chunks: ${chunks.length} | Top Events: ${topN} | Gold border = High prob (≥${(HIGH_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)
+            </p>
+          `;
+          plot1.appendChild(createChunkHeatmap(chunks, topEvents));
           plotsGrid.appendChild(plot1);
 
+          // Plot 2: Events Timeline (full width)
           const plot2 = document.createElement("div");
-          plot2.className = "plot-card";
-          plot2.innerHTML =
-            '<h2>🥧 Speech Detection Distribution</h2><div class="plot-container"></div>';
+          plot2.className = "plot-card full-width";
+          plot2.innerHTML = `
+            <h2>📈 Top ${topN} Event Probabilities Over Time</h2>
+            <p style="color: #666; font-size: 0.85em; margin-bottom: 10px;">
+              Marker size ∝ probability | Dashed lines = thresholds
+            </p>
+            <div class="plot-container large"></div>
+          `;
           plot2
             .querySelector(".plot-container")
-            .appendChild(createSpeechDistributionChart(stats));
+            .appendChild(createEventsTimeline(chunks, topEvents));
           plotsGrid.appendChild(plot2);
 
-          // Row 2: Top Predictions (full width)
+          // Plot 3: Results Bar Chart
           const plot3 = document.createElement("div");
-          plot3.className = "plot-card full-width";
-          plot3.innerHTML =
-            '<h2>🔝 Top Predictions Frequency</h2><div class="plot-container large"></div>';
+          plot3.className = "plot-card";
+          plot3.innerHTML = `
+            <h2>📊 Aggregated Audio Tagging Results</h2>
+            <p style="color: #666; font-size: 0.85em; margin-bottom: 10px;">
+              ★ = High confidence (≥${(HIGH_PROBABILITY_THRESHOLD * 100).toFixed(0)}%)
+            </p>
+            <div class="plot-container"></div>
+          `;
           plot3
             .querySelector(".plot-container")
-            .appendChild(createTopPredictionsChart(stats));
+            .appendChild(createResultsBar(topEvents));
           plotsGrid.appendChild(plot3);
 
-          // Row 3: Speech Timeline + Processing Modes
+          // Plot 4: Chunks Summary Grid (full width)
           const plot4 = document.createElement("div");
-          plot4.className = "plot-card";
-          plot4.innerHTML =
-            '<h2>🎯 Speech Detection Timeline</h2><div class="plot-container"></div>';
-          plot4
-            .querySelector(".plot-container")
-            .appendChild(createSpeechTimelineChart(chunks));
+          plot4.className = "plot-card full-width";
+          plot4.innerHTML = `
+            <h2>📋 Per-Chunk Top-${Math.min(topN, 3)} Predictions</h2>
+            <p style="color: #666; font-size: 0.85em; margin-bottom: 10px;">
+              Border color = confidence level | Bar opacity ∝ probability
+            </p>
+          `;
+          plot4.appendChild(createChunksSummary(chunks, Math.min(topN, 3)));
           plotsGrid.appendChild(plot4);
-
-          const plot5 = document.createElement("div");
-          plot5.className = "plot-card";
-          plot5.innerHTML =
-            '<h2>⚙️ Processing Modes Distribution</h2><div class="plot-container"></div>';
-          plot5
-            .querySelector(".plot-container")
-            .appendChild(createProcessingModesChart(stats));
-          plotsGrid.appendChild(plot5);
-
-          // Row 4: Speech Trend (full width)
-          const plot6 = document.createElement("div");
-          plot6.className = "plot-card full-width";
-          plot6.innerHTML =
-            '<h2>📈 Speech Probability Trend with Moving Average</h2><div class="plot-container large"></div>';
-          plot6
-            .querySelector(".plot-container")
-            .appendChild(createSpeechTrendChart(chunks));
-          plotsGrid.appendChild(plot6);
         } catch (error) {
+          console.error("[refreshPlots] Error:", error);
           plotsGrid.innerHTML = `
-                        <div class="plot-card full-width">
-                            <div class="error-message">
-                                <h3>❌ Error Loading Data</h3>
-                                <p>${error.message}</p>
-                                <button class="btn btn-small" onclick="refreshPlots()" style="margin-top: 10px;">
-                                    🔄 Retry
-                                </button>
-                            </div>
-                        </div>
-                    `;
+            <div class="plot-card full-width">
+              <div class="error-message">
+                <h3>❌ Error Loading Data</h3>
+                <p>${escapeHtml(error.message)}</p>
+                <button class="btn btn-small" onclick="refreshPlots()" style="margin-top: 10px;">🔄 Retry</button>
+              </div>
+            </div>
+          `;
         }
       }
 
-      // Initial load
+      // ===== Initialization =====
       document.addEventListener("DOMContentLoaded", () => {
+        console.log(
+          "[DOMContentLoaded] Initializing tags.html (chunk plots version)",
+        );
+        applySegmentFilterFromUrl();
         refreshPlots();
-        // Auto-refresh every 60 seconds
-        setInterval(refreshPlots, 60000);
+
+        // Auto-refresh every 60 seconds (only when not filtered)
+        setInterval(() => {
+          if (!activeSegmentFilter) {
+            refreshPlots();
+          }
+        }, 60000);
       });
 
-      // Handle window resize for charts
       window.addEventListener("resize", () => {
         Object.values(charts).forEach((chart) => chart.resize());
       });

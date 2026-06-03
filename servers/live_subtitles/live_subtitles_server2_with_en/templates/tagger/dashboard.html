@@ -34,6 +34,27 @@
       .header p {
         color: #666;
       }
+      .nav-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        margin-top: 15px;
+      }
+      .btn {
+        background: #667eea;
+        color: white;
+        border: none;
+        padding: 10px 25px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 0.95em;
+        text-decoration: none;
+        transition: background 0.3s;
+        display: inline-block;
+      }
+      .btn:hover {
+        background: #764ba2;
+      }
       .stats-bar {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -78,26 +99,6 @@
         border-bottom: 2px solid #667eea;
         padding-bottom: 10px;
       }
-      .endpoint {
-        background: #f5f5f5;
-        padding: 10px;
-        border-radius: 5px;
-        margin-bottom: 10px;
-        border-left: 4px solid #667eea;
-      }
-      .endpoint .method {
-        font-weight: bold;
-        color: #667eea;
-      }
-      .endpoint .path {
-        color: #333;
-        font-family: "Courier New", monospace;
-      }
-      .endpoint p {
-        color: #666;
-        margin-top: 5px;
-        font-size: 0.9em;
-      }
       .upload-area {
         border: 2px dashed #667eea;
         border-radius: 10px;
@@ -116,27 +117,13 @@
         background: rgba(102, 126, 234, 0.2);
         border-color: #764ba2;
       }
-      .btn {
-        background: #667eea;
-        color: white;
-        border: none;
-        padding: 12px 30px;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 1em;
-        transition: background 0.3s;
-        margin: 5px;
-      }
-      .btn:hover {
-        background: #764ba2;
+      .btn-small {
+        padding: 5px 15px;
+        font-size: 0.9em;
       }
       .btn:disabled {
         background: #ccc;
         cursor: not-allowed;
-      }
-      .btn-small {
-        padding: 5px 15px;
-        font-size: 0.9em;
       }
       .progress-bar {
         width: 100%;
@@ -196,6 +183,36 @@
         font-weight: bold;
         position: sticky;
         top: 0;
+      }
+      /* NEW: Clickable row styles */
+      tbody tr {
+        cursor: pointer;
+        transition:
+          background-color 0.2s,
+          transform 0.1s;
+      }
+      tbody tr:hover {
+        background-color: #f0f0ff;
+        transform: scale(1.002);
+      }
+      tbody tr:active {
+        background-color: #e0e0ff;
+      }
+      tbody tr.selected {
+        background-color: #d0d0ff;
+        outline: 2px solid #667eea;
+      }
+      /* NEW: View column indicator */
+      .view-indicator {
+        display: inline-block;
+        margin-left: 5px;
+        color: #667eea;
+        font-size: 0.8em;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      tbody tr:hover .view-indicator {
+        opacity: 1;
       }
       .table-container {
         max-height: 500px;
@@ -298,6 +315,23 @@
         background: #d1ecf1;
         color: #0c5460;
       }
+      /* NEW: Toast notification for navigation */
+      .toast {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #333;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 5px;
+        opacity: 0;
+        transition: opacity 0.3s;
+        z-index: 1000;
+        pointer-events: none;
+      }
+      .toast.show {
+        opacity: 1;
+      }
     </style>
   </head>
   <body>
@@ -308,8 +342,14 @@
           Analyze audio files for sound events, speech detection, and temporal
           patterns
         </p>
+        <div class="nav-buttons">
+          <a href="/tags" class="btn">📊 Analytics</a>
+        </div>
+        <p style="margin-top: 10px; font-size: 0.85em; color: #888">
+          💡 <strong>Click any row</strong> in the table to view that segment's
+          detailed analytics
+        </p>
       </div>
-
       <!-- Statistics Bar -->
       <div class="stats-bar">
         <div class="stat-card">
@@ -329,7 +369,6 @@
           <div class="value" id="avgSpeechProb">-</div>
         </div>
       </div>
-
       <div class="grid">
         <!-- Main Chunks Table -->
         <div class="card">
@@ -363,7 +402,6 @@
             <div class="loading" id="chunksLoading">Loading saved segments</div>
           </div>
         </div>
-
         <!-- Right Column: Config + Top Predictions -->
         <div>
           <div class="card">
@@ -391,14 +429,12 @@
               </tr>
             </table>
           </div>
-
           <div class="card" style="margin-top: 20px">
             <h2>🔝 Top Predictions</h2>
             <div id="topPredictionsChart" class="chart-container">
               <div class="loading">Loading predictions</div>
             </div>
           </div>
-
           <div class="card" style="margin-top: 20px">
             <h2>🎤 Speech Classes</h2>
             <ul style="list-style: none; padding: 0">
@@ -411,7 +447,6 @@
           </div>
         </div>
       </div>
-
       <!-- Upload and Test Section -->
       <div class="card">
         <h2>🚀 Try It Out</h2>
@@ -469,7 +504,8 @@
       </div>
       <div id="results"></div>
     </div>
-
+    <!-- NEW: Toast for navigation feedback -->
+    <div class="toast" id="toast"></div>
     <script>
       // ===== File Upload Handling =====
       let selectedFile = null;
@@ -481,6 +517,7 @@
       const progressDiv = document.getElementById("progress");
       const progressFill = document.getElementById("progressFill");
       const progressText = document.getElementById("progressText");
+      const toast = document.getElementById("toast");
 
       uploadArea.addEventListener("click", () => fileInput.click());
       uploadArea.addEventListener("dragover", (e) => {
@@ -510,36 +547,51 @@
         speechBtn.disabled = false;
       }
 
+      // ===== NEW: Toast notification =====
+      function showToast(message, duration = 2000) {
+        toast.textContent = message;
+        toast.classList.add("show");
+        setTimeout(() => {
+          toast.classList.remove("show");
+        }, duration);
+      }
+
+      // ===== NEW: Navigate to segment analytics =====
+      function navigateToSegment(segmentDir, segmentNumber) {
+        // Build a clean identifier for the segment
+        // Prefer segment_dir (e.g., "seg_001") over segment_number
+        const segmentId =
+          segmentDir || `seg_${String(segmentNumber || 0).padStart(3, "0")}`;
+        console.log(
+          `[navigateToSegment] Opening segment in new tab: ${segmentId}`,
+        );
+        showToast(`🔍 Opening analytics for ${segmentId} in new tab...`);
+        // Open in new tab immediately (no delay needed for new tab)
+        window.open(`/tags?segment=${encodeURIComponent(segmentId)}`, "_blank");
+      }
+
       // ===== Load Saved Chunks =====
       async function loadChunks() {
         const chunksLoading = document.getElementById("chunksLoading");
         const filterSelect = document.getElementById("filterSelect");
         const limitSelect = document.getElementById("limitSelect");
-
         chunksLoading.style.display = "block";
-
         const speechOnly = filterSelect.value === "speech";
         const limit = parseInt(limitSelect.value);
-
         try {
           const url = `/tags/chunks?limit=${limit}&offset=0&speech_only=${speechOnly}`;
           console.log("Fetching chunks from:", url);
-
           const response = await fetch(url);
           const data = await response.json();
-
           console.log("Received data:", data);
-
           // Update statistics
           updateStatistics(data.stats);
-
           // Update chunks table
           updateChunksTable(
             data.chunks,
             data.total_entries,
             data.returned_entries,
           );
-
           // Update top predictions chart
           updateTopPredictions(data.stats.top_predictions);
         } catch (error) {
@@ -555,7 +607,6 @@
 
       function updateStatistics(stats) {
         if (!stats) return;
-
         document.getElementById("totalSegments").textContent =
           stats.total_segments || 0;
         document.getElementById("speechSegments").textContent =
@@ -567,9 +618,9 @@
         ).toFixed(3);
       }
 
+      // ===== UPDATED: Table with clickable rows =====
       function updateChunksTable(chunks, totalEntries, returnedEntries) {
         const container = document.getElementById("chunksTableContainer");
-
         if (!chunks || chunks.length === 0) {
           container.innerHTML = `
                         <div style="padding: 40px; text-align: center; color: #666;">
@@ -579,10 +630,12 @@
                     `;
           return;
         }
-
         let html = `
                     <p style="margin-bottom: 10px; color: #666;">
                         Showing ${chunks.length} of ${totalEntries} segments
+                        <span style="font-size: 0.85em; margin-left: 10px;">
+                            💡 Click a row to view detailed analytics
+                        </span>
                     </p>
                     <table>
                         <thead>
@@ -598,7 +651,6 @@
                         </thead>
                         <tbody>
                 `;
-
         chunks.forEach((chunk) => {
           const speechDetected = chunk.speech_detected;
           const speechProb = chunk.speech_probability || 0;
@@ -606,15 +658,26 @@
           const predText = predictions
             .map((p) => `${p.name} (${(p.prob * 100).toFixed(0)}%)`)
             .join(", ");
-
           const timestamp = chunk.timestamp
             ? new Date(chunk.timestamp).toLocaleString()
             : "N/A";
+          const segmentDir = chunk.segment_dir || "N/A";
+          const segmentNumber = chunk.segment_number || "-";
+
+          // Build a clean segment identifier for the onclick handler
+          const segmentId =
+            chunk.segment_dir ||
+            `seg_${String(chunk.segment_number || 0).padStart(3, "0")}`;
 
           html += `
-                        <tr>
-                            <td><strong>${chunk.segment_dir || "N/A"}</strong></td>
-                            <td>${chunk.segment_number || "-"}</td>
+                        <tr onclick="navigateToSegment('${escapeHtml(String(chunk.segment_dir || ""))}', ${chunk.segment_number || 0})"
+                            title="Click to view detailed analytics for ${escapeHtml(segmentId)}"
+                            style="cursor: pointer;">
+                            <td>
+                                <strong>${escapeHtml(segmentDir)}</strong>
+                                <span class="view-indicator">🔍</span>
+                            </td>
+                            <td>${segmentNumber}</td>
                             <td>
                                 <span class="badge ${speechDetected ? "badge-success" : "badge-danger"}">
                                     ${speechDetected ? "✅ Yes" : "❌ No"}
@@ -627,35 +690,39 @@
                                 </div>
                                 <small>${(speechProb * 100).toFixed(1)}%</small>
                             </td>
-                            <td><span class="badge badge-info">${chunk.processing_mode || "unknown"}</span></td>
-                            <td><small>${predText || "No predictions"}</small></td>
-                            <td><small>${timestamp}</small></td>
+                            <td><span class="badge badge-info">${escapeHtml(chunk.processing_mode || "unknown")}</span></td>
+                            <td><small>${escapeHtml(predText) || "No predictions"}</small></td>
+                            <td><small>${escapeHtml(timestamp)}</small></td>
                         </tr>
                     `;
         });
-
         html += "</tbody></table>";
         container.innerHTML = html;
       }
 
+      // ===== NEW: Helper to escape HTML (prevent XSS in injected strings) =====
+      function escapeHtml(str) {
+        if (!str) return "";
+        const div = document.createElement("div");
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+      }
+
       function updateTopPredictions(predictions) {
         const container = document.getElementById("topPredictionsChart");
-
         if (!predictions || predictions.length === 0) {
           container.innerHTML =
             '<p style="text-align: center; color: #666;">No predictions data available</p>';
           return;
         }
-
         // Find max count for scaling
         const maxCount = Math.max(...predictions.map((p) => p.count));
-
         let html = "";
         predictions.slice(0, 10).forEach((pred) => {
           const percentage = ((pred.count / maxCount) * 100).toFixed(0);
           html += `
                         <div class="chart-bar">
-                            <div class="chart-label">${pred.name}</div>
+                            <div class="chart-label">${escapeHtml(pred.name)}</div>
                             <div class="chart-track">
                                 <div class="chart-fill" style="width: ${percentage}%"></div>
                             </div>
@@ -663,7 +730,6 @@
                         </div>
                     `;
         });
-
         container.innerHTML = html;
       }
 
@@ -725,12 +791,10 @@
         progressText.textContent = text;
         progressFill.style.width = "50%";
       }
-
       function hideProgress() {
         progressDiv.style.display = "none";
         progressFill.style.width = "0%";
       }
-
       function displayResults(data) {
         resultsDiv.style.display = "block";
         let html = "<h2>📊 Results</h2>";
@@ -740,7 +804,7 @@
           data.overall_top_predictions.forEach((pred) => {
             html += `
                             <div class="result-item">
-                                <strong>${pred.name}</strong>
+                                <strong>${escapeHtml(pred.name)}</strong>
                                 <div class="prob-bar">
                                     <div class="prob-fill" style="width: ${pred.prob * 100}%"></div>
                                 </div>
@@ -758,7 +822,7 @@
                                 <tr>
                                     <td>${chunk.chunk_index}</td>
                                     <td>${chunk.start_time}s - ${chunk.end_time}s</td>
-                                    <td>${topPred.name} (${(topPred.prob * 100).toFixed(1)}%)</td>
+                                    <td>${escapeHtml(topPred.name)} (${(topPred.prob * 100).toFixed(1)}%)</td>
                                     <td>${chunk.has_speech ? "✅" : "❌"}</td>
                                 </tr>
                             `;
@@ -770,7 +834,7 @@
           data.top_predictions.forEach((pred) => {
             html += `
                             <div class="result-item">
-                                <strong>${pred.name}</strong>
+                                <strong>${escapeHtml(pred.name)}</strong>
                                 <div class="prob-bar">
                                     <div class="prob-fill" style="width: ${pred.prob * 100}%"></div>
                                 </div>
@@ -782,7 +846,6 @@
         html += `<p><strong>Speech Detected:</strong> ${data.speech_detected ? "✅ Yes" : "❌ No"} | <strong>Processing Time:</strong> ${data.processing_time_seconds}s | <strong>RTF:</strong> ${data.real_time_factor}</p>`;
         resultsDiv.innerHTML = html;
       }
-
       function displaySpeechResult(data) {
         resultsDiv.style.display = "block";
         resultsDiv.innerHTML = `
@@ -791,24 +854,22 @@
                         <h3>${data.has_speech ? "✅ Speech Detected!" : "❌ No Speech Detected"}</h3>
                         <p><strong>Probability:</strong> ${(data.speech_probability * 100).toFixed(1)}%</p>
                         <p><strong>Threshold:</strong> ${(data.threshold_used * 100).toFixed(0)}%</p>
-                        <p><strong>File:</strong> ${data.filename}</p>
+                        <p><strong>File:</strong> ${escapeHtml(data.filename)}</p>
                         <p><strong>Processing Time:</strong> ${data.processing_time_seconds}s</p>
                     </div>
                 `;
       }
-
       function showError(message) {
         resultsDiv.style.display = "block";
         resultsDiv.innerHTML = `
                     <div style="background: #fee; border: 1px solid #fcc; padding: 20px; border-radius: 5px;">
                         <h3 style="color: #c00;">❌ Error</h3>
-                        <p>${message}</p>
+                        <p>${escapeHtml(message)}</p>
                     </div>
                 `;
       }
 
       // ===== Initial Load =====
-      // Load saved chunks on page load
       document.addEventListener("DOMContentLoaded", () => {
         loadChunks();
         // Auto-refresh every 30 seconds
