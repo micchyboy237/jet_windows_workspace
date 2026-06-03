@@ -476,7 +476,6 @@ def _save_segment_files(
     new_en_sents: list,
     ja_text: str,
     en_text: str,
-    tagging_events,
 ) -> dict:
     """Save all segment-related files to disk."""
     # Header
@@ -505,10 +504,6 @@ def _save_segment_files(
             "diarization": get_speaker_diarization(),
         }, f, ensure_ascii=False, indent=2)
 
-    # Tagging events
-    with open(segment_dir / "tagging_events.json", "w", encoding="utf-8") as f:
-        json.dump(tagging_events, f, ensure_ascii=False, indent=2)
-    
     # Results markdown
     if len(speaker_results) > 1:
         speaker_lines = [f"- {r['label']} ({r['confidence']:.3f}, {r['match_type']})" for r in speaker_results[:5]]
@@ -691,7 +686,6 @@ def _process_non_japanese(
         new_en_sents=[en_text] if en_text else [],
         ja_text="",
         en_text=en_text,
-        tagging_events=tagging_events,
     )
     
     # Save full audio files
@@ -972,7 +966,6 @@ def _process_japanese(
         new_en_sents=new_en_sents,
         ja_text=ja_text,
         en_text=en_text,
-        tagging_events=tagging_events,
     )
     
     # Save full audio files
