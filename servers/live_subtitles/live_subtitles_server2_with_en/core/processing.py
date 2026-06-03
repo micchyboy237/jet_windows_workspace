@@ -476,6 +476,7 @@ def _save_segment_files(
     new_en_sents: list,
     ja_text: str,
     en_text: str,
+    tagging_events,
 ) -> dict:
     """Save all segment-related files to disk."""
     # Header
@@ -503,6 +504,10 @@ def _save_segment_files(
             "speakers": speaker_results,
             "diarization": get_speaker_diarization(),
         }, f, ensure_ascii=False, indent=2)
+
+    # Tagging events
+    with open(segment_dir / "tagging_events.json", "w", encoding="utf-8") as f:
+        json.dump(tagging_events, f, ensure_ascii=False, indent=2)
     
     # Results markdown
     if len(speaker_results) > 1:
@@ -637,11 +642,6 @@ def _process_non_japanese(
     console.print(f"[bright_white]{en_text}[/bright_white]")
     console.print(f"[dim]Language: {language} | Words: {len(full_word_segments)}[/dim]")
     
-    # Speaker labeling
-    text_has_sufficient_content, speaker_results, primary_label, primary_confidence, speaker_metadata = (
-        _perform_speaker_labeling(audio_np, sample_rate, header, full_word_segments_text)
-    )
-    
     # Segment directory
     segment_num = get_next_segment_number()
     segment_dir = prepare_segment_directory(
@@ -654,6 +654,20 @@ def _process_non_japanese(
     console.print(
         f"[info]Segment directory:[/info] [uuid]{segment_dir_name}[/uuid] "
         f"(#{segment_num}, keeping last {n_segment_results})"
+    )
+
+    # Speaker labeling
+    text_has_sufficient_content, speaker_results, primary_label, primary_confidence, speaker_metadata = (
+        _perform_speaker_labeling(audio_np, sample_rate, header, full_word_segments_text)
+    )
+
+    # Audio tagging
+    tagging_events = perform_audio_tagging(
+        audio_np=audio_np,
+        sample_rate=sample_rate,
+        segment_dir=segment_dir,  # Will be set after prepare_segment_directory
+        chunk_duration=2.0,
+        overlap_duration=1.0,
     )
     
     # Save segment files
@@ -677,6 +691,7 @@ def _process_non_japanese(
         new_en_sents=[en_text] if en_text else [],
         ja_text="",
         en_text=en_text,
+        tagging_events=tagging_events,
     )
     
     # Save full audio files
@@ -708,6 +723,7 @@ def _process_non_japanese(
         "speaker_label": primary_label,
         "speaker_confidence": primary_confidence,
         "speakers": speaker_results,
+        "tagging_events": tagging_events,
     })
     
     if get_speaker_labeler() and get_speaker_labeler().total_segments_processed % 5 == 0:
@@ -756,6 +772,7 @@ def _process_non_japanese(
         "new_ja_start_index": None,
         "segment_number": segment_num,
         "segment_dir": segment_dir_name,
+        "tagging_events": tagging_events,
     }
 
 
@@ -784,10 +801,33 @@ def _process_japanese(
     console.print("[bold green]📝 Japanese Transcribed Text:[/bold green]")
     console.print(f"[bright_white]{full_ja_text}[/bright_white]")
     console.print(f"[dim]Sentences: {len(full_ja_sents)}[/dim]")
-    
+
+    # Segment directory
+    segment_num = get_next_segment_number()
+    segment_dir = prepare_segment_directory(
+        segment_num,
+        segments_dir=last_n_segments_dir,
+        segment_index_path=segment_index_path,
+        n_results=n_segment_results,
+    )
+    segment_dir_name = f"segment_{segment_num:03d}"
+    console.print(
+        f"[info]Segment directory:[/info] [uuid]{segment_dir_name}[/uuid] "
+        f"(#{segment_num}, keeping last {n_segment_results})"
+    )
+
     # Speaker labeling
     text_has_sufficient_content, speaker_results, primary_label, primary_confidence, speaker_metadata = (
         _perform_speaker_labeling(audio_np, sample_rate, header, full_word_segments_text)
+    )
+
+    # Audio tagging
+    tagging_events = perform_audio_tagging(
+        audio_np=audio_np,
+        sample_rate=sample_rate,
+        segment_dir=segment_dir,  # Will be set after prepare_segment_directory
+        chunk_duration=2.0,
+        overlap_duration=1.0,
     )
     
     # Process Japanese text and translate
@@ -911,20 +951,6 @@ def _process_japanese(
     ja_text = prefix_result["new_ja"]
     en_text = prefix_result["new_en"]
     
-    # Segment directory
-    segment_num = get_next_segment_number()
-    segment_dir = prepare_segment_directory(
-        segment_num,
-        segments_dir=last_n_segments_dir,
-        segment_index_path=segment_index_path,
-        n_results=n_segment_results,
-    )
-    segment_dir_name = f"segment_{segment_num:03d}"
-    console.print(
-        f"[info]Segment directory:[/info] [uuid]{segment_dir_name}[/uuid] "
-        f"(#{segment_num}, keeping last {n_segment_results})"
-    )
-    
     # Save segment files
     _save_segment_files(
         segment_dir=segment_dir,
@@ -946,6 +972,7 @@ def _process_japanese(
         new_en_sents=new_en_sents,
         ja_text=ja_text,
         en_text=en_text,
+        tagging_events=tagging_events,
     )
     
     # Save full audio files
@@ -982,6 +1009,7 @@ def _process_japanese(
         "speaker_label": primary_label,
         "speaker_confidence": primary_confidence,
         "speakers": speaker_results,
+        "tagging_events": tagging_events,
     })
     
     if get_speaker_labeler() and get_speaker_labeler().total_segments_processed % 5 == 0:
@@ -1030,4 +1058,244 @@ def _process_japanese(
         "phrase_segments": full_phrase_segments,
         "segment_number": segment_num,
         "segment_dir": segment_dir_name,
+        "tagging_events": tagging_events,
     }
+
+
+def perform_audio_tagging(
+    audio_np: np.ndarray,
+    sample_rate: int,
+    segment_dir: Optional[Path] = None,
+    chunk_duration: float = 2.0,
+    overlap_duration: float = 1.0,
+) -> Dict[str, Any]:
+    """
+    Perform audio tagging on an audio segment and save results.
+    """
+    from services.audio_tagger import AudioTagger
+    from core.state import get_audio_tagger, set_audio_tagger
+    
+    console.print(f"[info]🎵 Starting audio tagging...[/info]")
+    console.print(f"[info]Audio shape: {audio_np.shape}, Sample rate: {sample_rate}[/info]")
+    
+    # Calculate audio duration
+    audio_duration = len(audio_np) / sample_rate
+    console.print(f"[info]Audio duration: {audio_duration:.2f}s[/info]")
+    
+    try:
+        # Get or initialize tagger from state
+        tagger = get_audio_tagger()
+        if tagger is None:
+            tagger = AudioTagger(
+                top_k=5,
+                speech_prob_threshold=0.5,
+                chunk_duration=chunk_duration,
+                chunk_overlap=overlap_duration,
+                debug=False,
+            )
+            set_audio_tagger(tagger)
+        
+        # Convert to float32 for the tagger
+        audio_float = audio_np.astype(np.float32) / 32768.0
+        
+        # Check for speech
+        speech_prob = tagger.get_speech_probability(audio_float, sample_rate=sample_rate)
+        has_speech = speech_prob >= 0.5
+        
+        console.print(f"[info]Speech probability: {speech_prob:.3f}[/info]")
+        console.print(f"[info]Speech detected: {has_speech}[/info]")
+        
+        # Get tagging results
+        if audio_duration > chunk_duration * 2:
+            # Use chunked processing for longer audio
+            console.print(f"[info]Using chunked processing (audio > {chunk_duration*2:.1f}s)[/info]")
+            chunked_summary = tagger.tag_audio_chunks(
+                audio=audio_float,
+                sample_rate=sample_rate,
+                chunk_duration=chunk_duration,
+                overlap_duration=overlap_duration,
+            )
+            
+            tagging_results = {
+                "speech_detected": has_speech,
+                "max_speech_probability": round(speech_prob, 4),
+                "overall_top_predictions": chunked_summary["overall_top_predictions"],
+                "total_chunks": chunked_summary["total_chunks"],
+                "chunk_duration": chunked_summary["chunk_duration"],
+                "processing_mode": "chunked",
+                "chunks": [
+                    {
+                        "chunk_index": chunk["chunk_index"],
+                        "start_time": chunk["start_time"],
+                        "end_time": chunk["end_time"],
+                        "predictions": chunk["predictions"][:3],
+                    }
+                    for chunk in chunked_summary["chunks"]
+                ],
+                "processing_time": chunked_summary["total_processing_time"],
+                "real_time_factor": chunked_summary["real_time_factor"],
+            }
+        else:
+            # Single inference for short audio
+            console.print(f"[info]Using single inference (audio <= {chunk_duration*2:.1f}s)[/info]")
+            predictions = tagger.tag_audio(audio_float, sample_rate=sample_rate)
+            
+            tagging_results = {
+                "speech_detected": has_speech,
+                "max_speech_probability": round(speech_prob, 4),
+                "top_predictions": predictions[:5],
+                "total_predictions": len(predictions),
+                "processing_mode": "single",
+            }
+        
+        console.print("[bold green]🎵 Audio Tagging Results:[/bold green]")
+        console.print(f"  Speech detected: {'✅' if has_speech else '❌'} (prob: {speech_prob:.3f})")
+        
+        top_preds = tagging_results.get("overall_top_predictions") or tagging_results.get("top_predictions", [])
+        for pred in top_preds[:3]:
+            console.print(f"  - {pred['name']}: {pred['prob']:.3f}")
+        
+        # Save to segment directory if provided
+        if segment_dir:
+            _save_tagging_to_segment(segment_dir, tagging_results, has_speech, speech_prob)
+        
+        return tagging_results
+        
+    except Exception as e:
+        console.print(f"[error]Audio tagging failed: {e}[/error]")
+        console.print("[warning]Continuing without audio tagging results[/warning]")
+        
+        return {
+            "speech_detected": False,
+            "max_speech_probability": 0.0,
+            "error": str(e),
+            "processing_mode": "failed",
+            "top_predictions": [],
+        }
+
+
+def get_audio_tagger_summary(
+    audio_np: np.ndarray,
+    sample_rate: int,
+    max_duration: float = 30.0,
+) -> Dict[str, Any]:
+    """
+    Get a quick summary of audio content using the tagger.
+    """
+    from services.audio_tagger import AudioTagger
+    from core.state import get_audio_tagger, set_audio_tagger
+    
+    audio_duration = len(audio_np) / sample_rate
+    
+    console.print(f"[info]Getting audio tagger summary for {audio_duration:.2f}s audio[/info]")
+    
+    if audio_duration < 0.5 or len(audio_np) < sample_rate * 0.5:
+        console.print("[warning]Audio too short for tagging[/warning]")
+        return {
+            "speech_detected": False,
+            "content_type": "too_short",
+            "duration_seconds": round(audio_duration, 3),
+        }
+    
+    try:
+        # Get or initialize tagger from state
+        tagger = get_audio_tagger()
+        if tagger is None:
+            tagger = AudioTagger(top_k=5, debug=False)
+            set_audio_tagger(tagger)
+        
+        audio_float = audio_np.astype(np.float32) / 32768.0
+        
+        # Get quick predictions
+        predictions = tagger.tag_audio(audio_float, sample_rate=sample_rate)
+        speech_prob = tagger.get_speech_probability(audio_float, sample_rate=sample_rate)
+        
+        # Classify content type
+        top_name = predictions[0]["name"] if predictions else "Unknown"
+        top_prob = predictions[0]["prob"] if predictions else 0.0
+        
+        if speech_prob >= 0.7:
+            content_type = "speech"
+        elif any(music_term in top_name.lower() for music_term in ["music", "musical", "song", "singing"]):
+            content_type = "music"
+        elif any(noise_term in top_name.lower() for noise_term in ["noise", "silence", "background"]):
+            content_type = "noise"
+        else:
+            content_type = "other"
+        
+        summary = {
+            "speech_detected": speech_prob >= 0.5,
+            "speech_probability": round(speech_prob, 3),
+            "content_type": content_type,
+            "top_prediction": top_name,
+            "top_probability": round(top_prob, 3),
+            "duration_seconds": round(audio_duration, 3),
+            "all_predictions": predictions[:3],
+        }
+        
+        console.print(f"[success]Audio summary: {content_type} (speech prob: {speech_prob:.3f})[/success]")
+        
+        return summary
+        
+    except Exception as e:
+        console.print(f"[warning]Failed to get audio summary: {e}[/warning]")
+        return {
+            "speech_detected": False,
+            "content_type": "error",
+            "error": str(e),
+            "duration_seconds": round(audio_duration, 3),
+        }
+
+
+def _save_tagging_to_segment(
+    segment_dir: Path,
+    tagging_results: Dict[str, Any],
+    has_speech: bool,
+    speech_prob: float,
+) -> None:
+    """
+    Save audio tagging results to segment directory.
+    
+    Args:
+        segment_dir: Directory to save results
+        tagging_results: Tagging results dictionary
+        has_speech: Whether speech was detected
+        speech_prob: Maximum speech probability
+    
+    Debug logs trace:
+        - Directory creation
+        - File writing
+        - Success/failure status
+    """
+    import json
+    from datetime import datetime
+    
+    try:
+        tagging_dir = segment_dir / "tagging"
+        tagging_dir.mkdir(exist_ok=True)
+        
+        # Save detailed results
+        tagging_file = tagging_dir / "audio_tags.json"
+        with open(tagging_file, "w", encoding="utf-8") as f:
+            json.dump(tagging_results, f, ensure_ascii=False, indent=2)
+        
+        # Save summary
+        summary_file = tagging_dir / "tagging_summary.txt"
+        with open(summary_file, "w", encoding="utf-8") as f:
+            f.write(f"Audio Tagging Summary\n")
+            f.write(f"====================\n")
+            f.write(f"Timestamp: {datetime.now().isoformat()}\n")
+            f.write(f"Speech Detected: {'Yes' if has_speech else 'No'}\n")
+            f.write(f"Speech Probability: {speech_prob:.3f}\n")
+            f.write(f"Processing Mode: {tagging_results.get('processing_mode', 'unknown')}\n")
+            
+            top_preds = tagging_results.get("overall_top_predictions") or tagging_results.get("top_predictions", [])
+            if top_preds:
+                f.write(f"\nTop Predictions:\n")
+                for pred in top_preds[:5]:
+                    f.write(f"  - {pred['name']}: {pred['prob']:.3f}\n")
+        
+        console.print(f"[success]Audio tagging results saved to: {tagging_dir}[/success]")
+        
+    except Exception as e:
+        console.print(f"[warning]Failed to save tagging results: {e}[/warning]")

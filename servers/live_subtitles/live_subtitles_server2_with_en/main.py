@@ -1,6 +1,6 @@
+# servers\live_subtitles\live_subtitles_server2_with_en\main.py
 """
 Live Japanese Subtitles Server 2 - Main Application Entry Point.
-
 Refactored with separate route files for better maintainability.
 """
 import shutil
@@ -11,20 +11,16 @@ from fastapi import FastAPI
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.theme import Theme
-
-# Core state imports
 from core.state import (
     get_segment_index_path,
 )
 from services.live_subtitles_server_utils import load_segment_counter
-
-# Route imports
 from routes.websocket import websocket_endpoint
 from routes.speakers import router as speakers_router
 from routes.transcribe import router as transcribe_router
 from routes.translate import router as translate_router
+from routes.tagger import router as tagger_router
 
-# ---- Console Setup ----
 console = Console(
     theme=Theme(
         {
@@ -41,49 +37,99 @@ console = Console(
     )
 )
 
-# ---- Logging Setup ----
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[RichHandler(console=console, rich_tracebacks=True)],
-)
 logger = logging.getLogger("live_subtitles")
-
-# Suppress uvicorn logs to avoid duplicate logging
 for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(name).handlers = []
     logging.getLogger(name).propagate = True
 
-# ---- FastAPI App ----
 app = FastAPI(title="Live Japanese Subtitles Server 2")
 
-# ---- Register WebSocket Route (direct registration) ----
-# IMPORTANT: Use add_api_websocket_route for direct handler registration
-# The decorator wrapper in main.py was causing 403 errors because
-# FastAPI couldn't properly resolve the WebSocket handler chain.
+# WebSocket route for real-time audio processing
 app.add_api_websocket_route("/ws/live-subtitles", websocket_endpoint)
 
-# ---- Register REST Routes ----
+# REST API routes
 app.include_router(speakers_router)
 app.include_router(transcribe_router)
 app.include_router(translate_router)
-
+app.include_router(tagger_router)  # NEW: Audio tagging routes
 
 def initialize_detector():
     """Initialize the audio language detector."""
     from core.state import set_audio_language_detector
     from services.audio_language_detector import AudioLanguageDetector
-    
     console.print("Initializing AudioLanguageDetector...")
     detector = AudioLanguageDetector()
     set_audio_language_detector(detector)
     console.print("Detector initialized successfully!\n")
 
-
-# ---- Main Entry Point ----
-if __name__ == "__main__":
-    initialize_detector()
+def initialize_tagger():
+    """
+    Initialize the audio tagger at startup.
     
+    This pre-loads the ONNX model so the first tagging request
+    doesn't have to wait for model loading.
+    """
+    from core.state import set_audio_tagger
+    from services.audio_tagger import AudioTagger
+    
+    console.print("Initializing AudioTagger...")
+    try:
+        tagger = AudioTagger(
+            top_k=5,
+            speech_prob_threshold=0.5,
+            chunk_duration=2.0,
+            chunk_overlap=1.0,
+            debug=False,
+        )
+        set_audio_tagger(tagger)
+        console.print("AudioTagger initialized successfully!\n")
+    except FileNotFoundError as e:
+        console.print(f"[warning]AudioTagger model files not found: {e}[/warning]")
+        console.print("[warning]Audio tagging endpoints will be available but may fail on first request.[/warning]")
+        console.print("[warning]Download models from: https://github.com/k2-fsa/sherpa-onnx/releases/tag/audio-tagging-models[/warning]\n")
+    except Exception as e:
+        console.print(f"[warning]Could not initialize AudioTagger: {e}[/warning]")
+        console.print("[warning]Audio tagging endpoints will initialize on first request.[/warning]\n")
+
+def cleanup_on_shutdown():
+    """
+    Cleanup resources on server shutdown.
+    Saves speaker state and performs any necessary cleanup.
+    """
+    from core.state import (
+        save_speaker_state,
+        get_speaker_labeler,
+        get_audio_tagger,
+    )
+    
+    console.print("[info]Performing cleanup before shutdown...[/info]")
+    
+    # Save speaker state
+    if get_speaker_labeler() is not None:
+        save_speaker_state()
+        console.print("[success]Speaker state saved.[/success]")
+    
+    # Reset tagger (free resources)
+    tagger = get_audio_tagger()
+    if tagger is not None:
+        try:
+            tagger.reset()
+            console.print("[success]AudioTagger resources freed.[/success]")
+        except Exception as e:
+            console.print(f"[warning]Error resetting AudioTagger: {e}[/warning]")
+    
+    console.print("[success]Cleanup complete.[/success]")
+
+# Register shutdown handler
+import atexit
+atexit.register(cleanup_on_shutdown)
+
+if __name__ == "__main__":
+    # Initialize detectors and models
+    initialize_detector()
+    initialize_tagger()
+    
+    # Initialize segment counter
     segment_index_path = get_segment_index_path()
     segment_counter = load_segment_counter(segment_index_path)
     console.print(
@@ -91,9 +137,13 @@ if __name__ == "__main__":
         f"(next will be segment_{segment_counter + 1:03d})[/info]"
     )
     
+    # Log available endpoints
     logger.info("🚀 Starting [bold cyan]Live Japanese Subtitles Server 2[/]")
-    logger.info("WebSocket endpoint → [bold]ws://0.0.0.0:8000/ws/live-subtitles[/]")
-    logger.info("REST endpoints:")
+    logger.info("")
+    logger.info("📡 WebSocket endpoint:")
+    logger.info("   [bold]ws://0.0.0.0:8000/ws/live-subtitles[/]")
+    logger.info("")
+    logger.info("📋 REST endpoints:")
     logger.info("   POST /transcribe")
     logger.info("   POST /translate")
     logger.info("   GET  /speakers")
@@ -102,8 +152,22 @@ if __name__ == "__main__":
     logger.info("   POST /speakers/consolidate")
     logger.info("   POST /speakers/reset")
     logger.info("   POST /speakers/merge")
+    logger.info("   GET  /speakers/dashboard")
+    logger.info("   GET  /speakers/plots")
+    logger.info("   GET  /speakers/plot/{plot_name}")
+    logger.info("   GET  /speakers/data/export")
+    logger.info("")
+    logger.info("🎵 Audio Tagging endpoints:")
+    logger.info("   POST /tag/audio")
+    logger.info("   POST /tag/chunks")
+    logger.info("   POST /tag/speech-check")
+    logger.info("   GET  /tag/config")
+    logger.info("   POST /tag/config/update")
+    logger.info("   GET  /tag/dashboard")
+    logger.info("")
     logger.info("Press Ctrl+C to stop\n")
     
+    # Start server
     uvicorn.run(
         app="main:app",
         host="0.0.0.0",

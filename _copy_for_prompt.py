@@ -69,17 +69,17 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\audio-tagging-from-a-file.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\sherpa-onnx\python-api-examples\audio-tagging-from-a-file-ced.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_base.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_core.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_zipformer.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_base.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_core.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_zipformer.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_ced.py",
     # r"C:\Users\druiv\.cache\pretrained_models\sherpa-onnx\sherpa-onnx-zipformer-audio-tagging-2024-04-09\class_labels_indices.csv",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\vad_firered.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\_demo_speech_checker.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speech_checker.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speech_checker.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\audio_tagger_zipformer.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\speech_checker\chunk_results.json",
@@ -87,6 +87,17 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\speech_checker\results.json",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\speech_checker\speech_check_results.json",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\speech_checker\speech_insights.json",
+    r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger_chunk_plots.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_audio_tagger.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\state.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\__init__.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\models\schemas.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\websocket.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
     r"",
 ]
 
@@ -104,47 +115,8 @@ SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update speech checker audio input types to also use AudioInput, reuse existing load_audio.
-
-Fix current error
-
- python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\speech_checker.py "C:\Users\druiv\.cache\_temp\last_20_segments_spyx1_all_high_speech\segment_314\sound.wav"
-INFO: Building SpeechChecker with threshold=0.6
-INFO: Speech indices (for filtering): ['Speech', 'Male speech, man speaking', 'Female speech, woman speaking', 'Child speech, kid speaking', 'Conversation', 'Narration, monologue']
-DEBUG: ✓ FireRed alignment verified: window=16000samples (100 frames), hop=8000samples (50 frames)
-INFO: Using int8 quantised model
-                                   🎯 ZIPFORMER audio tagger configuration (Aligned with FireRed VAD)
-┏━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Parameter         ┃ Value                                                                                                             ┃
-┡━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ Backend           │ Zipformer                                                                                                         │
-│ Variant           │ Standard (larger, more accurate)                                                                                  │
-│ Model size        │ 288 MB                                                                                                            │
-│ Model path        │ C:\Users\druiv\.cache\pretrained_models\sherpa-onnx\sherpa-onnx-zipformer-audio-tagging-2024-04-09\model.int8.on… │
-│ Labels path       │ C:\Users\druiv\.cache\pretrained_models\sherpa-onnx\sherpa-onnx-zipformer-audio-tagging-2024-04-09\class_labels_… │
-│ Top K             │ 10                                                                                                                │
-│ Provider          │ cpu                                                                                                               │
-│ Threads           │ 1                                                                                                                 │
-│ FireRed Alignment │ ✓ Verified                                                                                                        │
-│ Window            │ 100 frames × 160 samples = 16000 samples (1.0s)                                                                   │
-│ Frame Shift       │ 160 samples (10ms)                                                                                                │
-└───────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
-D:\a\sherpa-onnx\sherpa-onnx\sherpa-onnx\csrc\offline-zipformer-audio-tagging-model.cc:Init:69 model_author=k2-fsa
-onnx.infer=onnxruntime.quant
-version=1
-model_type=zipformer2
-url=https://github.com/k2-fsa/icefall/tree/master/egs/audioset/AT/zipformer
-comment=zipformer2 audio tagger
-
-
-╭──────────────────────────────────────────────────────────────╮
-│ ✓ SpeechChecker Ready                                        │
-│ Threshold: 60% | Filter Types: 6 | Model: Zipformer-standard │
-╰──────────────────────────────────────────────────────────────╯
-
-🔍 Analyzing Speech in: sound.wav
-Error: name 'samples' is not defined
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
+I also want to perform audio tagging by chunks in processing.py. Include in response.
+Also create a new route and endpoints for the audio tagger.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
