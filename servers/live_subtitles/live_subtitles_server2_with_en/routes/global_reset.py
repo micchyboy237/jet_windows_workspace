@@ -317,13 +317,13 @@ def _reset_audio_tagger(debug: bool = False) -> Dict[str, Any]:
             if debug:
                 console.print(f"[debug]Resetting audio tagger[/debug]")
             
-            try:
-                tagger.reset()
-            except Exception as e:
-                if debug:
-                    console.print(f"[debug]Tagger reset() raised: {e}, setting to None[/debug]")
+            # try:
+            #     tagger.reset()
+            # except Exception as e:
+            #     if debug:
+            #         console.print(f"[debug]Tagger reset() raised: {e}, setting to None[/debug]")
             
-            set_audio_tagger(None)
+            # set_audio_tagger(None)
             stats["reset_success"] = True
             
             if debug:
@@ -445,7 +445,7 @@ def _reinitialize_critical_systems(debug: bool = False) -> Dict[str, Any]:
                 console.print(f"[debug]Cleared embedding inference[/debug]")
         
         # Clear speaker labeler to force reinitialization on next use
-        set_speaker_labeler(None)
+        # set_speaker_labeler(None)
         
         # Reset segment counter
         from services.live_subtitles_server_utils import _segment_counter

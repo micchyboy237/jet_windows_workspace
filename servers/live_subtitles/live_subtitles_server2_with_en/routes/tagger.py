@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import numpy as np
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, Request
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from rich.console import Console
 from rich.table import Table
 from jinja2 import Template
@@ -25,12 +25,218 @@ from services.save_utils import (
     save_tagging_results,
     save_chunked_results,
 )
-from config import OUTPUT_DIR, TEMPLATES_DIR
+from config import OUTPUT_DIR, TEMPLATES_DIR, STATIC_DIR
 
+static_dir = STATIC_DIR / "tagger"
 templates_dir = TEMPLATES_DIR / "tagger"
 
 console = Console()
 router = APIRouter(prefix="/tags", tags=["audio-tagging"])
+
+
+def read_and_inline_html(template_path: Path, static_dir: Path) -> str:
+    """
+    Read an HTML template and inline all CSS and JS files.
+    
+    Uses placeholder markers instead of HTML comments to avoid
+    JavaScript parsing errors.
+    
+    Placeholders in templates:
+    - <!-- CSS_PLACEHOLDER --> : Replaced with all CSS content
+    - <!-- JS_PLACEHOLDER --> : Replaced with all JS content in correct order
+    
+    Args:
+        template_path: Path to the HTML template file
+        static_dir: Path to the static files directory
+    
+    Returns:
+        Complete HTML string with inlined resources
+    """
+    console.print(f"[dim]Reading template: {template_path}[/dim]")
+    
+    # Read the template
+    with open(template_path, 'r', encoding='utf-8') as f:
+        html_content = f.read()
+    
+    # ===== Inline CSS =====
+    css_files = sorted(static_dir.glob('css/*.css'))
+    if css_files:
+        console.print(f"[dim]Found {len(css_files)} CSS files[/dim]")
+        all_css = ""
+        for css_file in css_files:
+            console.print(f"[dim]  Inlining: {css_file.name}[/dim]")
+            with open(css_file, 'r', encoding='utf-8') as f:
+                all_css += f"/* {css_file.name} */\n"
+                all_css += f.read() + "\n\n"
+        
+        # Replace CSS_PLACEHOLDER with inline style tag
+        css_tag = f'<style>\n{all_css}\n</style>'
+        html_content = html_content.replace('<!-- CSS_PLACEHOLDER -->', css_tag)
+    
+    # ===== Inline JavaScript =====
+    js_files = sorted(static_dir.glob('js/*.js'))
+    if js_files:
+        console.print(f"[dim]Found {len(js_files)} JS files[/dim]")
+        
+        # Define the correct loading order for JS files
+        # Files are loaded in this order; any unlisted files are appended alphabetically
+        js_order = [
+            'shared_constants.js',
+            'shared_utils.js',
+            'shared_charts.js',
+            'segment_filter.js',
+            'data_pipeline.js',
+            'summary_cards.js',
+            'heatmap_chart.js',
+            'timeline_chart.js',
+            'results_bar.js',
+            'chunks_summary.js',
+            'detail_card.js',
+            'dashboard_main.js',
+            'main_app.js',
+        ]
+        
+        # Sort JS files according to the defined order
+        ordered_js = []
+        remaining_js = list(js_files)
+        
+        for ordered_name in js_order:
+            for js_file in remaining_js[:]:  # iterate over a copy
+                if js_file.name == ordered_name:
+                    ordered_js.append(js_file)
+                    remaining_js.remove(js_file)
+                    break
+        
+        # Append any remaining unlisted files alphabetically
+        remaining_js.sort(key=lambda f: f.name)
+        ordered_js.extend(remaining_js)
+        
+        all_js = ""
+        for js_file in ordered_js:
+            console.print(f"[dim]  Inlining: {js_file.name}[/dim]")
+            with open(js_file, 'r', encoding='utf-8') as f:
+                js_content = f.read()
+            all_js += f"\n// ===== {js_file.name} =====\n"
+            all_js += js_content + "\n"
+        
+        # Replace JS_PLACEHOLDER with a single script tag containing all JS
+        js_tag = f'<script>\n{all_js}\n</script>'
+        html_content = html_content.replace('<!-- JS_PLACEHOLDER -->', js_tag)
+    
+    # ===== Remove any remaining placeholder comments =====
+    # Clean up any placeholders that weren't replaced
+    html_content = html_content.replace('<!-- CSS_PLACEHOLDER -->', '')
+    html_content = html_content.replace('<!-- JS_PLACEHOLDER -->', '')
+    
+    console.print(f"[success]✅ Template inlining complete[/success]")
+    return html_content
+
+
+def generate_static_html(template_path: Path, static_dir: Path, output_filename: str) -> Path:
+    """
+    Generate a static HTML file from a template by inlining resources.
+    
+    Args:
+        template_path: Path to the HTML template file
+        static_dir: Path to the static files directory
+        output_filename: Name of the output file (e.g., 'dashboard.html')
+    
+    Returns:
+        Path to the generated static HTML file
+    """
+    console.print(f"[info]Generating static HTML from template: {template_path.name}[/info]")
+    
+    # Generate the inlined HTML content
+    html_content = read_and_inline_html(template_path, static_dir)
+    
+    # Save to static directory
+    output_path = static_dir / output_filename
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    console.print(f"[success]✅ Generated static HTML: {output_path}[/success]")
+    return output_path
+
+
+def get_html_response(page_name: str, template_name: str) -> HTMLResponse:
+    """
+    Serve an HTML page with the following priority:
+    1. If static HTML exists, serve it directly
+    2. If template exists, generate static HTML from it and serve
+    3. If neither exists, return 404
+    
+    Args:
+        page_name: Name of the static HTML file (e.g., 'dashboard.html')
+        template_name: Name of the template file (e.g., 'dashboard_layout.html')
+    
+    Returns:
+        HTMLResponse with the page content
+    """
+    static_html_path = static_dir / page_name
+    template_path = templates_dir / template_name
+    
+    console.print(f"[dim]Looking for static HTML: {static_html_path}[/dim]")
+    
+    # Priority 1: Check if static HTML file exists
+    if static_html_path.exists():
+        console.print(f"[success]✅ Serving existing static HTML: {static_html_path}[/success]")
+        return FileResponse(static_html_path)
+    
+    # Priority 2: Check if template exists and generate static HTML
+    if template_path.exists():
+        console.print(f"[info]Static HTML not found, generating from template: {template_path}[/info]")
+        try:
+            generated_path = generate_static_html(template_path, static_dir, page_name)
+            console.print(f"[success]✅ Generated and serving: {generated_path}[/success]")
+            return FileResponse(generated_path)
+        except Exception as e:
+            console.print(f"[error]Failed to generate static HTML: {e}[/error]")
+            console.print(f"[dim]Traceback: {traceback.format_exc()}[/dim]")
+            # Fall through to 404
+    else:
+        console.print(f"[warning]Template not found: {template_path}[/warning]")
+    
+    # Priority 3: Neither exists, return 404
+    console.print(f"[error]❌ Neither static HTML nor template found for {page_name}[/error]")
+    return HTMLResponse(
+        content=f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Page Not Found</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; padding: 50px; }}
+                h1 {{ color: #e74c3c; }}
+                .info {{ color: #666; margin: 20px; }}
+                .btn {{ 
+                    display: inline-block; 
+                    padding: 10px 20px; 
+                    background: #3498db; 
+                    color: white; 
+                    text-decoration: none; 
+                    border-radius: 5px; 
+                    margin: 10px;
+                }}
+            </style>
+        </head>
+        <body>
+            <h1>📄 {page_name} Not Found</h1>
+            <p class="info">The requested page could not be found or generated.</p>
+            <p class="info">
+                <strong>Static HTML:</strong> {static_html_path} ({"✅ Exists" if static_html_path.exists() else "❌ Missing"})<br>
+                <strong>Template:</strong> {template_path} ({"✅ Exists" if template_path.exists() else "❌ Missing"})
+            </p>
+            <div>
+                <a href="/tags" class="btn">📊 Tags Analytics</a>
+                <a href="/tags/dashboard" class="btn">📋 Dashboard</a>
+            </div>
+        </body>
+        </html>
+        """,
+        status_code=404
+    )
 
 
 def get_tagger() -> AudioTagger:
@@ -56,20 +262,22 @@ def get_tagger() -> AudioTagger:
 
 
 @router.get("", response_class=HTMLResponse)
-async def get_tags():
+@router.get("/", response_class=HTMLResponse)
+async def get_tags(request: Request):
     """
-    Display audio tagging data visualizations using Chart.js.
-    Shows:
-    - Summary statistics at the top
-    - Speech probability distribution over segments
-    - Top predictions frequency bar chart
-    - Speech vs non-speech timeline
-    - Processing mode distribution
-    - Speech probability trend line
+    Serve the tags analytics page.
+    Priority: static HTML > generate from template > 404
     """
-    template_path = templates_dir / "tags.html"
-    template = Template(template_path.read_text(encoding='utf-8'))
-    return HTMLResponse(content=template.render())
+    return get_html_response("tags.html", "tags_layout.html")
+
+
+@router.get("/dashboard", response_class=HTMLResponse)
+async def get_dashboard(request: Request):
+    """
+    Serve the tagger dashboard page.
+    Priority: static HTML > generate from template > 404
+    """
+    return get_html_response("dashboard.html", "dashboard_layout.html")
 
 
 @router.get("/config")
@@ -239,14 +447,6 @@ async def get_saved_chunks(
         console.print(f"[error]Error reading tag events: {e}[/error]")
         console.print(f"[dim]Traceback: {traceback.format_exc()}[/dim]")
         raise HTTPException(status_code=500, detail=f"Error reading tag events: {str(e)}")
-
-
-@router.get("/dashboard", response_class=HTMLResponse)
-async def get_tagger_dashboard():
-    tagger_config = await get_tagger_config()
-    template_path = templates_dir / "dashboard.html"
-    template = Template(template_path.read_text(encoding='utf-8'))
-    return HTMLResponse(content=template.render(config=tagger_config))
 
 
 @router.post("/audio")

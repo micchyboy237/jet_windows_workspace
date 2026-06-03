@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.theme import Theme
@@ -38,27 +40,38 @@ console = Console(
     )
 )
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    handlers=[RichHandler(console=console, rich_tracebacks=True)]
+)
 logger = logging.getLogger("live_subtitles")
-for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-    logging.getLogger(name).handlers = []
-    logging.getLogger(name).propagate = True
 
+# Create FastAPI app
 app = FastAPI(title="Live Japanese Subtitles Server 2")
 
-# WebSocket route for real-time audio processing
-app.add_api_websocket_route("/ws/live-subtitles", websocket_endpoint)
+# ===== Configure Static File Serving =====
+# Get the directory where main.py is located
+BASE_DIR = Path(__file__).resolve().parent
 
-# REST API routes
+# Mount static files directory
+static_dir = BASE_DIR / "static"
+app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# ===== WebSocket and API Routes =====
+app.add_api_websocket_route("/ws/live-subtitles", websocket_endpoint)
 app.include_router(speakers_router)
 app.include_router(transcribe_router)
 app.include_router(translate_router)
-app.include_router(tagger_router)  # NEW: Audio tagging routes
+app.include_router(tagger_router)
 app.include_router(global_reset_router)
 
 def initialize_detector():
     """Initialize the audio language detector."""
     from core.state import set_audio_language_detector
     from services.audio_language_detector import AudioLanguageDetector
+    
     console.print("Initializing AudioLanguageDetector...")
     detector = AudioLanguageDetector()
     set_audio_language_detector(detector)
@@ -67,7 +80,6 @@ def initialize_detector():
 def initialize_tagger():
     """
     Initialize the audio tagger at startup.
-    
     This pre-loads the ONNX model so the first tagging request
     doesn't have to wait for model loading.
     """
@@ -106,12 +118,10 @@ def cleanup_on_shutdown():
     
     console.print("[info]Performing cleanup before shutdown...[/info]")
     
-    # Save speaker state
     if get_speaker_labeler() is not None:
         save_speaker_state()
         console.print("[success]Speaker state saved.[/success]")
     
-    # Reset tagger (free resources)
     tagger = get_audio_tagger()
     if tagger is not None:
         try:
@@ -122,16 +132,13 @@ def cleanup_on_shutdown():
     
     console.print("[success]Cleanup complete.[/success]")
 
-# Register shutdown handler
 import atexit
 atexit.register(cleanup_on_shutdown)
 
 if __name__ == "__main__":
-    # Initialize detectors and models
     initialize_detector()
     initialize_tagger()
     
-    # Initialize segment counter
     segment_index_path = get_segment_index_path()
     segment_counter = load_segment_counter(segment_index_path)
     console.print(
@@ -139,7 +146,6 @@ if __name__ == "__main__":
         f"(next will be segment_{segment_counter + 1:03d})[/info]"
     )
     
-    # Log available endpoints
     logger.info("🚀 Starting [bold cyan]Live Japanese Subtitles Server 2[/]")
     logger.info("")
     logger.info("📡 WebSocket endpoint:")
@@ -171,13 +177,12 @@ if __name__ == "__main__":
     logger.info("   POST /tags/speech-check")
     logger.info("   POST /tags/config/update")
     logger.info("")
-    logger.info("🔄 Global Reset endpoints:")           # <-- NEW SECTION
+    logger.info("🔄 Global Reset endpoints:")
     logger.info("   POST /global/reset")
     logger.info("   GET  /global/status")
     logger.info("")
     logger.info("Press Ctrl+C to stop\n")
     
-    # Start server
     uvicorn.run(
         app="main:app",
         host="0.0.0.0",

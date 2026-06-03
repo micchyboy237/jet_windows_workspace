@@ -1,0 +1,176 @@
+<!-- servers\live_subtitles\live_subtitles_server2_with_en\templates\tagger\tags_layout.html -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audio Tagger - Chunk Analytics Plots</title>
+
+    <!-- External dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.min.js"></script>
+
+    <!-- CSS_PLACEHOLDER -->
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>📊 Audio Tagger - Chunk Analytics Plots</h1>
+        <p>
+          Visual analysis of chunked audio tagging results (matching
+          audio_tagger_chunk_plots.py)
+        </p>
+        <div class="nav-buttons">
+          <a href="/tags" class="btn" id="navHome">📊 Home</a>
+          <a href="/tags/dashboard" class="btn btn-secondary">📋 Dashboard</a>
+          <a href="/tags/chunks" class="btn btn-secondary" target="_blank"
+            >🔌 API: Chunks</a
+          >
+        </div>
+      </div>
+
+      <div class="filter-banner hidden" id="filterBanner">
+        <span class="filter-info">
+          🔍 <strong>Filtering by segment:</strong>
+          <span id="filterBannerSegmentName">-</span>
+        </span>
+        <div>
+          <a href="/tags" class="btn btn-warning btn-small">✕ Clear Filter</a>
+          <a
+            href="/tags/dashboard"
+            class="btn btn-secondary btn-small"
+            style="margin-left: 10px"
+            >📋 Back to Dashboard</a
+          >
+        </div>
+      </div>
+
+      <div class="summary-cards" id="summaryCards">
+        <div class="summary-card">
+          <div class="label">Unique Segments</div>
+          <div class="value" id="cardSegments">-</div>
+          <div class="subtitle">Distinct audio segments</div>
+        </div>
+        <div class="summary-card">
+          <div class="label">Total Chunks</div>
+          <div class="value" id="cardTotal">-</div>
+          <div class="subtitle">Across all segments</div>
+        </div>
+        <div class="summary-card">
+          <div class="label">Speech Segments</div>
+          <div class="value" id="cardSpeech">-</div>
+          <div class="subtitle" id="cardSpeechPct">-</div>
+        </div>
+        <div class="summary-card">
+          <div class="label">Avg Chunks/Seg</div>
+          <div class="value" id="cardAvgChunks">-</div>
+          <div class="subtitle">Per segment</div>
+        </div>
+        <div class="summary-card">
+          <div class="label">Avg Prob</div>
+          <div class="value" id="cardAvgProb">-</div>
+          <div class="subtitle">Speech confidence</div>
+        </div>
+        <div class="summary-card">
+          <div class="label">Top Event</div>
+          <div class="value" id="cardTopEvent" style="font-size: 1.2em">-</div>
+          <div class="subtitle" id="cardTopEventProb">-</div>
+        </div>
+      </div>
+
+      <div class="controls" id="globalControls">
+        <div class="segment-filter-group">
+          <span class="filter-label">📅 Last N Segments:</span>
+          <div class="preset-buttons" id="presetButtons">
+            <button
+              class="btn btn-outline btn-small active"
+              data-count="10"
+              onclick="setSegmentCount(10, this)"
+            >
+              10
+            </button>
+            <button
+              class="btn btn-outline btn-small"
+              data-count="20"
+              onclick="setSegmentCount(20, this)"
+            >
+              20
+            </button>
+            <button
+              class="btn btn-outline btn-small"
+              data-count="50"
+              onclick="setSegmentCount(50, this)"
+            >
+              50
+            </button>
+            <button
+              class="btn btn-outline btn-small"
+              data-count="100"
+              onclick="setSegmentCount(100, this)"
+            >
+              100
+            </button>
+            <button
+              class="btn btn-outline btn-small"
+              data-count="200"
+              onclick="setSegmentCount(200, this)"
+            >
+              200
+            </button>
+          </div>
+          <div class="custom-input-wrapper">
+            <input
+              type="number"
+              class="custom-input"
+              id="customSegmentCount"
+              placeholder="Custom"
+              min="1"
+              max="10000"
+              onkeydown="if (event.key === 'Enter') applyCustomSegmentCount();"
+              onfocus="highlightCustomInput(true)"
+              onblur="highlightCustomInput(false)"
+            />
+            <button
+              class="apply-custom-btn"
+              onclick="applyCustomSegmentCount()"
+              title="Apply custom count"
+            >
+              Go
+            </button>
+          </div>
+          <span class="segment-info" id="segmentInfo"></span>
+        </div>
+        <div
+          style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap"
+        >
+          <label
+            >🎯 Filter:
+            <select id="filterSelect" onchange="refreshPlots()">
+              <option value="all">All Segments</option>
+              <option value="speech">Speech Only</option>
+              <option value="non-speech">Non-Speech Only</option>
+            </select>
+          </label>
+          <label
+            >🔝 Top N Events:
+            <select id="topNSelect" onchange="refreshPlots()">
+              <option value="3">Top 3</option>
+              <option value="5" selected>Top 5</option>
+              <option value="8">Top 8</option>
+              <option value="10">Top 10</option>
+            </select>
+          </label>
+          <button class="btn btn-small" onclick="refreshPlots()">
+            🔄 Refresh Data
+          </button>
+        </div>
+      </div>
+
+      <div class="plots-grid" id="plotsGrid">
+        <div class="loading">Loading visualizations</div>
+      </div>
+    </div>
+
+    <!-- JS_PLACEHOLDER -->
+  </body>
+</html>

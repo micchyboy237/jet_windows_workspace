@@ -1,0 +1,168 @@
+<!-- servers\live_subtitles\live_subtitles_server2_with_en\templates\tagger\dashboard_layout.html -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audio Tagger Dashboard</title>
+    <!-- CSS_PLACEHOLDER -->
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🎵 Audio Tagger Dashboard</h1>
+        <p>
+          Analyze audio files for sound events, speech detection, and temporal
+          patterns
+        </p>
+        <div class="nav-buttons">
+          <a href="/tags" class="btn">📊 Analytics</a>
+        </div>
+        <p style="margin-top: 10px; font-size: 0.85em; color: #888">
+          💡 <strong>Click any row</strong> in the table to view that segment's
+          detailed analytics
+        </p>
+      </div>
+
+      <div class="stats-bar">
+        <div class="stat-card">
+          <h3>Total Segments</h3>
+          <div class="value" id="totalSegments">-</div>
+        </div>
+        <div class="stat-card">
+          <h3>Speech Segments</h3>
+          <div class="value" id="speechSegments">-</div>
+        </div>
+        <div class="stat-card">
+          <h3>Speech %</h3>
+          <div class="value" id="speechPercentage">-</div>
+        </div>
+        <div class="stat-card">
+          <h3>Avg Speech Prob</h3>
+          <div class="value" id="avgSpeechProb">-</div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h2>📊 Saved Audio Segments</h2>
+          <div class="controls">
+            <div>
+              <label
+                >Filter:
+                <select id="filterSelect" onchange="loadChunks()">
+                  <option value="all">All Segments</option>
+                  <option value="speech">Speech Only</option>
+                </select>
+              </label>
+              <label style="margin-left: 15px"
+                >Limit:
+                <select id="limitSelect" onchange="loadChunks()">
+                  <option value="20">20</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                </select>
+              </label>
+            </div>
+            <div>
+              <button class="btn btn-small" onclick="loadChunks()">
+                🔄 Refresh
+              </button>
+            </div>
+          </div>
+          <div id="chunksTableContainer" class="table-container">
+            <div class="loading" id="chunksLoading">Loading saved segments</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <h2>📋 Configuration</h2>
+            <table id="configTable">
+              <!-- Filled by JS -->
+            </table>
+          </div>
+
+          <div class="card" style="margin-top: 20px">
+            <h2>🔝 Top Predictions</h2>
+            <div id="topPredictionsChart" class="chart-container">
+              <div class="loading">Loading predictions</div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top: 20px">
+            <h2>🎤 Speech Classes</h2>
+            <ul id="speechClassesList" style="list-style: none; padding: 0">
+              <!-- Filled by JS -->
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🚀 Try It Out</h2>
+        <div class="upload-area" id="uploadArea">
+          <h3>📁 Drop an audio file here or click to upload</h3>
+          <p>Supports WAV, MP3, FLAC, and more</p>
+          <input
+            type="file"
+            id="fileInput"
+            accept="audio/*"
+            style="display: none"
+          />
+        </div>
+
+        <div style="text-align: center; margin-top: 20px">
+          <label style="margin-right: 20px">
+            <input type="checkbox" id="chunkedMode" /> Process in chunks
+          </label>
+          <label style="margin-right: 20px">
+            Chunk duration:
+            <input
+              type="number"
+              id="chunkDuration"
+              value="2.0"
+              step="0.5"
+              min="0.5"
+              max="30"
+              style="width: 80px"
+            />
+            s
+          </label>
+          <label>
+            Overlap:
+            <input
+              type="number"
+              id="overlapDuration"
+              value="1.0"
+              step="0.5"
+              min="0.1"
+              max="15"
+              style="width: 80px"
+            />
+            s
+          </label>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px">
+          <button class="btn" id="tagBtn" disabled>🎯 Tag Audio</button>
+          <button class="btn" id="speechBtn" disabled>🎤 Check Speech</button>
+        </div>
+
+        <div id="progress" style="display: none">
+          <div class="progress-bar">
+            <div class="fill" id="progressFill"></div>
+          </div>
+          <p id="progressText" style="text-align: center; color: #666"></p>
+        </div>
+      </div>
+
+      <div id="results"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- JS_PLACEHOLDER -->
+  </body>
+</html>
