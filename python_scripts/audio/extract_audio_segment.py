@@ -142,7 +142,7 @@ if __name__ == "__main__":
     import shutil
     from pathlib import Path
 
-    DEFAULT_INPUT_AUDIO = r"C:\Users\druiv\.cache\video\0001_video_en_sub.mp4"
+    DEFAULT_INPUT_AUDIO = r"C:\Users\druiv\.cache\files\video\0001_video_en_sub.mp4"
 
     parser = argparse.ArgumentParser(description="Extract mono 16kHz audio segment.")
     parser.add_argument(

@@ -147,6 +147,12 @@ def extract_frames(
 
 
 if __name__ == "__main__":
+    import shutil
+
+    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
     parser = argparse.ArgumentParser(
         description="Extract frames from a video file as JPEG images.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -157,8 +163,8 @@ if __name__ == "__main__":
 
     parser.add_argument(
         "-o", "--output-dir",
-        type=str,
-        default="frames",
+        type=Path,
+        default=OUTPUT_DIR,
         help="Directory to save extracted frames (default: ./frames)"
     )
 
