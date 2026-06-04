@@ -914,8 +914,9 @@ def perform_audio_tagging(
         audio_float = audio_np.astype(np.float32) / 32768.0
         
         # Check for speech
+        threshold = 0.5
+        has_speech = tagger.contains_speech(audio_float, sample_rate=sample_rate, prob_threshold=threshold)
         speech_prob = tagger.get_speech_probability(audio_float, sample_rate=sample_rate)
-        has_speech = speech_prob >= 0.5
         
         console.print(f"[info]Speech probability: {speech_prob:.3f}[/info]")
         console.print(f"[info]Speech detected: {has_speech}[/info]")
@@ -986,77 +987,4 @@ def perform_audio_tagging(
             "error": str(e),
             "processing_mode": "failed",
             "top_predictions": [],
-        }
-
-
-def get_audio_tagger_summary(
-    audio_np: np.ndarray,
-    sample_rate: int,
-    max_duration: float = 30.0,
-) -> Dict[str, Any]:
-    """
-    Get a quick summary of audio content using the tagger.
-    """
-    from services.audio_tagger import AudioTagger
-    from core.state import get_audio_tagger, set_audio_tagger
-    
-    audio_duration = len(audio_np) / sample_rate
-    
-    console.print(f"[info]Getting audio tagger summary for {audio_duration:.2f}s audio[/info]")
-    
-    if audio_duration < 0.5 or len(audio_np) < sample_rate * 0.5:
-        console.print("[warning]Audio too short for tagging[/warning]")
-        return {
-            "speech_detected": False,
-            "content_type": "too_short",
-            "duration_seconds": round(audio_duration, 3),
-        }
-    
-    try:
-        # Get or initialize tagger from state
-        tagger = get_audio_tagger()
-        if tagger is None:
-            tagger = AudioTagger(top_k=5, debug=False)
-            set_audio_tagger(tagger)
-        
-        audio_float = audio_np.astype(np.float32) / 32768.0
-        
-        # Get quick predictions
-        predictions = tagger.tag_audio(audio_float, sample_rate=sample_rate)
-        speech_prob = tagger.get_speech_probability(audio_float, sample_rate=sample_rate)
-        
-        # Classify content type
-        top_name = predictions[0]["name"] if predictions else "Unknown"
-        top_prob = predictions[0]["prob"] if predictions else 0.0
-        
-        if speech_prob >= 0.7:
-            content_type = "speech"
-        elif any(music_term in top_name.lower() for music_term in ["music", "musical", "song", "singing"]):
-            content_type = "music"
-        elif any(noise_term in top_name.lower() for noise_term in ["noise", "silence", "background"]):
-            content_type = "noise"
-        else:
-            content_type = "other"
-        
-        summary = {
-            "speech_detected": speech_prob >= 0.5,
-            "speech_probability": round(speech_prob, 3),
-            "content_type": content_type,
-            "top_prediction": top_name,
-            "top_probability": round(top_prob, 3),
-            "duration_seconds": round(audio_duration, 3),
-            "all_predictions": predictions[:3],
-        }
-        
-        console.print(f"[success]Audio summary: {content_type} (speech prob: {speech_prob:.3f})[/success]")
-        
-        return summary
-        
-    except Exception as e:
-        console.print(f"[warning]Failed to get audio summary: {e}[/warning]")
-        return {
-            "speech_detected": False,
-            "content_type": "error",
-            "error": str(e),
-            "duration_seconds": round(audio_duration, 3),
         }
