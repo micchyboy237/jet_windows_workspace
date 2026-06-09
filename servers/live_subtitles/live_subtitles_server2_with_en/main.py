@@ -90,9 +90,6 @@ def initialize_tagger():
     try:
         tagger = AudioTagger(
             top_k=5,
-            speech_prob_threshold=0.5,
-            chunk_duration=2.0,
-            chunk_overlap=1.0,
             debug=False,
         )
         set_audio_tagger(tagger)
