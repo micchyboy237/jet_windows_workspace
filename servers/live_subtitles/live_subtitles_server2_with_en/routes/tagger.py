@@ -251,9 +251,9 @@ def get_tagger() -> AudioTagger:
         console.print("[info]Initializing AudioTagger...[/info]")
         tagger = AudioTagger(
             top_k=5,
-            speech_prob_threshold=0.5,
-            chunk_duration=2.0,
-            chunk_overlap=1.0,
+            chunk_duration=AudioTagger.DEFAULT_CHUNK_DURATION,
+            overlap_duration=AudioTagger.DEFAULT_CHUNK_OVERLAP,
+            speech_prob_threshold=AudioTagger.DEFAULT_SPEECH_PROB_THRESHOLD,
             debug=False,
         )
         set_audio_tagger(tagger)

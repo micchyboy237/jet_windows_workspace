@@ -69,13 +69,13 @@ def main():
     parser.add_argument(
         "--speech-threshold",
         type=float,
-        default=0.5,
+        default=AudioTagger.DEFAULT_SPEECH_PROB_THRESHOLD,
         help="Minimum probability for speech detection",
     )
     parser.add_argument(
         "--speech-top-n",
         type=int,
-        default=3,
+        default=AudioTagger.DEFAULT_SPEECH_TOP_N,
         help="Check top N predictions for speech",
     )
     parser.add_argument(

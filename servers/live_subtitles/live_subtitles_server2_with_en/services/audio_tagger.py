@@ -15,20 +15,20 @@ from rich.traceback import install as install_rich_traceback
 
 try:
     from services.audio_utils import AudioInput, load_audio
-    from services.custom_logging import linkify
     from services.config import (
         FRAME_PER_SECONDS,
         FRAME_SHIFT_S,
         SAMPLE_RATE,
     )
+    from services.custom_logging import linkify
 except ImportError:
     from audio_utils import AudioInput, load_audio
-    from custom_logging import linkify
     from config import (
         FRAME_PER_SECONDS,
         FRAME_SHIFT_S,
         SAMPLE_RATE,
     )
+    from custom_logging import linkify
 
 install_rich_traceback(show_locals=True)
 
@@ -159,6 +159,9 @@ class AudioTagger:
         "Narration, monologue",
     ]
 
+    DEFAULT_SPEECH_PROB_THRESHOLD: float = 0.5
+    DEFAULT_SPEECH_TOP_N: int = 3
+
     # Default chunking constants from jet.audio.helpers.config
     # Chunk duration: 100 frames * 0.010s = 1.0s (same as process_audio_chunks window)
     DEFAULT_CHUNK_DURATION: float = FRAME_PER_SECONDS * FRAME_SHIFT_S  # 1.0s
@@ -173,8 +176,8 @@ class AudioTagger:
         num_threads: int = 1,
         provider: str = "cpu",
         debug: bool = False,
-        speech_prob_threshold: float = 0.5,
-        speech_top_n: int = 3,
+        speech_prob_threshold: Optional[float] = None,
+        speech_top_n: Optional[int] = None,
         # Chunking defaults
         chunk_duration: Optional[float] = None,
         chunk_overlap: Optional[float] = None,
@@ -190,8 +193,8 @@ class AudioTagger:
             num_threads: Number of CPU threads
             provider: Computation provider ("cpu", "cuda", etc.)
             debug: Enable debug logging for Sherpa-ONNX
-            speech_prob_threshold: Minimum probability to consider as speech
-            speech_top_n: Check top N predictions for speech classes
+            speech_prob_threshold: Minimum speech probability (default: 0.5)
+            speech_top_n: Check the top N predictions for speech classes (default: 3)
             chunk_duration: Default chunk duration in seconds (default: 1.0s)
             chunk_overlap: Default overlap between chunks in seconds (default: 0.5s)
             min_chunk_duration: Minimum valid chunk duration (default: 0.5s)
@@ -206,8 +209,16 @@ class AudioTagger:
         self.num_threads: int = num_threads
         self.provider: str = provider
         self.debug: bool = debug
-        self.speech_prob_threshold: float = speech_prob_threshold
-        self.speech_top_n: int = speech_top_n
+
+        # Use defaults if not provided
+        self.speech_prob_threshold: float = (
+            speech_prob_threshold
+            if speech_prob_threshold is not None
+            else self.DEFAULT_SPEECH_PROB_THRESHOLD
+        )
+        self.speech_top_n: int = (
+            speech_top_n if speech_top_n is not None else self.DEFAULT_SPEECH_TOP_N
+        )
 
         # Chunking configuration (from jet.audio.helpers.config)
         self.chunk_duration: float = (
@@ -236,6 +247,7 @@ class AudioTagger:
                 f"Model: {linkify(str(self.model_path))}\n"
                 f"Labels: {linkify(str(self.labels_path))}\n"
                 f"Speech Threshold: {self.speech_prob_threshold}\n"
+                f"Speech Top N: {self.speech_top_n}\n"
                 f"Chunk Duration: {self.chunk_duration}s\n"
                 f"Chunk Overlap: {self.chunk_overlap}s\n"
                 f"Min Chunk Duration: {self.min_chunk_duration}s",
@@ -314,7 +326,9 @@ class AudioTagger:
         return self._labels_map
 
     # ── NEW: Speech detection helper for chunks ───────────────────────
-    def _chunk_has_speech(self, predictions: List[TaggingResult], top_n: Optional[int] = None) -> tuple[bool, float]:
+    def _chunk_has_speech(
+        self, predictions: List[TaggingResult], top_n: Optional[int] = None
+    ) -> tuple[bool, float]:
         """
         Check if chunk predictions indicate speech.
 
@@ -327,49 +341,49 @@ class AudioTagger:
         """
         n_to_check = top_n if top_n is not None else self.speech_top_n
         max_speech_prob = 0.0
-        
+
         for result in predictions[:n_to_check]:
             name = result.get("name", "")
             prob = result.get("prob", 0.0)
             if name in self.SPEECH_CLASS_NAMES and prob > max_speech_prob:
                 max_speech_prob = prob
-        
+
         speech_detected = max_speech_prob >= self.speech_prob_threshold
         return speech_detected, max_speech_prob
 
     # ── NEW: Calculate speech duration from consecutive speech chunks ──
     def _calculate_speech_duration(
-        self, 
+        self,
         chunks: List[ChunkTaggingResult],
         overlap_duration: float,
     ) -> float:
         """
         Calculate total speech duration by merging consecutive speech chunks.
-        
+
         Accounts for overlap between consecutive chunks to avoid double-counting.
-        
+
         Args:
             chunks: List of chunk results with speech_detected flags
             overlap_duration: Overlap between consecutive chunks in seconds
-            
+
         Returns:
             Total speech duration in seconds (sum of consecutive speech chunks)
         """
         if not chunks:
             return 0.0
-        
+
         # Sort chunks by start time (should already be sorted, but ensure)
         sorted_chunks = sorted(chunks, key=lambda c: c["start_time"])
-        
+
         speech_segments = []  # List of (start, end) tuples
         current_start = None
         current_end = None
-        
+
         for chunk in sorted_chunks:
             if chunk.get("speech_detected", False):
                 chunk_start = chunk["start_time"]
                 chunk_end = chunk["end_time"]
-                
+
                 if current_start is None:
                     # Start new speech segment
                     current_start = chunk_start
@@ -388,14 +402,14 @@ class AudioTagger:
                     speech_segments.append((current_start, current_end))
                     current_start = None
                     current_end = None
-        
+
         # Don't forget the last segment
         if current_start is not None:
             speech_segments.append((current_start, current_end))
-        
+
         # Calculate total speech duration
         total_speech_duration = sum(end - start for start, end in speech_segments)
-        
+
         return total_speech_duration
 
     def tag_audio(
@@ -589,7 +603,7 @@ class AudioTagger:
 
             # ── NEW: Check for speech in this chunk ───────────────────
             speech_detected, max_speech_prob = self._chunk_has_speech(chunk_predictions)
-            
+
             if speech_detected:
                 any_speech_detected = True
             if max_speech_prob > global_max_speech_prob:
@@ -891,7 +905,7 @@ class AudioTagger:
     ) -> AudioTaggingSummary:
         """
         Get a comprehensive summary of audio tagging results.
-        
+
         Updated to include speech_duration field.
 
         Args:
@@ -913,7 +927,7 @@ class AudioTagger:
         results = self.tag_audio(audio, sample_rate=sample_rate)
         max_speech_prob = self.get_speech_probability(audio, sample_rate=sample_rate)
         speech_detected = max_speech_prob >= self.speech_prob_threshold
-        
+
         # For single-tag summary, speech_duration equals total duration if speech detected
         speech_duration = audio_duration if speech_detected else 0.0
 
@@ -1005,4 +1019,5 @@ class AudioTagger:
 
 if __name__ == "__main__":
     from main._main_audio_tagger import main
+
     main()

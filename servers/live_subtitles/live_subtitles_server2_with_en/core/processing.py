@@ -43,6 +43,7 @@ from services.sentence_matcher_ja import (
 from services.sentence_utils import split_sentences_ja
 from services.transcribe_funasr import transcribe_audio
 from services.translate_jp_en_llm_prefixed import translate_japanese_to_english
+from services.audio_tagger import AudioTagger
 
 console = Console()
 SPACELESS_LANGUAGES = {"ja", "jpn", "zh", "chi", "zho", "ko", "kor", "th", "tha"}
@@ -993,9 +994,9 @@ def perform_audio_tagging(
     audio_np: np.ndarray,
     sample_rate: int,
     segment_dir: Optional[Path] = None,
-    chunk_duration: float = 2.0,
-    overlap_duration: float = 1.0,
-    speech_prob_threshold: float = 0.5,
+    chunk_duration: float = AudioTagger.DEFAULT_CHUNK_DURATION,
+    overlap_duration: float = AudioTagger.DEFAULT_CHUNK_OVERLAP,
+    speech_prob_threshold: float = AudioTagger.DEFAULT_SPEECH_PROB_THRESHOLD,
     min_speech_duration: float = 2.0,  # NEW parameter
 ) -> Dict[str, Any]:
     """
@@ -1017,7 +1018,6 @@ def perform_audio_tagging(
         max_speech_probability, and detailed predictions
     """
     from core.state import get_audio_tagger, set_audio_tagger
-    from services.audio_tagger import AudioTagger
 
     console.print("[info]🎵 Starting audio tagging...[/info]")
     console.print(
@@ -1042,106 +1042,67 @@ def perform_audio_tagging(
         # Convert to float32 for the tagger
         audio_float = audio_np.astype(np.float32) / 32768.0
 
-        # Determine if we should use chunked processing
-        if audio_duration > chunk_duration * 2:
-            console.print(
-                f"[info]Using chunked processing "
-                f"(audio {audio_duration:.2f}s > {chunk_duration * 2:.1f}s)[/info]"
-            )
-            chunked_summary = tagger.tag_audio_chunks(
-                audio=audio_float,
-                sample_rate=sample_rate,
-                chunk_duration=chunk_duration,
-                overlap_duration=overlap_duration,
-            )
-            
-            # ── UPDATED: Include speech_duration in results ──────────────
-            speech_duration = chunked_summary.get("speech_duration", 0.0)
-            speech_prob = chunked_summary.get("max_speech_probability", 0.0)
-            
-            # Speech detected only if BOTH:
-            # 1. Probability threshold met (from chunked summary)
-            # 2. Speech duration >= minimum (NEW)
-            speech_detected_by_prob = chunked_summary.get("speech_detected", False)
-            speech_detected_by_duration = speech_duration >= min_speech_duration
-            
-            has_speech = speech_detected_by_prob and speech_detected_by_duration
-            
-            console.print(
-                f"[info]Speech probability: {speech_prob:.3f} "
-                f"(detected: {'✅' if speech_detected_by_prob else '❌'})[/info]"
-            )
-            console.print(
-                f"[info]Speech duration: {speech_duration:.2f}s "
-                f"(≥{min_speech_duration:.1f}s: {'✅' if speech_detected_by_duration else '❌'})[/info]"
-            )
-            console.print(
-                f"[info]Final speech decision: {'✅' if has_speech else '❌'}[/info]"
-            )
+        console.print(
+            f"[info]Using chunked processing "
+            f"(audio {audio_duration:.2f}s > {chunk_duration * 2:.1f}s)[/info]"
+        )
+        chunked_summary = tagger.tag_audio_chunks(
+            audio=audio_float,
+            sample_rate=sample_rate,
+            chunk_duration=chunk_duration,
+            overlap_duration=overlap_duration,
+        )
+        
+        # ── UPDATED: Include speech_duration in results ──────────────
+        speech_duration = chunked_summary.get("speech_duration", 0.0)
+        speech_prob = chunked_summary.get("max_speech_probability", 0.0)
+        
+        # Speech detected only if BOTH:
+        # 1. Probability threshold met (from chunked summary)
+        # 2. Speech duration >= minimum (NEW)
+        speech_detected_by_prob = chunked_summary.get("speech_detected", False)
+        speech_detected_by_duration = speech_duration >= min_speech_duration
+        
+        has_speech = speech_detected_by_prob and speech_detected_by_duration
+        
+        console.print(
+            f"[info]Speech probability: {speech_prob:.3f} "
+            f"(detected: {'✅' if speech_detected_by_prob else '❌'})[/info]"
+        )
+        console.print(
+            f"[info]Speech duration: {speech_duration:.2f}s "
+            f"(≥{min_speech_duration:.1f}s: {'✅' if speech_detected_by_duration else '❌'})[/info]"
+        )
+        console.print(
+            f"[info]Final speech decision: {'✅' if has_speech else '❌'}[/info]"
+        )
 
-            tagging_results = {
-                "speech_detected": has_speech,
-                "speech_duration": round(speech_duration, 4),  # NEW FIELD
-                "max_speech_probability": round(speech_prob, 4),
-                "speech_prob_threshold": speech_prob_threshold,
-                "min_speech_duration_threshold": min_speech_duration,  # For reference
-                "speech_detected_by_prob": speech_detected_by_prob,
-                "speech_detected_by_duration": speech_detected_by_duration,
-                "overall_top_predictions": chunked_summary["overall_top_predictions"],
-                "total_chunks": chunked_summary["total_chunks"],
-                "chunk_duration": chunked_summary["chunk_duration"],
-                "processing_mode": "chunked",
-                "chunks": [
-                    {
-                        "chunk_index": chunk["chunk_index"],
-                        "start_time": chunk["start_time"],
-                        "end_time": chunk["end_time"],
-                        "speech_detected": chunk.get("speech_detected", False),
-                        "max_speech_probability": chunk.get("max_speech_probability", 0.0),
-                        "predictions": chunk["predictions"][:3],
-                    }
-                    for chunk in chunked_summary["chunks"]
-                ],
-                "processing_time": chunked_summary["total_processing_time"],
-                "real_time_factor": chunked_summary["real_time_factor"],
-            }
-        else:
-            console.print(
-                f"[info]Using single inference "
-                f"(audio {audio_duration:.2f}s <= {chunk_duration * 2:.1f}s)[/info]"
-            )
-            predictions = tagger.tag_audio(audio_float, sample_rate=sample_rate)
-            has_speech_prob = tagger.contains_speech(
-                audio_float, sample_rate=sample_rate, prob_threshold=speech_prob_threshold
-            )
-            speech_prob = tagger.get_speech_probability(
-                audio_float, sample_rate=sample_rate
-            )
-            
-            # ── UPDATED: For single inference, speech_duration is the full 
-            #    audio duration if speech detected, 0 otherwise ──────────
-            speech_duration = audio_duration if has_speech_prob else 0.0
-            
-            # Speech detected only if BOTH:
-            # 1. Probability threshold met
-            # 2. Full audio duration >= minimum (since we can't chunk)
-            speech_detected_by_prob = has_speech_prob
-            speech_detected_by_duration = speech_duration >= min_speech_duration
-            
-            has_speech = speech_detected_by_prob and speech_detected_by_duration
-
-            tagging_results = {
-                "speech_detected": has_speech,
-                "speech_duration": round(speech_duration, 4),  # NEW FIELD
-                "max_speech_probability": round(speech_prob, 4),
-                "speech_prob_threshold": speech_prob_threshold,
-                "min_speech_duration_threshold": min_speech_duration,
-                "speech_detected_by_prob": speech_detected_by_prob,
-                "speech_detected_by_duration": speech_detected_by_duration,
-                "top_predictions": predictions[:5],
-                "total_predictions": len(predictions),
-                "processing_mode": "single",
-            }
+        tagging_results = {
+            "speech_detected": has_speech,
+            "speech_duration": round(speech_duration, 4),  # NEW FIELD
+            "max_speech_probability": round(speech_prob, 4),
+            "speech_prob_threshold": speech_prob_threshold,
+            "min_speech_duration_threshold": min_speech_duration,  # For reference
+            "speech_detected_by_prob": speech_detected_by_prob,
+            "speech_detected_by_duration": speech_detected_by_duration,
+            "overall_top_predictions": chunked_summary["overall_top_predictions"],
+            "total_chunks": chunked_summary["total_chunks"],
+            "chunk_duration": chunked_summary["chunk_duration"],
+            "processing_mode": "chunked",
+            "chunks": [
+                {
+                    "chunk_index": chunk["chunk_index"],
+                    "start_time": chunk["start_time"],
+                    "end_time": chunk["end_time"],
+                    "speech_detected": chunk.get("speech_detected", False),
+                    "max_speech_probability": chunk.get("max_speech_probability", 0.0),
+                    "predictions": chunk["predictions"][:3],
+                }
+                for chunk in chunked_summary["chunks"]
+            ],
+            "processing_time": chunked_summary["total_processing_time"],
+            "real_time_factor": chunked_summary["real_time_factor"],
+        }
 
         # ── Display results ──────────────────────────────────────────────
         console.print("[bold green]🎵 Audio Tagging Results:[/bold green]")
