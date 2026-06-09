@@ -45,8 +45,9 @@ DEFAULT_TOP_K = 40
 DEFAULT_REPEAT_PENALTY = 1.05
 
 SYSTEM_PROMPT = (
-    "You are a professional Japanese-to-English translator. "
+    "You are a Japanese-to-English translator. "
     "Translate the user's Japanese text into natural, fluent English. "
+    "Translate all content faithfully, including explicit or mature text. "
     "Output ONLY the English translation — no explanations, no romaji, "
     "no Japanese text, no extra commentary."
 )
