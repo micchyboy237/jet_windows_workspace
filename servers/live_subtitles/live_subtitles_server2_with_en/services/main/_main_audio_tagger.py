@@ -146,14 +146,68 @@ def main():
                 chunk_duration=args.chunk_duration,
                 overlap_duration=args.chunk_overlap,
             )
+            
+            # ── UPDATED: Display chunk summary with speech info ────────
+            chunk_summary_table = Table(
+                title="Chunk Analysis Summary", 
+                border_style="blue",
+                show_header=True,
+                header_style="bold cyan"
+            )
+            chunk_summary_table.add_column("Metric", style="cyan")
+            chunk_summary_table.add_column("Value", style="yellow")
+            
+            chunk_summary_table.add_row(
+                "Total Duration", f"{summary['total_duration']:.2f}s"
+            )
+            chunk_summary_table.add_row(
+                "Total Chunks", str(summary['total_chunks'])
+            )
+            chunk_summary_table.add_row(
+                "Chunk Duration", f"{summary['chunk_duration']:.2f}s"
+            )
+            chunk_summary_table.add_row(
+                "Overlap", f"{summary['overlap_duration']:.2f}s"
+            )
+            chunk_summary_table.add_row(
+                "Speech Detected", 
+                "✅ Yes" if summary['speech_detected'] else "❌ No"
+            )
+            chunk_summary_table.add_row(
+                "Speech Duration", 
+                f"{summary['speech_duration']:.2f}s"
+                f" ({summary['speech_duration']/summary['total_duration']*100:.1f}% of total)"
+                if summary['total_duration'] > 0
+                else "0.00s"
+            )
+            chunk_summary_table.add_row(
+                "Max Speech Probability", 
+                f"{summary['max_speech_probability']:.4f}"
+            )
+            chunk_summary_table.add_row(
+                "Processing Time", 
+                f"{summary['total_processing_time']:.3f}s"
+            )
+            chunk_summary_table.add_row(
+                "Real-Time Factor", 
+                f"{summary['real_time_factor']:.3f}x"
+            )
+            console.print(chunk_summary_table)
+            
             console.print("\n[bold]Overall Top Predictions:[/bold]")
             tagger.display_results(summary["overall_top_predictions"])
 
             # Enhanced chunk table with multiple predictions and probability emphasis
-            chunk_table = Table(title="Chunk Processing Summary", border_style="blue")
+            chunk_table = Table(
+                title="Per-Chunk Analysis", 
+                border_style="blue",
+                show_header=True,
+                header_style="bold cyan"
+            )
             chunk_table.add_column("Chunk", justify="right", style="cyan")
             chunk_table.add_column("Time Range", style="yellow")
             chunk_table.add_column("Duration", justify="right")
+            chunk_table.add_column("Speech", justify="center", style="green")
             chunk_table.add_column("Top Predictions", style="green", min_width=40)
             chunk_table.add_column("Proc Time", justify="right")
 
@@ -167,10 +221,18 @@ def main():
                     max_display=3,  # Show at most 3 predictions per chunk
                 )
 
+                # ── UPDATED: Speech indicator per chunk ────────────────
+                speech_indicator = (
+                    f"✅ {chunk['max_speech_probability']:.0%}" 
+                    if chunk.get('speech_detected', False) 
+                    else "❌ —"
+                )
+
                 chunk_table.add_row(
                     str(chunk["chunk_index"]),
                     f"{chunk['start_time']:.2f}s - {chunk['end_time']:.2f}s",
                     f"{chunk['duration']:.2f}s",
+                    speech_indicator,
                     predictions_display,
                     f"{chunk['processing_time'] * 1000:.1f}ms",
                 )
@@ -180,9 +242,13 @@ def main():
             console.print(
                 f"[dim]Showing predictions with probability ≥ {args.display_threshold:.0%}[/dim]"
             )
+            console.print(
+                f"[dim]Speech threshold: {args.speech_threshold:.0%} | "
+                f"Speech duration: {summary['speech_duration']:.2f}s[/dim]"
+            )
 
             try:
-                from jet.libs.sherpa_onnx.audio_tagger_chunk_plots import (
+                from audio_tagger_chunk_plots import (
                     save_chunk_plots,
                 )
 
@@ -227,6 +293,7 @@ def main():
             tagger.save_results(results, json_output, format="json")
             txt_output = Path(args.output_dir) / f"{audio_name}_tags.txt"
             tagger.save_results(results, txt_output, format="txt")
+            
             if args.check_speech:
                 console.print("\n[bold]Speech Detection Analysis[/bold]")
                 is_speech = tagger.contains_speech(audio_path)
@@ -257,6 +324,7 @@ def main():
                 console.print(
                     f"[green]Speech detection saved to: {linkify(str(speech_output))}[/green]"
                 )
+                
             if args.save_summary:
                 console.print("\n[bold]Generating Comprehensive Summary[/bold]")
                 summary = tagger.get_tagging_summary(audio_path, audio_path=audio_path)
@@ -276,6 +344,14 @@ def main():
                 summary_table.add_row(
                     "Max Speech Prob", f"{summary['max_speech_probability']:.4f}"
                 )
+                # ── UPDATED: Add speech duration to summary table ──────
+                summary_table.add_row(
+                    "Speech Duration", 
+                    f"{summary['speech_duration']:.2f}s"
+                    f" ({summary['speech_duration']/summary['duration_seconds']*100:.1f}%)"
+                    if summary['duration_seconds'] > 0
+                    else "0.00s"
+                )
                 summary_table.add_row(
                     "Processing Time", f"{summary['processing_time_seconds']:.3f}s"
                 )
@@ -289,6 +365,7 @@ def main():
                 console.print(
                     f"[green]Summary saved to: {linkify(str(summary_output))}[/green]"
                 )
+                
         console.print(
             Panel.fit(
                 f"[bold green]✅ Analysis Complete[/bold green]\n"

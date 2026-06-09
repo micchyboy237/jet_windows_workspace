@@ -61,6 +61,10 @@ class ChunkTaggingResult(TypedDict):
     duration: float
     predictions: List[TaggingResult]
     processing_time: float
+    # NEW: Whether this chunk contains speech
+    speech_detected: bool
+    # NEW: Maximum speech probability in this chunk
+    max_speech_probability: float
 
 
 class AudioChunksTaggingSummary(TypedDict):
@@ -76,6 +80,12 @@ class AudioChunksTaggingSummary(TypedDict):
     overall_top_predictions: List[TaggingResult]
     total_processing_time: float
     real_time_factor: float
+    # NEW: Total duration of consecutive speech chunks
+    speech_duration: float
+    # NEW: Whether any speech was detected
+    speech_detected: bool
+    # NEW: Maximum speech probability across all chunks
+    max_speech_probability: float
 
 
 class AudioTaggerConfig(TypedDict, total=False):
@@ -107,6 +117,8 @@ class AudioTaggingSummary(TypedDict):
     max_speech_probability: float
     processing_time_seconds: float
     real_time_factor: float
+    # NEW: For consistency, also add speech_duration to single-tag summary
+    speech_duration: float
 
 
 class AudioTagger:
@@ -117,6 +129,7 @@ class AudioTagger:
     - Tags audio with type AudioInput (reuses load_audio)
     - Checks if audio contains high-probability speech
     - Process long audio in overlapping chunks with tag_audio_chunks()
+    - Calculates speech_duration: sum of consecutive speech chunks
     - Configurable chunking parameters from jet.audio.helpers.config
 
     Example:
@@ -300,6 +313,91 @@ class AudioTagger:
             self._labels_map = self._load_labels()
         return self._labels_map
 
+    # ── NEW: Speech detection helper for chunks ───────────────────────
+    def _chunk_has_speech(self, predictions: List[TaggingResult], top_n: Optional[int] = None) -> tuple[bool, float]:
+        """
+        Check if chunk predictions indicate speech.
+
+        Args:
+            predictions: List of tagging results for a chunk
+            top_n: Number of top predictions to check (default: self.speech_top_n)
+
+        Returns:
+            Tuple of (speech_detected: bool, max_speech_prob: float)
+        """
+        n_to_check = top_n if top_n is not None else self.speech_top_n
+        max_speech_prob = 0.0
+        
+        for result in predictions[:n_to_check]:
+            name = result.get("name", "")
+            prob = result.get("prob", 0.0)
+            if name in self.SPEECH_CLASS_NAMES and prob > max_speech_prob:
+                max_speech_prob = prob
+        
+        speech_detected = max_speech_prob >= self.speech_prob_threshold
+        return speech_detected, max_speech_prob
+
+    # ── NEW: Calculate speech duration from consecutive speech chunks ──
+    def _calculate_speech_duration(
+        self, 
+        chunks: List[ChunkTaggingResult],
+        overlap_duration: float,
+    ) -> float:
+        """
+        Calculate total speech duration by merging consecutive speech chunks.
+        
+        Accounts for overlap between consecutive chunks to avoid double-counting.
+        
+        Args:
+            chunks: List of chunk results with speech_detected flags
+            overlap_duration: Overlap between consecutive chunks in seconds
+            
+        Returns:
+            Total speech duration in seconds (sum of consecutive speech chunks)
+        """
+        if not chunks:
+            return 0.0
+        
+        # Sort chunks by start time (should already be sorted, but ensure)
+        sorted_chunks = sorted(chunks, key=lambda c: c["start_time"])
+        
+        speech_segments = []  # List of (start, end) tuples
+        current_start = None
+        current_end = None
+        
+        for chunk in sorted_chunks:
+            if chunk.get("speech_detected", False):
+                chunk_start = chunk["start_time"]
+                chunk_end = chunk["end_time"]
+                
+                if current_start is None:
+                    # Start new speech segment
+                    current_start = chunk_start
+                    current_end = chunk_end
+                elif chunk_start <= current_end:
+                    # Extend current segment (accounting for overlap)
+                    current_end = max(current_end, chunk_end)
+                else:
+                    # Gap detected, save previous segment
+                    speech_segments.append((current_start, current_end))
+                    current_start = chunk_start
+                    current_end = chunk_end
+            else:
+                if current_start is not None:
+                    # End of speech segment
+                    speech_segments.append((current_start, current_end))
+                    current_start = None
+                    current_end = None
+        
+        # Don't forget the last segment
+        if current_start is not None:
+            speech_segments.append((current_start, current_end))
+        
+        # Calculate total speech duration
+        total_speech_duration = sum(end - start for start, end in speech_segments)
+        
+        return total_speech_duration
+
     def tag_audio(
         self,
         audio: AudioInput,
@@ -365,6 +463,7 @@ class AudioTagger:
         - Very long recordings that exceed model context windows
         - Tracking how audio content changes over time
         - Speech/music segmentation at coarse granularity
+        - Computing speech_duration (sum of consecutive speech chunks)
 
         Args:
             audio: Audio input (file path, bytes, numpy array, or torch tensor)
@@ -377,12 +476,14 @@ class AudioTagger:
                                Default: self.min_chunk_duration (0.5s)
 
         Returns:
-            AudioChunksTaggingSummary with per-chunk results and overall aggregation
+            AudioChunksTaggingSummary with per-chunk results, overall aggregation,
+            and speech_duration
 
         Example:
             >>> tagger = AudioTagger()
             >>> summary = tagger.tag_audio_chunks("long_speech.wav", chunk_duration=5.0)
             >>> print(f"Processed {summary['total_chunks']} chunks")
+            >>> print(f"Speech duration: {summary['speech_duration']:.2f}s")
             >>> for chunk in summary['chunks']:
             ...     print(f"  Chunk {chunk['chunk_index']}: "
             ...           f"{chunk['predictions'][0]['name']}")
@@ -461,11 +562,16 @@ class AudioTagger:
                 real_time_factor=elapsed / total_duration
                 if total_duration > 0
                 else 0.0,
+                speech_duration=0.0,
+                speech_detected=False,
+                max_speech_probability=0.0,
             )
 
         # ── Process each chunk ──────────────────────────────────────────
         chunks: List[ChunkTaggingResult] = []
         all_predictions: Dict[str, List[float]] = {}  # name -> list of probs
+        any_speech_detected = False
+        global_max_speech_prob = 0.0
 
         for idx, (start_sample, end_sample) in enumerate(chunk_positions):
             chunk_start_time = time.time()
@@ -480,6 +586,14 @@ class AudioTagger:
             except Exception:
                 # Create error entry
                 chunk_predictions = []
+
+            # ── NEW: Check for speech in this chunk ───────────────────
+            speech_detected, max_speech_prob = self._chunk_has_speech(chunk_predictions)
+            
+            if speech_detected:
+                any_speech_detected = True
+            if max_speech_prob > global_max_speech_prob:
+                global_max_speech_prob = max_speech_prob
 
             chunk_elapsed = time.time() - chunk_start_time
 
@@ -497,8 +611,13 @@ class AudioTagger:
                 duration=round(end_sec - start_sec, 3),
                 predictions=chunk_predictions,
                 processing_time=round(chunk_elapsed, 4),
+                speech_detected=speech_detected,
+                max_speech_probability=round(max_speech_prob, 4),
             )
             chunks.append(chunk_result)
+
+        # ── NEW: Calculate speech duration ─────────────────────────────
+        speech_duration = self._calculate_speech_duration(chunks, _overlap)
 
         # ── Aggregate overall top predictions ───────────────────────────
         overall_top = self._aggregate_chunk_predictions(all_predictions, self.top_k)
@@ -518,6 +637,9 @@ class AudioTagger:
             overall_top_predictions=overall_top,
             total_processing_time=round(total_elapsed, 4),
             real_time_factor=round(rtf, 4),
+            speech_duration=round(speech_duration, 3),
+            speech_detected=any_speech_detected,
+            max_speech_probability=round(global_max_speech_prob, 4),
         )
 
         return summary
@@ -680,7 +802,7 @@ class AudioTagger:
 
         return results
 
-    # ── Existing methods (unchanged below this line) ───────────────────
+    # ── Existing methods (updated) ───────────────────────────────────
 
     def contains_speech(
         self,
@@ -769,6 +891,8 @@ class AudioTagger:
     ) -> AudioTaggingSummary:
         """
         Get a comprehensive summary of audio tagging results.
+        
+        Updated to include speech_duration field.
 
         Args:
             audio: Audio input
@@ -776,7 +900,7 @@ class AudioTagger:
             audio_path: Identifier for the audio source
 
         Returns:
-            AudioTaggingSummary with complete analysis
+            AudioTaggingSummary with complete analysis including speech_duration
         """
         start_time = time.time()
 
@@ -789,6 +913,9 @@ class AudioTagger:
         results = self.tag_audio(audio, sample_rate=sample_rate)
         max_speech_prob = self.get_speech_probability(audio, sample_rate=sample_rate)
         speech_detected = max_speech_prob >= self.speech_prob_threshold
+        
+        # For single-tag summary, speech_duration equals total duration if speech detected
+        speech_duration = audio_duration if speech_detected else 0.0
 
         elapsed = time.time() - start_time
         rtf = elapsed / audio_duration if audio_duration > 0 else float("inf")
@@ -803,6 +930,7 @@ class AudioTagger:
             "max_speech_probability": max_speech_prob,
             "processing_time_seconds": elapsed,
             "real_time_factor": rtf,
+            "speech_duration": speech_duration,
         }
 
         return summary
