@@ -996,7 +996,7 @@ def perform_audio_tagging(
     chunk_duration: float = 2.0,
     overlap_duration: float = 1.0,
     speech_prob_threshold: float = 0.5,
-    min_speech_duration: float = 3.0,  # NEW parameter
+    min_speech_duration: float = 2.0,  # NEW parameter
 ) -> Dict[str, Any]:
     """
     Perform audio tagging on an audio segment and save results.
