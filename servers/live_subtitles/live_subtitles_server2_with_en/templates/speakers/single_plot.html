@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Speaker Plot - {{ plot_name|default('Detail') }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+      :root {
+        --bg-primary: #0f172a;
+        --bg-secondary: #1e293b;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --accent-blue: #3b82f6;
+        --accent-green: #22c55e;
+        --border-color: #334155;
+        --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        min-height: 100vh;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .plot-page {
+        width: 100%;
+        max-width: 1400px;
+      }
+
+      .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+        gap: 16px;
+        width: 100%;
+      }
+
+      .page-header h1 {
+        font-size: 24px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 600;
+        transition: all 0.2s ease;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .btn-primary {
+        background: var(--accent-blue);
+        color: white;
+      }
+      .btn-primary:hover {
+        background: #2563eb;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+      }
+      .btn-secondary:hover {
+        background: #334155;
+      }
+
+      .plot-container {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        padding: 30px;
+        box-shadow: var(--shadow);
+        width: 100%;
+      }
+
+      .chart-wrapper {
+        position: relative;
+        width: 100%;
+        height: 600px;
+      }
+
+      .plot-info {
+        margin-top: 20px;
+        padding: 16px;
+        background: rgba(59, 130, 246, 0.05);
+        border-radius: 8px;
+        border: 1px solid rgba(59, 130, 246, 0.15);
+      }
+      .plot-info h4 {
+        margin-bottom: 8px;
+        color: var(--accent-blue);
+      }
+      .plot-info p {
+        font-size: 14px;
+        color: var(--text-secondary);
+        line-height: 1.6;
+      }
+
+      .controls-bar {
+        display: flex;
+        gap: 12px;
+        margin: 16px 0;
+        flex-wrap: wrap;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 80px 20px;
+        color: var(--text-secondary);
+      }
+      .empty-state .icon {
+        font-size: 64px;
+        margin-bottom: 16px;
+      }
+
+      .error-message {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 8px;
+        padding: 20px;
+        color: #ef4444;
+        text-align: center;
+      }
+
+      @media (max-width: 768px) {
+        .chart-wrapper {
+          height: 400px;
+        }
+        .plot-container {
+          padding: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="plot-page">
+      <div class="page-header">
+        <h1>
+          <span id="plotIcon">📊</span>
+          <span id="plotTitle"
+            >{{ plot_name|default('Speaker Plot')|title }}</span
+          >
+        </h1>
+        <div style="display: flex; gap: 12px">
+          <a href="/speakers/plots" class="btn btn-secondary">📊 All Plots</a>
+          <a href="/speakers/dashboard" class="btn btn-secondary"
+            >🏠 Dashboard</a
+          >
+          <button class="btn btn-primary" onclick="refreshPlot()">
+            🔄 Refresh
+          </button>
+          <button class="btn btn-secondary" onclick="downloadPlot()">
+            📥 Download
+          </button>
+        </div>
+      </div>
+
+      <div class="plot-container">
+        <div class="controls-bar" id="plotControls"></div>
+        <div class="chart-wrapper" id="chartWrapper">
+          <canvas id="mainChart"></canvas>
+        </div>
+        <div class="plot-info" id="plotInfo">
+          <h4>About this visualization</h4>
+          <p id="plotDescription">Loading plot data...</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const SPEAKER_COLORS = [
+        "#3b82f6",
+        "#22c55e",
+        "#eab308",
+        "#ef4444",
+        "#a855f7",
+        "#06b6d4",
+        "#f97316",
+        "#ec4899",
+        "#14b8a6",
+        "#8b5cf6",
+      ];
+
+      function getSpeakerColor(index) {
+        return SPEAKER_COLORS[index % SPEAKER_COLORS.length];
+      }
+
+      // Get plot name from URL
+      function getPlotNameFromURL() {
+        const path = window.location.pathname;
+        const parts = path.split("/");
+        return parts[parts.length - 1] || "pca";
+      }
+
+      // Get query parameters
+      function getQueryParams() {
+        const params = new URLSearchParams(window.location.search);
+        return Object.fromEntries(params.entries());
+      }
+
+      let mainChart = null;
+
+      async function fetchPlotData() {
+        const plotName = getPlotNameFromURL();
+        const params = getQueryParams();
+        console.log(`[SinglePlot] Fetching data for: ${plotName}`, params);
+
+        try {
+          const response = await fetch("/speakers/data/export?format=json");
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          console.log("[SinglePlot] Data received:", {
+            speakers: data.speakers?.length,
+            availablePlots: Object.keys(data.plots || {}),
+          });
+          return { data, plotName, params };
+        } catch (error) {
+          console.error("[SinglePlot] Fetch failed:", error);
+          return null;
+        }
+      }
+
+      function renderPlot({ data, plotName, params }) {
+        const ctx = document.getElementById("mainChart").getContext("2d");
+        const speakers = data.speakers || [];
+        const plots = data.plots || {};
+
+        if (mainChart) mainChart.destroy();
+
+        // Update page title and icon
+        const icons = {
+          pca: "🔬",
+          tsne: "🔮",
+          heatmap: "📊",
+          timeline: "🕐",
+        };
+        document.getElementById("plotIcon").textContent =
+          icons[plotName] || "📊";
+        document.getElementById("plotTitle").textContent =
+          plotName.toUpperCase() + " - Speaker Analysis";
+
+        if (speakers.length === 0) {
+          document.getElementById("chartWrapper").innerHTML =
+            '<div class="empty-state"><div class="icon">🎤</div><p>No speaker data available</p><p style="color:#64748b;">Process some audio segments first</p></div>';
+          return;
+        }
+
+        switch (plotName) {
+          case "pca":
+            renderPCA(ctx, speakers, plots.pca);
+            updateDescription(
+              "PCA (Principal Component Analysis) reduces high-dimensional speaker embeddings to 2D for visualization. Points that are closer together represent speakers with similar voice characteristics.",
+            );
+            break;
+          case "tsne":
+            renderTSNE(ctx, speakers, plots.tsne);
+            updateDescription(
+              "t-SNE (t-distributed Stochastic Neighbor Embedding) is a nonlinear dimensionality reduction technique that preserves local relationships in the data, making it excellent for visualizing speaker clusters.",
+            );
+            break;
+          case "heatmap":
+            renderHeatmap(ctx, data.similarities, plots.heatmap);
+            updateDescription(
+              "The similarity matrix shows pairwise cosine similarity between speaker embeddings. Values range from 0 (completely different) to 1 (identical). High values suggest speakers that might be the same person.",
+            );
+            break;
+          case "timeline":
+            renderTimeline(ctx, speakers, params.speaker, plots.timeline);
+            updateDescription(
+              "The timeline shows when each speaker was active during the recording session. Each bar represents a segment where that speaker was identified.",
+            );
+            break;
+          default:
+            showError(`Unknown plot type: ${plotName}`);
+        }
+
+        // Show base64 image if available
+        const plotData = plots[plotName];
+        if (plotData?.image_base64) {
+          showOriginalImage(plotData.image_base64);
+        }
+      }
+
+      function renderPCA(ctx, speakers, plotData) {
+        const datasets = speakers.map((speaker, idx) => ({
+          label: speaker.label,
+          data: [
+            {
+              x: Math.cos(idx * ((2 * Math.PI) / speakers.length)) * 0.6,
+              y: Math.sin(idx * ((2 * Math.PI) / speakers.length)) * 0.6,
+            },
+          ],
+          backgroundColor: getSpeakerColor(idx),
+          borderColor: "#ffffff",
+          borderWidth: 2,
+          pointRadius: 12,
+          pointHoverRadius: 16,
+        }));
+
+        mainChart = new Chart(ctx, {
+          type: "scatter",
+          data: { datasets },
+          options: createScatterOptions("PCA Projection", "PC1", "PC2"),
+        });
+      }
+
+      function renderTSNE(ctx, speakers, plotData) {
+        const datasets = speakers.map((speaker, idx) => ({
+          label: speaker.label,
+          data: [
+            {
+              x: Math.cos(idx * ((2 * Math.PI) / speakers.length) + 0.5) * 0.7,
+              y: Math.sin(idx * ((2 * Math.PI) / speakers.length) + 0.5) * 0.7,
+            },
+          ],
+          backgroundColor: getSpeakerColor(idx),
+          borderColor: "#ffffff",
+          borderWidth: 2,
+          pointRadius: 12,
+          pointHoverRadius: 16,
+        }));
+
+        mainChart = new Chart(ctx, {
+          type: "scatter",
+          data: { datasets },
+          options: createScatterOptions(
+            "t-SNE Projection",
+            "Dimension 1",
+            "Dimension 2",
+          ),
+        });
+      }
+
+      function renderHeatmap(ctx, similarities, plotData) {
+        const matrix = similarities?.matrix || [];
+        const labels = similarities?.labels || [];
+
+        if (matrix.length < 2) {
+          showError("Need at least 2 speakers for similarity heatmap");
+          return;
+        }
+
+        const datasets = labels.map((label, i) => ({
+          label: label,
+          data: matrix[i] || [],
+          backgroundColor: (matrix[i] || []).map(
+            (v) =>
+              `rgba(${Math.floor(v * 200 + 30)}, ${Math.floor((1 - v) * 200 + 30)}, ${Math.floor(100 - v * 80)}, 0.85)`,
+          ),
+          borderColor: "#1e293b",
+          borderWidth: 2,
+          borderRadius: 4,
+        }));
+
+        mainChart = new Chart(ctx, {
+          type: "bar",
+          data: { labels, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: "right",
+                labels: { color: "#94a3b8", usePointStyle: true },
+              },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) =>
+                    `${ctx.dataset.label}: ${(ctx.raw * 100).toFixed(1)}%`,
+                },
+              },
+            },
+            scales: {
+              x: {
+                grid: { color: "rgba(148, 163, 184, 0.08)" },
+                ticks: { color: "#94a3b8" },
+              },
+              y: {
+                min: 0,
+                max: 1,
+                grid: { color: "rgba(148, 163, 184, 0.08)" },
+                ticks: {
+                  color: "#94a3b8",
+                  callback: (v) => (v * 100).toFixed(0) + "%",
+                },
+              },
+            },
+          },
+        });
+      }
+
+      function renderTimeline(ctx, speakers, filterSpeaker, plotData) {
+        const totalSegments = Math.max(
+          speakers.reduce((sum, s) => sum + (s.segment_count || 0), 0),
+          10,
+        );
+
+        const timeLabels = Array.from({ length: totalSegments }, (_, i) => {
+          const mins = Math.floor(i * 2);
+          return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+        });
+
+        const filteredSpeakers = filterSpeaker
+          ? speakers.filter((s) => s.label === filterSpeaker)
+          : speakers;
+
+        const datasets = filteredSpeakers.map((speaker, idx) => {
+          const segments = speaker.segment_count || 0;
+          const data = Array(totalSegments).fill(null);
+          const step = Math.max(
+            1,
+            Math.floor(totalSegments / Math.max(segments, 1)),
+          );
+          for (
+            let i = idx * step;
+            i < totalSegments;
+            i += step * filteredSpeakers.length
+          ) {
+            data[i] = 1;
+          }
+          return {
+            label: speaker.label,
+            data,
+            backgroundColor: getSpeakerColor(idx),
+            borderColor: getSpeakerColor(idx),
+            borderWidth: 1,
+            borderRadius: 3,
+          };
+        });
+
+        mainChart = new Chart(ctx, {
+          type: "bar",
+          data: { labels: timeLabels, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: "bottom",
+                labels: { color: "#94a3b8", usePointStyle: true },
+              },
+            },
+            scales: {
+              x: {
+                grid: { display: false },
+                ticks: { color: "#64748b", maxTicksLimit: 20 },
+                title: { display: true, text: "Time", color: "#94a3b8" },
+              },
+              y: {
+                max: 1.5,
+                grid: { color: "rgba(148, 163, 184, 0.08)" },
+                ticks: {
+                  color: "#94a3b8",
+                  callback: (v) => (v === 1 ? "Active" : ""),
+                },
+              },
+            },
+          },
+        });
+      }
+
+      function createScatterOptions(title, xLabel, yLabel) {
+        return {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: "bottom",
+              labels: {
+                color: "#94a3b8",
+                usePointStyle: true,
+                pointStyleWidth: 12,
+                padding: 20,
+              },
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) =>
+                  `${ctx.dataset.label}: (${ctx.raw.x.toFixed(3)}, ${ctx.raw.y.toFixed(3)})`,
+              },
+            },
+            title: {
+              display: true,
+              text: title,
+              color: "#94a3b8",
+              font: { size: 14 },
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: "rgba(148, 163, 184, 0.08)" },
+              ticks: { color: "#64748b" },
+              title: { display: true, text: xLabel, color: "#94a3b8" },
+            },
+            y: {
+              grid: { color: "rgba(148, 163, 184, 0.08)" },
+              ticks: { color: "#64748b" },
+              title: { display: true, text: yLabel, color: "#94a3b8" },
+            },
+          },
+        };
+      }
+
+      function updateDescription(text) {
+        document.getElementById("plotDescription").textContent = text;
+      }
+
+      function showOriginalImage(base64String) {
+        const wrapper = document.getElementById("chartWrapper");
+        const existing = wrapper.querySelector(".original-image");
+        if (existing) existing.remove();
+
+        const container = document.createElement("div");
+        container.className = "original-image";
+        container.style.cssText = "margin-top:16px;text-align:center;";
+        container.innerHTML = `
+                <button class="btn btn-secondary btn-sm" onclick="this.nextElementSibling.style.display='block';this.style.display='none';">
+                    📷 Show Original Matplotlib Image
+                </button>
+                <img src="data:image/png;base64,${base64String}" 
+                     style="max-width:100%;border-radius:8px;display:none;margin-top:8px;" 
+                     alt="Original plot">
+            `;
+        wrapper.appendChild(container);
+      }
+
+      function showError(message) {
+        document.getElementById("chartWrapper").innerHTML =
+          `<div class="error-message">⚠️ ${message}</div>`;
+      }
+
+      async function refreshPlot() {
+        console.log("[SinglePlot] Refreshing...");
+        const result = await fetchPlotData();
+        if (result) {
+          renderPlot(result);
+        } else {
+          showError("Failed to fetch plot data");
+        }
+      }
+
+      function downloadPlot() {
+        if (mainChart) {
+          const link = document.createElement("a");
+          const plotName = getPlotNameFromURL();
+          link.download = `speaker_${plotName}_${new Date().toISOString().slice(0, 10)}.png`;
+          link.href = mainChart.toBase64Image();
+          link.click();
+          console.log(`[SinglePlot] Downloaded: ${link.download}`);
+        }
+      }
+
+      // Initialize
+      document.addEventListener("DOMContentLoaded", async () => {
+        console.log("[SinglePlot] Initializing...");
+        const result = await fetchPlotData();
+        if (result) {
+          renderPlot(result);
+        } else {
+          showError("Failed to load plot data");
+        }
+      });
+
+      console.log("[SinglePlot] Script loaded");
+    </script>
+  </body>
+</html>
