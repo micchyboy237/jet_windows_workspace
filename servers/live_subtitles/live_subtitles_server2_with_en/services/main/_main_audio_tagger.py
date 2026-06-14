@@ -3,16 +3,13 @@ import json
 import shutil
 import time
 from pathlib import Path
-
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.traceback import install as install_rich_traceback
-
 install_rich_traceback(show_locals=True)
 console = Console()
-
 
 def main():
     from custom_logging import linkify
@@ -21,10 +18,10 @@ def main():
         CLASS_LABELS_INDICES_CSV,
         AudioTagger,
     )
-
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    
     parser = argparse.ArgumentParser(
         description="Audio tagging with Sherpa-ONNX models",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -117,8 +114,10 @@ def main():
         default=0.3,
         help="Minimum probability to display predictions in chunk table",
     )
+    
     args = parser.parse_args()
     audio_path = args.audio_path
+    
     tagger = AudioTagger(
         model_path=args.model_path,
         labels_path=args.labels_path,
@@ -131,32 +130,38 @@ def main():
         chunk_duration=args.chunk_duration,
         chunk_overlap=args.chunk_overlap,
     )
+    
     console.print(
         Panel.fit(
             "[bold cyan]Audio Tagging Analysis[/bold cyan]",
             border_style="cyan",
         )
     )
+    
     try:
         console.print(f"\n[bold]Analyzing audio: {linkify(audio_path)}[/bold]\n")
         audio_name = Path(audio_path).stem
+        
         if args.chunk:
+            # ── FIX: Pass output_dir when --save-speech-chunks is set ──
+            output_dir_param = Path(args.output_dir)
+            
             summary = tagger.tag_audio_chunks(
                 audio_path,
                 chunk_duration=args.chunk_duration,
                 overlap_duration=args.chunk_overlap,
+                output_dir=output_dir_param,  # ← KEY FIX
             )
+            # ───────────────────────────────────────────────────────────
             
-            # ── UPDATED: Display chunk summary with speech info ────────
             chunk_summary_table = Table(
-                title="Chunk Analysis Summary", 
+                title="Chunk Analysis Summary",
                 border_style="blue",
                 show_header=True,
                 header_style="bold cyan"
             )
             chunk_summary_table.add_column("Metric", style="cyan")
             chunk_summary_table.add_column("Value", style="yellow")
-            
             chunk_summary_table.add_row(
                 "Total Duration", f"{summary['total_duration']:.2f}s"
             )
@@ -170,36 +175,43 @@ def main():
                 "Overlap", f"{summary['overlap_duration']:.2f}s"
             )
             chunk_summary_table.add_row(
-                "Speech Detected", 
+                "Speech Detected",
                 "✅ Yes" if summary['speech_detected'] else "❌ No"
             )
             chunk_summary_table.add_row(
-                "Speech Duration", 
+                "Speech Duration",
                 f"{summary['speech_duration']:.2f}s"
                 f" ({summary['speech_duration']/summary['total_duration']*100:.1f}% of total)"
                 if summary['total_duration'] > 0
                 else "0.00s"
             )
             chunk_summary_table.add_row(
-                "Max Speech Probability", 
+                "Max Speech Probability",
                 f"{summary['max_speech_probability']:.4f}"
             )
+            # ── NEW: Display avg speech probability ──
             chunk_summary_table.add_row(
-                "Processing Time", 
+                "Avg Speech Probability",
+                f"{summary['avg_speech_probability']:.4f}"
+                if summary['avg_speech_probability'] > 0
+                else "N/A (no speech chunks)"
+            )
+            # ─────────────────────────────────────────
+            chunk_summary_table.add_row(
+                "Processing Time",
                 f"{summary['total_processing_time']:.3f}s"
             )
             chunk_summary_table.add_row(
-                "Real-Time Factor", 
+                "Real-Time Factor",
                 f"{summary['real_time_factor']:.3f}x"
             )
             console.print(chunk_summary_table)
             
             console.print("\n[bold]Overall Top Predictions:[/bold]")
             tagger.display_results(summary["overall_top_predictions"])
-
-            # Enhanced chunk table with multiple predictions and probability emphasis
+            
             chunk_table = Table(
-                title="Per-Chunk Analysis", 
+                title="Per-Chunk Analysis",
                 border_style="blue",
                 show_header=True,
                 header_style="bold cyan"
@@ -210,24 +222,21 @@ def main():
             chunk_table.add_column("Speech", justify="center", style="green")
             chunk_table.add_column("Top Predictions", style="green", min_width=40)
             chunk_table.add_column("Proc Time", justify="right")
-
+            
             for chunk in summary["chunks"]:
                 predictions = chunk.get("predictions", [])
-
-                # Filter predictions above threshold and format with color
                 predictions_display = _format_predictions_with_emphasis(
                     predictions,
                     threshold=args.display_threshold,
-                    max_display=3,  # Show at most 3 predictions per chunk
+                    max_display=3,
                 )
-
-                # ── UPDATED: Speech indicator per chunk ────────────────
+                # ── FIX: Use speech_probability from chunk ──
                 speech_indicator = (
-                    f"✅ {chunk['max_speech_probability']:.0%}" 
-                    if chunk.get('speech_detected', False) 
+                    f"✅ {chunk['speech_probability']:.0%}"
+                    if chunk.get('speech_detected', False)
                     else "❌ —"
                 )
-
+                # ────────────────────────────────────────────
                 chunk_table.add_row(
                     str(chunk["chunk_index"]),
                     f"{chunk['start_time']:.2f}s - {chunk['end_time']:.2f}s",
@@ -237,26 +246,25 @@ def main():
                     f"{chunk['processing_time'] * 1000:.1f}ms",
                 )
             console.print(chunk_table)
-
-            # Show threshold info
             console.print(
                 f"[dim]Showing predictions with probability ≥ {args.display_threshold:.0%}[/dim]"
             )
             console.print(
                 f"[dim]Speech threshold: {args.speech_threshold:.0%} | "
-                f"Speech duration: {summary['speech_duration']:.2f}s[/dim]"
+                f"Speech duration: {summary['speech_duration']:.2f}s | "
+                f"Avg speech prob: {summary['avg_speech_probability']:.4f}[/dim]"
             )
-
+            
+            # Generate plots if available
             try:
                 from audio_tagger_chunk_plots import (
                     save_chunk_plots,
                 )
-
                 plot_paths = save_chunk_plots(
                     summary=summary,
                     output_dir=Path(args.output_dir),
                     top_n_display=min(args.top_k, 10),
-                    probability_threshold=args.display_threshold,  # Pass threshold to plots
+                    probability_threshold=args.display_threshold,
                 )
                 console.print(
                     Panel(
@@ -274,7 +282,8 @@ def main():
                 )
             except Exception as e:
                 console.print(f"[red]⚠ Plot generation failed: {e}[/red]")
-
+            
+            # Save chunk summary JSON
             summary_output = Path(args.output_dir) / f"{audio_name}_chunks_summary.json"
             serializable = {
                 **summary,
@@ -286,11 +295,24 @@ def main():
             console.print(
                 f"[green]Chunked results saved to: {linkify(str(summary_output))}[/green]"
             )
+            
+            # ── NEW: Confirm speech chunks saved ──
+            speech_chunks_dir = Path(args.output_dir) / "speech_chunks"
+            if speech_chunks_dir.exists():
+                num_chunks = len(list(speech_chunks_dir.iterdir()))
+                console.print(
+                    f"[green]💾 {num_chunks} speech chunks saved to: "
+                    f"{linkify(str(speech_chunks_dir))}[/green]"
+                )
+            # ───────────────────────────────────────
+        
         else:
             results = tagger.tag_audio(audio_path)
             tagger.display_results(results)
+            
             json_output = Path(args.output_dir) / f"{audio_name}_tags.json"
             tagger.save_results(results, json_output, format="json")
+            
             txt_output = Path(args.output_dir) / f"{audio_name}_tags.txt"
             tagger.save_results(results, txt_output, format="txt")
             
@@ -298,6 +320,7 @@ def main():
                 console.print("\n[bold]Speech Detection Analysis[/bold]")
                 is_speech = tagger.contains_speech(audio_path)
                 speech_prob = tagger.get_speech_probability(audio_path)
+                
                 speech_table = Table(
                     title="Speech Detection Results", border_style="green"
                 )
@@ -309,6 +332,7 @@ def main():
                 speech_table.add_row("Max Speech Probability", f"{speech_prob:.4f}")
                 speech_table.add_row("Threshold", str(args.speech_threshold))
                 console.print(speech_table)
+                
                 speech_result = {
                     "audio_path": audio_path,
                     "speech_detected": is_speech,
@@ -324,10 +348,11 @@ def main():
                 console.print(
                     f"[green]Speech detection saved to: {linkify(str(speech_output))}[/green]"
                 )
-                
+            
             if args.save_summary:
                 console.print("\n[bold]Generating Comprehensive Summary[/bold]")
                 summary = tagger.get_tagging_summary(audio_path, audio_path=audio_path)
+                
                 summary_table = Table(
                     title="Audio Tagging Summary", border_style="magenta"
                 )
@@ -344,9 +369,8 @@ def main():
                 summary_table.add_row(
                     "Max Speech Prob", f"{summary['max_speech_probability']:.4f}"
                 )
-                # ── UPDATED: Add speech duration to summary table ──────
                 summary_table.add_row(
-                    "Speech Duration", 
+                    "Speech Duration",
                     f"{summary['speech_duration']:.2f}s"
                     f" ({summary['speech_duration']/summary['duration_seconds']*100:.1f}%)"
                     if summary['duration_seconds'] > 0
@@ -359,13 +383,14 @@ def main():
                     "Real-Time Factor", f"{summary['real_time_factor']:.3f}"
                 )
                 console.print(summary_table)
+                
                 summary_output = Path(args.output_dir) / f"{audio_name}_summary.json"
                 with open(summary_output, "w", encoding="utf-8") as f:
                     json.dump(summary, f, indent=2, ensure_ascii=False)
                 console.print(
                     f"[green]Summary saved to: {linkify(str(summary_output))}[/green]"
                 )
-                
+        
         console.print(
             Panel.fit(
                 f"[bold green]✅ Analysis Complete[/bold green]\n"
@@ -373,6 +398,7 @@ def main():
                 border_style="green",
             )
         )
+    
     except Exception as e:
         console.print(
             Panel.fit(
@@ -386,15 +412,12 @@ def main():
 def _format_predictions_with_emphasis(predictions, threshold=0.3, max_display=3):
     """
     Format multiple predictions with visual emphasis based on probability magnitude.
-
     Args:
         predictions: List of prediction dicts with 'name' and 'prob' keys
         threshold: Minimum probability to display
         max_display: Maximum number of predictions to show
-
     Returns:
         Rich Text object with color-coded predictions
-
     Probability magnitude emphasis:
         - High (≥0.7): Bold green
         - Medium (0.4-0.7): Yellow
@@ -402,66 +425,50 @@ def _format_predictions_with_emphasis(predictions, threshold=0.3, max_display=3)
         - Below threshold: Not shown
     """
     text = Text()
-
-    # Filter and sort predictions by probability
     qualified = [p for p in predictions if p.get("prob", 0) >= threshold]
     qualified.sort(key=lambda x: x.get("prob", 0), reverse=True)
-
     if not qualified:
         return Text("—", style="dim")
-
     for i, pred in enumerate(qualified[:max_display]):
         prob = pred["prob"]
         name = pred["name"]
-
-        # Truncate long names
         display_name = name[:35] + "…" if len(name) > 35 else name
-
-        # Color and style based on probability magnitude
         if prob >= 0.7:
             style = "bold green"
-            emoji = "🔴"  # High probability indicator
+            emoji = "🔴"
         elif prob >= 0.4:
             style = "yellow"
-            emoji = "🟡"  # Medium probability indicator
+            emoji = "🟡"
         else:
             style = "dim white"
-            emoji = "⚪"  # Low probability indicator
-
+            emoji = "⚪"
         if i > 0:
             text.append("\n")
-
-        # Add probability with magnitude indicator
         prob_bar = _get_probability_bar(prob)
         text.append(f"{emoji} ", style="")
         text.append(f"{display_name} ", style=style)
         text.append(f"{prob:.1%} ", style=style)
         text.append(f"[{prob_bar}]", style="dim")
-
     return text
 
 
 def _get_probability_bar(probability, width=10):
     """
     Create a visual bar indicating probability magnitude.
-
     Args:
         probability: Float between 0 and 1
         width: Total width of the bar in characters
-
     Returns:
         String with filled and empty blocks representing probability
     """
     filled = int(probability * width)
     empty = width - filled
-
     if probability >= 0.7:
         bar_char = "█"
     elif probability >= 0.4:
         bar_char = "▓"
     else:
         bar_char = "▒"
-
     return f"{bar_char * filled}{'░' * empty}"
 
 

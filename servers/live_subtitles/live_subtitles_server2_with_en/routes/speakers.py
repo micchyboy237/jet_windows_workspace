@@ -433,6 +433,222 @@ async def get_single_plot(
         """)
 
 
+@router.get("/centroids")
+async def get_centroid_data():
+    """Get speaker centroid coordinates for visualization.
+    
+    Returns actual embedding coordinates (not synthetic data).
+    If centroids are high-dimensional (>2D), returns them as-is
+    so the frontend can perform PCA/t-SNE or use first 2 dimensions.
+    """
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    
+    speakers_info = labeler.get_all_speakers_info()
+    
+    centroids = {}
+    for label, info in speakers_info.items():
+        coords = info.get("centroid_coordinates")
+        if coords:
+            # Flatten if nested
+            if isinstance(coords[0], list):
+                coords = coords[0]
+            centroids[label] = {
+                "coordinates": coords,
+                "segment_count": info.get("segment_count", 0),
+                "centroid_quality": info.get("centroid_quality", 0),
+                "first_seen": info.get("first_seen", 0),
+                "last_seen": info.get("last_seen", 0),
+                "active_duration": info.get("active_duration", 0),
+            }
+    
+    console.print(f"[info]Returning centroid data for {len(centroids)} speakers[/info]")
+    
+    return {
+        "centroids": centroids,
+        "total_speakers": len(centroids),
+        "embedding_dimension": len(list(centroids.values())[0]["coordinates"]) if centroids else 0
+    }
+
+
+@router.get("/centroid-distances")
+async def get_centroid_distances():
+    """Get pairwise distances between all speaker centroids.
+    Useful for understanding speaker separation.
+    """
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    
+    similarity_matrix = labeler.get_speaker_similarity_matrix()
+    labels = similarity_matrix.get("labels", [])
+    similarities = similarity_matrix.get("similarities", [])
+    
+    # Convert similarities to distances
+    distances = []
+    for i, row in enumerate(similarities):
+        distance_row = []
+        for j, sim in enumerate(row):
+            distance_row.append(round(1.0 - sim, 4))
+        distances.append(distance_row)
+    
+    return {
+        "labels": labels,
+        "distances": distances,
+        "similarities": similarities,
+        "segment_counts": similarity_matrix.get("segment_counts", [])
+    }
+
+
+@router.get("/centroid-comparison")
+async def get_centroid_comparison(
+    label1: str = Query(..., description="First speaker label"),
+    label2: str = Query(..., description="Second speaker label")
+):
+    """Compare two speaker centroids with detailed metrics.
+    
+    Returns cosine distance, similarity, and per-dimension comparison.
+    Useful for understanding why two speakers are similar/different.
+    """
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    
+    speaker1 = labeler.get_speaker_info(label1)
+    speaker2 = labeler.get_speaker_info(label2)
+    
+    if not speaker1 or not speaker2:
+        missing = []
+        if not speaker1:
+            missing.append(label1)
+        if not speaker2:
+            missing.append(label2)
+        raise HTTPException(
+            status_code=404,
+            detail=f"Speaker(s) not found: {', '.join(missing)}"
+        )
+    
+    # Get centroids
+    centroids = labeler.get_centroid_arrays()
+    centroid1 = centroids.get(label1)
+    centroid2 = centroids.get(label2)
+    
+    if centroid1 is None or centroid2 is None:
+        raise HTTPException(
+            status_code=400,
+            detail="One or both speakers have no valid centroid"
+        )
+    
+    # Flatten centroids if needed
+    c1 = centroid1.flatten()
+    c2 = centroid2.flatten()
+    
+    # Cosine similarity and distance
+    from scipy.spatial.distance import cosine
+    cos_dist = float(cosine(c1, c2))
+    cos_sim = 1.0 - cos_dist
+    
+    # Euclidean distance (L2)
+    euclidean_dist = float(np.linalg.norm(c1 - c2))
+    
+    # Per-dimension absolute differences
+    dim_diffs = np.abs(c1 - c2)
+    top_different_dims = np.argsort(dim_diffs)[-10:][::-1]  # Top 10 most different dimensions
+    
+    # Centroid norms
+    norm1 = float(np.linalg.norm(c1))
+    norm2 = float(np.linalg.norm(c2))
+    
+    comparison = {
+        "speaker1": {
+            "label": label1,
+            "segment_count": speaker1.get("segment_count", 0),
+            "centroid_quality": speaker1.get("centroid_quality", 0),
+            "centroid_norm": round(norm1, 4),
+            "first_seen": speaker1.get("first_seen", 0),
+            "last_seen": speaker1.get("last_seen", 0),
+        },
+        "speaker2": {
+            "label": label2,
+            "segment_count": speaker2.get("segment_count", 0),
+            "centroid_quality": speaker2.get("centroid_quality", 0),
+            "centroid_norm": round(norm2, 4),
+            "first_seen": speaker2.get("first_seen", 0),
+            "last_seen": speaker2.get("last_seen", 0),
+        },
+        "comparison": {
+            "cosine_similarity": round(cos_sim, 4),
+            "cosine_distance": round(cos_dist, 4),
+            "euclidean_distance": round(euclidean_dist, 4),
+            "would_merge": cos_sim >= labeler.consolidation_threshold,
+            "merge_threshold": labeler.consolidation_threshold,
+            "top_different_dimensions": [
+                {
+                    "dimension": int(d),
+                    "diff": round(float(dim_diffs[d]), 6),
+                    "value_speaker1": round(float(c1[d]), 6),
+                    "value_speaker2": round(float(c2[d]), 6),
+                }
+                for d in top_different_dims[:5]
+            ],
+            "dimension_count": len(c1),
+        },
+        "timestamp": datetime.now().isoformat()
+    }
+    
+    console.print(
+        f"[info]Centroid comparison: {label1} vs {label2} "
+        f"(similarity={cos_sim:.3f}, distance={cos_dist:.3f})[/info]"
+    )
+    
+    return comparison
+
+
+@router.get("/centroid-quality-history")
+async def get_centroid_quality_history():
+    """Get centroid quality metrics and rejection history.
+    
+    Shows how centroids have evolved and how many updates were rejected
+    to prevent contamination.
+    """
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    
+    health = labeler.get_centroid_health_stats() if hasattr(labeler, 'get_centroid_health_stats') else {}
+    all_info = labeler.get_all_speakers_info()
+    
+    # Build quality timeline from centroid update log
+    quality_history = []
+    if hasattr(labeler, '_centroid_update_log'):
+        for entry in labeler._centroid_update_log[-50:]:  # Last 50 updates
+            quality_history.append({
+                "label": entry.get("label"),
+                "similarity": entry.get("similarity"),
+                "match_type": entry.get("match_type"),
+                "centroid_shift": entry.get("centroid_shift"),
+                "segment_count": entry.get("segment_count"),
+                "timestamp": entry.get("timestamp"),
+            })
+    
+    return {
+        "health_stats": health,
+        "speakers": {
+            label: {
+                "quality": info.get("centroid_quality", 0),
+                "segments": info.get("segment_count", 0),
+                "centroid_shape": info.get("centroid_shape"),
+            }
+            for label, info in all_info.items()
+        },
+        "quality_history": quality_history,
+        "total_rejected": health.get("total_updates_rejected", 0),
+        "total_processed": health.get("total_segments_processed", 0),
+        "rejection_rate": health.get("rejection_rate", 0),
+    }
+
+
 @router.get("/data/export")
 async def export_speaker_data(
     format: str = Query("json", description="Export format: json or html")
@@ -460,9 +676,9 @@ async def export_speaker_data(
     # JSON export
     import io
     import base64
-    
+
     figures = {}
-    
+
     # Generate matplotlib plots as base64 for backward compatibility
     try:
         if hasattr(labeler, 'plot_centroids_2d'):
@@ -512,7 +728,7 @@ async def export_speaker_data(
                 figures['timeline'] = {"error": str(e)}
     except Exception as e:
         console.print(f"[error]Plot generation failed: {e}[/error]")
-    
+
     export_data = {
         "speakers": labeler.get_all_speakers_info() if hasattr(labeler, 'get_all_speakers_info') else [],
         "health": labeler.get_health_status() if hasattr(labeler, 'get_health_status') else {},
@@ -524,6 +740,17 @@ async def export_speaker_data(
             "timestamp": datetime.now().isoformat()
         }
     }
-    
+
+    # Add centroid stats
+    centroid_stats = None
+    if hasattr(labeler, 'get_centroid_stats'):
+        try:
+            centroid_stats = labeler.get_centroid_stats()
+        except Exception as e:
+            console.print(f"[warning]Could not get centroid stats: {e}[/warning]")
+            centroid_stats = {"error": str(e)}
+
+    export_data["centroid_stats"] = centroid_stats
+
     console.print(f"[success]Exported data: {len(export_data['speakers'])} speakers, {len(figures)} plots[/success]")
     return JSONResponse(content=export_data)

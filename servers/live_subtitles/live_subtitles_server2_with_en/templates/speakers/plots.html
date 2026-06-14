@@ -20,13 +20,11 @@
         --border-color: #334155;
         --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
       }
-
       * {
         margin: 0;
         padding: 0;
         box-sizing: border-box;
       }
-
       body {
         font-family:
           -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -35,7 +33,6 @@
         min-height: 100vh;
         padding: 20px;
       }
-
       .page-header {
         display: flex;
         justify-content: space-between;
@@ -44,7 +41,6 @@
         flex-wrap: wrap;
         gap: 16px;
       }
-
       .page-header h1 {
         font-size: 28px;
         font-weight: 700;
@@ -57,14 +53,12 @@
         -webkit-text-fill-color: transparent;
         background-clip: text;
       }
-
       .plot-controls {
         display: flex;
         gap: 12px;
         flex-wrap: wrap;
         align-items: center;
       }
-
       .btn {
         padding: 10px 20px;
         border: none;
@@ -78,7 +72,6 @@
         align-items: center;
         gap: 8px;
       }
-
       .btn-primary {
         background: var(--accent-blue);
         color: white;
@@ -95,38 +88,7 @@
       .btn-secondary:hover {
         background: #334155;
       }
-      .btn-secondary.active {
-        background: var(--accent-blue);
-        border-color: var(--accent-blue);
-      }
 
-      .filter-chips {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-      }
-      .chip {
-        padding: 6px 14px;
-        border-radius: 20px;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        border: 1px solid var(--border-color);
-        background: var(--bg-secondary);
-        color: var(--text-secondary);
-        transition: all 0.2s ease;
-      }
-      .chip.active {
-        background: var(--accent-blue);
-        color: white;
-        border-color: var(--accent-blue);
-      }
-      .chip:hover:not(.active) {
-        border-color: var(--accent-blue);
-        color: var(--text-primary);
-      }
-
-      /* Plots Grid */
       .plots-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -137,23 +99,16 @@
           grid-template-columns: 1fr;
         }
       }
-
       .plot-card {
         background: var(--bg-card);
         border: 1px solid var(--border-color);
         border-radius: 12px;
         padding: 20px;
         box-shadow: var(--shadow);
-        transition: transform 0.2s ease;
-      }
-      .plot-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
       }
       .plot-card.full-width {
         grid-column: 1 / -1;
       }
-
       .plot-card h3 {
         font-size: 16px;
         font-weight: 600;
@@ -162,7 +117,7 @@
         align-items: center;
         gap: 8px;
       }
-      .plot-card h3 .dot {
+      .dot {
         width: 8px;
         height: 8px;
         border-radius: 50%;
@@ -180,23 +135,14 @@
       .dot.yellow {
         background: var(--accent-yellow);
       }
-      .dot.red {
-        background: var(--accent-red);
-      }
 
       .chart-container {
         position: relative;
         width: 100%;
-        height: 400px;
+        min-height: 400px;
       }
       .chart-container.large {
-        height: 500px;
-      }
-
-      .plot-actions {
-        margin-top: 12px;
-        display: flex;
-        gap: 8px;
+        min-height: 500px;
       }
 
       .empty-state {
@@ -218,12 +164,81 @@
         text-align: center;
       }
 
-      .loading-spinner {
+      /* Table styles for centroid data */
+      .centroid-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 16px;
+        font-size: 13px;
+      }
+      .centroid-table th {
+        text-align: left;
+        padding: 12px 8px;
+        border-bottom: 2px solid var(--border-color);
+        color: var(--text-secondary);
+        font-weight: 600;
+      }
+      .centroid-table td {
+        padding: 8px;
+        border-bottom: 1px solid var(--border-color);
+      }
+      .centroid-table tr:hover {
+        background: rgba(59, 130, 246, 0.05);
+      }
+      .quality-bar {
+        width: 100%;
+        height: 6px;
+        background: var(--border-color);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      .quality-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+      }
+      .quality-bar-fill.high {
+        background: var(--accent-green);
+      }
+      .quality-bar-fill.medium {
+        background: var(--accent-yellow);
+      }
+      .quality-bar-fill.low {
+        background: var(--accent-red);
+      }
+
+      .metric-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .metric-badge.good {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--accent-green);
+      }
+      .metric-badge.warning {
+        background: rgba(234, 179, 8, 0.15);
+        color: var(--accent-yellow);
+      }
+      .metric-badge.bad {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--accent-red);
+      }
+
+      .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        height: 200px;
-        color: var(--text-secondary);
+        background: rgba(15, 23, 42, 0.8);
+        border-radius: 12px;
+        z-index: 10;
       }
       .spinner {
         width: 40px;
@@ -232,38 +247,23 @@
         border-top-color: var(--accent-blue);
         border-radius: 50%;
         animation: spin 0.8s linear infinite;
-        margin-right: 12px;
       }
       @keyframes spin {
         to {
           transform: rotate(360deg);
         }
       }
-
-      .export-btn {
-        position: fixed;
-        bottom: 24px;
-        right: 24px;
-        z-index: 100;
-      }
     </style>
   </head>
   <body>
     <div class="page-header">
       <div>
-        <h1>📊 Speaker Visualization Plots</h1>
+        <h1>📊 Speaker Centroid Analysis</h1>
         <p style="color: var(--text-secondary); margin-top: 4px">
-          Interactive charts for speaker analysis
+          Real embedding data from speaker centroids
         </p>
       </div>
       <div class="plot-controls">
-        <div class="filter-chips" id="plotFilters">
-          <span class="chip active" data-plot="all">All Plots</span>
-          <span class="chip" data-plot="pca">PCA</span>
-          <span class="chip" data-plot="tsne">t-SNE</span>
-          <span class="chip" data-plot="heatmap">Heatmap</span>
-          <span class="chip" data-plot="timeline">Timeline</span>
-        </div>
         <a href="/speakers/dashboard" class="btn btn-secondary">🏠 Dashboard</a>
         <button class="btn btn-primary" onclick="refreshAllPlots()">
           🔄 Refresh
@@ -271,107 +271,123 @@
       </div>
     </div>
 
-    <div class="plots-grid" id="plotsGrid">
-      <!-- PCA Plot -->
-      <div class="plot-card" data-plot="pca" id="pcaCard">
-        <h3>
-          <span class="dot blue"></span> PCA Projection of Speaker Embeddings
-        </h3>
-        <div class="chart-container large" id="pcaContainer">
-          <canvas id="pcaChart"></canvas>
+    <!-- Summary Cards -->
+    <div
+      style="
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+      "
+      id="summaryCards"
+    >
+      <div class="plot-card" style="text-align: center">
+        <div
+          style="font-size: 36px; font-weight: 700; color: var(--accent-blue)"
+          id="totalSpeakers"
+        >
+          -
         </div>
-        <div class="plot-actions">
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick="downloadPlot('pca')"
-          >
-            📥 Download
-          </button>
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick="openFullscreen('pcaChart')"
-          >
-            🖥️ Fullscreen
-          </button>
+        <div style="color: var(--text-secondary); margin-top: 4px">
+          Total Speakers
         </div>
       </div>
-
-      <!-- t-SNE Plot -->
-      <div class="plot-card" data-plot="tsne" id="tsneCard">
-        <h3>
-          <span class="dot purple"></span> t-SNE Projection of Speaker
-          Embeddings
-        </h3>
-        <div class="chart-container large" id="tsneContainer">
-          <canvas id="tsneChart"></canvas>
+      <div class="plot-card" style="text-align: center">
+        <div
+          style="font-size: 36px; font-weight: 700; color: var(--accent-purple)"
+          id="embeddingDim"
+        >
+          -
         </div>
-        <div class="plot-actions">
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick="downloadPlot('tsne')"
-          >
-            📥 Download
-          </button>
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick="openFullscreen('tsneChart')"
-          >
-            🖥️ Fullscreen
-          </button>
+        <div style="color: var(--text-secondary); margin-top: 4px">
+          Embedding Dimensions
         </div>
       </div>
-
-      <!-- Similarity Heatmap -->
-      <div class="plot-card full-width" data-plot="heatmap" id="heatmapCard">
-        <h3><span class="dot yellow"></span> Speaker Similarity Matrix</h3>
-        <div class="chart-container large" id="heatmapContainer">
-          <canvas id="heatmapChart"></canvas>
+      <div class="plot-card" style="text-align: center">
+        <div
+          style="font-size: 36px; font-weight: 700; color: var(--accent-green)"
+          id="avgQuality"
+        >
+          -
         </div>
-        <div class="plot-actions">
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick="downloadPlot('heatmap')"
-          >
-            📥 Download
-          </button>
+        <div style="color: var(--text-secondary); margin-top: 4px">
+          Avg Centroid Quality
         </div>
       </div>
-
-      <!-- Timeline -->
-      <div class="plot-card full-width" data-plot="timeline" id="timelineCard">
-        <h3><span class="dot green"></span> Speaker Timeline</h3>
-        <div class="chart-container large" id="timelineContainer">
-          <canvas id="timelineChart"></canvas>
+      <div class="plot-card" style="text-align: center">
+        <div
+          style="font-size: 36px; font-weight: 700; color: var(--accent-yellow)"
+          id="avgSeparation"
+        >
+          -
         </div>
-        <div class="plot-actions">
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick="downloadPlot('timeline')"
-          >
-            📥 Download
-          </button>
-          <label
-            style="
-              margin-left: 16px;
-              font-size: 13px;
-              color: var(--text-secondary);
-            "
-          >
-            <input type="checkbox" id="stackedTimeline" /> Stacked view
-          </label>
+        <div style="color: var(--text-secondary); margin-top: 4px">
+          Avg Speaker Separation
         </div>
       </div>
     </div>
 
-    <div class="export-btn">
-      <button class="btn btn-primary" onclick="exportAllPlots()">
-        📦 Export All Plots
-      </button>
+    <div class="plots-grid">
+      <!-- Centroid 2D Projection (using first 2 dims or PCA) -->
+      <div class="plot-card" id="centroidScatterCard">
+        <h3>
+          <span class="dot blue"></span> Speaker Centroid Positions (2D
+          Projection)
+        </h3>
+        <div class="chart-container large" id="centroidScatterContainer">
+          <canvas id="centroidScatterChart"></canvas>
+        </div>
+        <p
+          style="color: var(--text-secondary); font-size: 12px; margin-top: 8px"
+        >
+          💡 Each point represents a speaker's centroid. Distance ≈ voice
+          dissimilarity. Larger points = more segments (more reliable).
+        </p>
+      </div>
+
+      <!-- Centroid Quality Chart -->
+      <div class="plot-card" id="centroidQualityCard">
+        <h3><span class="dot green"></span> Centroid Quality by Speaker</h3>
+        <div class="chart-container large" id="centroidQualityContainer">
+          <canvas id="centroidQualityChart"></canvas>
+        </div>
+        <p
+          style="color: var(--text-secondary); font-size: 12px; margin-top: 8px"
+        >
+          💡 Quality score (0-1) based on number of segments contributing to
+          centroid. Higher = more reliable speaker identification.
+        </p>
+      </div>
+
+      <!-- Inter-Speaker Distance Matrix -->
+      <div class="plot-card full-width" id="distanceMatrixCard">
+        <h3><span class="dot yellow"></span> Inter-Speaker Distance Matrix</h3>
+        <div class="chart-container large" id="distanceMatrixContainer">
+          <canvas id="distanceMatrixChart"></canvas>
+        </div>
+        <p
+          style="color: var(--text-secondary); font-size: 12px; margin-top: 8px"
+        >
+          💡 Shows cosine distances between centroids. 1.0 = completely
+          different voices, 0.0 = identical voices. Red = similar (potential
+          same speaker), Blue = different.
+        </p>
+      </div>
+
+      <!-- Speaker Detail Table -->
+      <div class="plot-card full-width" id="detailTableCard">
+        <h3><span class="dot purple"></span> Speaker Centroid Details</h3>
+        <div id="detailTableContainer">
+          <div class="empty-state">
+            <div class="icon">📋</div>
+            <p>Loading speaker details...</p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
-      // ===== Chart Instances =====
-      const charts = {};
+      // ===== Color Palette =====
       const SPEAKER_COLORS = [
         "#3b82f6",
         "#22c55e",
@@ -390,59 +406,82 @@
         "#10b981",
       ];
 
+      let allData = null;
+      const charts = {};
+
       function getSpeakerColor(index) {
         return SPEAKER_COLORS[index % SPEAKER_COLORS.length];
       }
 
       // ===== Data Fetching =====
-      async function fetchAllPlotData() {
-        console.log("[Plots] Fetching plot data...");
+      async function fetchAllData() {
+        console.log("[Plots] Fetching centroid data...");
         try {
-          const response = await fetch("/speakers/data/export?format=json");
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const data = await response.json();
+          const [centroidsRes, distancesRes] = await Promise.all([
+            fetch("/speakers/centroids"),
+            fetch("/speakers/centroid-distances"),
+          ]);
+
+          if (!centroidsRes.ok || !distancesRes.ok) {
+            throw new Error("Failed to fetch data");
+          }
+
+          const centroids = await centroidsRes.json();
+          const distances = await distancesRes.json();
+
           console.log("[Plots] Data received:", {
-            speakers: data.speakers?.length,
-            plots: Object.keys(data.plots || {}),
-            health: data.health,
+            speakers: centroids.total_speakers,
+            dimensions: centroids.embedding_dimension,
+            distancesLabels: distances.labels?.length,
           });
-          return data;
+
+          return { centroids, distances };
         } catch (error) {
           console.error("[Plots] Fetch failed:", error);
           return null;
         }
       }
 
-      // ===== PCA Chart =====
-      function createPCAChart(data) {
-        const ctx = document.getElementById("pcaChart").getContext("2d");
-        const speakers = data.speakers || [];
-        const plotData = data.plots?.pca;
+      // ===== 2D Centroid Scatter Plot =====
+      function createCentroidScatter(data) {
+        const { centroids, distances } = data;
+        const speakers = centroids.centroids || {};
+        const labels = Object.keys(speakers);
 
-        if (charts.pca) charts.pca.destroy();
+        const ctx = document
+          .getElementById("centroidScatterChart")
+          .getContext("2d");
+        if (charts.centroidScatter) charts.centroidScatter.destroy();
 
-        if (speakers.length < 2) {
-          document.getElementById("pcaContainer").innerHTML =
-            '<div class="empty-state"><div class="icon">🔬</div><p>Need at least 2 speakers for PCA visualization</p></div>';
+        if (labels.length < 1) {
+          document.getElementById("centroidScatterContainer").innerHTML =
+            '<div class="empty-state"><div class="icon">🔬</div><p>No speaker centroids available</p></div>';
           return;
         }
 
-        const datasets = speakers.map((speaker, idx) => ({
-          label: speaker.label,
-          data: [
-            {
-              x: Math.cos(idx * ((2 * Math.PI) / speakers.length)) * 0.6,
-              y: Math.sin(idx * ((2 * Math.PI) / speakers.length)) * 0.6,
-            },
-          ],
-          backgroundColor: getSpeakerColor(idx),
-          borderColor: getSpeakerColor(idx),
-          pointRadius: 10,
-          pointHoverRadius: 14,
-          pointStyle: "circle",
-        }));
+        // Use first 2 dimensions of centroids for visualization
+        // If centroids have >2 dims, this gives a rough 2D view
+        // A production version would do PCA in the frontend
+        const datasets = labels.map((label, idx) => {
+          const coords = speakers[label].coordinates || [];
+          const x = coords[0] || 0;
+          const y = coords[1] || 0;
+          const segCount = speakers[label].segment_count || 0;
+          const quality = speakers[label].centroid_quality || 0;
 
-        charts.pca = new Chart(ctx, {
+          return {
+            label: label,
+            data: [{ x: x, y: y }],
+            backgroundColor: getSpeakerColor(idx),
+            borderColor: getSpeakerColor(idx),
+            pointRadius: Math.max(6, Math.min(16, segCount * 2)),
+            pointHoverRadius: Math.max(10, Math.min(20, segCount * 2 + 4)),
+            segmentCount: segCount,
+            quality: quality,
+          };
+        });
+
+        charts.centroidScatter = new Chart(ctx, {
           type: "scatter",
           data: { datasets },
           options: {
@@ -456,103 +495,20 @@
                   usePointStyle: true,
                   pointStyleWidth: 12,
                   padding: 20,
-                  generateLabels: function (chart) {
-                    return chart.data.datasets.map((ds, i) => ({
-                      text: ds.label,
-                      fillStyle: ds.backgroundColor,
-                      strokeStyle: ds.borderColor,
-                      lineWidth: 2,
-                      hidden: false,
-                      index: i,
-                      pointStyle: "circle",
-                    }));
+                },
+              },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const ds = ctx.dataset;
+                    return [
+                      `${ds.label}`,
+                      `Position: (${ctx.raw.x.toFixed(4)}, ${ctx.raw.y.toFixed(4)})`,
+                      `Segments: ${ds.segmentCount}`,
+                      `Quality: ${(ds.quality * 100).toFixed(0)}%`,
+                    ];
                   },
                 },
-              },
-              tooltip: {
-                callbacks: {
-                  label: (ctx) =>
-                    `${ctx.dataset.label}: (${ctx.raw.x.toFixed(3)}, ${ctx.raw.y.toFixed(3)})`,
-                },
-              },
-              title: {
-                display: true,
-                text: "PCA Projection - First 2 Principal Components",
-                color: "#94a3b8",
-                font: { size: 13 },
-              },
-            },
-            scales: {
-              x: {
-                grid: { color: "rgba(148, 163, 184, 0.08)" },
-                ticks: { color: "#64748b" },
-                title: { display: true, text: "PC1", color: "#94a3b8" },
-              },
-              y: {
-                grid: { color: "rgba(148, 163, 184, 0.08)" },
-                ticks: { color: "#64748b" },
-                title: { display: true, text: "PC2", color: "#94a3b8" },
-              },
-            },
-          },
-        });
-
-        // Add base64 image overlay if available
-        if (plotData?.image_base64) {
-          addBase64Overlay("pcaContainer", plotData.image_base64);
-        }
-      }
-
-      // ===== t-SNE Chart =====
-      function createTSNEChart(data) {
-        const ctx = document.getElementById("tsneChart").getContext("2d");
-        const speakers = data.speakers || [];
-        const plotData = data.plots?.tsne;
-
-        if (charts.tsne) charts.tsne.destroy();
-
-        if (speakers.length < 2) {
-          document.getElementById("tsneContainer").innerHTML =
-            '<div class="empty-state"><div class="icon">🔮</div><p>Need at least 2 speakers for t-SNE visualization</p></div>';
-          return;
-        }
-
-        const datasets = speakers.map((speaker, idx) => ({
-          label: speaker.label,
-          data: [
-            {
-              x: Math.cos(idx * ((2 * Math.PI) / speakers.length) + 0.5) * 0.7,
-              y: Math.sin(idx * ((2 * Math.PI) / speakers.length) + 0.5) * 0.7,
-            },
-          ],
-          backgroundColor: getSpeakerColor(idx),
-          borderColor: getSpeakerColor(idx),
-          pointRadius: 10,
-          pointHoverRadius: 14,
-        }));
-
-        charts.tsne = new Chart(ctx, {
-          type: "scatter",
-          data: { datasets },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-              legend: {
-                position: "bottom",
-                labels: { color: "#94a3b8", usePointStyle: true, padding: 20 },
-              },
-              tooltip: {
-                callbacks: {
-                  label: (ctx) =>
-                    `${ctx.dataset.label}: (${ctx.raw.x.toFixed(3)}, ${ctx.raw.y.toFixed(3)})`,
-                },
-              },
-              title: {
-                display: true,
-                text: "t-SNE Projection - 2D Embedding Space",
-                color: "#94a3b8",
-                font: { size: 13 },
               },
             },
             scales: {
@@ -569,142 +525,131 @@
             },
           },
         });
-
-        if (plotData?.image_base64) {
-          addBase64Overlay("tsneContainer", plotData.image_base64);
-        }
       }
 
-      // ===== Heatmap Chart =====
-      function createHeatmapChart(data) {
-        const ctx = document.getElementById("heatmapChart").getContext("2d");
-        const similarities = data.similarities || {};
-        const matrix = similarities.matrix || [];
-        const labels = similarities.labels || [];
+      // ===== Centroid Quality Bar Chart =====
+      function createCentroidQuality(data) {
+        const { centroids } = data;
+        const speakers = centroids.centroids || {};
+        const labels = Object.keys(speakers);
 
-        if (charts.heatmap) charts.heatmap.destroy();
+        const ctx = document
+          .getElementById("centroidQualityChart")
+          .getContext("2d");
+        if (charts.centroidQuality) charts.centroidQuality.destroy();
 
-        if (matrix.length < 2 || labels.length < 2) {
-          document.getElementById("heatmapContainer").innerHTML =
-            '<div class="empty-state"><div class="icon">📊</div><p>Need at least 2 speakers for similarity heatmap</p></div>';
+        if (labels.length < 1) {
+          document.getElementById("centroidQualityContainer").innerHTML =
+            '<div class="empty-state"><div class="icon">📊</div><p>No data available</p></div>';
           return;
         }
 
-        // Create heatmap data points
-        const heatmapData = [];
-        for (let i = 0; i < matrix.length; i++) {
-          for (let j = 0; j < matrix[i].length; j++) {
-            heatmapData.push({ x: j, y: i, v: matrix[i][j] });
-          }
-        }
+        const qualityData = labels.map(
+          (label) => speakers[label].centroid_quality || 0,
+        );
+        const segCounts = labels.map(
+          (label) => speakers[label].segment_count || 0,
+        );
 
-        charts.heatmap = new Chart(ctx, {
+        charts.centroidQuality = new Chart(ctx, {
           type: "bar",
           data: {
             labels: labels,
-            datasets: labels.map((label, i) => ({
-              label: label,
-              data: matrix[i] || [],
-              backgroundColor:
-                matrix[i]?.map(
-                  (v) =>
-                    `rgba(${Math.floor(v * 200 + 30)}, ${Math.floor((1 - v) * 200 + 30)}, ${Math.floor(100 - v * 80)}, 0.85)`,
-                ) || [],
-              borderColor: "#1e293b",
-              borderWidth: 2,
-              borderRadius: 4,
-            })),
+            datasets: [
+              {
+                label: "Centroid Quality",
+                data: qualityData,
+                backgroundColor: qualityData.map((q) => {
+                  if (q >= 0.8) return "rgba(34, 197, 94, 0.7)";
+                  if (q >= 0.5) return "rgba(234, 179, 8, 0.7)";
+                  return "rgba(239, 68, 68, 0.7)";
+                }),
+                borderColor: qualityData.map((q) => {
+                  if (q >= 0.8) return "#22c55e";
+                  if (q >= 0.5) return "#eab308";
+                  return "#ef4444";
+                }),
+                borderWidth: 2,
+                borderRadius: 6,
+              },
+            ],
           },
           options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-              legend: {
-                position: "right",
-                labels: { color: "#94a3b8", usePointStyle: true },
-              },
+              legend: { display: false },
               tooltip: {
                 callbacks: {
-                  label: function (ctx) {
-                    return `${ctx.dataset.label}: ${(ctx.raw * 100).toFixed(1)}%`;
+                  label: (ctx) => {
+                    const idx = ctx.dataIndex;
+                    return [
+                      `Quality: ${(ctx.raw * 100).toFixed(0)}%`,
+                      `Segments: ${segCounts[idx]}`,
+                    ];
                   },
                 },
               },
             },
             scales: {
-              x: {
-                stacked: false,
-                grid: { color: "rgba(148, 163, 184, 0.08)" },
-                ticks: { color: "#94a3b8" },
-              },
               y: {
-                stacked: false,
-                min: 0,
+                beginAtZero: true,
                 max: 1,
                 grid: { color: "rgba(148, 163, 184, 0.08)" },
                 ticks: {
                   color: "#94a3b8",
                   callback: (v) => (v * 100).toFixed(0) + "%",
                 },
+                title: {
+                  display: true,
+                  text: "Quality Score",
+                  color: "#94a3b8",
+                },
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
               },
             },
           },
         });
-
-        if (data.plots?.heatmap?.image_base64) {
-          addBase64Overlay("heatmapContainer", data.plots.heatmap.image_base64);
-        }
       }
 
-      // ===== Timeline Chart =====
-      function createTimelineChart(data) {
-        const ctx = document.getElementById("timelineChart").getContext("2d");
-        const speakers = data.speakers || [];
-        const isStacked =
-          document.getElementById("stackedTimeline")?.checked || false;
+      // ===== Distance Matrix =====
+      function createDistanceMatrix(data) {
+        const { distances } = data;
+        const labels = distances.labels || [];
+        const distMatrix = distances.distances || [];
 
-        if (charts.timeline) charts.timeline.destroy();
+        const ctx = document
+          .getElementById("distanceMatrixChart")
+          .getContext("2d");
+        if (charts.distanceMatrix) charts.distanceMatrix.destroy();
 
-        if (speakers.length === 0) {
-          document.getElementById("timelineContainer").innerHTML =
-            '<div class="empty-state"><div class="icon">🕐</div><p>No speaker data for timeline</p></div>';
+        if (labels.length < 2) {
+          document.getElementById("distanceMatrixContainer").innerHTML =
+            '<div class="empty-state"><div class="icon">📊</div><p>Need at least 2 speakers for distance matrix</p></div>';
           return;
         }
 
-        // Create simulated timeline data from speaker segments
-        const totalSegments =
-          speakers.reduce((sum, s) => sum + (s.segment_count || 0), 0) || 10;
-        const datasets = speakers.map((speaker, idx) => {
-          const segments = speaker.segment_count || 0;
-          const data = Array(totalSegments).fill(null);
-          // Distribute speaker segments across timeline
-          const step = Math.max(
-            1,
-            Math.floor(totalSegments / Math.max(segments, 1)),
-          );
-          for (let i = idx; i < totalSegments; i += step * speakers.length) {
-            data[i] = 1; // Speaker active at this time point
-          }
-          return {
-            label: speaker.label,
-            data: data,
-            backgroundColor: getSpeakerColor(idx),
-            borderColor: getSpeakerColor(idx),
-            borderWidth: 1,
-            borderRadius: 3,
-            stack: isStacked ? "stack1" : speaker.label,
-          };
-        });
+        // Create a heatmap-style visualization using stacked bars per row
+        const datasets = labels.map((label, i) => ({
+          label: label,
+          data: distMatrix[i] || [],
+          backgroundColor: (distMatrix[i] || []).map((d) => {
+            // Red for similar (low distance), blue for different (high distance)
+            const r = Math.floor((1 - d) * 200 + 30);
+            const b = Math.floor(d * 200 + 30);
+            return `rgba(${r}, 60, ${b}, 0.8)`;
+          }),
+          borderColor: "#1e293b",
+          borderWidth: 1,
+        }));
 
-        const timeLabels = Array.from({ length: totalSegments }, (_, i) => {
-          const mins = Math.floor(i * 2);
-          return `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
-        });
-
-        charts.timeline = new Chart(ctx, {
+        charts.distanceMatrix = new Chart(ctx, {
           type: "bar",
           data: {
-            labels: timeLabels,
+            labels: labels,
             datasets: datasets,
           },
           options: {
@@ -712,191 +657,216 @@
             maintainAspectRatio: false,
             plugins: {
               legend: {
-                position: "bottom",
-                labels: { color: "#94a3b8", usePointStyle: true },
+                position: "right",
+                labels: { color: "#94a3b8", usePointStyle: true, padding: 10 },
               },
-              title: {
-                display: true,
-                text: "Speaker Activity Timeline",
-                color: "#94a3b8",
-                font: { size: 13 },
-              },
-            },
-            scales: {
-              x: {
-                stacked: isStacked,
-                grid: { display: false },
-                ticks: { color: "#64748b", maxTicksLimit: 20 },
-                title: { display: true, text: "Time", color: "#94a3b8" },
-              },
-              y: {
-                stacked: isStacked,
-                max: isStacked ? speakers.length : 1.5,
-                grid: { color: "rgba(148, 163, 184, 0.08)" },
-                ticks: {
-                  color: "#94a3b8",
-                  callback: (v) => (isStacked ? v : v === 1 ? "Active" : ""),
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const dist = ctx.raw;
+                    const sim = 1 - dist;
+                    return `Distance: ${(dist * 100).toFixed(1)}% (Similarity: ${(sim * 100).toFixed(1)}%)`;
+                  },
                 },
               },
             },
-            interaction: {
-              intersect: false,
-              mode: "index",
+            scales: {
+              y: {
+                min: 0,
+                max: 1,
+                grid: { color: "rgba(148, 163, 184, 0.08)" },
+                ticks: {
+                  color: "#94a3b8",
+                  callback: (v) => (v * 100).toFixed(0) + "%",
+                },
+                title: {
+                  display: true,
+                  text: "Cosine Distance",
+                  color: "#94a3b8",
+                },
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
+              },
             },
           },
         });
-
-        document
-          .getElementById("stackedTimeline")
-          ?.addEventListener("change", () => {
-            createTimelineChart(data);
-          });
-
-        if (data.plots?.timeline?.image_base64) {
-          addBase64Overlay(
-            "timelineContainer",
-            data.plots.timeline.image_base64,
-          );
-        }
       }
 
-      // ===== Helper Functions =====
-      function addBase64Overlay(containerId, base64String) {
-        const container = document.getElementById(containerId);
-        const existingImg = container.querySelector(".base64-overlay");
-        if (existingImg) existingImg.remove();
+      // ===== Speaker Detail Table =====
+      function createDetailTable(data) {
+        const { centroids, distances } = data;
+        const speakers = centroids.centroids || {};
+        const labels = Object.keys(speakers);
 
-        const img = document.createElement("img");
-        img.src = `data:image/png;base64,${base64String}`;
-        img.className = "base64-overlay";
-        img.style.cssText =
-          "max-width:100%;border-radius:8px;margin-top:12px;display:none;";
-
-        const toggleBtn = document.createElement("button");
-        toggleBtn.className = "btn btn-secondary btn-sm";
-        toggleBtn.textContent = "📷 Toggle Original Image";
-        toggleBtn.style.marginTop = "8px";
-        toggleBtn.onclick = () => {
-          img.style.display = img.style.display === "none" ? "block" : "none";
-          toggleBtn.textContent =
-            img.style.display === "none"
-              ? "📷 Show Original Image"
-              : "📷 Hide Original Image";
-        };
-
-        container.appendChild(toggleBtn);
-        container.appendChild(img);
-      }
-
-      function downloadPlot(plotType) {
-        const chart = charts[plotType];
-        if (!chart) {
-          console.warn(`[Plots] No chart found for: ${plotType}`);
+        if (labels.length < 1) {
+          document.getElementById("detailTableContainer").innerHTML =
+            '<div class="empty-state"><div class="icon">📋</div><p>No speaker data available</p></div>';
           return;
         }
-        const link = document.createElement("a");
-        link.download = `speaker_${plotType}_${new Date().toISOString().slice(0, 10)}.png`;
-        link.href = chart.toBase64Image();
-        link.click();
-        console.log(`[Plots] Downloaded: ${link.download}`);
-      }
 
-      function openFullscreen(canvasId) {
-        const canvas = document.getElementById(canvasId);
-        if (canvas.requestFullscreen) {
-          canvas.requestFullscreen();
-        }
-      }
-
-      async function exportAllPlots() {
-        const plotTypes = ["pca", "tsne", "heatmap", "timeline"];
-        for (const type of plotTypes) {
-          if (charts[type]) {
-            downloadPlot(type);
-            await new Promise((r) => setTimeout(r, 500)); // Delay between downloads
-          }
-        }
-      }
-
-      // ===== Plot Filtering =====
-      function filterPlots(plotType) {
-        const cards = document.querySelectorAll(".plot-card");
-        cards.forEach((card) => {
-          const cardPlot = card.getAttribute("data-plot");
-          if (plotType === "all" || cardPlot === plotType) {
-            card.style.display = "";
-          } else {
-            card.style.display = "none";
-          }
+        // Build distance lookup
+        const distLabels = distances.labels || [];
+        const distMatrix = distances.distances || [];
+        const distLookup = {};
+        distLabels.forEach((label, i) => {
+          distLookup[label] = {};
+          distLabels.forEach((label2, j) => {
+            if (i !== j && distMatrix[i]) {
+              distLookup[label][label2] = distMatrix[i][j];
+            }
+          });
         });
 
-        // Update active chip
-        document.querySelectorAll(".chip").forEach((chip) => {
-          chip.classList.toggle(
-            "active",
-            chip.getAttribute("data-plot") === plotType,
-          );
+        let html = `
+                <table class="centroid-table">
+                    <thead>
+                        <tr>
+                            <th>Speaker</th>
+                            <th>Segments</th>
+                            <th>Quality</th>
+                            <th>Centroid Norm</th>
+                            <th>Nearest Neighbor</th>
+                            <th>Distance to NN</th>
+                            <th>Active Duration</th>
+                            <th>Top Dims</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+        labels.forEach((label, idx) => {
+          const sp = speakers[label];
+          const quality = sp.centroid_quality || 0;
+          const segCount = sp.segment_count || 0;
+          const duration = sp.active_duration || 0;
+
+          // Find nearest neighbor
+          let nearestLabel = "-";
+          let nearestDist = 1;
+          if (distLookup[label]) {
+            const neighbors = Object.entries(distLookup[label]);
+            if (neighbors.length > 0) {
+              neighbors.sort((a, b) => a[1] - b[1]);
+              nearestLabel = neighbors[0][0];
+              nearestDist = neighbors[0][1];
+            }
+          }
+
+          const qualityClass =
+            quality >= 0.8 ? "good" : quality >= 0.5 ? "warning" : "bad";
+          const qualityPct = (quality * 100).toFixed(0);
+
+          // Get top dimensions (first few coordinates with largest magnitudes)
+          const coords = sp.coordinates || [];
+          const topDims = coords
+            .map((val, i) => ({ dim: i, val: Math.abs(val) }))
+            .sort((a, b) => b.val - a.val)
+            .slice(0, 3)
+            .map((d) => `D${d.dim}(${d.val.toFixed(2)})`)
+            .join(", ");
+
+          html += `
+                    <tr>
+                        <td>
+                            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: ${getSpeakerColor(idx)}; margin-right: 8px;"></span>
+                            <strong>${label}</strong>
+                        </td>
+                        <td>${segCount}</td>
+                        <td>
+                            <span class="metric-badge ${qualityClass}">${qualityPct}%</span>
+                            <div class="quality-bar" style="width: 60px; margin-top: 4px;">
+                                <div class="quality-bar-fill ${qualityClass}" style="width: ${qualityPct}%;"></div>
+                            </div>
+                        </td>
+                        <td>${(sp.centroid_norm || 0).toFixed(3)}</td>
+                        <td style="color: ${nearestDist < 0.3 ? "var(--accent-red)" : "var(--text-primary)"}">${nearestLabel}</td>
+                        <td>
+                            <span class="metric-badge ${nearestDist < 0.3 ? "bad" : nearestDist > 0.6 ? "good" : "warning"}">
+                                ${(nearestDist * 100).toFixed(0)}%
+                            </span>
+                        </td>
+                        <td>${duration.toFixed(1)}s</td>
+                        <td style="font-size: 11px; color: var(--text-secondary);">${topDims || "N/A"}</td>
+                    </tr>
+                `;
         });
 
-        console.log(`[Plots] Filtered to: ${plotType}`);
+        html += "</tbody></table>";
+        document.getElementById("detailTableContainer").innerHTML = html;
+
+        // Update summary cards
+        document.getElementById("totalSpeakers").textContent = labels.length;
+        document.getElementById("embeddingDim").textContent =
+          centroids.embedding_dimension || "?";
+
+        const avgQuality =
+          labels.reduce(
+            (sum, l) => sum + (speakers[l].centroid_quality || 0),
+            0,
+          ) / Math.max(1, labels.length);
+        document.getElementById("avgQuality").textContent =
+          (avgQuality * 100).toFixed(0) + "%";
+
+        // Average inter-speaker distance
+        let totalDist = 0;
+        let distCount = 0;
+        distLabels.forEach((l1, i) => {
+          distLabels.forEach((l2, j) => {
+            if (i < j && distMatrix[i] && distMatrix[i][j] !== undefined) {
+              totalDist += distMatrix[i][j];
+              distCount++;
+            }
+          });
+        });
+        const avgDist = distCount > 0 ? totalDist / distCount : 0;
+        document.getElementById("avgSeparation").textContent =
+          (avgDist * 100).toFixed(0) + "%";
       }
 
       // ===== Refresh All =====
       async function refreshAllPlots() {
         console.log("[Plots] Refreshing all plots...");
-        showAllLoading();
-        const data = await fetchAllPlotData();
+
+        // Show loading state
+        document.querySelectorAll(".chart-container").forEach((el) => {
+          const overlay = document.createElement("div");
+          overlay.className = "loading-overlay";
+          overlay.innerHTML = '<div class="spinner"></div>';
+          el.style.position = "relative";
+          el.appendChild(overlay);
+        });
+
+        const data = await fetchAllData();
+
+        // Remove loading overlays
+        document
+          .querySelectorAll(".loading-overlay")
+          .forEach((el) => el.remove());
+
         if (!data) {
-          showAllError("Failed to fetch plot data");
+          document.querySelectorAll(".chart-container").forEach((el) => {
+            el.innerHTML =
+              '<div class="error-message">⚠️ Failed to fetch speaker data. Is the labeler initialized?</div>';
+          });
           return;
         }
-        createPCAChart(data);
-        createTSNEChart(data);
-        createHeatmapChart(data);
-        createTimelineChart(data);
-        hideAllLoading();
+
+        allData = data;
+        createCentroidScatter(data);
+        createCentroidQuality(data);
+        createDistanceMatrix(data);
+        createDetailTable(data);
+
         console.log("[Plots] All plots refreshed successfully");
-      }
-
-      function showAllLoading() {
-        document.querySelectorAll(".chart-container").forEach((el) => {
-          if (!el.querySelector(".loading-spinner")) {
-            const spinner = document.createElement("div");
-            spinner.className = "loading-spinner";
-            spinner.innerHTML =
-              '<div class="spinner"></div><span>Loading...</span>';
-            el.appendChild(spinner);
-          }
-        });
-      }
-
-      function hideAllLoading() {
-        document
-          .querySelectorAll(".loading-spinner")
-          .forEach((el) => el.remove());
-      }
-
-      function showAllError(message) {
-        document.querySelectorAll(".chart-container").forEach((el) => {
-          el.innerHTML = `<div class="error-message">⚠️ ${message}</div>`;
-        });
       }
 
       // ===== Initialize =====
       document.addEventListener("DOMContentLoaded", () => {
         console.log("[Plots] Initializing plots page...");
-
-        // Setup filter chips
-        document.querySelectorAll(".chip").forEach((chip) => {
-          chip.addEventListener("click", () => {
-            filterPlots(chip.getAttribute("data-plot"));
-          });
-        });
-
         refreshAllPlots();
       });
-
-      console.log("[Plots] Script loaded successfully");
     </script>
   </body>
 </html>

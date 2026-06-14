@@ -1583,6 +1583,102 @@ class SegmentSpeakerLabeler:
             ),
         }
 
+    def get_centroid_arrays(self) -> Dict[str, np.ndarray]:
+        """Get raw centroid arrays for all speakers.
+        
+        Returns:
+            Dict mapping speaker labels to their centroid numpy arrays
+        """
+        centroids = {}
+        for label, ref in self._speakers.items():
+            if ref.has_valid_centroid:
+                centroids[label] = ref.centroid.copy()
+        return centroids
+
+    def get_centroid_stats(self) -> Dict:
+        """Get comprehensive centroid statistics for visualization.
+        
+        Returns data suitable for PCA/t-SNE plotting or direct visualization.
+        Includes per-dimension statistics and quality metrics.
+        """
+        centroids = self.get_centroid_arrays()
+        if not centroids:
+            return {"error": "No valid centroids available"}
+        
+        labels = list(centroids.keys())
+        centroid_matrix = np.vstack([centroids[label] for label in labels])
+        
+        # Basic stats
+        stats = {
+            "labels": labels,
+            "centroid_shape": list(centroid_matrix.shape),
+            "embedding_dimension": centroid_matrix.shape[1],
+            "total_speakers": len(labels),
+            "total_segments": sum(ref.segment_count for ref in self._speakers.values()),
+        }
+        
+        # Per-speaker details with centroid vectors flattened for frontend
+        speaker_details = {}
+        for i, label in enumerate(labels):
+            ref = self._speakers[label]
+            centroid = centroids[label]
+            
+            # Flatten centroid
+            flat = centroid.flatten()
+            
+            # Compute centroid norm (magnitude)
+            norm = float(np.linalg.norm(flat))
+            
+            # Get the strongest dimensions (for interpretability)
+            top_dims = np.argsort(np.abs(flat))[-5:][::-1]  # Top 5 dimensions
+            
+            # Full centroid vector for frontend (all dimensions)
+            centroid_vector = flat.tolist()
+            
+            speaker_details[label] = {
+                "centroid_vector": centroid_vector[:50],  # First 50 dims (enough for visualization)
+                "centroid_norm": round(norm, 4),
+                "top_dimensions": [
+                    {"dim": int(d), "value": round(float(flat[d]), 6)}
+                    for d in top_dims
+                ],
+                "segment_count": ref.segment_count,
+                "centroid_quality": ref.centroid_quality,
+                "first_seen": ref.first_seen if ref.first_seen else 0,
+                "last_seen": ref.last_seen,
+                "active_duration": ref.active_duration,
+                "embedding_count": len(ref.embeddings),
+            }
+        
+        stats["speakers"] = speaker_details
+        
+        # If we have enough centroids, compute inter-centroid distances
+        if len(labels) >= 2:
+            distances = cdist(centroid_matrix, centroid_matrix, metric="cosine")
+            similarities = 1.0 - distances
+            
+            # Full similarity matrix for heatmap
+            stats["similarity_matrix"] = similarities.tolist()
+            stats["distance_matrix"] = distances.tolist()
+            
+            # Average distance from each centroid to all others
+            for i, label in enumerate(labels):
+                other_distances = [distances[i, j] for j in range(len(labels)) if j != i]
+                other_similarities = [similarities[i, j] for j in range(len(labels)) if j != i]
+                
+                nearest_idx = min(
+                    (j for j in range(len(labels)) if j != i),
+                    key=lambda j: distances[i, j]
+                )
+                
+                speaker_details[label]["avg_distance_to_others"] = round(float(np.mean(other_distances)), 4)
+                speaker_details[label]["avg_similarity_to_others"] = round(float(np.mean(other_similarities)), 4)
+                speaker_details[label]["nearest_neighbor"] = labels[nearest_idx]
+                speaker_details[label]["nearest_distance"] = round(float(distances[i, nearest_idx]), 4)
+                speaker_details[label]["nearest_similarity"] = round(float(similarities[i, nearest_idx]), 4)
+        
+        return stats
+
     def reset(self) -> None:
         """Reset the labeler to initial state."""
         self._speakers.clear()

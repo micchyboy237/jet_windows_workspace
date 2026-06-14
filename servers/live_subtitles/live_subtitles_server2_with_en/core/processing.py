@@ -1055,7 +1055,8 @@ def perform_audio_tagging(
         
         # ── UPDATED: Include speech_duration in results ──────────────
         speech_duration = chunked_summary.get("speech_duration", 0.0)
-        speech_prob = chunked_summary.get("max_speech_probability", 0.0)
+        avg_speech_prob = chunked_summary.get("avg_speech_probability", 0.0)
+        max_speech_prob = chunked_summary.get("max_speech_probability", 0.0)
         
         # Speech detected only if BOTH:
         # 1. Probability threshold met (from chunked summary)
@@ -1066,7 +1067,10 @@ def perform_audio_tagging(
         has_speech = speech_detected_by_prob and speech_detected_by_duration
         
         console.print(
-            f"[info]Speech probability: {speech_prob:.3f} "
+            f"[info]Average speech probability: {avg_speech_prob:.3f}[/info]"
+        )
+        console.print(
+            f"[info]Max speech probability: {max_speech_prob:.3f} "
             f"(detected: {'✅' if speech_detected_by_prob else '❌'})[/info]"
         )
         console.print(
@@ -1080,7 +1084,8 @@ def perform_audio_tagging(
         tagging_results = {
             "speech_detected": has_speech,
             "speech_duration": round(speech_duration, 4),  # NEW FIELD
-            "max_speech_probability": round(speech_prob, 4),
+            "avg_speech_probability": round(avg_speech_prob, 4),
+            "max_speech_probability": round(max_speech_prob, 4),
             "speech_prob_threshold": speech_prob_threshold,
             "min_speech_duration_threshold": min_speech_duration,  # For reference
             "speech_detected_by_prob": speech_detected_by_prob,
@@ -1095,7 +1100,7 @@ def perform_audio_tagging(
                     "start_time": chunk["start_time"],
                     "end_time": chunk["end_time"],
                     "speech_detected": chunk.get("speech_detected", False),
-                    "max_speech_probability": chunk.get("max_speech_probability", 0.0),
+                    "speech_probability": chunk.get("speech_probability", 0.0),
                     "predictions": chunk["predictions"][:3],
                 }
                 for chunk in chunked_summary["chunks"]
@@ -1108,7 +1113,7 @@ def perform_audio_tagging(
         console.print("[bold green]🎵 Audio Tagging Results:[/bold green]")
         console.print(
             f"  Speech detected (prob): {'✅' if speech_detected_by_prob else '❌'} "
-            f"(prob: {speech_prob:.3f})"
+            f"(prob: {max_speech_prob:.3f})"
         )
         console.print(
             f"  Speech duration: {speech_duration:.2f}s "
@@ -1126,7 +1131,7 @@ def perform_audio_tagging(
 
         if segment_dir:
             save_tagging_to_segment(
-                segment_dir, tagging_results, has_speech, speech_prob
+                segment_dir, tagging_results, has_speech, max_speech_prob
             )
 
         return tagging_results
@@ -1137,6 +1142,7 @@ def perform_audio_tagging(
         return {
             "speech_detected": False,
             "speech_duration": 0.0,  # NEW FIELD
+            "avg_speech_probability": 0.0,
             "max_speech_probability": 0.0,
             "speech_prob_threshold": speech_prob_threshold,
             "min_speech_duration_threshold": min_speech_duration,

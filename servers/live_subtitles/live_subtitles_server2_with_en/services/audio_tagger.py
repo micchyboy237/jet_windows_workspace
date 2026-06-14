@@ -54,22 +54,18 @@ class TaggingResult(TypedDict):
 
 class ChunkTaggingResult(TypedDict):
     """Per-chunk tagging result with timing metadata."""
-
     chunk_index: int
     start_time: float
     end_time: float
     duration: float
     predictions: List[TaggingResult]
     processing_time: float
-    # NEW: Whether this chunk contains speech
     speech_detected: bool
-    # NEW: Maximum speech probability in this chunk
-    max_speech_probability: float
+    # REMOVED: max_speech_probability: float
 
 
 class AudioChunksTaggingSummary(TypedDict):
     """Complete summary of chunked audio tagging."""
-
     audio_path: str
     total_duration: float
     sample_rate: int
@@ -80,12 +76,10 @@ class AudioChunksTaggingSummary(TypedDict):
     overall_top_predictions: List[TaggingResult]
     total_processing_time: float
     real_time_factor: float
-    # NEW: Total duration of consecutive speech chunks
     speech_duration: float
-    # NEW: Whether any speech was detected
     speech_detected: bool
-    # NEW: Maximum speech probability across all chunks
     max_speech_probability: float
+    avg_speech_probability: float  # average only across speech chunks
 
 
 class AudioTaggerConfig(TypedDict, total=False):
@@ -337,19 +331,19 @@ class AudioTagger:
             top_n: Number of top predictions to check (default: self.speech_top_n)
 
         Returns:
-            Tuple of (speech_detected: bool, max_speech_prob: float)
+            Tuple of (speech_detected: bool, chunk_speech_prob: float)
         """
         n_to_check = top_n if top_n is not None else self.speech_top_n
-        max_speech_prob = 0.0
+        chunk_speech_prob = 0.0
 
         for result in predictions[:n_to_check]:
             name = result.get("name", "")
             prob = result.get("prob", 0.0)
-            if name in self.SPEECH_CLASS_NAMES and prob > max_speech_prob:
-                max_speech_prob = prob
+            if name in self.SPEECH_CLASS_NAMES and prob > chunk_speech_prob:
+                chunk_speech_prob = prob
 
-        speech_detected = max_speech_prob >= self.speech_prob_threshold
-        return speech_detected, max_speech_prob
+        speech_detected = chunk_speech_prob >= self.speech_prob_threshold
+        return speech_detected, chunk_speech_prob
 
     # ── NEW: Calculate speech duration from consecutive speech chunks ──
     def _calculate_speech_duration(
@@ -411,252 +405,6 @@ class AudioTagger:
         total_speech_duration = sum(end - start for start, end in speech_segments)
 
         return total_speech_duration
-
-    def tag_audio(
-        self,
-        audio: AudioInput,
-        sample_rate: Optional[int] = None,
-    ) -> List[TaggingResult]:
-        """
-        Tag audio with predicted labels and probabilities.
-
-        Args:
-            audio: Audio input (file path, bytes, numpy array, or torch tensor)
-            sample_rate: Sample rate for raw audio data (ignored for file paths)
-
-        Returns:
-            List of TaggingResult dicts with keys: index, name, class_index, prob
-
-        Example:
-            >>> tagger = AudioTagger()
-            >>> results = tagger.tag_audio("speech.wav")
-            >>> for r in results:
-            ...     print(f"{r['name']}: {r['prob']:.3f}")
-        """
-        start_time = time.time()
-
-        try:
-            waveform, actual_sr = load_audio(audio, sr=sample_rate or 16000, mono=True)
-        except Exception:
-            raise
-
-        try:
-            stream = self.tagger.create_stream()
-            stream.accept_waveform(sample_rate=actual_sr, waveform=waveform)
-            raw_results = self.tagger.compute(stream)
-        except Exception:
-            raise
-
-        results: List[TaggingResult] = []
-        for i, event in enumerate(raw_results):
-            result: TaggingResult = {
-                "index": i,
-                "name": getattr(event, "name", "Unknown"),
-                "class_index": getattr(event, "index", -1),
-                "prob": getattr(event, "prob", 0.0),
-            }
-            results.append(result)
-
-        return results
-
-    # ── NEW METHOD: tag_audio_chunks ─────────────────────────────────────
-
-    def tag_audio_chunks(
-        self,
-        audio: AudioInput,
-        sample_rate: Optional[int] = None,
-        chunk_duration: Optional[float] = None,
-        overlap_duration: Optional[float] = None,
-        min_chunk_duration: Optional[float] = None,
-    ) -> AudioChunksTaggingSummary:
-        """
-        Process long audio by splitting into overlapping chunks and tagging each.
-
-        This method splits audio into fixed-duration overlapping chunks,
-        tags each independently, and aggregates results. Useful for:
-        - Very long recordings that exceed model context windows
-        - Tracking how audio content changes over time
-        - Speech/music segmentation at coarse granularity
-        - Computing speech_duration (sum of consecutive speech chunks)
-
-        Args:
-            audio: Audio input (file path, bytes, numpy array, or torch tensor)
-            sample_rate: Sample rate for raw audio data (default: 16000)
-            chunk_duration: Duration of each chunk in seconds.
-                           Default: self.chunk_duration (from config, typically 1.0s)
-            overlap_duration: Overlap between chunks in seconds.
-                             Default: self.chunk_overlap (typically 0.5s)
-            min_chunk_duration: Minimum duration for the last chunk.
-                               Default: self.min_chunk_duration (0.5s)
-
-        Returns:
-            AudioChunksTaggingSummary with per-chunk results, overall aggregation,
-            and speech_duration
-
-        Example:
-            >>> tagger = AudioTagger()
-            >>> summary = tagger.tag_audio_chunks("long_speech.wav", chunk_duration=5.0)
-            >>> print(f"Processed {summary['total_chunks']} chunks")
-            >>> print(f"Speech duration: {summary['speech_duration']:.2f}s")
-            >>> for chunk in summary['chunks']:
-            ...     print(f"  Chunk {chunk['chunk_index']}: "
-            ...           f"{chunk['predictions'][0]['name']}")
-        """
-        # ── Parameter resolution with config defaults ──────────────────
-        _chunk_dur = (
-            chunk_duration if chunk_duration is not None else self.chunk_duration
-        )
-        _overlap = (
-            overlap_duration if overlap_duration is not None else self.chunk_overlap
-        )
-        _min_chunk = (
-            min_chunk_duration
-            if min_chunk_duration is not None
-            else self.min_chunk_duration
-        )
-
-        # Validate parameters
-        if _chunk_dur < _min_chunk:
-            _chunk_dur = _min_chunk
-
-        if _overlap >= _chunk_dur:
-            _overlap = _chunk_dur / 2.0
-
-        # ── Load audio ─────────────────────────────────────────────────
-        overall_start = time.time()
-
-        try:
-            waveform, actual_sr = load_audio(
-                audio, sr=sample_rate or SAMPLE_RATE, mono=True
-            )
-        except Exception:
-            raise
-
-        total_samples = len(waveform)
-        total_duration = total_samples / actual_sr
-
-        # Determine audio path identifier
-        if isinstance(audio, (str, Path)):
-            audio_path_str = str(audio)
-        elif isinstance(audio, bytes):
-            audio_path_str = f"bytes_input_{len(audio)}bytes"
-        else:
-            audio_path_str = f"array_input_{waveform.shape}"
-
-        # ── Calculate chunk boundaries ──────────────────────────────────
-        chunk_samples = int(_chunk_dur * actual_sr)
-        hop_samples = int((_chunk_dur - _overlap) * actual_sr)
-
-        # Ensure hop is at least 1 sample
-        if hop_samples < 1:
-            hop_samples = 1
-
-        # ── Generate chunk positions ────────────────────────────────────
-        chunk_positions = self._calculate_chunk_positions(
-            total_samples=total_samples,
-            chunk_samples=chunk_samples,
-            hop_samples=hop_samples,
-            min_chunk_duration=_min_chunk,
-            sample_rate=actual_sr,
-        )
-
-        if not chunk_positions:
-            # Return empty summary
-            elapsed = time.time() - overall_start
-            return AudioChunksTaggingSummary(
-                audio_path=audio_path_str,
-                total_duration=total_duration,
-                sample_rate=actual_sr,
-                chunk_duration=_chunk_dur,
-                overlap_duration=_overlap,
-                total_chunks=0,
-                chunks=[],
-                overall_top_predictions=[],
-                total_processing_time=elapsed,
-                real_time_factor=elapsed / total_duration
-                if total_duration > 0
-                else 0.0,
-                speech_duration=0.0,
-                speech_detected=False,
-                max_speech_probability=0.0,
-            )
-
-        # ── Process each chunk ──────────────────────────────────────────
-        chunks: List[ChunkTaggingResult] = []
-        all_predictions: Dict[str, List[float]] = {}  # name -> list of probs
-        any_speech_detected = False
-        global_max_speech_prob = 0.0
-
-        for idx, (start_sample, end_sample) in enumerate(chunk_positions):
-            chunk_start_time = time.time()
-
-            start_sec = start_sample / actual_sr
-            end_sec = end_sample / actual_sr
-            chunk_waveform = waveform[start_sample:end_sample].copy()
-
-            # Tag this chunk
-            try:
-                chunk_predictions = self._tag_waveform(chunk_waveform, actual_sr)
-            except Exception:
-                # Create error entry
-                chunk_predictions = []
-
-            # ── NEW: Check for speech in this chunk ───────────────────
-            speech_detected, max_speech_prob = self._chunk_has_speech(chunk_predictions)
-
-            if speech_detected:
-                any_speech_detected = True
-            if max_speech_prob > global_max_speech_prob:
-                global_max_speech_prob = max_speech_prob
-
-            chunk_elapsed = time.time() - chunk_start_time
-
-            # Collect predictions for aggregation
-            for pred in chunk_predictions:
-                name = pred["name"]
-                if name not in all_predictions:
-                    all_predictions[name] = []
-                all_predictions[name].append(pred["prob"])
-
-            chunk_result = ChunkTaggingResult(
-                chunk_index=idx,
-                start_time=round(start_sec, 3),
-                end_time=round(end_sec, 3),
-                duration=round(end_sec - start_sec, 3),
-                predictions=chunk_predictions,
-                processing_time=round(chunk_elapsed, 4),
-                speech_detected=speech_detected,
-                max_speech_probability=round(max_speech_prob, 4),
-            )
-            chunks.append(chunk_result)
-
-        # ── NEW: Calculate speech duration ─────────────────────────────
-        speech_duration = self._calculate_speech_duration(chunks, _overlap)
-
-        # ── Aggregate overall top predictions ───────────────────────────
-        overall_top = self._aggregate_chunk_predictions(all_predictions, self.top_k)
-
-        # ── Build summary ───────────────────────────────────────────────
-        total_elapsed = time.time() - overall_start
-        rtf = total_elapsed / total_duration if total_duration > 0 else 0.0
-
-        summary = AudioChunksTaggingSummary(
-            audio_path=audio_path_str,
-            total_duration=round(total_duration, 3),
-            sample_rate=actual_sr,
-            chunk_duration=_chunk_dur,
-            overlap_duration=_overlap,
-            total_chunks=len(chunks),
-            chunks=chunks,
-            overall_top_predictions=overall_top,
-            total_processing_time=round(total_elapsed, 4),
-            real_time_factor=round(rtf, 4),
-            speech_duration=round(speech_duration, 3),
-            speech_detected=any_speech_detected,
-            max_speech_probability=round(global_max_speech_prob, 4),
-        )
-
-        return summary
 
     def _calculate_chunk_positions(
         self,
@@ -816,7 +564,453 @@ class AudioTagger:
 
         return results
 
-    # ── Existing methods (updated) ───────────────────────────────────
+    def _save_speech_chunk(
+        self,
+        chunk_waveform: np.ndarray,
+        sample_rate: int,
+        chunk_index: int,
+        start_time: float,
+        end_time: float,
+        speech_probability: float,
+        predictions: List[TaggingResult],
+        base_dir: Path,
+    ) -> Path:
+        """
+        Save a speech chunk's audio and metadata to disk.
+        
+        Creates directory structure:
+            base_dir / "chunk_<chunk_index + 1>" / sound.wav
+            base_dir / "chunk_<chunk_index + 1>" / meta.json
+        
+        Args:
+            chunk_waveform: Audio samples for the chunk (mono, float32)
+            sample_rate: Sample rate in Hz
+            chunk_index: Zero-based index of the chunk
+            start_time: Start time of chunk in seconds
+            end_time: End time of chunk in seconds
+            speech_probability: Detected speech probability for this chunk
+            predictions: List of tagging predictions for this chunk
+            base_dir: Base directory for speech chunks
+        
+        Returns:
+            Path to the created chunk directory
+        
+        Debug logs trace:
+            - Directory creation
+            - WAV file saving
+            - meta.json writing
+            - File sizes
+        """
+        import soundfile as sf
+        
+        # Create chunk subdirectory with 1-based index in name
+        chunk_dir = base_dir / f"chunk_{chunk_index + 1}"
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        
+        console.print(
+            f"[dim]💾 Saving speech chunk {chunk_index + 1} to: "
+            f"{chunk_dir}[/dim]"
+        )
+        
+        # Save audio as WAV
+        wav_path = chunk_dir / "sound.wav"
+        try:
+            # Ensure waveform is in correct format for soundfile
+            # soundfile expects float32 in range [-1, 1] or int16
+            if chunk_waveform.dtype != np.float32:
+                chunk_waveform = chunk_waveform.astype(np.float32)
+            
+            sf.write(
+                str(wav_path),
+                chunk_waveform,
+                samplerate=sample_rate,
+                subtype='PCM_16',  # Use 16-bit PCM for compatibility
+            )
+            
+            wav_size = wav_path.stat().st_size
+            console.print(
+                f"[dim]   ✅ sound.wav saved ({wav_size:,} bytes)[/dim]"
+            )
+        except Exception as e:
+            console.print(f"[red]   ❌ Failed to save WAV: {e}[/red]")
+            raise
+        
+        # Build metadata
+        duration = end_time - start_time
+        meta = {
+            "chunk_index": chunk_index,
+            "start_time": round(start_time, 3),
+            "end_time": round(end_time, 3),
+            "duration": round(duration, 3),
+            "sample_rate": sample_rate,
+            "total_samples": len(chunk_waveform),
+            "speech_probability": round(speech_probability, 4),
+            "top_prediction": predictions[0]["name"] if predictions else "Unknown",
+            "top_probability": round(predictions[0]["prob"], 4) if predictions else 0.0,
+            "predictions": [
+                {
+                    "name": p["name"],
+                    "class_index": p.get("class_index", -1),
+                    "prob": round(p["prob"], 4),
+                }
+                for p in predictions[:10]  # Save top 10 predictions
+            ],
+        }
+        
+        # Save metadata as JSON
+        meta_path = chunk_dir / "meta.json"
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2, ensure_ascii=False)
+            
+            meta_size = meta_path.stat().st_size
+            console.print(
+                f"[dim]   ✅ meta.json saved ({meta_size:,} bytes)[/dim]"
+            )
+        except Exception as e:
+            console.print(f"[red]   ❌ Failed to save meta.json: {e}[/red]")
+            raise
+        
+        console.print(
+            f"[green]   📁 Speech chunk saved to: {linkify(chunk_dir)}[/green]"
+        )
+        
+        return chunk_dir
+
+    # ── Public methods ───────────────────────────────────
+
+    def tag_audio(
+        self,
+        audio: AudioInput,
+        sample_rate: Optional[int] = None,
+    ) -> List[TaggingResult]:
+        """
+        Tag audio with predicted labels and probabilities.
+
+        Args:
+            audio: Audio input (file path, bytes, numpy array, or torch tensor)
+            sample_rate: Sample rate for raw audio data (ignored for file paths)
+
+        Returns:
+            List of TaggingResult dicts with keys: index, name, class_index, prob
+
+        Example:
+            >>> tagger = AudioTagger()
+            >>> results = tagger.tag_audio("speech.wav")
+            >>> for r in results:
+            ...     print(f"{r['name']}: {r['prob']:.3f}")
+        """
+        start_time = time.time()
+
+        try:
+            waveform, actual_sr = load_audio(audio, sr=sample_rate or 16000, mono=True)
+        except Exception:
+            raise
+
+        try:
+            stream = self.tagger.create_stream()
+            stream.accept_waveform(sample_rate=actual_sr, waveform=waveform)
+            raw_results = self.tagger.compute(stream)
+        except Exception:
+            raise
+
+        results: List[TaggingResult] = []
+        for i, event in enumerate(raw_results):
+            result: TaggingResult = {
+                "index": i,
+                "name": getattr(event, "name", "Unknown"),
+                "class_index": getattr(event, "index", -1),
+                "prob": getattr(event, "prob", 0.0),
+            }
+            results.append(result)
+
+        return results
+
+    def tag_audio_chunks(
+        self,
+        audio: AudioInput,
+        sample_rate: Optional[int] = None,
+        chunk_duration: Optional[float] = None,
+        overlap_duration: Optional[float] = None,
+        min_chunk_duration: Optional[float] = None,
+        output_dir: Optional[Union[str, Path]] = None,  # NEW parameter
+    ) -> AudioChunksTaggingSummary:
+        """
+        Process long audio by splitting into overlapping chunks and tagging each.
+        
+        This method splits audio into fixed-duration overlapping chunks,
+        tags each independently, and aggregates results. Useful for:
+        - Very long recordings that exceed model context windows
+        - Tracking how audio content changes over time
+        - Speech/music segmentation at coarse granularity
+        - Computing speech_duration (sum of consecutive speech chunks)
+        
+        Args:
+            audio: Audio input (file path, bytes, numpy array, or torch tensor)
+            sample_rate: Sample rate for raw audio data (default: 16000)
+            chunk_duration: Duration of each chunk in seconds.
+                        Default: self.chunk_duration (from config, typically 1.0s)
+            overlap_duration: Overlap between chunks in seconds.
+                            Default: self.chunk_overlap (typically 0.5s)
+            min_chunk_duration: Minimum duration for the last chunk.
+                            Default: self.min_chunk_duration (0.5s)
+            output_dir: Optional directory to save speech chunks.
+                    If provided, speech chunks will be saved under
+                    output_dir / "speech_chunks" / "chunk_<index+1>" /
+                    as sound.wav and meta.json
+        
+        Returns:
+            AudioChunksTaggingSummary with per-chunk results, overall aggregation,
+            speech_duration, and avg_speech_probability
+        
+        Example:
+            >>> tagger = AudioTagger()
+            >>> summary = tagger.tag_audio_chunks("long_speech.wav", chunk_duration=5.0)
+            >>> print(f"Processed {summary['total_chunks']} chunks")
+            >>> print(f"Speech duration: {summary['speech_duration']:.2f}s")
+            >>> print(f"Avg speech probability: {summary['avg_speech_probability']:.4f}")
+            >>> for chunk in summary['chunks']:
+            ...     print(f"  Chunk {chunk['chunk_index']}: "
+            ...           f"{chunk['predictions'][0]['name']}")
+        """
+        import soundfile as sf  # For saving WAV files
+        
+        _chunk_dur = (
+            chunk_duration if chunk_duration is not None else self.chunk_duration
+        )
+        _overlap = (
+            overlap_duration if overlap_duration is not None else self.chunk_overlap
+        )
+        _min_chunk = (
+            min_chunk_duration
+            if min_chunk_duration is not None
+            else self.min_chunk_duration
+        )
+        
+        # Validate chunking parameters
+        if _chunk_dur < _min_chunk:
+            console.print(
+                f"[yellow]⚠ Chunk duration {_chunk_dur}s < min {_min_chunk}s, "
+                f"using min value[/yellow]"
+            )
+            _chunk_dur = _min_chunk
+        if _overlap >= _chunk_dur:
+            console.print(
+                f"[yellow]⚠ Overlap {_overlap}s >= chunk duration {_chunk_dur}s, "
+                f"using half chunk duration[/yellow]"
+            )
+            _overlap = _chunk_dur / 2.0
+        
+        overall_start = time.time()
+        
+        # Load audio
+        try:
+            waveform, actual_sr = load_audio(
+                audio, sr=sample_rate or SAMPLE_RATE, mono=True
+            )
+        except Exception as e:
+            console.print(f"[red]❌ Failed to load audio: {e}[/red]")
+            raise
+        
+        total_samples = len(waveform)
+        total_duration = total_samples / actual_sr
+        
+        console.print(
+            f"[dim]📊 Audio loaded: {total_duration:.2f}s, "
+            f"{actual_sr}Hz, {total_samples} samples[/dim]"
+        )
+        
+        # Determine audio path string for metadata
+        if isinstance(audio, (str, Path)):
+            audio_path_str = str(audio)
+        elif isinstance(audio, bytes):
+            audio_path_str = f"bytes_input_{len(audio)}bytes"
+        else:
+            audio_path_str = f"array_input_{waveform.shape}"
+        
+        # Calculate chunk parameters
+        chunk_samples = int(_chunk_dur * actual_sr)
+        hop_samples = int((_chunk_dur - _overlap) * actual_sr)
+        if hop_samples < 1:
+            hop_samples = 1
+        
+        console.print(
+            f"[dim]🔧 Chunk config: {_chunk_dur}s chunks, "
+            f"{_overlap}s overlap, hop={hop_samples} samples[/dim]"
+        )
+        
+        # Calculate chunk positions
+        chunk_positions = self._calculate_chunk_positions(
+            total_samples=total_samples,
+            chunk_samples=chunk_samples,
+            hop_samples=hop_samples,
+            min_chunk_duration=_min_chunk,
+            sample_rate=actual_sr,
+        )
+        
+        console.print(f"[dim]📏 Calculated {len(chunk_positions)} chunk positions[/dim]")
+        
+        # Handle empty audio case
+        if not chunk_positions:
+            elapsed = time.time() - overall_start
+            console.print("[yellow]⚠ No valid chunk positions found[/yellow]")
+            return AudioChunksTaggingSummary(
+                audio_path=audio_path_str,
+                total_duration=total_duration,
+                sample_rate=actual_sr,
+                chunk_duration=_chunk_dur,
+                overlap_duration=_overlap,
+                total_chunks=0,
+                chunks=[],
+                overall_top_predictions=[],
+                total_processing_time=elapsed,
+                real_time_factor=elapsed / total_duration
+                if total_duration > 0
+                else 0.0,
+                speech_duration=0.0,
+                speech_detected=False,
+                max_speech_probability=0.0,
+                avg_speech_probability=0.0,  # NEW
+            )
+        
+        # Setup output directory for speech chunks if specified
+        speech_chunks_base_dir = None
+        if output_dir is not None:
+            output_dir = Path(output_dir)
+            speech_chunks_base_dir = output_dir / "speech_chunks"
+            speech_chunks_base_dir.mkdir(parents=True, exist_ok=True)
+            console.print(
+                f"[dim]💾 Speech chunks will be saved to: "
+                f"{speech_chunks_base_dir}[/dim]"
+            )
+        
+        # Process each chunk
+        chunks: List[ChunkTaggingResult] = []
+        all_predictions: Dict[str, List[float]] = {}
+        any_speech_detected = False
+        global_max_speech_prob = 0.0
+        speech_probabilities: List[float] = []  # NEW: collect probs for speech chunks
+        
+        for idx, (start_sample, end_sample) in enumerate(chunk_positions):
+            chunk_start_time = time.time()
+            start_sec = start_sample / actual_sr
+            end_sec = end_sample / actual_sr
+            
+            console.print(
+                f"[dim]🔍 Processing chunk {idx + 1}/{len(chunk_positions)}: "
+                f"{start_sec:.2f}s - {end_sec:.2f}s[/dim]"
+            )
+            
+            # Extract chunk waveform
+            chunk_waveform = waveform[start_sample:end_sample].copy()
+            
+            # Tag the chunk
+            try:
+                chunk_predictions = self._tag_waveform(chunk_waveform, actual_sr)
+                console.print(
+                    f"[dim]   ✅ Tagged successfully: "
+                    f"{len(chunk_predictions)} predictions[/dim]"
+                )
+            except Exception as e:
+                console.print(f"[red]   ❌ Tagging failed: {e}[/red]")
+                chunk_predictions = []
+            
+            # Check for speech
+            speech_detected, chunk_speech_prob = self._chunk_has_speech(chunk_predictions)
+            
+            if speech_detected:
+                any_speech_detected = True
+                speech_probabilities.append(chunk_speech_prob)  # NEW: collect for avg
+                console.print(
+                    f"[green]   🎤 Speech detected! "
+                    f"speech_prob={chunk_speech_prob:.4f}[/green]"
+                )
+            else:
+                console.print(
+                    f"[dim]   🔇 No speech detected "
+                    f"(speech_prob={chunk_speech_prob:.4f})[/dim]"
+                )
+            
+            if chunk_speech_prob > global_max_speech_prob:
+                global_max_speech_prob = chunk_speech_prob
+            
+            chunk_elapsed = time.time() - chunk_start_time
+            
+            # Aggregate predictions for overall stats
+            for pred in chunk_predictions:
+                name = pred["name"]
+                if name not in all_predictions:
+                    all_predictions[name] = []
+                all_predictions[name].append(pred["prob"])
+            
+            # Build chunk result (with speech_probability instead of max_speech_probability)
+            chunk_result = ChunkTaggingResult(
+                chunk_index=idx,
+                start_time=round(start_sec, 3),
+                end_time=round(end_sec, 3),
+                duration=round(end_sec - start_sec, 3),
+                predictions=chunk_predictions,
+                processing_time=round(chunk_elapsed, 4),
+                speech_detected=speech_detected,
+                speech_probability=round(chunk_speech_prob, 4),  # RENAMED: was max_speech_probability
+            )
+            chunks.append(chunk_result)
+            
+            # NEW: Save speech chunk to disk if output_dir specified
+            if output_dir is not None and speech_detected and speech_chunks_base_dir:
+                self._save_speech_chunk(
+                    chunk_waveform=chunk_waveform,
+                    sample_rate=actual_sr,
+                    chunk_index=idx,
+                    start_time=start_sec,
+                    end_time=end_sec,
+                    speech_probability=chunk_speech_prob,
+                    predictions=chunk_predictions,
+                    base_dir=speech_chunks_base_dir,
+                )
+        
+        # Calculate aggregate metrics
+        speech_duration = self._calculate_speech_duration(chunks, _overlap)
+        
+        # NEW: Calculate average speech probability
+        if speech_probabilities:
+            avg_speech_prob = float(np.mean(speech_probabilities))
+            console.print(
+                f"[dim]📊 Avg speech probability: {avg_speech_prob:.4f} "
+                f"(from {len(speech_probabilities)} speech chunks)[/dim]"
+            )
+        else:
+            avg_speech_prob = 0.0
+            console.print("[dim]📊 No speech chunks for avg calculation[/dim]")
+        
+        overall_top = self._aggregate_chunk_predictions(all_predictions, self.top_k)
+        total_elapsed = time.time() - overall_start
+        rtf = total_elapsed / total_duration if total_duration > 0 else 0.0
+        
+        console.print(
+            f"[dim]⏱ Total processing: {total_elapsed:.2f}s, "
+            f"RTF: {rtf:.3f}x[/dim]"
+        )
+        
+        # Build final summary with new field
+        summary = AudioChunksTaggingSummary(
+            audio_path=audio_path_str,
+            total_duration=round(total_duration, 3),
+            sample_rate=actual_sr,
+            chunk_duration=_chunk_dur,
+            overlap_duration=_overlap,
+            total_chunks=len(chunks),
+            chunks=chunks,
+            overall_top_predictions=overall_top,
+            total_processing_time=round(total_elapsed, 4),
+            real_time_factor=round(rtf, 4),
+            speech_duration=round(speech_duration, 3),
+            speech_detected=any_speech_detected,
+            max_speech_probability=round(global_max_speech_prob, 4),
+            avg_speech_probability=round(avg_speech_prob, 4),  # NEW
+        )
+        
+        return summary
 
     def contains_speech(
         self,
@@ -905,35 +1099,55 @@ class AudioTagger:
     ) -> AudioTaggingSummary:
         """
         Get a comprehensive summary of audio tagging results.
-
-        Updated to include speech_duration field.
-
+        
         Args:
             audio: Audio input
             sample_rate: Sample rate for raw audio data
             audio_path: Identifier for the audio source
-
+        
         Returns:
             AudioTaggingSummary with complete analysis including speech_duration
+        
+        Debug logs trace:
+            - Audio loading time
+            - Tagging duration
+            - Speech probability calculation
+            - Final metrics
         """
         start_time = time.time()
-
+        
+        console.print(f"[dim]📊 Loading audio for summary: {audio_path}[/dim]")
         try:
             waveform, actual_sr = load_audio(audio, sr=sample_rate or 16000, mono=True)
             audio_duration = len(waveform) / actual_sr if actual_sr > 0 else 0
-        except Exception:
+            console.print(
+                f"[dim]   Loaded: {audio_duration:.2f}s, {actual_sr}Hz[/dim]"
+            )
+        except Exception as e:
+            console.print(f"[red]❌ Failed to load audio: {e}[/red]")
             raise
-
+        
+        console.print("[dim]🏷 Tagging audio...[/dim]")
         results = self.tag_audio(audio, sample_rate=sample_rate)
+        console.print(f"[dim]   Got {len(results)} predictions[/dim]")
+        
+        console.print("[dim]🔍 Checking speech probability...[/dim]")
         max_speech_prob = self.get_speech_probability(audio, sample_rate=sample_rate)
         speech_detected = max_speech_prob >= self.speech_prob_threshold
-
-        # For single-tag summary, speech_duration equals total duration if speech detected
         speech_duration = audio_duration if speech_detected else 0.0
-
+        
+        console.print(
+            f"[dim]   Speech prob: {max_speech_prob:.4f}, "
+            f"detected: {speech_detected}[/dim]"
+        )
+        
         elapsed = time.time() - start_time
         rtf = elapsed / audio_duration if audio_duration > 0 else float("inf")
-
+        
+        console.print(
+            f"[dim]⏱ Summary processing: {elapsed:.3f}s, RTF: {rtf:.3f}x[/dim]"
+        )
+        
         summary: AudioTaggingSummary = {
             "audio_path": audio_path,
             "duration_seconds": audio_duration,
@@ -946,7 +1160,7 @@ class AudioTagger:
             "real_time_factor": rtf,
             "speech_duration": speech_duration,
         }
-
+        
         return summary
 
     def reset(self) -> None:
