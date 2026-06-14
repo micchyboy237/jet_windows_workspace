@@ -97,14 +97,16 @@ Apply minimal change in system prompt.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
-Provide step-by-step analysis and explain the flow first.
-Use visuals, diagrams, or tables when helpful.
+General:
+- Browse when beneficial or requested.
+- Keep explanations simple and clear.
 
-Show full code for new files, then show full function code for new or updated functions.
-Keep explanations simple and clear.
-
-Write smart, flexible, reusable, maintainable, optimal, robust, and minimal code.
-Always add logs so we can trace and know if all features work correctly.
+When coding:
+- Provide step-by-step analysis and explain the flow.
+- Use visuals, diagrams, or tables when helpful.
+- Show full code for new files, then show full function code for new or updated functions.
+- Write smart, flexible, reusable, maintainable, optimal, robust, and minimal code.
+- Always add logs so we can trace and know if all features work correctly.
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """
