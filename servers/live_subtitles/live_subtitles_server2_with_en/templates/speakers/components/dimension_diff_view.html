@@ -1,0 +1,539 @@
+<!-- templates/speakers/components/dimension_diff_view.html -->
+<!--
+  Dimension Difference Analysis Component
+  Dependencies: Chart.js 4.4.0+
+  Usage: {% include 'components/dimension_diff_view.html' %}
+  
+  Shows which embedding dimensions differ most between two speakers.
+  Call renderDimensionDiff(containerId, comparisonData, options) to use.
+  
+  Options:
+  - maxDimensions: number (default: 20)
+  - sortBy: 'diff' | 'dimension' (default: 'diff')
+  - colors: { speaker1: '#3b82f6', speaker2: '#f97316' }
+  - showChart: boolean (default: true)
+  - showTable: boolean (default: true)
+-->
+
+<style>
+  .dimdiff-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .dimdiff-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 16px;
+    background: var(--bg-card, #1e293b);
+    border-radius: 12px;
+    border: 1px solid var(--border-color, #334155);
+  }
+
+  .dimdiff-title-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .dimdiff-color-strip {
+    display: flex;
+    gap: 0;
+    height: 4px;
+    border-radius: 2px;
+    overflow: hidden;
+    width: 60px;
+  }
+
+  .dimdiff-color-strip .strip-segment {
+    flex: 1;
+  }
+
+  .dimdiff-summary-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .dimdiff-badge {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .dimdiff-badge.primary {
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--accent-blue, #3b82f6);
+  }
+
+  .dimdiff-badge.secondary {
+    background: rgba(249, 115, 22, 0.15);
+    color: var(--accent-orange, #f97316);
+  }
+
+  .dimdiff-badge.total {
+    background: rgba(168, 85, 247, 0.15);
+    color: var(--accent-purple, #a855f7);
+  }
+
+  .dimdiff-chart-container {
+    background: var(--bg-card, #1e293b);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .dimdiff-chart-wrapper {
+    width: 100%;
+    height: 350px;
+  }
+
+  .dimdiff-table-container {
+    background: var(--bg-card, #1e293b);
+    border: 1px solid var(--border-color, #334155);
+    border-radius: 12px;
+    padding: 16px;
+    max-height: 500px;
+    overflow-y: auto;
+  }
+
+  .dimdiff-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  .dimdiff-table th {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 2px solid var(--border-color, #334155);
+    color: var(--text-secondary, #94a3b8);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    position: sticky;
+    top: 0;
+    background: var(--bg-card, #1e293b);
+    z-index: 1;
+  }
+
+  .dimdiff-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(51, 65, 85, 0.3);
+    color: var(--text-primary, #f1f5f9);
+  }
+
+  .dimdiff-table tbody tr {
+    transition: background 0.15s;
+  }
+
+  .dimdiff-table tbody tr:hover {
+    background: rgba(59, 130, 246, 0.05);
+  }
+
+  .dimdiff-table tbody tr.top-diff {
+    background: rgba(239, 68, 68, 0.05);
+  }
+
+  .dimdiff-bar-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .dimdiff-bar-wrapper {
+    flex: 1;
+    height: 8px;
+    background: var(--border-color, #334155);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+  }
+
+  .dimdiff-bar-speaker1 {
+    height: 100%;
+    transition: width 0.3s;
+  }
+
+  .dimdiff-bar-speaker2 {
+    height: 100%;
+    transition: width 0.3s;
+    margin-left: auto;
+  }
+
+  .dimdiff-value {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 11px;
+    min-width: 60px;
+    text-align: right;
+  }
+
+  .dimdiff-value.dominant-speaker1 {
+    color: var(--accent-blue, #3b82f6);
+  }
+
+  .dimdiff-value.dominant-speaker2 {
+    color: var(--accent-orange, #f97316);
+  }
+
+  .dimdiff-diff-indicator {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 50px;
+    text-align: center;
+  }
+
+  .dimdiff-diff-indicator.large-diff {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+  }
+
+  .dimdiff-diff-indicator.medium-diff {
+    background: rgba(234, 179, 8, 0.15);
+    color: #eab308;
+  }
+
+  .dimdiff-diff-indicator.small-diff {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+  }
+
+  .dimdiff-ranking {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    background: var(--border-color, #334155);
+    color: var(--text-secondary, #94a3b8);
+  }
+
+  .dimdiff-ranking.top-3 {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+  }
+
+  .dimdiff-ranking.top-10 {
+    background: rgba(234, 179, 8, 0.2);
+    color: #eab308;
+  }
+</style>
+
+<script>
+  /**
+   * Render dimension difference analysis
+   * @param {string} containerId - Container element ID
+   * @param {object} comparisonData - Data from /speakers/centroid-comparison
+   * @param {object} options - Configuration
+   */
+  function renderDimensionDiff(containerId, comparisonData, options = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) {
+      console.warn(`[DimensionDiff] Container #${containerId} not found`);
+      return;
+    }
+
+    const config = {
+      maxDimensions: 20,
+      sortBy: "diff",
+      colors: { speaker1: "#3b82f6", speaker2: "#f97316" },
+      showChart: true,
+      showTable: true,
+      speaker1Label: comparisonData?.speaker1 || "Speaker 1",
+      speaker2Label: comparisonData?.speaker2 || "Speaker 2",
+      ...options,
+    };
+
+    const topDims =
+      comparisonData?.top_different_dimensions ||
+      comparisonData?.comparison?.top_different_dimensions ||
+      [];
+
+    if (topDims.length === 0) {
+      container.innerHTML = `
+        <div class="dimdiff-container">
+          <div style="text-align:center; padding:60px; color:var(--text-secondary);">
+            <div style="font-size:48px; margin-bottom:12px;">📏</div>
+            <h3>No Dimension Data</h3>
+            <p>Select two speakers to see dimension differences.</p>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const displayDims = topDims.slice(0, config.maxDimensions);
+    const totalDiff = displayDims.reduce((sum, d) => sum + Math.abs(d.diff), 0);
+    const avgDiff = totalDiff / displayDims.length;
+    const maxDiff = Math.max(...displayDims.map((d) => Math.abs(d.diff)));
+
+    let html = `<div class="dimdiff-container">`;
+
+    // Header with summary
+    html += `
+      <div class="dimdiff-header">
+        <div class="dimdiff-title-section">
+          <div class="dimdiff-color-strip">
+            <div class="strip-segment" style="background:${config.colors.speaker1};flex:1;"></div>
+            <div class="strip-segment" style="background:${config.colors.speaker2};flex:1;"></div>
+          </div>
+          <div>
+            <h4 style="margin:0;">Dimension Differences</h4>
+            <span style="font-size:12px;color:var(--text-secondary);">
+              ${config.speaker1Label} vs ${config.speaker2Label}
+            </span>
+          </div>
+        </div>
+        <div class="dimdiff-summary-badges">
+          <span class="dimdiff-badge total">📐 ${displayDims.length} dims analyzed</span>
+          <span class="dimdiff-badge primary">Avg Δ: ${avgDiff.toFixed(4)}</span>
+          <span class="dimdiff-badge secondary">Max Δ: ${maxDiff.toFixed(4)}</span>
+        </div>
+      </div>`;
+
+    // Chart
+    if (config.showChart) {
+      const chartId = `${containerId}-chart`;
+      html += `
+        <div class="dimdiff-chart-container">
+          <h5 style="margin:0 0 12px 0; color:var(--text-secondary);">Top Dimension Differences</h5>
+          <div class="dimdiff-chart-wrapper">
+            <canvas id="${chartId}"></canvas>
+          </div>
+        </div>`;
+    }
+
+    // Table
+    if (config.showTable) {
+      const maxAbsVal = Math.max(
+        ...displayDims.map((d) =>
+          Math.max(Math.abs(d.value_speaker1), Math.abs(d.value_speaker2)),
+        ),
+        0.001,
+      );
+
+      html += `
+        <div class="dimdiff-table-container">
+          <table class="dimdiff-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Dim</th>
+                <th>${config.speaker1Label}</th>
+                <th>${config.speaker2Label}</th>
+                <th>Comparison</th>
+                <th>Diff</th>
+              </tr>
+            </thead>
+            <tbody>`;
+
+      displayDims.forEach((d, i) => {
+        const absDiff = Math.abs(d.diff);
+        const rank = i + 1;
+        const rankClass = rank <= 3 ? "top-3" : rank <= 10 ? "top-10" : "";
+
+        let diffClass;
+        if (absDiff >= maxDiff * 0.7) diffClass = "large-diff";
+        else if (absDiff >= maxDiff * 0.3) diffClass = "medium-diff";
+        else diffClass = "small-diff";
+
+        const pct1 = ((Math.abs(d.value_speaker1) / maxAbsVal) * 100).toFixed(
+          0,
+        );
+        const pct2 = ((Math.abs(d.value_speaker2) / maxAbsVal) * 100).toFixed(
+          0,
+        );
+        const dominant =
+          d.value_speaker1 >= d.value_speaker2
+            ? "dominant-speaker1"
+            : "dominant-speaker2";
+
+        const rowClass = absDiff >= maxDiff * 0.7 ? "top-diff" : "";
+
+        html += `
+          <tr class="${rowClass}">
+            <td><span class="dimdiff-ranking ${rankClass}">${rank}</span></td>
+            <td><strong>D${d.dimension}</strong></td>
+            <td class="dimdiff-value">${d.value_speaker1.toFixed(5)}</td>
+            <td class="dimdiff-value">${d.value_speaker2.toFixed(5)}</td>
+            <td>
+              <div class="dimdiff-bar-cell">
+                <span style="font-size:10px;color:${config.colors.speaker1};min-width:25px;">S1</span>
+                <div class="dimdiff-bar-wrapper">
+                  <div class="dimdiff-bar-speaker1" style="width:${pct1}%;background:${config.colors.speaker1};"></div>
+                </div>
+                <div class="dimdiff-bar-wrapper" style="margin-left:2px;">
+                  <div class="dimdiff-bar-speaker2" style="width:${pct2}%;background:${config.colors.speaker2};"></div>
+                </div>
+                <span style="font-size:10px;color:${config.colors.speaker2};min-width:25px;text-align:right;">S2</span>
+              </div>
+            </td>
+            <td>
+              <span class="dimdiff-diff-indicator ${diffClass}">
+                ${d.diff >= 0 ? "+" : ""}${d.diff.toFixed(4)}
+              </span>
+            </td>
+          </tr>`;
+      });
+
+      html += `</tbody></table></div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
+
+    // Render chart if needed
+    if (config.showChart) {
+      setTimeout(() => {
+        _renderDimDiffChart(`${containerId}-chart`, displayDims, config);
+      }, 100);
+    }
+
+    // Store data
+    container._dimDiffData = { displayDims, config };
+  }
+
+  /**
+   * Internal: Render the dimension difference chart
+   */
+  function _renderDimDiffChart(chartId, displayDims, config) {
+    const canvas = document.getElementById(chartId);
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    const labels = displayDims.map((d) => `D${d.dimension}`);
+
+    new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: config.speaker1Label,
+            data: displayDims.map((d) => d.value_speaker1),
+            backgroundColor: config.colors.speaker1 + "CC",
+            borderColor: config.colors.speaker1,
+            borderWidth: 1,
+            borderRadius: 4,
+            order: 2,
+          },
+          {
+            label: config.speaker2Label,
+            data: displayDims.map((d) => d.value_speaker2),
+            backgroundColor: config.colors.speaker2 + "CC",
+            borderColor: config.colors.speaker2,
+            borderWidth: 1,
+            borderRadius: 4,
+            order: 2,
+          },
+          {
+            label: "Absolute Difference",
+            data: displayDims.map((d) => Math.abs(d.diff)),
+            type: "line",
+            borderColor: "#ef4444",
+            backgroundColor: "transparent",
+            borderWidth: 2,
+            pointRadius: 3,
+            pointBackgroundColor: "#ef4444",
+            yAxisID: "y1",
+            order: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { color: "#94a3b8", usePointStyle: true, padding: 16 },
+          },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                if (ctx.dataset.label === "Absolute Difference") {
+                  return `Δ: ${ctx.raw.toFixed(5)}`;
+                }
+                return `${ctx.dataset.label}: ${ctx.raw.toFixed(5)}`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              color: "#94a3b8",
+              maxRotation: 45,
+              font: { size: 10 },
+            },
+          },
+          y: {
+            position: "left",
+            grid: { color: "rgba(148,163,184,0.08)" },
+            ticks: { color: "#64748b" },
+            title: { display: true, text: "Value", color: "#94a3b8" },
+          },
+          y1: {
+            position: "right",
+            grid: { display: false },
+            ticks: {
+              color: "#ef4444",
+              callback: (v) => v.toFixed(3),
+            },
+            title: { display: true, text: "|Diff|", color: "#ef4444" },
+          },
+        },
+      },
+    });
+  }
+
+  /**
+   * Export dimension differences as CSV
+   */
+  function exportDimensionDiffCSV(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container || !container._dimDiffData) return;
+
+    const { displayDims, config } = container._dimDiffData;
+
+    let csv =
+      "Rank,Dimension," +
+      config.speaker1Label +
+      "," +
+      config.speaker2Label +
+      ",Difference,AbsDiff\n";
+    displayDims.forEach((d, i) => {
+      csv += `${i + 1},D${d.dimension},${d.value_speaker1},${d.value_speaker2},${d.diff},${Math.abs(d.diff)}\n`;
+    });
+
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `dimension_diff_${config.speaker1Label}_vs_${config.speaker2Label}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    console.log(
+      `[DimensionDiff] Exported ${displayDims.length} dimensions to CSV`,
+    );
+  }
+
+  // Expose globally
+  window.renderDimensionDiff = renderDimensionDiff;
+  window.exportDimensionDiffCSV = exportDimensionDiffCSV;
+</script>

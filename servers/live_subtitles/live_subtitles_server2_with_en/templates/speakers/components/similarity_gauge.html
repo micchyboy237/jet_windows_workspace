@@ -1,0 +1,351 @@
+<!-- templates/speakers/components/similarity_gauge.html -->
+<!--
+  Reusable Similarity Gauge Component
+  Dependencies: None (pure CSS + JS)
+  Usage: {% include 'components/similarity_gauge.html' %}
+  
+  Creates a circular gauge showing similarity between two speakers.
+  Call updateSimilarityGauge(elementId, similarity, options) to update.
+  
+  Options:
+  - size: 'sm' | 'md' | 'lg' (default: 'md')
+  - showLabel: boolean (default: true)
+  - animated: boolean (default: true)
+  - thresholds: { high: 0.80, medium: 0.50 }
+  - colors: { high: '#ef4444', medium: '#eab308', low: '#22c55e' }
+-->
+
+<style>
+  .sim-gauge-container {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sim-gauge {
+    position: relative;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.5s ease;
+  }
+
+  .sim-gauge.sm {
+    width: 48px;
+    height: 48px;
+  }
+
+  .sim-gauge.md {
+    width: 80px;
+    height: 80px;
+  }
+
+  .sim-gauge.lg {
+    width: 120px;
+    height: 120px;
+  }
+
+  .sim-gauge::before {
+    content: "";
+    position: absolute;
+    border-radius: 50%;
+    background: var(--bg-card, #1e293b);
+    transition: background 0.3s;
+  }
+
+  .sim-gauge.sm::before {
+    inset: 4px;
+  }
+
+  .sim-gauge.md::before {
+    inset: 6px;
+  }
+
+  .sim-gauge.lg::before {
+    inset: 8px;
+  }
+
+  .sim-gauge-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .sim-gauge-value {
+    font-weight: 700;
+    color: var(--text-primary, #f1f5f9);
+    line-height: 1.2;
+    transition: color 0.5s ease;
+  }
+
+  .sim-gauge.sm .sim-gauge-value {
+    font-size: 11px;
+  }
+
+  .sim-gauge.md .sim-gauge-value {
+    font-size: 16px;
+  }
+
+  .sim-gauge.lg .sim-gauge-value {
+    font-size: 22px;
+  }
+
+  .sim-gauge-subtitle {
+    font-size: 9px;
+    color: var(--text-secondary, #94a3b8);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .sim-gauge.sm .sim-gauge-subtitle {
+    display: none;
+  }
+
+  .sim-gauge.md .sim-gauge-subtitle {
+    font-size: 9px;
+  }
+
+  .sim-gauge.lg .sim-gauge-subtitle {
+    font-size: 11px;
+  }
+
+  .sim-gauge-label {
+    font-size: 12px;
+    color: var(--text-secondary, #94a3b8);
+    text-align: center;
+    max-width: 120px;
+    line-height: 1.4;
+  }
+
+  .sim-gauge-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+  }
+
+  .sim-gauge-badge.high-sim {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+  }
+
+  .sim-gauge-badge.medium-sim {
+    background: rgba(234, 179, 8, 0.15);
+    color: #eab308;
+  }
+
+  .sim-gauge-badge.low-sim {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+  }
+
+  /* Pulse animation for high similarity */
+  @keyframes simPulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    }
+  }
+
+  .sim-gauge.pulse {
+    animation: simPulse 2s infinite;
+  }
+
+  /* Skeleton loading */
+  .sim-gauge.skeleton {
+    background: var(--border-color, #334155) !important;
+    animation: shimmer 1.5s infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      opacity: 0.5;
+    }
+    50% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.5;
+    }
+  }
+</style>
+
+<script>
+  /**
+   * Create a similarity gauge element
+   * @param {string} id - Element ID
+   * @param {object} options - Configuration options
+   * @returns {HTMLElement} The gauge container element
+   */
+  function createSimilarityGauge(id, options = {}) {
+    const defaults = {
+      size: "md",
+      showLabel: true,
+      animated: true,
+      thresholds: { high: 0.8, medium: 0.5 },
+      colors: { high: "#ef4444", medium: "#eab308", low: "#22c55e" },
+      labels: {
+        high: "Very Similar",
+        medium: "Moderate",
+        low: "Different",
+      },
+    };
+
+    const config = { ...defaults, ...options };
+
+    const container = document.createElement("div");
+    container.className = "sim-gauge-container";
+    container.id = id;
+
+    container.innerHTML = `
+      <div class="sim-gauge ${config.size} skeleton" id="${id}-gauge">
+        <div class="sim-gauge-inner">
+          <span class="sim-gauge-value" id="${id}-value">--%</span>
+          <span class="sim-gauge-subtitle" id="${id}-subtitle"></span>
+        </div>
+      </div>
+      ${config.showLabel ? `<span class="sim-gauge-label" id="${id}-label"></span>` : ""}
+    `;
+
+    // Store config
+    container._config = config;
+    container._similarity = 0;
+
+    return container;
+  }
+
+  /**
+   * Update an existing similarity gauge
+   * @param {string} id - The gauge container ID
+   * @param {number} similarity - Value between 0 and 1
+   * @param {object} overrides - Optional overrides (speaker1, speaker2 names, etc.)
+   */
+  function updateSimilarityGauge(id, similarity, overrides = {}) {
+    const container = document.getElementById(id);
+    if (!container) {
+      console.warn(`[SimilarityGauge] Container #${id} not found`);
+      return;
+    }
+
+    const config = container._config || {};
+    const thresholds = overrides.thresholds ||
+      config.thresholds || { high: 0.8, medium: 0.5 };
+    const colors = overrides.colors ||
+      config.colors || { high: "#ef4444", medium: "#eab308", low: "#22c55e" };
+    const labels = overrides.labels ||
+      config.labels || {
+        high: "Very Similar",
+        medium: "Moderate",
+        low: "Different",
+      };
+    const size = overrides.size || config.size || "md";
+
+    const pct = Math.round(Math.max(0, Math.min(1, similarity)) * 100);
+
+    // Determine category
+    let category, color, label;
+    if (similarity >= thresholds.high) {
+      category = "high-sim";
+      color = colors.high;
+      label = labels.high;
+    } else if (similarity >= thresholds.medium) {
+      category = "medium-sim";
+      color = colors.medium;
+      label = labels.medium;
+    } else {
+      category = "low-sim";
+      color = colors.low;
+      label = labels.low;
+    }
+
+    // Update gauge
+    const gauge = container.querySelector(".sim-gauge");
+    const valueEl = container.querySelector(".sim-gauge-value");
+    const subtitleEl = container.querySelector(".sim-gauge-subtitle");
+    const labelEl = container.querySelector(".sim-gauge-label");
+
+    if (gauge) {
+      gauge.classList.remove("skeleton");
+      gauge.style.background = `conic-gradient(${color} ${pct}%, var(--border-color, #334155) ${pct}%)`;
+
+      if (similarity >= thresholds.high && config.animated !== false) {
+        gauge.classList.add("pulse");
+      } else {
+        gauge.classList.remove("pulse");
+      }
+    }
+
+    if (valueEl) {
+      valueEl.textContent = pct + "%";
+      valueEl.style.color = color;
+    }
+
+    if (subtitleEl) {
+      subtitleEl.textContent = label;
+      subtitleEl.style.color = color;
+    }
+
+    if (labelEl) {
+      const sp1 = overrides.speaker1 || "";
+      const sp2 = overrides.speaker2 || "";
+      if (sp1 && sp2) {
+        labelEl.innerHTML = `<strong>${sp1}</strong> ↔ <strong>${sp2}</strong>`;
+      }
+    }
+
+    // Store current value
+    container._similarity = similarity;
+    container._category = category;
+    container._color = color;
+
+    // Dispatch event
+    container.dispatchEvent(
+      new CustomEvent("gaugeUpdated", {
+        detail: { similarity, category, color, label },
+      }),
+    );
+
+    console.log(`[SimilarityGauge] Updated #${id}: ${pct}% (${category})`);
+  }
+
+  /**
+   * Create a similarity badge (inline text version)
+   * @param {number} similarity - Value between 0 and 1
+   * @param {object} options - Configuration
+   * @returns {string} HTML string for the badge
+   */
+  function createSimilarityBadge(similarity, options = {}) {
+    const thresholds = options.thresholds || { high: 0.8, medium: 0.5 };
+    const pct = Math.round(similarity * 100);
+
+    let cssClass, icon;
+    if (similarity >= thresholds.high) {
+      cssClass = "high-sim";
+      icon = "⚠️";
+    } else if (similarity >= thresholds.medium) {
+      cssClass = "medium-sim";
+      icon = "🔶";
+    } else {
+      cssClass = "low-sim";
+      icon = "✅";
+    }
+
+    return `<span class="sim-gauge-badge ${cssClass}">${icon} ${pct}%</span>`;
+  }
+
+  // Expose globally
+  window.createSimilarityGauge = createSimilarityGauge;
+  window.updateSimilarityGauge = updateSimilarityGauge;
+  window.createSimilarityBadge = createSimilarityBadge;
+</script>

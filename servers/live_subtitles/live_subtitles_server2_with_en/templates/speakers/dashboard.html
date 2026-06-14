@@ -564,9 +564,12 @@
         // Total speakers with breakdown
         const matureCount = status.categories?.mature?.length || 0;
         const youngCount = status.categories?.young?.length || 0;
+        const orphanCount = status.categories?.orphan?.length || 0;
+        const newbornCount = status.categories?.newborn?.length || 0;
+
         document.getElementById("totalSpeakers").textContent = labels.length;
         document.getElementById("speakerBreakdown").textContent =
-          `Mature: ${matureCount} | Young: ${youngCount}`;
+          `Mature: ${matureCount} | Young: ${youngCount} | New: ${newbornCount}`;
 
         // Total segments
         const totalSegs = labels.reduce(
@@ -574,8 +577,12 @@
           0,
         );
         document.getElementById("totalSegments").textContent = totalSegs;
+
+        // Rejection info from health report
+        const rejectedCount = status.centroids?.total_updates_rejected || 0;
+        const rejectionRate = status.centroids?.rejection_rate || 0;
         document.getElementById("rejectionInfo").textContent =
-          `Rejected updates: ${status.centroids?.total_updates_rejected || 0}`;
+          `Rejected: ${rejectedCount} (${(rejectionRate * 100).toFixed(1)}% rate)`;
 
         // Average quality
         const avgQ =
@@ -608,12 +615,20 @@
         const avgDist = distCount > 0 ? totalDist / distCount : 0;
         document.getElementById("avgSeparation").textContent =
           (avgDist * 100).toFixed(0) + "%";
+
         document.getElementById("separationInfo").textContent =
           avgDist > 0.6
             ? "Well separated"
             : avgDist > 0.3
               ? "Moderately close"
               : "Very similar voices";
+
+        // Show merge count if available
+        const mergeCount = status.merge_history?.length || 0;
+        if (mergeCount > 0) {
+          document.getElementById("separationInfo").textContent +=
+            ` | ${mergeCount} merges`;
+        }
 
         document.getElementById("lastUpdated").textContent =
           "Last updated: " + new Date(data.timestamp).toLocaleTimeString();
@@ -750,65 +765,77 @@
         const existing = document.getElementById("speaker-popup");
         if (existing) existing.remove();
 
-        const speaker = allData.centroids.centroids[label];
+        const speaker = allData?.centroids?.centroids?.[label];
         if (!speaker) return;
 
         const popup = document.createElement("div");
         popup.id = "speaker-popup";
         popup.style.cssText = `
-        position: fixed;
-        z-index: 1000;
-        background: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 16px;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-        min-width: 240px;
-        max-width: 320px;
-        font-size: 13px;
-        color: #f1f5f9;
-        animation: fadeIn 0.15s ease;
-    `;
+    position: fixed;
+    z-index: 1000;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    min-width: 260px;
+    max-width: 340px;
+    font-size: 13px;
+    color: #f1f5f9;
+    animation: fadeIn 0.15s ease;
+  `;
 
-        // Position near click
+        // Position near click but keep on screen
         popup.style.left =
-          Math.min(event.clientX, window.innerWidth - 340) + "px";
+          Math.min(event.clientX, window.innerWidth - 360) + "px";
         popup.style.top =
-          Math.min(event.clientY, window.innerHeight - 300) + "px";
+          Math.min(event.clientY, window.innerHeight - 350) + "px";
 
         const quality = speaker.centroid_quality || 0;
         const qualityClass =
           quality >= 0.8 ? "good" : quality >= 0.5 ? "warning" : "bad";
+        const nn = speaker.nearest_neighbor || "None";
+        const nnSim = speaker.nearest_similarity || 0;
 
         popup.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px;">
-            <strong style="font-size:15px;">🎙️ ${label}</strong>
-            <button onclick="this.parentElement.parentElement.remove()" 
-                    style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;padding:0 4px;">
-                ×
-            </button>
-        </div>
-        <div style="margin-bottom:8px;">
-            <span class="metric-badge ${qualityClass}">Quality: ${(quality * 100).toFixed(0)}%</span>
-            <span style="margin-left:8px;color:#94a3b8;">Segments: ${speaker.segment_count || 0}</span>
-        </div>
-        <div style="color:#94a3b8; font-size:12px; margin-bottom:4px;">
-            Active: ${(speaker.active_duration || 0).toFixed(1)}s | 
-            First: ${(speaker.first_seen || 0).toFixed(1)}s | 
-            Last: ${(speaker.last_seen || 0).toFixed(1)}s
-        </div>
-        <div style="display:flex; flex-direction:column; gap:6px; margin-top:12px;">
-            <button class="btn btn-sm btn-primary" onclick="openSpeakerDetail('${label}')" style="width:100%;justify-content:center;">
-                📊 View Full Details
-            </button>
-            <button class="btn btn-sm btn-secondary" onclick="compareWithNearest('${label}')" style="width:100%;justify-content:center;">
-                🔍 Compare with Nearest
-            </button>
-            <button class="btn btn-sm btn-secondary" onclick="renameSpeaker('${label}')" style="width:100%;justify-content:center;">
-                ✏️ Rename Speaker
-            </button>
-        </div>
-    `;
+    <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px;">
+      <strong style="font-size:15px;">🎙️ ${label}</strong>
+      <button onclick="this.parentElement.parentElement.remove()" 
+              style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;padding:0 4px;">
+        ×
+      </button>
+    </div>
+    <div style="margin-bottom:8px;">
+      <span class="metric-badge ${qualityClass}">Quality: ${(quality * 100).toFixed(0)}%</span>
+      <span style="margin-left:8px;color:#94a3b8;">Segments: ${speaker.segment_count || 0}</span>
+    </div>
+    <div style="color:#94a3b8; font-size:12px; margin-bottom:4px;">
+      Active: ${(speaker.active_duration || 0).toFixed(1)}s | 
+      First: ${(speaker.first_seen || 0).toFixed(1)}s | 
+      Last: ${(speaker.last_seen || 0).toFixed(1)}s
+    </div>
+    <div style="color:#94a3b8; font-size:12px; margin-bottom:8px;">
+      Nearest: <strong style="color:#f1f5f9;">${nn}</strong> 
+      (${(nnSim * 100).toFixed(0)}% similar)
+    </div>
+    <div style="display:flex; flex-direction:column; gap:6px; margin-top:12px;">
+      <button class="btn btn-sm btn-primary" 
+              onclick="openSpeakerDetail('${label}')" 
+              style="width:100%;justify-content:center;">
+        📊 View Full Details
+      </button>
+      <button class="btn btn-sm btn-secondary" 
+              onclick="compareWithNearest('${label}')" 
+              style="width:100%;justify-content:center;">
+        🔍 Compare with Nearest
+      </button>
+      <button class="btn btn-sm btn-secondary" 
+              onclick="renameSpeaker('${label}')" 
+              style="width:100%;justify-content:center;">
+        ✏️ Rename Speaker
+      </button>
+    </div>
+  `;
 
         document.body.appendChild(popup);
 
@@ -835,12 +862,14 @@
 
       // ===== Additional Speaker Actions =====
       function compareWithNearest(label) {
-        const speaker = allData.centroids.centroids[label];
+        const speaker = allData?.centroids?.centroids?.[label];
         if (!speaker || !speaker.nearest_neighbor) return;
 
         const neighbor = speaker.nearest_neighbor;
-        const url = `/speakers/plot/comparison?speaker1=${encodeURIComponent(label)}&speaker2=${encodeURIComponent(neighbor)}`;
-        window.open(url, "_blank");
+        const url = `/speakers/plot/pca?speaker1=${encodeURIComponent(label)}&speaker2=${encodeURIComponent(neighbor)}&view=pairwise`;
+
+        // Navigate to comparison view
+        window.location.href = url;
 
         // Close popup
         const popup = document.getElementById("speaker-popup");
@@ -1103,7 +1132,7 @@
 
       // ===== Detail Table =====
       function createDetailTable(data) {
-        const { centroids, distances } = data;
+        const { centroids, distances, status } = data;
         const speakers = centroids.centroids || {};
         const labels = Object.keys(speakers);
 
@@ -1113,84 +1142,105 @@
           return;
         }
 
-        // Build neighbor lookup
-        const distLabels = distances.labels || [];
-        const distMatrix = distances.distances || [];
+        // Build neighbor lookup from centroid data (more reliable than distances endpoint)
         const neighborMap = {};
-        distLabels.forEach((l1, i) => {
-          let nearest = null,
-            nearestDist = 1;
-          distLabels.forEach((l2, j) => {
-            if (i !== j && distMatrix[i] && distMatrix[i][j] < nearestDist) {
-              nearestDist = distMatrix[i][j];
-              nearest = l2;
-            }
-          });
-          neighborMap[l1] = { label: nearest, dist: nearestDist };
+        labels.forEach((label) => {
+          const sp = speakers[label];
+          if (sp.nearest_neighbor) {
+            neighborMap[label] = {
+              label: sp.nearest_neighbor,
+              dist: sp.nearest_distance || 1,
+              sim: sp.nearest_similarity || 0,
+            };
+          }
+        });
+
+        // Get merge history for merge indicators
+        const mergeHistory = status.merge_history || [];
+        const mergedSpeakers = new Set();
+        mergeHistory.forEach((m) => {
+          mergedSpeakers.add(m.source);
+          mergedSpeakers.add(m.target);
         });
 
         let html = `
-                <table class="data-table">
-                    <thead><tr>
-                        <th>Speaker</th><th>Segments</th><th>Quality</th>
-                        <th>Nearest Neighbor</th><th>Distance</th>
-                        <th>Active Time</th><th>Top Dimensions</th>
-                    </tr></thead><tbody>
-            `;
+    <table class="data-table">
+      <thead><tr>
+        <th>Speaker</th>
+        <th>Segments</th>
+        <th>Quality</th>
+        <th>Nearest Neighbor</th>
+        <th>Similarity</th>
+        <th>Active Time</th>
+        <th>First Seen</th>
+        <th>Top Dims</th>
+        <th>Actions</th>
+      </tr></thead><tbody>`;
 
         labels.forEach((label, idx) => {
           const sp = speakers[label];
           const q = sp.centroid_quality || 0;
           const qClass = q >= 0.8 ? "good" : q >= 0.5 ? "warning" : "bad";
           const nn = neighborMap[label] || {};
-          const nnDist = nn.dist || 1;
+          const nnSim = nn.sim || 0;
           const nnClass =
-            nnDist < 0.3 ? "bad" : nnDist > 0.6 ? "good" : "warning";
+            nnSim >= 0.85 ? "bad" : nnSim >= 0.5 ? "warning" : "good";
           const topDims = (sp.top_dimensions || [])
             .slice(0, 3)
-            .map((d) => `D${d.dim}(${d.value.toFixed(2)})`)
+            .map((d) => `D${d.dim}(${(d.value || 0).toFixed(2)})`)
             .join(", ");
 
+          // Check if this speaker was involved in a merge
+          const wasMerged = mergedSpeakers.has(label);
+
           html += `
-                    <tr>
-                        <td>
-                            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${getColor(idx)};margin-right:8px;"></span>
-                            <strong>${label}</strong>
-                        </td>
-                        <td>${sp.segment_count || 0}</td>
-                        <td>
-                            <span class="metric-badge ${qClass}">${(q * 100).toFixed(0)}%</span>
-                            <div class="quality-bar" style="margin-top:4px;"><div class="quality-bar-fill ${qClass}" style="width:${(q * 100).toFixed(0)}%;"></div></div>
-                        </td>
-                        <td>${nn.label || "-"}</td>
-                        <td><span class="metric-badge ${nnClass}">${(nnDist * 100).toFixed(0)}%</span></td>
-                        <td>${(sp.active_duration || 0).toFixed(1)}s</td>
-                        <td style="font-size:11px;color:var(--text-secondary);">${topDims || "N/A"}</td>
-                    </tr>
-                `;
+      <tr data-speaker="${label}" 
+          style="cursor:pointer; transition: background 0.2s; ${wasMerged ? "background:rgba(168,85,247,0.05);" : ""}"
+          onmouseenter="this.style.background='rgba(59,130,246,0.08)'"
+          onmouseleave="this.style.background='${wasMerged ? "rgba(168,85,247,0.05)" : ""}'">
+        <td>
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${getColor(idx)};margin-right:8px;"></span>
+          <strong>${label}</strong>
+          ${wasMerged ? '<span style="font-size:10px;color:#a855f7;margin-left:4px;" title="Involved in merge">🔀</span>' : ""}
+        </td>
+        <td>${sp.segment_count || 0}</td>
+        <td>
+          <span class="metric-badge ${qClass}">${(q * 100).toFixed(0)}%</span>
+          <div class="quality-bar" style="margin-top:4px;">
+            <div class="quality-bar-fill ${qClass}" style="width:${(q * 100).toFixed(0)}%;"></div>
+          </div>
+        </td>
+        <td>${nn.label || "-"}</td>
+        <td><span class="metric-badge ${nnClass}">${(nnSim * 100).toFixed(0)}%</span></td>
+        <td>${(sp.active_duration || 0).toFixed(1)}s</td>
+        <td>${(sp.first_seen || 0).toFixed(1)}s</td>
+        <td style="font-size:11px;color:var(--text-secondary);">${topDims || "N/A"}</td>
+        <td>
+          <button class="btn btn-sm" style="padding:4px 8px;font-size:11px;" 
+                  onclick="event.stopPropagation(); openSpeakerDetail('${label}')" 
+                  title="Open in single plot view">
+            📊
+          </button>
+        </td>
+      </tr>`;
         });
 
         html += "</tbody></table>";
         document.getElementById("detailTableContainer").innerHTML = html;
 
-        // After creating table, add click handlers to rows
+        // Add click handlers to rows (fallback if button not clicked)
         setTimeout(() => {
           const rows = document.querySelectorAll(
             "#detailTableContainer .data-table tbody tr",
           );
           rows.forEach((row) => {
-            row.style.cursor = "pointer";
-            row.addEventListener("click", function () {
+            row.addEventListener("click", function (e) {
+              // Don't trigger if button was clicked
+              if (e.target.tagName === "BUTTON") return;
               const labelCell = this.querySelector("td:first-child strong");
               if (labelCell) {
                 openSpeakerDetail(labelCell.textContent.trim());
               }
-            });
-            row.addEventListener("mouseenter", function () {
-              this.style.background = "rgba(59,130,246,0.08)";
-            });
-            row.addEventListener("mouseleave", function () {
-              this.style.background = "";
             });
           });
         }, 100);
@@ -1199,9 +1249,14 @@
       // ===== Speaker Click Handler =====
       function openSpeakerDetail(label) {
         console.log(`[Dashboard] Opening detail for speaker: ${label}`);
-        // Open in new tab with speaker-specific view
-        const url = `/speakers/plot/pca?speaker=${encodeURIComponent(label)}`;
-        window.open(url, "_blank");
+
+        // Instead of opening a new tab (which can cause recursion),
+        // navigate to single_plot with the speaker highlighted
+        const url = `/speakers/plot/pca?speaker=${encodeURIComponent(label)}&view=dimensions`;
+
+        // Use location.href for same-tab navigation, or window.open for new tab
+        // Same-tab is safer and avoids duplicate initializations
+        window.location.href = url;
       }
 
       // ===== Refresh All =====
@@ -1233,6 +1288,15 @@
         }
 
         allData = data;
+
+        // Log what we received for debugging
+        console.log("[Dashboard] Data summary:", {
+          speakers: Object.keys(data.centroids?.centroids || {}).length,
+          categories: Object.keys(data.status?.categories || {}),
+          mergeCount: data.status?.merge_history?.length || 0,
+          rejectionRate: data.status?.centroids?.rejection_rate || 0,
+        });
+
         updateSummaryCards(data);
         createPCAChart(data);
         createQualityChart(data);

@@ -505,6 +505,32 @@
         <button class="btn" data-view="table" onclick="switchView('table')">
           📋 Detail Table
         </button>
+
+        <!-- Segment -->
+        <button
+          class="btn"
+          data-view="pairwise"
+          onclick="switchView('pairwise')"
+        >
+          🔍 Deep Compare
+        </button>
+        <button
+          class="btn"
+          data-view="speaker-analysis"
+          onclick="switchView('speaker-analysis')"
+        >
+          🔬 Speaker Analysis
+        </button>
+        <button
+          class="btn"
+          data-view="similarity-network"
+          onclick="switchView('similarity-network')"
+        >
+          🕸️ Network
+        </button>
+        <button class="btn" data-view="health" onclick="switchView('health')">
+          🏥 Health
+        </button>
       </div>
 
       <!-- Tab: Scatter -->
@@ -773,11 +799,251 @@
         </div>
       </div>
 
+      <!-- ============================================================ -->
+      <!-- Tab: Pairwise Comparison (conditional include) -->
+      <!-- ============================================================ -->
+      <div class="tab-content" id="tab-pairwise">
+        {% if include_pairwise %} {% include
+        'components/pairwise_comparison.html' %} {% else %}
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-orange);
+              "
+            ></span>
+            Pairwise Speaker Comparison
+          </h3>
+          <div id="pairwiseContent">
+            <div class="empty-state">
+              <div class="icon">🔍</div>
+              <p>Pairwise comparison component loading...</p>
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- Tab: Independent Speaker Analysis (conditional include) -->
+      <!-- ============================================================ -->
+      <div class="tab-content" id="tab-speaker-analysis">
+        {% if include_speaker_analysis %}
+        <div class="plot-container">
+          <h3>🎯 Select Speakers for Independent Analysis</h3>
+          <div
+            style="
+              display: flex;
+              gap: 12px;
+              align-items: center;
+              flex-wrap: wrap;
+              margin-top: 12px;
+            "
+          >
+            <select
+              id="indieSpeaker1"
+              class="speaker-select speaker1"
+              onchange="updateIndependentAnalysis()"
+              style="flex: 1; min-width: 200px"
+            >
+              <option value="">-- Select Speaker 1 --</option>
+            </select>
+            <span style="color: var(--text-secondary); font-weight: 600"
+              >vs</span
+            >
+            <select
+              id="indieSpeaker2"
+              class="speaker-select speaker2"
+              onchange="updateIndependentAnalysis()"
+              style="flex: 1; min-width: 200px"
+            >
+              <option value="">-- Select Speaker 2 --</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-top: 16px">
+          <div id="embedding-speaker1-container">
+            <div class="plot-container">
+              <div class="empty-state">
+                <div class="icon">🔬</div>
+                <p>Select Speaker 1</p>
+              </div>
+            </div>
+          </div>
+          <div id="embedding-speaker2-container">
+            <div class="plot-container">
+              <div class="empty-state">
+                <div class="icon">🔬</div>
+                <p>Select Speaker 2</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="plot-container" style="text-align: center">
+          <h3>🔗 Speaker Similarity</h3>
+          <div
+            id="indie-gauge-container"
+            style="
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              padding: 20px;
+              min-height: 120px;
+            "
+          >
+            <div class="empty-state" style="padding: 20px">
+              <div class="icon">🎯</div>
+              <p>Select two speakers</p>
+            </div>
+          </div>
+        </div>
+        <div class="plot-container" id="indie-dimension-diff-container">
+          <h3>📏 Dimension Differences</h3>
+          <div id="indie-dimdiff-content">
+            <div class="empty-state">
+              <div class="icon">📏</div>
+              <p>Select two speakers</p>
+            </div>
+          </div>
+        </div>
+        <div class="plot-container" id="indie-comparison-table-container">
+          <h3>📋 Comparison Details</h3>
+          <div id="indie-comparison-table-content">
+            <div class="empty-state">
+              <div class="icon">📋</div>
+              <p>Select two speakers</p>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="plot-container">
+          <div class="empty-state">
+            <div class="icon">🔬</div>
+            <p>Independent analysis component not available</p>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- Tab: Similarity Network (conditional include) -->
+      <!-- ============================================================ -->
+      <div class="tab-content" id="tab-similarity-network">
+        {% if include_network %}
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-purple);
+              "
+            ></span>
+            Speaker Similarity Network
+          </h3>
+          <div class="chart-wrapper large" id="networkWrapper">
+            <canvas id="networkChart"></canvas>
+          </div>
+        </div>
+        <div class="plot-container">
+          <h3>🎚️ Similarity Distribution</h3>
+          <div class="chart-wrapper" id="simDistWrapper" style="height: 300px">
+            <canvas id="simDistChart"></canvas>
+          </div>
+        </div>
+        {% else %}
+        <div class="plot-container">
+          <div class="empty-state">
+            <div class="icon">🕸️</div>
+            <p>Network visualization component not available</p>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- ============================================================ -->
+      <!-- Tab: Health (conditional include) -->
+      <!-- ============================================================ -->
+      <div class="tab-content" id="tab-health">
+        {% if include_health %}
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-green);
+              "
+            ></span>
+            Speaker System Health
+          </h3>
+          <div id="healthContent">
+            <div class="empty-state">
+              <div class="icon">🏥</div>
+              <p>Loading health data...</p>
+            </div>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-top: 16px">
+          <div class="plot-container">
+            <h3>📂 Speaker Categories</h3>
+            <div class="chart-wrapper" style="height: 300px">
+              <canvas id="healthCategoriesChart"></canvas>
+            </div>
+          </div>
+          <div class="plot-container">
+            <h3>🔀 Merge History</h3>
+            <div
+              id="mergeHistoryContent"
+              style="max-height: 300px; overflow-y: auto"
+            >
+              <div class="empty-state">
+                <div class="icon">🔄</div>
+                <p>Loading merge history...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="plot-container">
+          <h3>🚫 Centroid Update Rejection Analysis</h3>
+          <div class="chart-wrapper" style="height: 300px">
+            <canvas id="rejectionChart"></canvas>
+          </div>
+        </div>
+        {% else %}
+        <div class="plot-container">
+          <div class="empty-state">
+            <div class="icon">🏥</div>
+            <p>Health diagnostics component not available</p>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
       <div class="last-updated" id="lastUpdated">Last updated: --</div>
     </div>
 
+    <!-- Feature-specific JavaScript modules -->
+    {% if has_pairwise_js %}
+    <script src="/static/js/speakers/pairwise_comparison.js"></script>
+    {% endif %} {% if has_independent_js %}
+    <script src="/static/js/speakers/independent_analysis.js"></script>
+    {% endif %} {% if has_network_js %}
+    <script src="/static/js/speakers/similarity_network.js"></script>
+    {% endif %} {% if has_health_js %}
+    <script src="/static/js/speakers/health_diagnostics.js"></script>
+    {% endif %}
+
     <script>
-      // ===== Constants =====
+      // ===== Constants (keep existing) =====
       const SPEAKER_COLORS = [
         "#3b82f6",
         "#22c55e",
@@ -921,12 +1187,19 @@
 
       // ===== Destroy all charts =====
       function destroyAllCharts() {
+        // Core charts
         Object.keys(charts).forEach((key) => {
           if (charts[key]) {
             charts[key].destroy();
             charts[key] = null;
           }
         });
+        // Feature-specific charts
+        if (typeof destroyPairwiseCharts === "function")
+          destroyPairwiseCharts();
+        if (typeof destroyIndieCharts === "function") destroyIndieCharts();
+        if (typeof destroyNetworkCharts === "function") destroyNetworkCharts();
+        if (typeof destroyHealthCharts === "function") destroyHealthCharts();
       }
 
       // ===== View: Scatter =====
@@ -1683,27 +1956,24 @@
         console.log(`[SinglePlot] Switching to view: ${view}`);
         currentView = view;
 
-        // Update tab buttons
+        // Update tab button states
         document.querySelectorAll("#viewTabs .btn").forEach((btn) => {
           btn.classList.remove("btn-active");
-          if (btn.dataset.view === view) {
-            btn.classList.add("btn-active");
-          }
+          if (btn.dataset.view === view) btn.classList.add("btn-active");
         });
 
-        // Update tab contents
+        // Show/hide tab contents
         document.querySelectorAll(".tab-content").forEach((tab) => {
           tab.classList.remove("active");
         });
         const targetTab = document.getElementById("tab-" + view);
-        if (targetTab) {
-          targetTab.classList.add("active");
-        }
+        if (targetTab) targetTab.classList.add("active");
 
-        // Render if data is available
         if (!allData) return;
 
         destroyAllCharts();
+
+        const speakerLabels = Object.keys(allData.centroids?.centroids || {});
 
         switch (view) {
           case "scatter":
@@ -1714,6 +1984,26 @@
             break;
           case "similarity":
             renderSimilarity(allData);
+            break;
+          case "pairwise":
+            if (typeof initPairwiseSelects === "function") {
+              initPairwiseSelects(speakerLabels);
+            }
+            break;
+          case "speaker-analysis":
+            if (typeof initIndependentSelects === "function") {
+              initIndependentSelects(speakerLabels);
+            }
+            break;
+          case "similarity-network":
+            if (typeof renderSimilarityNetwork === "function") {
+              renderSimilarityNetwork(allData);
+            }
+            break;
+          case "health":
+            if (typeof renderHealthDashboard === "function") {
+              renderHealthDashboard(allData);
+            }
             break;
           case "comparison":
             renderComparison(allData);
@@ -1729,7 +2019,6 @@
             break;
         }
       }
-
       // ===== URL Parameter Handling =====
       function getQueryParams() {
         const params = new URLSearchParams(window.location.search);
@@ -1790,54 +2079,55 @@
 
       // ===== Actions =====
       async function refreshAll() {
-        console.log("[SinglePlot] Refreshing...");
+        console.log("[SinglePlot] Refreshing all data...");
 
-        // Show loading
+        // Show loading overlays
         document
           .querySelectorAll(
-            ".chart-wrapper, #comparisonWrapper, #dimensionsWrapper, #tableWrapper",
+            ".chart-wrapper, #pairwiseContent, #indie-gauge-container, #healthContent, #networkWrapper, #simDistWrapper",
           )
           .forEach((el) => {
-            if (el.querySelector(".loading-overlay")) return;
             el.style.position = "relative";
-            const overlay = document.createElement("div");
-            overlay.className = "loading-overlay";
-            overlay.innerHTML = '<div class="spinner"></div>';
-            el.appendChild(overlay);
+            if (!el.querySelector(".loading-overlay")) {
+              const overlay = document.createElement("div");
+              overlay.className = "loading-overlay";
+              overlay.innerHTML = '<div class="spinner"></div>';
+              el.appendChild(overlay);
+            }
           });
 
         const data = await fetchAllData();
 
-        // Remove loading
+        // Remove loading overlays
         document
           .querySelectorAll(".loading-overlay")
           .forEach((el) => el.remove());
 
         if (!data) {
-          document
-            .querySelectorAll(
-              ".chart-wrapper, #comparisonWrapper, #dimensionsWrapper, #tableWrapper",
-            )
-            .forEach((el) => {
-              el.innerHTML =
-                '<div class="error-message">⚠️ Failed to load data. Is the speaker labeler initialized?</div>';
-            });
+          console.error("[SinglePlot] Failed to load data");
           return;
         }
 
         allData = data;
         updateSummaryStrip(data);
+
+        // Initialize feature dropdowns
+        const speakerLabels = Object.keys(data.centroids?.centroids || {});
+        if (typeof initPairwiseSelects === "function")
+          initPairwiseSelects(speakerLabels);
+        if (typeof initIndependentSelects === "function")
+          initIndependentSelects(speakerLabels);
+
         switchView(currentView);
 
-        // ===== Handle URL params =====
+        // Handle URL params
         const params = getQueryParams();
         if (params.speaker) {
           setTimeout(() => highlightSpeaker(params.speaker), 300);
         }
         if (params.speaker1 && params.speaker2) {
           setTimeout(() => {
-            switchView("comparison");
-            highlightSpeakers([params.speaker1, params.speaker2]);
+            switchView("pairwise");
           }, 300);
         }
 
@@ -1942,7 +2232,7 @@
 
       // ===== Initialize =====
       document.addEventListener("DOMContentLoaded", () => {
-        console.log("[SinglePlot] Initializing...");
+        console.log("[SinglePlot] DOM ready, initializing...");
         refreshAll();
       });
     </script>

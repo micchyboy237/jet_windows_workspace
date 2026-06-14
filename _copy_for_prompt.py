@@ -55,7 +55,7 @@ include_files = [
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\state.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
@@ -65,8 +65,8 @@ include_files = [
 ]
 
 structure_include = [
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en",
-    # r"C:\Users\druiv\.cache\huggingface\hub\models--pyannote--speech-separation-ami-1.0\snapshots\9486b106945ae0cc0784041a08bfcdba5edadfb9",
+    r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates",
 ]
 structure_exclude = []
 
@@ -83,8 +83,43 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Evaluate the insights covered in dashboard and single plot.
-Are segments covered in single plot? Please improve
+What caused the error when clicking a row in dashboard -> Speaker Centroid Details to open a speaker in single plot
+
+Rendering single plot: pca (format=html)
+Query params: {'speaker': 'SPEAKER_01', 'view': 'dimensions'}
+Loaded template: single_plot.html
+Failed to render single plot: maximum recursion depth exceeded
+Recursion detected - likely missing component file
+Components dir:
+C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\component
+s
+Available:
+[WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/spea
+kers/components/dimension_diff_view.html'),
+WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speak
+ers/components/pairwise_comparison.html'),
+WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speak
+ers/components/similarity_gauge.html'),
+WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speak
+ers/components/speaker_embedding_plot.html')]
+INFO:     192.168.68.103:60593 - "GET /speakers/plot/pca?speaker=SPEAKER_01&view=dimensions HTTP/1.1" 200 OKRendering single plot: pca (format=html)
+Query params: {'speaker': 'SPEAKER_01', 'view': 'dimensions'}
+Loaded template: single_plot.html
+Failed to render single plot: maximum recursion depth exceeded
+Recursion detected - likely missing component file
+Components dir:
+C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\component
+s
+Available:
+[WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/spea
+kers/components/dimension_diff_view.html'),
+WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speak
+ers/components/pairwise_comparison.html'),
+WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speak
+ers/components/similarity_gauge.html'),
+WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speak
+ers/components/speaker_embedding_plot.html')]
+INFO:     192.168.68.103:60593 - "GET /speakers/plot/pca?speaker=SPEAKER_01&view=dimensions HTTP/1.1" 200 OK
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
