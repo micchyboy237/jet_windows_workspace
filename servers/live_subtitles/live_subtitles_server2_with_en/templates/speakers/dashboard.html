@@ -1259,35 +1259,10 @@
         }
       }
 
-      function setupAutoRefresh() {
-        const cb = document.getElementById("autoRefresh");
-        function start() {
-          if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-          autoRefreshTimer = setInterval(refreshAll, 10000);
-        }
-        function stop() {
-          if (autoRefreshTimer) {
-            clearInterval(autoRefreshTimer);
-            autoRefreshTimer = null;
-          }
-        }
-        cb.addEventListener("change", () => (cb.checked ? start() : stop()));
-        if (cb.checked) start();
-
-        document.addEventListener("visibilitychange", () => {
-          if (document.hidden) stop();
-          else if (cb.checked) {
-            start();
-            refreshAll();
-          }
-        });
-      }
-
       // ===== Initialize =====
       document.addEventListener("DOMContentLoaded", () => {
         console.log("[Dashboard] Initializing...");
         refreshAll();
-        setupAutoRefresh();
       });
     </script>
   </body>
