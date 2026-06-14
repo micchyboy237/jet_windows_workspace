@@ -1250,13 +1250,11 @@
       function openSpeakerDetail(label) {
         console.log(`[Dashboard] Opening detail for speaker: ${label}`);
 
-        // Instead of opening a new tab (which can cause recursion),
-        // navigate to single_plot with the speaker highlighted
+        // Open single_plot with the speaker highlighted in a new tab
         const url = `/speakers/plot/pca?speaker=${encodeURIComponent(label)}&view=dimensions`;
 
-        // Use location.href for same-tab navigation, or window.open for new tab
-        // Same-tab is safer and avoids duplicate initializations
-        window.location.href = url;
+        // Open in new tab - safe now that component templates are fixed
+        window.open(url, "_blank");
       }
 
       // ===== Refresh All =====
