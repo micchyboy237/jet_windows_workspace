@@ -14,6 +14,7 @@ from _utils_copy_for_prompt import (
     remove_parent_paths,
     copy_to_clipboard,
 )
+from headroom import compress
 
 logger = Console()
 
@@ -52,26 +53,12 @@ include_files = [
 
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\speech_checker\chunk_results.json",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\speech_checker\metadata.json",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\speech_checker\results.json",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\speech_checker\speech_check_results.json",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\samples\audio\features\generated\speech_checker\speech_insights.json",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\websocket.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\config.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\tagger.py",
-    r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\state.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
     r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\dashboard.html",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\single_plot.html",
     r"",
@@ -92,15 +79,18 @@ exclude_content = []
 SHORTEN_FUNCTS = False 
 INCLUDE_FILE_STRUCTURE = False
 
+COMPRESSION_MODEL = "gpt-4o"
+TOKEN_BUDGET = 8000
+
 DEFAULT_QUERY_MESSAGE = r"""
-Now please improve dashboard and single plot
+Evaluate the insights covered in dashboard and single plot.
+Are segments covered in single plot? Please improve
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
 General:
 - Browse when beneficial or requested.
 - Keep explanations simple and clear.
-
 When coding:
 - Provide step-by-step analysis and explain the flow.
 - Use visuals, diagrams, or tables when helpful.
@@ -111,22 +101,20 @@ When coding:
 
 DEFAULT_SYSTEM_MESSAGE = """
 """.strip()
-
 # For existing projects
 # DEFAULT_INSTRUCTIONS_MESSAGE += (
-#     "\n- Only respond with parts of the code that have been added or updated to keep it short and concise."
+# "\n- Only respond with parts of the code that have been added or updated to keep it short and concise."
 # )z
-
 # For creating projects
 # DEFAULT_INSTRUCTIONS_MESSAGE += (
-#     "\n- At the end, display the updated file structure and instructions for running the code."
-#     "\n- Provide complete working code for each file (should match file structure)"
+# "\n- At the end, display the updated file structure and instructions for running the code."
+# "\n- Provide complete working code for each file (should match file structure)"
 # )
-
 # base_dir should be actual file directory
 file_dir = os.path.dirname(os.path.abspath(__file__))
 # Change the current working directory to the script's directory
 os.chdir(file_dir)
+
 
 def get_language_from_extension(filename: str) -> str:
     """
@@ -134,7 +122,6 @@ def get_language_from_extension(filename: str) -> str:
     Returns 'text' as safe fallback
     """
     ext = os.path.splitext(filename.lower())[1]
-
     mapping = {
         ".py": "python",
         ".js": "javascript",
@@ -166,42 +153,102 @@ def get_language_from_extension(filename: str) -> str:
         ".php": "php",
         ".rb": "ruby",
     }
-
     return mapping.get(ext, "text")
 
 
 def main():
     global exclude_files, include_files, include_content, exclude_content
-
     print("Running _copy_for_prompt.py")
     # Parse command-line options
     parser = argparse.ArgumentParser(
-        description='Generate clipboard content from specified files.')
-    parser.add_argument('-b', '--base-dir', default=file_dir,
-                        help='Base directory to search files in (default: current directory)')
-    parser.add_argument('-if', '--include-files', nargs='*', default=include_files,
-                        help='Patterns of files to include (default: schema.prisma, episode)')
-    parser.add_argument('-ef', '--exclude-files', nargs='*', default=exclude_files,
-                        help='Directories or files to exclude (default: node_modules)')
-    parser.add_argument('-ic', '--include-content', nargs='*', default=include_content,
-                        help='Patterns of file content to include')
-    parser.add_argument('-ec', '--exclude-content', nargs='*', default=exclude_content,
-                        help='Patterns of file content to exclude')
-    parser.add_argument('-cs', '--case-sensitive', action='store_true', default=False,
-                        help='Make content pattern matching case-sensitive')
-    parser.add_argument('-sf', '--shorten-funcs', action='store_true', default=SHORTEN_FUNCTS,
-                        help='Shorten function and class definitions')
-    parser.add_argument('-s', '--system', default=DEFAULT_SYSTEM_MESSAGE,
-                        help='Message to include in the clipboard content')
-    parser.add_argument('-m', '--message', default=DEFAULT_QUERY_MESSAGE,
-                        help='Message to include in the clipboard content')
-    parser.add_argument('-i', '--instructions', default=DEFAULT_INSTRUCTIONS_MESSAGE,
-                        help='Instructions to include in the clipboard content')
-    parser.add_argument('-fo', '--filenames-only', action='store_true',
-                        help='Only copy the relative filenames, not their contents')
-    parser.add_argument('-nl', '--no-length', action='store_true', default=INCLUDE_FILE_STRUCTURE,
-                        help='Do not show file character length')
-
+        description="Generate clipboard content from specified files."
+    )
+    parser.add_argument(
+        "-b",
+        "--base-dir",
+        default=file_dir,
+        help="Base directory to search files in (default: current directory)",
+    )
+    parser.add_argument(
+        "-if",
+        "--include-files",
+        nargs="*",
+        default=include_files,
+        help="Patterns of files to include (default: schema.prisma, episode)",
+    )
+    parser.add_argument(
+        "-ef",
+        "--exclude-files",
+        nargs="*",
+        default=exclude_files,
+        help="Directories or files to exclude (default: node_modules)",
+    )
+    parser.add_argument(
+        "-ic",
+        "--include-content",
+        nargs="*",
+        default=include_content,
+        help="Patterns of file content to include",
+    )
+    parser.add_argument(
+        "-ec",
+        "--exclude-content",
+        nargs="*",
+        default=exclude_content,
+        help="Patterns of file content to exclude",
+    )
+    parser.add_argument(
+        "-cs",
+        "--case-sensitive",
+        action="store_true",
+        default=False,
+        help="Make content pattern matching case-sensitive",
+    )
+    parser.add_argument(
+        "-sf",
+        "--shorten-funcs",
+        action="store_true",
+        default=SHORTEN_FUNCTS,
+        help="Shorten function and class definitions",
+    )
+    parser.add_argument(
+        "-s",
+        "--system",
+        default=DEFAULT_SYSTEM_MESSAGE,
+        help="Message to include in the clipboard content",
+    )
+    parser.add_argument(
+        "-m",
+        "--message",
+        default=DEFAULT_QUERY_MESSAGE,
+        help="Message to include in the clipboard content",
+    )
+    parser.add_argument(
+        "-i",
+        "--instructions",
+        default=DEFAULT_INSTRUCTIONS_MESSAGE,
+        help="Instructions to include in the clipboard content",
+    )
+    parser.add_argument(
+        "-fo",
+        "--filenames-only",
+        action="store_true",
+        help="Only copy the relative filenames, not their contents",
+    )
+    parser.add_argument(
+        "-nl",
+        "--no-length",
+        action="store_true",
+        default=INCLUDE_FILE_STRUCTURE,
+        help="Do not show file character length",
+    )
+    parser.add_argument(
+        "-c",
+        "--compress",
+        action="store_true",
+        default=False,
+        help="Enable compression of the clipboard content before copying (default: False)",
+    )
     args = parser.parse_args()
     base_dir = args.base_dir
     include = args.include_files
@@ -215,12 +262,12 @@ def main():
     instructions_message = args.instructions
     filenames_only = args.filenames_only
     show_file_length = not args.no_length
-
+    compress_enabled = args.compress
     # Find all files matching the patterns in the base directory and its subdirectories
     print("\n")
-    context_files = find_files(base_dir, include, exclude,
-                               include_content, exclude_content, case_sensitive)
-
+    context_files = find_files(
+        base_dir, include, exclude, include_content, exclude_content, case_sensitive
+    )
     print("\n")
     print(f"Include patterns: {include}")
     print(f"Exclude patterns: {exclude}")
@@ -228,27 +275,23 @@ def main():
     print(f"Exclude content patterns: {exclude_content}")
     print(f"Case sensitive: {case_sensitive}")
     print(f"Filenames only: {filenames_only}")
-    print(f"\nFound files ({len(context_files)}):\n{
-          json.dumps(context_files, indent=2)}")
-
+    print(f"Compress enabled: {compress_enabled}")
+    print(
+        f"\nFound files ({len(context_files)}):\n{json.dumps(context_files, indent=2)}"
+    )
     print("\n")
-
     # Initialize the clipboard content
     clipboard_content = ""
-
     if not context_files:
         print("No context files found matching the given patterns.")
     else:
-
         # Append relative filenames to the clipboard content
         for file in tqdm(
             context_files, desc=f"Processing {len(context_files)} files..."
         ):
             rel_path = os.path.relpath(path=file, start=file_dir)
             cleaned_rel_path = remove_parent_paths(rel_path)
-
-            prefix = (
-                f"\n# {cleaned_rel_path}\n" if not filenames_only else f"{file}\n")
+            prefix = f"\n# {cleaned_rel_path}\n" if not filenames_only else f"{file}\n"
             if filenames_only:
                 clipboard_content += f"{prefix}"
             else:
@@ -267,9 +310,7 @@ def main():
                         continue
                 else:
                     clipboard_content += f"{prefix}\n"
-
         clipboard_content = clean_newlines(clipboard_content).strip()
-
     # Generate and format the file structure
     structure_include_files = structure_include
     if include:
@@ -287,10 +328,8 @@ def main():
         shorten_funcs=shorten_funcs,
         show_file_length=show_file_length,
     )
-
     # Prepend system and query to the clipboard content then append instructions
     clipboard_content_parts = []
-
     if system_message:
         clipboard_content_parts.append(f"System\n{system_message}\n")
     # Query should come before instructions
@@ -299,22 +338,43 @@ def main():
         clipboard_content_parts.append(f"Instructions\n{instructions_message}\n")
     if INCLUDE_FILE_STRUCTURE:
         clipboard_content_parts.append(f"Files Structure\n{files_structure}\n")
-
     if clipboard_content:
         clipboard_content_parts.append(
             f"Existing Files Contents\n{clipboard_content}\n"
         )
-
     clipboard_content = "\n\n".join(clipboard_content_parts)
-
+    # Compress to reduce tokens (optional)
+    if compress_enabled:
+        messages = [{"role": "user", "content": clipboard_content}]
+        result = compress(
+            messages,
+            model=COMPRESSION_MODEL,  # headroom uses this for strategy selection only
+            token_budget=TOKEN_BUDGET,  # enforce fit within llama-server context
+            ccr_enabled=True,  # reversible compression (default)
+            compress_user_messages=True,
+            target_ratio=0.5,  # keep 50% — safe for mixed prose + code
+            protect_recent=0,  # only 1 message, nothing to protect
+            protect_analysis_context=False,  # do not protect code from compression
+            # kompress_model="disabled",
+        )
+        # Log compression stats using logger.log for each result.*
+        logger.log("Tokens before:", f"{result.tokens_before:,}")
+        logger.log("Tokens after:", f"{result.tokens_after:,}")
+        logger.log(
+            "Tokens saved:",
+            f"{result.tokens_saved:,} ({result.compression_ratio:.1%})",
+        )
+        logger.log(
+            "Transforms applied:",
+            str(result.transforms_applied),
+        )
+    else:
+        logger.log("Compression skipped (use -c or --compress to enable)")
     # Copy the content to the clipboard
     copy_to_clipboard(clipboard_content)
-
     # Print the copied content character count
     logger.log("Prompt Char Count:", len(clipboard_content))
-
     logger.log("Tokens Count (gpt-4o):", count_tokens(clipboard_content))
-
     # Newline
     print("\n")
 
@@ -326,7 +386,6 @@ def count_tokens(
 ) -> int:
     """
     Count the number of tokens in a string using tiktoken.
-
     Args:
         text: The input string to tokenize.
         model: OpenAI model name to determine the encoding
@@ -334,7 +393,6 @@ def count_tokens(
         encoding_name: Optional direct encoding name
                        (e.g., "o200k_base", "cl100k_base").
                        Takes precedence over model.
-
     Returns:
         Number of tokens.
     """
@@ -342,7 +400,6 @@ def count_tokens(
         encoding = tiktoken.get_encoding(encoding_name)
     else:
         encoding = tiktoken.encoding_for_model(model)
-
     return len(encoding.encode(text))
 
 

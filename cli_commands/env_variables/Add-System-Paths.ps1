@@ -11,7 +11,8 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 }
 
 $pathsToAdd = @(
-    "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin"
+    "C:\Users\druiv\.cargo\bin"
+    # "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\FireRedVAD\fireredvad\bin",
     # "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin",
     # "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\libnvvp",
     # "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\extras\CUPTI\lib64"

@@ -724,6 +724,157 @@
             },
           },
         });
+
+        // After creating the chart, add click handler
+        charts.pca.canvas.onclick = function (evt) {
+          const points = charts.pca.getElementsAtEventForMode(
+            evt,
+            "nearest",
+            { intersect: true },
+            true,
+          );
+          if (points.length > 0) {
+            const datasetIndex = points[0].datasetIndex;
+            const label = charts.pca.data.datasets[datasetIndex].label;
+            if (label && allData.centroids.centroids[label]) {
+              // Show mini popup with options
+              showSpeakerPopup(evt, label);
+            }
+          }
+        };
+      }
+
+      // ===== Speaker Popup Menu =====
+      function showSpeakerPopup(event, label) {
+        // Remove existing popup
+        const existing = document.getElementById("speaker-popup");
+        if (existing) existing.remove();
+
+        const speaker = allData.centroids.centroids[label];
+        if (!speaker) return;
+
+        const popup = document.createElement("div");
+        popup.id = "speaker-popup";
+        popup.style.cssText = `
+        position: fixed;
+        z-index: 1000;
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        min-width: 240px;
+        max-width: 320px;
+        font-size: 13px;
+        color: #f1f5f9;
+        animation: fadeIn 0.15s ease;
+    `;
+
+        // Position near click
+        popup.style.left =
+          Math.min(event.clientX, window.innerWidth - 340) + "px";
+        popup.style.top =
+          Math.min(event.clientY, window.innerHeight - 300) + "px";
+
+        const quality = speaker.centroid_quality || 0;
+        const qualityClass =
+          quality >= 0.8 ? "good" : quality >= 0.5 ? "warning" : "bad";
+
+        popup.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px;">
+            <strong style="font-size:15px;">🎙️ ${label}</strong>
+            <button onclick="this.parentElement.parentElement.remove()" 
+                    style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;padding:0 4px;">
+                ×
+            </button>
+        </div>
+        <div style="margin-bottom:8px;">
+            <span class="metric-badge ${qualityClass}">Quality: ${(quality * 100).toFixed(0)}%</span>
+            <span style="margin-left:8px;color:#94a3b8;">Segments: ${speaker.segment_count || 0}</span>
+        </div>
+        <div style="color:#94a3b8; font-size:12px; margin-bottom:4px;">
+            Active: ${(speaker.active_duration || 0).toFixed(1)}s | 
+            First: ${(speaker.first_seen || 0).toFixed(1)}s | 
+            Last: ${(speaker.last_seen || 0).toFixed(1)}s
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; margin-top:12px;">
+            <button class="btn btn-sm btn-primary" onclick="openSpeakerDetail('${label}')" style="width:100%;justify-content:center;">
+                📊 View Full Details
+            </button>
+            <button class="btn btn-sm btn-secondary" onclick="compareWithNearest('${label}')" style="width:100%;justify-content:center;">
+                🔍 Compare with Nearest
+            </button>
+            <button class="btn btn-sm btn-secondary" onclick="renameSpeaker('${label}')" style="width:100%;justify-content:center;">
+                ✏️ Rename Speaker
+            </button>
+        </div>
+    `;
+
+        document.body.appendChild(popup);
+
+        // Close on outside click
+        setTimeout(() => {
+          document.addEventListener("click", function closePopup(e) {
+            if (!popup.contains(e.target)) {
+              popup.remove();
+              document.removeEventListener("click", closePopup);
+            }
+          });
+        }, 100);
+      }
+
+      // Add this CSS animation to the style section
+      const popupStyle = document.createElement("style");
+      popupStyle.textContent = `
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(5px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+`;
+      document.head.appendChild(popupStyle);
+
+      // ===== Additional Speaker Actions =====
+      function compareWithNearest(label) {
+        const speaker = allData.centroids.centroids[label];
+        if (!speaker || !speaker.nearest_neighbor) return;
+
+        const neighbor = speaker.nearest_neighbor;
+        const url = `/speakers/plot/comparison?speaker1=${encodeURIComponent(label)}&speaker2=${encodeURIComponent(neighbor)}`;
+        window.open(url, "_blank");
+
+        // Close popup
+        const popup = document.getElementById("speaker-popup");
+        if (popup) popup.remove();
+      }
+
+      async function renameSpeaker(label) {
+        const newName = prompt(`Rename ${label} to:`, label);
+        if (!newName || newName === label) return;
+
+        console.log(`[Dashboard] Renaming: ${label} → ${newName}`);
+        // Note: This would need a backend endpoint
+        try {
+          const formData = new FormData();
+          formData.append("old_label", label);
+          formData.append("new_label", newName);
+
+          const res = await fetch("/speakers/rename", {
+            method: "POST",
+            body: formData,
+          });
+          if (res.ok) {
+            refreshAll();
+          } else {
+            const err = await res.json();
+            alert("Rename failed: " + (err.detail || "Unknown error"));
+          }
+        } catch (e) {
+          alert("Rename error: " + e.message);
+        }
+
+        // Close popup
+        const popup = document.getElementById("speaker-popup");
+        if (popup) popup.remove();
       }
 
       function createSyntheticScatter(ctx, labels, speakers, type) {
@@ -861,6 +1012,22 @@
             },
           },
         });
+
+        charts.quality.canvas.onclick = function (evt) {
+          const points = charts.quality.getElementsAtEventForMode(
+            evt,
+            "nearest",
+            { intersect: true },
+            true,
+          );
+          if (points.length > 0) {
+            const index = points[0].index;
+            const label = charts.quality.data.labels[index];
+            if (label) {
+              showSpeakerPopup(evt, label);
+            }
+          }
+        };
       }
 
       // ===== Distance Matrix =====
@@ -1005,6 +1172,36 @@
 
         html += "</tbody></table>";
         document.getElementById("detailTableContainer").innerHTML = html;
+
+        // After creating table, add click handlers to rows
+        setTimeout(() => {
+          const rows = document.querySelectorAll(
+            "#detailTableContainer .data-table tbody tr",
+          );
+          rows.forEach((row) => {
+            row.style.cursor = "pointer";
+            row.addEventListener("click", function () {
+              const labelCell = this.querySelector("td:first-child strong");
+              if (labelCell) {
+                openSpeakerDetail(labelCell.textContent.trim());
+              }
+            });
+            row.addEventListener("mouseenter", function () {
+              this.style.background = "rgba(59,130,246,0.08)";
+            });
+            row.addEventListener("mouseleave", function () {
+              this.style.background = "";
+            });
+          });
+        }, 100);
+      }
+
+      // ===== Speaker Click Handler =====
+      function openSpeakerDetail(label) {
+        console.log(`[Dashboard] Opening detail for speaker: ${label}`);
+        // Open in new tab with speaker-specific view
+        const url = `/speakers/plot/pca?speaker=${encodeURIComponent(label)}`;
+        window.open(url, "_blank");
       }
 
       // ===== Refresh All =====

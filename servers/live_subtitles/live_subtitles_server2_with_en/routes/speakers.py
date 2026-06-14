@@ -754,3 +754,63 @@ async def export_speaker_data(
 
     console.print(f"[success]Exported data: {len(export_data['speakers'])} speakers, {len(figures)} plots[/success]")
     return JSONResponse(content=export_data)
+
+
+@router.post("/rename")
+async def rename_speaker(
+    old_label: str = Form(...),
+    new_label: str = Form(...),
+):
+    """Rename a speaker label."""
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    
+    if old_label not in labeler._speakers:
+        raise HTTPException(status_code=404, detail=f"Speaker {old_label} not found")
+    
+    if new_label in labeler._speakers:
+        # Merge instead
+        console.print(f"[info]Renaming {old_label} → {new_label} (target exists, merging)[/info]")
+        result = labeler.merge_speakers(new_label, old_label)
+        return {
+            "success": True,
+            "action": "merge",
+            "merged_label": result,
+            "message": f"Merged {old_label} into {new_label}"
+        }
+    
+    console.print(f"[info]Renaming speaker: {old_label} → {new_label}[/info]")
+    
+    ref = labeler._speakers[old_label]
+    ref.label = new_label
+    labeler._speakers[new_label] = ref
+    del labeler._speakers[old_label]
+    
+    # Update creation times
+    if old_label in labeler._speaker_creation_times:
+        labeler._speaker_creation_times[new_label] = labeler._speaker_creation_times.pop(old_label)
+    
+    # Update label history
+    labeler._label_history = [
+        (t, new_label if l == old_label else l)
+        for t, l in labeler._label_history
+    ]
+    
+    # Update merge history
+    for entry in labeler._merge_history:
+        if entry.get("source") == old_label:
+            entry["source"] = new_label
+        if entry.get("target") == old_label:
+            entry["target"] = new_label
+    
+    save_speaker_state()
+    console.print(f"[success]Speaker renamed: {old_label} → {new_label}[/success]")
+    
+    return {
+        "success": True,
+        "action": "rename",
+        "old_label": old_label,
+        "new_label": new_label,
+        "message": f"Renamed {old_label} to {new_label}"
+    }

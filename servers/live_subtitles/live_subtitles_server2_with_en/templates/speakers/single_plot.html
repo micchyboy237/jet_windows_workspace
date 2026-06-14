@@ -9,6 +9,7 @@
       :root {
         --bg-primary: #0f172a;
         --bg-secondary: #1e293b;
+        --bg-card: #1e293b;
         --text-primary: #f1f5f9;
         --text-secondary: #94a3b8;
         --accent-blue: #3b82f6;
@@ -16,6 +17,8 @@
         --accent-yellow: #eab308;
         --accent-red: #ef4444;
         --accent-purple: #a855f7;
+        --accent-cyan: #06b6d4;
+        --accent-orange: #f97316;
         --border-color: #334155;
         --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
       }
@@ -33,7 +36,7 @@
         padding: 20px;
       }
       .plot-page {
-        max-width: 1400px;
+        max-width: 1600px;
         margin: 0 auto;
       }
       .page-header {
@@ -51,6 +54,9 @@
         align-items: center;
         gap: 12px;
       }
+      .page-header h1 .plot-icon {
+        font-size: 28px;
+      }
       .btn {
         padding: 10px 20px;
         border: none;
@@ -63,38 +69,251 @@
         display: inline-flex;
         align-items: center;
         gap: 8px;
-      }
-      .btn-primary {
-        background: var(--accent-blue);
-        color: white;
-      }
-      .btn-primary:hover {
-        background: #2563eb;
-      }
-      .btn-secondary {
         background: var(--bg-secondary);
         color: var(--text-primary);
         border: 1px solid var(--border-color);
       }
-      .btn-secondary:hover {
+      .btn:hover {
         background: #334155;
+        transform: translateY(-1px);
+      }
+      .btn-primary {
+        background: var(--accent-blue);
+        color: white;
+        border: none;
+      }
+      .btn-primary:hover {
+        background: #2563eb;
+      }
+      .btn-active {
+        background: var(--accent-blue) !important;
+        color: white !important;
+        border-color: var(--accent-blue) !important;
       }
       .btn-sm {
         padding: 6px 12px;
         font-size: 12px;
       }
+      .btn-group {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .btn-group .btn {
+        border-radius: 0;
+      }
+      .btn-group .btn:first-child {
+        border-radius: 8px 0 0 8px;
+      }
+      .btn-group .btn:last-child {
+        border-radius: 0 8px 8px 0;
+      }
+      .btn-group .btn:only-child {
+        border-radius: 8px;
+      }
+
+      /* Summary Strip */
+      .summary-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .mini-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 14px 16px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .mini-card .mini-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+      .mini-card .mini-info .mini-value {
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .mini-card .mini-info .mini-label {
+        font-size: 11px;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+      }
+      .bg-blue {
+        background: rgba(59, 130, 246, 0.15);
+        color: var(--accent-blue);
+      }
+      .bg-green {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--accent-green);
+      }
+      .bg-yellow {
+        background: rgba(234, 179, 8, 0.15);
+        color: var(--accent-yellow);
+      }
+      .bg-red {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--accent-red);
+      }
+      .bg-purple {
+        background: rgba(168, 85, 247, 0.15);
+        color: var(--accent-purple);
+      }
+      .bg-cyan {
+        background: rgba(6, 182, 212, 0.15);
+        color: var(--accent-cyan);
+      }
+      .bg-orange {
+        background: rgba(249, 115, 22, 0.15);
+        color: var(--accent-orange);
+      }
+
       .plot-container {
         background: var(--bg-secondary);
         border: 1px solid var(--border-color);
         border-radius: 16px;
         padding: 24px;
         box-shadow: var(--shadow);
+        margin-bottom: 20px;
+      }
+      .plot-container h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
       .chart-wrapper {
         position: relative;
         width: 100%;
+        min-height: 400px;
+      }
+      .chart-wrapper.large {
         min-height: 500px;
       }
+
+      /* Grid layouts */
+      .grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+      }
+      @media (max-width: 1200px) {
+        .grid-2,
+        .grid-3 {
+          grid-template-columns: 1fr;
+        }
+      }
+      .full-width {
+        grid-column: 1 / -1;
+      }
+
+      /* Tables */
+      .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      .data-table th,
+      .data-table td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+      }
+      .data-table th {
+        color: var(--text-secondary);
+        font-weight: 600;
+        font-size: 11px;
+        text-transform: uppercase;
+        position: sticky;
+        top: 0;
+        background: var(--bg-secondary);
+      }
+      .data-table tbody tr:hover td {
+        background: rgba(255, 255, 255, 0.03);
+      }
+
+      .metric-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .metric-badge.good {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--accent-green);
+      }
+      .metric-badge.warning {
+        background: rgba(234, 179, 8, 0.15);
+        color: var(--accent-yellow);
+      }
+      .metric-badge.bad {
+        background: rgba(239, 68, 68, 0.15);
+        color: var(--accent-red);
+      }
+      .metric-badge.info {
+        background: rgba(59, 130, 246, 0.15);
+        color: var(--accent-blue);
+      }
+
+      .quality-bar {
+        width: 80px;
+        height: 6px;
+        background: var(--border-color);
+        border-radius: 3px;
+        overflow: hidden;
+        display: inline-block;
+      }
+      .quality-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s;
+      }
+      .quality-bar-fill.high {
+        background: var(--accent-green);
+      }
+      .quality-bar-fill.medium {
+        background: var(--accent-yellow);
+      }
+      .quality-bar-fill.low {
+        background: var(--accent-red);
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: var(--text-secondary);
+      }
+      .empty-state .icon {
+        font-size: 48px;
+        margin-bottom: 12px;
+      }
+      .error-message {
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 8px;
+        padding: 20px;
+        color: var(--accent-red);
+        text-align: center;
+      }
+
       .plot-info {
         margin-top: 20px;
         padding: 16px;
@@ -111,64 +330,7 @@
         color: var(--text-secondary);
         line-height: 1.6;
       }
-      .controls-bar {
-        display: flex;
-        gap: 12px;
-        margin: 16px 0;
-        flex-wrap: wrap;
-      }
-      .empty-state {
-        text-align: center;
-        padding: 80px 20px;
-        color: var(--text-secondary);
-      }
-      .empty-state .icon {
-        font-size: 64px;
-        margin-bottom: 16px;
-      }
-      .error-message {
-        background: rgba(239, 68, 68, 0.1);
-        border: 1px solid rgba(239, 68, 68, 0.3);
-        border-radius: 8px;
-        padding: 20px;
-        color: var(--accent-red);
-        text-align: center;
-      }
-      /* Comparison view */
-      .comparison-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 20px;
-        margin-top: 20px;
-      }
-      @media (max-width: 768px) {
-        .comparison-grid {
-          grid-template-columns: 1fr;
-        }
-      }
-      .comparison-card {
-        background: var(--bg-primary);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 16px;
-      }
-      .comparison-card h4 {
-        margin-bottom: 12px;
-        color: var(--accent-blue);
-      }
-      .stat-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 6px 0;
-        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-        font-size: 13px;
-      }
-      .stat-label {
-        color: var(--text-secondary);
-      }
-      .stat-value {
-        font-weight: 600;
-      }
+
       .loading-overlay {
         position: absolute;
         top: 0;
@@ -195,66 +357,427 @@
           transform: rotate(360deg);
         }
       }
+
+      .last-updated {
+        font-size: 12px;
+        color: var(--text-secondary);
+        text-align: right;
+        margin-top: 8px;
+      }
+
+      /* Tab content */
+      .tab-content {
+        display: none;
+      }
+      .tab-content.active {
+        display: block;
+      }
+
+      /* Heatmap legend */
+      .heatmap-legend {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-top: 8px;
+      }
+      .heatmap-gradient {
+        width: 120px;
+        height: 12px;
+        border-radius: 3px;
+        background: linear-gradient(to right, #ef4444, #eab308, #22c55e);
+      }
     </style>
   </head>
   <body>
     <div class="plot-page">
+      <!-- Header -->
       <div class="page-header">
         <h1>
-          <span id="plotIcon">📊</span>
+          <span class="plot-icon" id="plotIcon">📊</span>
           <span id="plotTitle"
             >{{ plot_name|default('Speaker Plot')|title }}</span
           >
         </h1>
         <div style="display: flex; gap: 12px; flex-wrap: wrap">
-          <a href="/speakers/plots" class="btn btn-secondary">📊 All Plots</a>
-          <a href="/speakers/dashboard" class="btn btn-secondary"
-            >🏠 Dashboard</a
-          >
-          <button class="btn btn-primary" onclick="refreshPlot()">
+          <a href="/speakers/plots" class="btn">📊 All Plots</a>
+          <a href="/speakers/dashboard" class="btn">🏠 Dashboard</a>
+          <button class="btn btn-primary" onclick="refreshAll()">
             🔄 Refresh
           </button>
-          <button class="btn btn-secondary btn-sm" onclick="downloadPlot()">
+          <button class="btn btn-sm" onclick="downloadCurrentView()">
             📥 Download
           </button>
         </div>
       </div>
 
-      <div class="plot-container">
-        <div class="controls-bar" id="plotControls">
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick="switchView('scatter')"
-            id="btnScatter"
-          >
-            📍 Scatter
-          </button>
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick="switchView('comparison')"
-            id="btnCompare"
-          >
-            🔍 Compare
-          </button>
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick="switchView('dimensions')"
-            id="btnDims"
-          >
-            📏 Dimensions
-          </button>
+      <!-- Summary Strip -->
+      <div class="summary-strip" id="summaryStrip">
+        <div class="mini-card">
+          <div class="mini-icon bg-blue">👥</div>
+          <div class="mini-info">
+            <div class="mini-value" id="totalSpeakers">-</div>
+            <div class="mini-label">Total Speakers</div>
+          </div>
         </div>
-        <div class="chart-wrapper" id="chartWrapper">
-          <canvas id="mainChart"></canvas>
+        <div class="mini-card">
+          <div class="mini-icon bg-green">📝</div>
+          <div class="mini-info">
+            <div class="mini-value" id="totalSegments">-</div>
+            <div class="mini-label">Segments</div>
+          </div>
         </div>
-        <div class="plot-info" id="plotInfo">
-          <h4>About this visualization</h4>
-          <p id="plotDescription">Loading plot data...</p>
+        <div class="mini-card">
+          <div class="mini-icon bg-yellow">🎯</div>
+          <div class="mini-info">
+            <div class="mini-value" id="avgQuality">-</div>
+            <div class="mini-label">Avg Quality</div>
+          </div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-icon bg-cyan">📏</div>
+          <div class="mini-info">
+            <div class="mini-value" id="avgSeparation">-</div>
+            <div class="mini-label">Avg Separation</div>
+          </div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-icon bg-orange">⚠️</div>
+          <div class="mini-info">
+            <div class="mini-value" id="rejectedCount">-</div>
+            <div class="mini-label">Rejected</div>
+          </div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-icon bg-purple">🔄</div>
+          <div class="mini-info">
+            <div class="mini-value" id="mergeCount">-</div>
+            <div class="mini-label">Merges</div>
+          </div>
         </div>
       </div>
+
+      <!-- View Tabs -->
+      <div class="btn-group" style="margin-bottom: 20px" id="viewTabs">
+        <button
+          class="btn btn-active"
+          data-view="scatter"
+          onclick="switchView('scatter')"
+        >
+          📍 Centroid Scatter
+        </button>
+        <button
+          class="btn"
+          data-view="segments"
+          onclick="switchView('segments')"
+        >
+          📊 Segment Analysis
+        </button>
+        <button
+          class="btn"
+          data-view="similarity"
+          onclick="switchView('similarity')"
+        >
+          🔥 Similarity Matrix
+        </button>
+        <button
+          class="btn"
+          data-view="comparison"
+          onclick="switchView('comparison')"
+        >
+          🔍 Pairwise Compare
+        </button>
+        <button
+          class="btn"
+          data-view="timeline"
+          onclick="switchView('timeline')"
+        >
+          ⏱️ Timeline
+        </button>
+        <button
+          class="btn"
+          data-view="dimensions"
+          onclick="switchView('dimensions')"
+        >
+          📏 Dimension Analysis
+        </button>
+        <button class="btn" data-view="table" onclick="switchView('table')">
+          📋 Detail Table
+        </button>
+      </div>
+
+      <!-- Tab: Scatter -->
+      <div class="tab-content active" id="tab-scatter">
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-blue);
+              "
+            ></span>
+            Speaker Centroid Positions (Browser PCA)
+          </h3>
+          <div class="chart-wrapper large" id="scatterWrapper">
+            <canvas id="scatterChart"></canvas>
+          </div>
+          <div class="plot-info">
+            <h4>📍 Centroid Scatter Plot</h4>
+            <p>
+              PCA projection of real speaker centroid vectors. Distance between
+              points ≈ voice dissimilarity. Larger points = more segments (more
+              reliable centroids). Hover for details.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Segment Analysis -->
+      <div class="tab-content" id="tab-segments">
+        <div class="grid-2">
+          <div class="plot-container">
+            <h3>
+              <span
+                style="
+                  display: inline-block;
+                  width: 8px;
+                  height: 8px;
+                  border-radius: 50%;
+                  background: var(--accent-green);
+                "
+              ></span>
+              Segments per Speaker
+            </h3>
+            <div class="chart-wrapper" id="segBarWrapper">
+              <canvas id="segBarChart"></canvas>
+            </div>
+          </div>
+          <div class="plot-container">
+            <h3>
+              <span
+                style="
+                  display: inline-block;
+                  width: 8px;
+                  height: 8px;
+                  border-radius: 50%;
+                  background: var(--accent-yellow);
+                "
+              ></span>
+              Speaker Distribution (Mature vs Young)
+            </h3>
+            <div class="chart-wrapper" id="segPieWrapper">
+              <canvas id="segPieChart"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="plot-container full-width">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-purple);
+              "
+            ></span>
+            Segment Accumulation (First Seen → Last Seen)
+          </h3>
+          <div class="chart-wrapper large" id="segTimelineWrapper">
+            <canvas id="segTimelineChart"></canvas>
+          </div>
+          <div class="plot-info">
+            <h4>📊 Segment Analysis</h4>
+            <p>
+              <strong>Segments per Speaker:</strong> Bar chart showing how many
+              audio segments each speaker has. More segments = more reliable
+              voice profile.<br />
+              <strong>Distribution:</strong> Pie chart showing mature (5+
+              segments, reliable) vs young (1-2 segments, tentative) vs growing
+              (3-4 segments) speakers.<br />
+              <strong>Timeline:</strong> Shows each speaker's active time range
+              from first to last seen. Wider bars = longer speaking presence.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Similarity Matrix -->
+      <div class="tab-content" id="tab-similarity">
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-red);
+              "
+            ></span>
+            Speaker Similarity Heatmap
+          </h3>
+          <div class="chart-wrapper large" id="similarityWrapper">
+            <canvas id="similarityChart"></canvas>
+          </div>
+          <div class="heatmap-legend">
+            <span>Low Similarity</span>
+            <div class="heatmap-gradient"></div>
+            <span>High Similarity</span>
+            <span style="margin-left: 12px"
+              >⚠️ High similarity pairs may need merging</span
+            >
+          </div>
+          <div class="plot-info">
+            <h4>🔥 Similarity Matrix</h4>
+            <p>
+              Cosine similarity between all speaker pairs. Red/orange cells =
+              speakers that sound very similar (may be the same person).
+              Green/blue cells = well-separated voices. The diagonal is always
+              1.0 (self-similarity).
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Comparison -->
+      <div class="tab-content" id="tab-comparison">
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-orange);
+              "
+            ></span>
+            Pairwise Speaker Comparison
+          </h3>
+          <div
+            style="overflow-x: auto; max-height: 500px; overflow-y: auto"
+            id="comparisonWrapper"
+          >
+            <div class="empty-state">
+              <div class="icon">🔍</div>
+              <p>Loading comparison data...</p>
+            </div>
+          </div>
+          <div class="plot-info">
+            <h4>🔍 Pairwise Comparison</h4>
+            <p>
+              All speaker pairs with similarity scores. Red rows = pairs above
+              the 85% consolidation threshold (would be merged automatically).
+              Click any row to see detailed comparison metrics.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Timeline -->
+      <div class="tab-content" id="tab-timeline">
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-cyan);
+              "
+            ></span>
+            Speaker Activity Timeline
+          </h3>
+          <div class="chart-wrapper large" id="timelineWrapper">
+            <canvas id="timelineChart"></canvas>
+          </div>
+          <div class="plot-info">
+            <h4>⏱️ Activity Timeline</h4>
+            <p>
+              Horizontal bars showing when each speaker was active (first seen →
+              last seen). The width represents active duration. Dots represent
+              segment count. Hover for exact times.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Dimensions -->
+      <div class="tab-content" id="tab-dimensions">
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-purple);
+              "
+            ></span>
+            Per-Speaker Dimension Analysis
+          </h3>
+          <div id="dimensionsWrapper">
+            <div class="empty-state">
+              <div class="icon">📏</div>
+              <p>Loading dimension data...</p>
+            </div>
+          </div>
+          <div class="plot-info">
+            <h4>📏 Dimension Analysis</h4>
+            <p>
+              Top 5 most prominent embedding dimensions for each speaker. These
+              dimensions encode the most distinctive features of each voice.
+              Compare dimensions across speakers to understand what makes them
+              different.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Detail Table -->
+      <div class="tab-content" id="tab-table">
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-blue);
+              "
+            ></span>
+            Complete Speaker Details
+          </h3>
+          <div style="overflow-x: auto" id="tableWrapper">
+            <div class="empty-state">
+              <div class="icon">📋</div>
+              <p>Loading speaker data...</p>
+            </div>
+          </div>
+          <div class="plot-info">
+            <h4>📋 Detail Table</h4>
+            <p>
+              Comprehensive view of all speaker metrics: segment counts, quality
+              scores, nearest neighbors, distances, active times, and top
+              embedding dimensions.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="last-updated" id="lastUpdated">Last updated: --</div>
     </div>
 
     <script>
+      // ===== Constants =====
       const SPEAKER_COLORS = [
         "#3b82f6",
         "#22c55e",
@@ -266,24 +789,22 @@
         "#ec4899",
         "#14b8a6",
         "#8b5cf6",
+        "#84cc16",
+        "#f43f5e",
+        "#0ea5e9",
+        "#d946ef",
+        "#10b981",
       ];
+      const CONSOLIDATION_THRESHOLD = 0.85;
+
       function getColor(i) {
         return SPEAKER_COLORS[i % SPEAKER_COLORS.length];
       }
 
-      let mainChart = null;
+      // ===== State =====
+      let allData = null;
+      let charts = {};
       let currentView = "scatter";
-      let plotData = null;
-
-      function getPlotNameFromURL() {
-        const parts = window.location.pathname.split("/");
-        return parts[parts.length - 1] || "pca";
-      }
-
-      function getQueryParams() {
-        const params = new URLSearchParams(window.location.search);
-        return Object.fromEntries(params.entries());
-      }
 
       // ===== Browser PCA =====
       function computePCA(vectors) {
@@ -310,25 +831,30 @@
         return projected;
       }
 
-      async function fetchData() {
-        const plotName = getPlotNameFromURL();
-        const params = getQueryParams();
-        console.log(`[SinglePlot] Fetching data for ${plotName}`, params);
-
+      // ===== Data Fetching =====
+      async function fetchAllData() {
+        console.log("[SinglePlot] Fetching all data...");
         try {
-          const [centroidsRes, distancesRes] = await Promise.all([
+          const [centroidsRes, distancesRes, statusRes] = await Promise.all([
             fetch("/speakers/centroids"),
             fetch("/speakers/centroid-distances"),
+            fetch("/speakers/status"),
           ]);
-
           const centroids = await centroidsRes.json();
           const distances = await distancesRes.json();
+          const status = await statusRes.json();
+
+          console.log("[SinglePlot] Data received:", {
+            speakers: centroids.total_speakers,
+            dims: centroids.embedding_dimension,
+            distLabels: distances.labels?.length,
+            statusKeys: Object.keys(status),
+          });
 
           return {
             centroids,
             distances,
-            plotName,
-            params,
+            status,
             timestamp: new Date().toISOString(),
           };
         } catch (e) {
@@ -337,245 +863,1087 @@
         }
       }
 
-      function renderScatterView(data) {
+      // ===== Summary Strip =====
+      function updateSummaryStrip(data) {
+        const { centroids, distances, status } = data;
+        const speakers = centroids.centroids || {};
+        const labels = Object.keys(speakers);
+        const distLabels = distances.labels || [];
+        const distMatrix = distances.distances || [];
+
+        // Total speakers
+        document.getElementById("totalSpeakers").textContent = labels.length;
+
+        // Total segments
+        const totalSegs = labels.reduce(
+          (s, l) => s + (speakers[l].segment_count || 0),
+          0,
+        );
+        document.getElementById("totalSegments").textContent = totalSegs;
+
+        // Average quality
+        const avgQ =
+          labels.length > 0
+            ? labels.reduce(
+                (s, l) => s + (speakers[l].centroid_quality || 0),
+                0,
+              ) / labels.length
+            : 0;
+        document.getElementById("avgQuality").textContent =
+          (avgQ * 100).toFixed(0) + "%";
+
+        // Average separation
+        let totalDist = 0,
+          distCount = 0;
+        for (let i = 0; i < distLabels.length; i++) {
+          for (let j = i + 1; j < distLabels.length; j++) {
+            if (distMatrix[i] && distMatrix[i][j] !== undefined) {
+              totalDist += distMatrix[i][j];
+              distCount++;
+            }
+          }
+        }
+        const avgDist = distCount > 0 ? totalDist / distCount : 0;
+        document.getElementById("avgSeparation").textContent =
+          (avgDist * 100).toFixed(0) + "%";
+
+        // Rejected updates
+        document.getElementById("rejectedCount").textContent =
+          status.centroids?.total_updates_rejected || "0";
+
+        // Merges
+        document.getElementById("mergeCount").textContent =
+          status.merge_history?.length || "0";
+
+        document.getElementById("lastUpdated").textContent =
+          "Last updated: " + new Date(data.timestamp).toLocaleTimeString();
+      }
+
+      // ===== Destroy all charts =====
+      function destroyAllCharts() {
+        Object.keys(charts).forEach((key) => {
+          if (charts[key]) {
+            charts[key].destroy();
+            charts[key] = null;
+          }
+        });
+      }
+
+      // ===== View: Scatter =====
+      function renderScatter(data) {
         const { centroids } = data;
         const speakers = centroids.centroids || {};
         const labels = Object.keys(speakers);
-        const ctx = document.getElementById("mainChart").getContext("2d");
-        if (mainChart) mainChart.destroy();
+
+        const wrapper = document.getElementById("scatterWrapper");
+        wrapper.innerHTML = '<canvas id="scatterChart"></canvas>';
+        const ctx = document.getElementById("scatterChart").getContext("2d");
 
         if (labels.length < 1) {
-          document.getElementById("chartWrapper").innerHTML =
-            '<div class="empty-state"><div class="icon">🔬</div><p>No speaker data</p></div>';
+          wrapper.innerHTML =
+            '<div class="empty-state"><div class="icon">🔬</div><p>No speaker data yet</p></div>';
           return;
         }
 
         const vectors = labels.map((l) => speakers[l].centroid_vector || []);
-        const projections = computePCA(vectors);
+        const validVectors = vectors.filter((v) => v.length > 0);
+        const validLabels = labels.filter((l, i) => vectors[i].length > 0);
 
-        if (!projections) {
-          document.getElementById("chartWrapper").innerHTML =
-            '<div class="empty-state"><div class="icon">🔬</div><p>Need more centroid data for projection</p></div>';
+        if (validVectors.length < 2) {
+          // Fallback: circular layout
+          const datasets = labels.map((label, idx) => {
+            const angle = idx * ((2 * Math.PI) / labels.length);
+            const sp = speakers[label];
+            return {
+              label: label,
+              data: [{ x: Math.cos(angle) * 0.7, y: Math.sin(angle) * 0.7 }],
+              backgroundColor: getColor(idx),
+              borderColor: "#fff",
+              borderWidth: 2,
+              pointRadius: Math.max(
+                6,
+                Math.min(16, (sp.segment_count || 0) * 2),
+              ),
+              pointHoverRadius: Math.max(
+                10,
+                Math.min(20, (sp.segment_count || 0) * 2 + 4),
+              ),
+              segCount: sp.segment_count || 0,
+              quality: sp.centroid_quality || 0,
+            };
+          });
+
+          charts.scatter = new Chart(ctx, {
+            type: "scatter",
+            data: { datasets },
+            options: getScatterOptions(
+              "⚠️ Circular Layout (need more centroid data for PCA)",
+            ),
+          });
           return;
         }
 
-        const datasets = labels.map((label, idx) => ({
-          label: label,
-          data: [{ x: projections[idx].x, y: projections[idx].y }],
-          backgroundColor: getColor(idx),
-          borderColor: "#fff",
-          borderWidth: 2,
-          pointRadius: Math.max(
-            6,
-            Math.min(16, (speakers[label].segment_count || 0) * 2),
-          ),
-          pointHoverRadius: Math.max(
-            10,
-            Math.min(20, (speakers[label].segment_count || 0) * 2 + 4),
-          ),
-          segCount: speakers[label].segment_count || 0,
-          quality: speakers[label].centroid_quality || 0,
-        }));
+        const projections = computePCA(validVectors);
+        const datasets = validLabels.map((label, idx) => {
+          const sp = speakers[label];
+          const proj = projections[idx];
+          return {
+            label: label,
+            data: [{ x: proj.x, y: proj.y }],
+            backgroundColor: getColor(idx),
+            borderColor: "#fff",
+            borderWidth: 2,
+            pointRadius: Math.max(6, Math.min(16, (sp.segment_count || 0) * 2)),
+            pointHoverRadius: Math.max(
+              10,
+              Math.min(20, (sp.segment_count || 0) * 2 + 4),
+            ),
+            segCount: sp.segment_count || 0,
+            quality: sp.centroid_quality || 0,
+            activeDuration: (sp.active_duration || 0).toFixed(1),
+          };
+        });
 
-        mainChart = new Chart(ctx, {
+        charts.scatter = new Chart(ctx, {
           type: "scatter",
           data: { datasets },
+          options: getScatterOptions(
+            "PCA Projection of Speaker Centroids (Real Data)",
+          ),
+        });
+      }
+
+      function getScatterOptions(title) {
+        return {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: "bottom",
+              labels: {
+                color: "#94a3b8",
+                usePointStyle: true,
+                padding: 16,
+                generateLabels: function (chart) {
+                  return chart.data.datasets.map((ds, i) => ({
+                    text: `${ds.label} (${ds.segCount} segs, ${ds.quality ? (ds.quality * 100).toFixed(0) + "%" : "0%"})`,
+                    fillStyle: ds.backgroundColor,
+                    strokeStyle: ds.borderColor,
+                    lineWidth: 2,
+                    hidden: false,
+                    index: i,
+                    pointStyle: "circle",
+                  }));
+                },
+              },
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => [
+                  ctx.dataset.label,
+                  `Position: (${ctx.raw.x.toFixed(3)}, ${ctx.raw.y.toFixed(3)})`,
+                  `Segments: ${ctx.dataset.segCount}`,
+                  `Quality: ${ctx.dataset.quality ? (ctx.dataset.quality * 100).toFixed(0) + "%" : "0%"}`,
+                  `Active: ${ctx.dataset.activeDuration || "0"}s`,
+                ],
+              },
+            },
+            title: {
+              display: true,
+              text: title,
+              color: "#94a3b8",
+              font: { size: 13 },
+            },
+          },
+          scales: {
+            x: {
+              grid: { color: "rgba(148,163,184,0.08)" },
+              ticks: { color: "#64748b" },
+              title: { display: true, text: "PC1", color: "#94a3b8" },
+            },
+            y: {
+              grid: { color: "rgba(148,163,184,0.08)" },
+              ticks: { color: "#64748b" },
+              title: { display: true, text: "PC2", color: "#94a3b8" },
+            },
+          },
+        };
+      }
+
+      // ===== View: Segment Analysis =====
+      function renderSegments(data) {
+        const { centroids, status } = data;
+        const speakers = centroids.centroids || {};
+        const labels = Object.keys(speakers);
+
+        if (labels.length < 1) {
+          document.getElementById("segBarWrapper").innerHTML =
+            '<div class="empty-state"><div class="icon">📊</div><p>No data</p></div>';
+          document.getElementById("segPieWrapper").innerHTML =
+            '<div class="empty-state"><div class="icon">📊</div><p>No data</p></div>';
+          document.getElementById("segTimelineWrapper").innerHTML =
+            '<div class="empty-state"><div class="icon">📊</div><p>No data</p></div>';
+          return;
+        }
+
+        // ---- Segments Bar Chart ----
+        const barWrapper = document.getElementById("segBarWrapper");
+        barWrapper.innerHTML = '<canvas id="segBarChart"></canvas>';
+        const barCtx = document.getElementById("segBarChart").getContext("2d");
+
+        if (charts.segBar) charts.segBar.destroy();
+        charts.segBar = new Chart(barCtx, {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: "Segment Count",
+                data: labels.map((l) => speakers[l].segment_count || 0),
+                backgroundColor: labels.map((l, i) => getColor(i)),
+                borderRadius: 8,
+                borderColor: "transparent",
+                borderWidth: 0,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => `${ctx.raw} segments`,
+                },
+              },
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                grid: { color: "rgba(148,163,184,0.08)" },
+                ticks: { color: "#94a3b8", stepSize: 1 },
+                title: { display: true, text: "Segments", color: "#94a3b8" },
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
+              },
+            },
+          },
+        });
+
+        // ---- Distribution Pie Chart ----
+        const pieWrapper = document.getElementById("segPieWrapper");
+        pieWrapper.innerHTML = '<canvas id="segPieChart"></canvas>';
+        const pieCtx = document.getElementById("segPieChart").getContext("2d");
+
+        const mature = status.categories?.mature || [];
+        const young = status.categories?.young || [];
+        const activeYoung = status.categories?.active_young || [];
+        const orphan = status.categories?.orphan || [];
+        const growing = activeYoung.filter(
+          (l) => !young.includes(l) && !mature.includes(l),
+        );
+
+        if (charts.segPie) charts.segPie.destroy();
+        charts.segPie = new Chart(pieCtx, {
+          type: "doughnut",
+          data: {
+            labels: [
+              "Mature (5+ segs)",
+              "Growing (3-4 segs)",
+              "Young (1-2 segs)",
+              "Orphan (inactive)",
+            ],
+            datasets: [
+              {
+                data: [
+                  mature.length,
+                  growing.length,
+                  young.length,
+                  orphan.length,
+                ],
+                backgroundColor: ["#22c55e", "#3b82f6", "#eab308", "#ef4444"],
+                borderColor: "#1e293b",
+                borderWidth: 3,
+                hoverBorderColor: "#334155",
+              },
+            ],
+          },
           options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
               legend: {
                 position: "bottom",
-                labels: { color: "#94a3b8", usePointStyle: true },
+                labels: { color: "#94a3b8", padding: 12, usePointStyle: true },
               },
               tooltip: {
                 callbacks: {
-                  label: (ctx) => [
-                    ctx.dataset.label,
-                    `Segments: ${ctx.dataset.segCount}`,
-                    `Quality: ${(ctx.dataset.quality * 100).toFixed(0)}%`,
-                  ],
+                  label: (ctx) => {
+                    const total = ctx.dataset.data.reduce((s, v) => s + v, 0);
+                    const pct =
+                      total > 0 ? ((ctx.raw / total) * 100).toFixed(0) : 0;
+                    return `${ctx.label}: ${ctx.raw} (${pct}%)`;
+                  },
                 },
-              },
-              title: {
-                display: true,
-                text: "Speaker Centroid Positions (PCA)",
-                color: "#94a3b8",
-                font: { size: 14 },
-              },
-            },
-            scales: {
-              x: {
-                grid: { color: "rgba(148,163,184,0.08)" },
-                ticks: { color: "#64748b" },
-                title: { display: true, text: "PC1", color: "#94a3b8" },
-              },
-              y: {
-                grid: { color: "rgba(148,163,184,0.08)" },
-                ticks: { color: "#64748b" },
-                title: { display: true, text: "PC2", color: "#94a3b8" },
               },
             },
           },
         });
 
-        document.getElementById("plotDescription").textContent =
-          "PCA projection of real speaker centroid vectors. Distance between points represents voice dissimilarity. Larger points have more segments (more reliable centroids).";
+        // ---- Segment Timeline (First Seen → Last Seen) ----
+        const tlWrapper = document.getElementById("segTimelineWrapper");
+        tlWrapper.innerHTML = '<canvas id="segTimelineChart"></canvas>';
+        const tlCtx = document
+          .getElementById("segTimelineChart")
+          .getContext("2d");
+
+        // Sort by first_seen
+        const sortedLabels = [...labels].sort(
+          (a, b) =>
+            (speakers[a].first_seen || 0) - (speakers[b].first_seen || 0),
+        );
+
+        if (charts.segTimeline) charts.segTimeline.destroy();
+        charts.segTimeline = new Chart(tlCtx, {
+          type: "bar",
+          data: {
+            labels: sortedLabels,
+            datasets: [
+              {
+                label: "Active Duration",
+                data: sortedLabels.map((l) => {
+                  const sp = speakers[l];
+                  return [sp.first_seen || 0, sp.last_seen || 0];
+                }),
+                backgroundColor: sortedLabels.map((l, i) => {
+                  const origIdx = labels.indexOf(l);
+                  return getColor(origIdx) + "99";
+                }),
+                borderColor: sortedLabels.map((l, i) => {
+                  const origIdx = labels.indexOf(l);
+                  return getColor(origIdx);
+                }),
+                borderWidth: 2,
+                borderRadius: 6,
+                borderSkipped: false,
+              },
+            ],
+          },
+          options: {
+            indexAxis: "y",
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const sp = speakers[ctx.label];
+                    return [
+                      `First seen: ${(sp.first_seen || 0).toFixed(1)}s`,
+                      `Last seen: ${(sp.last_seen || 0).toFixed(1)}s`,
+                      `Duration: ${(sp.active_duration || 0).toFixed(1)}s`,
+                      `Segments: ${sp.segment_count || 0}`,
+                    ];
+                  },
+                },
+              },
+              title: {
+                display: true,
+                text: "Speaker Activity Ranges",
+                color: "#94a3b8",
+              },
+            },
+            scales: {
+              x: {
+                grid: { color: "rgba(148,163,184,0.08)" },
+                ticks: {
+                  color: "#94a3b8",
+                  callback: (v) => v.toFixed(0) + "s",
+                },
+                title: {
+                  display: true,
+                  text: "Time (seconds)",
+                  color: "#94a3b8",
+                },
+              },
+              y: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
+              },
+            },
+          },
+        });
       }
 
-      function renderComparisonView(data) {
+      // ===== View: Similarity Matrix =====
+      function renderSimilarity(data) {
+        const { distances } = data;
+        const labels = distances.labels || [];
+        const similarities = distances.similarities || [];
+
+        const wrapper = document.getElementById("similarityWrapper");
+        wrapper.innerHTML = '<canvas id="similarityChart"></canvas>';
+        const ctx = document.getElementById("similarityChart").getContext("2d");
+
+        if (labels.length < 2) {
+          wrapper.innerHTML =
+            '<div class="empty-state"><div class="icon">🔥</div><p>Need 2+ speakers for similarity matrix</p></div>';
+          return;
+        }
+
+        // Create heatmap data
+        const datasets = labels.map((label, i) => ({
+          label: label,
+          data: (similarities[i] || []).map((sim, j) => ({
+            x: labels[j],
+            y: sim,
+          })),
+          backgroundColor: (similarities[i] || []).map((sim) => {
+            // Red (similar) → Yellow → Green (different)
+            const r = Math.floor(sim * 220 + 30);
+            const g = Math.floor(sim * 180 + 30);
+            const b = Math.floor((1 - sim) * 220 + 30);
+            return `rgba(${r},${g},${b},0.9)`;
+          }),
+          borderColor: "#1e293b",
+          borderWidth: 1,
+          borderRadius: 4,
+          barPercentage: 0.95,
+          categoryPercentage: 0.95,
+        }));
+
+        if (charts.similarity) charts.similarity.destroy();
+        charts.similarity = new Chart(ctx, {
+          type: "bar",
+          data: { labels, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: "right",
+                labels: { color: "#94a3b8", usePointStyle: true, padding: 8 },
+              },
+              tooltip: {
+                callbacks: {
+                  title: (items) => {
+                    const ds = items[0].dataset.label;
+                    const x = items[0].raw.x;
+                    return `${ds} ↔ ${x}`;
+                  },
+                  label: (ctx) => {
+                    const sim = ctx.raw.y;
+                    const dist = 1 - sim;
+                    const wouldMerge = sim >= CONSOLIDATION_THRESHOLD;
+                    return [
+                      `Similarity: ${(sim * 100).toFixed(1)}%`,
+                      `Distance: ${(dist * 100).toFixed(1)}%`,
+                      wouldMerge
+                        ? "⚠️ Would merge (>85%)"
+                        : "✅ Separate speakers",
+                    ];
+                  },
+                },
+              },
+              title: {
+                display: true,
+                text: "Speaker Similarity Heatmap",
+                color: "#94a3b8",
+              },
+            },
+            scales: {
+              y: {
+                min: 0,
+                max: 1,
+                grid: { color: "rgba(148,163,184,0.08)" },
+                ticks: {
+                  color: "#94a3b8",
+                  callback: (v) => (v * 100).toFixed(0) + "%",
+                },
+                title: { display: true, text: "Similarity", color: "#94a3b8" },
+              },
+              x: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8", maxRotation: 45 },
+              },
+            },
+          },
+        });
+      }
+
+      // ===== View: Comparison Table =====
+      function renderComparison(data) {
+        const { centroids, distances } = data;
+        const speakers = centroids.centroids || {};
+        const distLabels = distances.labels || [];
+        const distMatrix = distances.distances || [];
+        const simMatrix = distances.similarities || [];
+
+        const wrapper = document.getElementById("comparisonWrapper");
+
+        if (distLabels.length < 2) {
+          wrapper.innerHTML =
+            '<div class="empty-state"><div class="icon">🔍</div><p>Need 2+ speakers for comparison</p></div>';
+          return;
+        }
+
+        let html = `<table class="data-table">
+          <thead><tr>
+            <th>Speaker 1</th><th>Speaker 2</th><th>Similarity</th><th>Distance</th>
+            <th>Would Merge?</th><th>Segs 1</th><th>Segs 2</th><th>Action</th>
+          </tr></thead><tbody>`;
+
+        for (let i = 0; i < distLabels.length; i++) {
+          for (let j = i + 1; j < distLabels.length; j++) {
+            const dist = distMatrix[i]?.[j] ?? 0;
+            const sim = simMatrix[i]?.[j] ?? 1 - dist;
+            const wouldMerge = sim >= CONSOLIDATION_THRESHOLD;
+            const simClass = wouldMerge
+              ? "bad"
+              : sim >= 0.5
+                ? "warning"
+                : "good";
+            const segs1 = speakers[distLabels[i]]?.segment_count || 0;
+            const segs2 = speakers[distLabels[j]]?.segment_count || 0;
+            const bgColor = wouldMerge ? "rgba(239,68,68,0.08)" : "";
+
+            html += `<tr style="background:${bgColor}; cursor:pointer;" 
+                         onclick="compareSpeakers('${distLabels[i]}', '${distLabels[j]}')"
+                         title="Click for detailed comparison">
+              <td><strong>${distLabels[i]}</strong></td>
+              <td><strong>${distLabels[j]}</strong></td>
+              <td><span class="metric-badge ${simClass}">${(sim * 100).toFixed(1)}%</span></td>
+              <td>${(dist * 100).toFixed(1)}%</td>
+              <td>${wouldMerge ? "⚠️ Yes" : "✅ No"}</td>
+              <td>${segs1}</td>
+              <td>${segs2}</td>
+              <td><button class="btn btn-sm" onclick="event.stopPropagation(); mergeSpeakers('${distLabels[i]}', '${distLabels[j]}')">Merge</button></td>
+            </tr>`;
+          }
+        }
+
+        html += "</tbody></table>";
+        wrapper.innerHTML = html;
+      }
+
+      // ===== View: Timeline =====
+      function renderTimeline(data) {
+        const { centroids } = data;
+        const speakers = centroids.centroids || {};
+        const labels = Object.keys(speakers);
+
+        const wrapper = document.getElementById("timelineWrapper");
+        wrapper.innerHTML = '<canvas id="timelineChart"></canvas>';
+        const ctx = document.getElementById("timelineChart").getContext("2d");
+
+        if (labels.length < 1) {
+          wrapper.innerHTML =
+            '<div class="empty-state"><div class="icon">⏱️</div><p>No speaker data</p></div>';
+          return;
+        }
+
+        const sortedLabels = [...labels].sort(
+          (a, b) =>
+            (speakers[a].first_seen || 0) - (speakers[b].first_seen || 0),
+        );
+
+        if (charts.timeline) charts.timeline.destroy();
+        charts.timeline = new Chart(ctx, {
+          type: "bar",
+          data: {
+            labels: sortedLabels,
+            datasets: [
+              {
+                label: "Activity Window",
+                data: sortedLabels.map((l) => {
+                  const sp = speakers[l];
+                  return [sp.first_seen || 0, sp.last_seen || 0];
+                }),
+                backgroundColor: sortedLabels.map((l, i) => {
+                  const origIdx = labels.indexOf(l);
+                  return getColor(origIdx) + "88";
+                }),
+                borderColor: sortedLabels.map((l, i) => {
+                  const origIdx = labels.indexOf(l);
+                  return getColor(origIdx);
+                }),
+                borderWidth: 2,
+                borderRadius: 8,
+                borderSkipped: false,
+              },
+            ],
+          },
+          options: {
+            indexAxis: "y",
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: (ctx) => {
+                    const sp = speakers[ctx.label];
+                    return [
+                      `First: ${(sp.first_seen || 0).toFixed(1)}s`,
+                      `Last: ${(sp.last_seen || 0).toFixed(1)}s`,
+                      `Duration: ${(sp.active_duration || 0).toFixed(1)}s`,
+                      `Segments: ${sp.segment_count || 0}`,
+                      `Quality: ${((sp.centroid_quality || 0) * 100).toFixed(0)}%`,
+                    ];
+                  },
+                },
+              },
+              title: {
+                display: true,
+                text: "Speaker Activity Timeline",
+                color: "#94a3b8",
+              },
+            },
+            scales: {
+              x: {
+                grid: { color: "rgba(148,163,184,0.08)" },
+                ticks: {
+                  color: "#94a3b8",
+                  callback: (v) => v.toFixed(0) + "s",
+                },
+                title: {
+                  display: true,
+                  text: "Time (seconds)",
+                  color: "#94a3b8",
+                },
+              },
+              y: {
+                grid: { display: false },
+                ticks: { color: "#94a3b8" },
+              },
+            },
+          },
+        });
+      }
+
+      // ===== View: Dimensions =====
+      function renderDimensions(data) {
+        const { centroids } = data;
+        const speakers = centroids.centroids || {};
+        const labels = Object.keys(speakers);
+
+        const wrapper = document.getElementById("dimensionsWrapper");
+
+        if (labels.length < 1) {
+          wrapper.innerHTML =
+            '<div class="empty-state"><div class="icon">📏</div><p>No speaker data</p></div>';
+          return;
+        }
+
+        let html =
+          '<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px;">';
+
+        // Add data-speaker attribute to each card
+        labels.forEach((label, idx) => {
+          html += `<div data-speaker="${label}" style="...">`;
+          const sp = speakers[label];
+          const topDims = sp.top_dimensions || [];
+          const quality = sp.centroid_quality || 0;
+          const qualityClass =
+            quality >= 0.8 ? "good" : quality >= 0.5 ? "warning" : "bad";
+
+          html += `
+          <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:16px;">
+            <h4 style="margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+              <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${getColor(idx)};"></span>
+              ${label}
+              <span class="metric-badge ${qualityClass}" style="margin-left:auto;">${(quality * 100).toFixed(0)}%</span>
+            </h4>
+            <div class="stat-row"><span class="stat-label">Segments</span><span class="stat-value">${sp.segment_count || 0}</span></div>
+            <div class="stat-row"><span class="stat-label">Centroid Norm</span><span class="stat-value">${(sp.centroid_norm || 0).toFixed(3)}</span></div>
+            <div class="stat-row"><span class="stat-label">Active Duration</span><span class="stat-value">${(sp.active_duration || 0).toFixed(1)}s</span></div>
+            <div class="stat-row"><span class="stat-label">Avg Dist to Others</span><span class="stat-value">${((sp.avg_distance_to_others || 0) * 100).toFixed(0)}%</span></div>
+            <div class="stat-row"><span class="stat-label">Nearest Neighbor</span><span class="stat-value">${sp.nearest_neighbor || "-"} (${((sp.nearest_similarity || 0) * 100).toFixed(0)}% sim)</span></div>
+            <div style="margin-top:12px; font-weight:600; color:var(--text-secondary); font-size:12px;">Top 5 Dimensions:</div>
+            ${topDims
+              .slice(0, 5)
+              .map(
+                (d) => `
+              <div class="stat-row" style="font-size:12px;">
+                <span class="stat-label">Dimension ${d.dim}</span>
+                <span class="stat-value" style="font-family:monospace;">${(d.value || 0).toFixed(4)}</span>
+              </div>
+            `,
+              )
+              .join("")}
+          </div>`;
+        });
+
+        // Check URL params for speaker highlight
+        const params = getQueryParams();
+        if (params.speaker) {
+          highlightSpeaker(params.speaker);
+        }
+
+        html += "</div>";
+        wrapper.innerHTML = html;
+      }
+
+      // ===== View: Detail Table =====
+      function renderTable(data) {
         const { centroids, distances } = data;
         const speakers = centroids.centroids || {};
         const labels = Object.keys(speakers);
         const distLabels = distances.labels || [];
         const distMatrix = distances.distances || [];
 
-        if (mainChart) mainChart.destroy();
-
-        if (labels.length < 2) {
-          document.getElementById("chartWrapper").innerHTML =
-            '<div class="empty-state"><div class="icon">🔍</div><p>Need 2+ speakers for comparison</p></div>';
-          return;
-        }
-
-        // Build pairwise comparison table
-        let html =
-          '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">';
-        html +=
-          '<thead><tr><th style="padding:8px;">Speaker Pair</th><th style="padding:8px;">Similarity</th><th style="padding:8px;">Distance</th><th style="padding:8px;">Would Merge?</th></tr></thead><tbody>';
-
-        for (let i = 0; i < distLabels.length; i++) {
-          for (let j = i + 1; j < distLabels.length; j++) {
-            const dist = distMatrix[i]?.[j] || 0;
-            const sim = 1 - dist;
-            const wouldMerge = sim >= 0.85; // Consolidation threshold
-            const simClass =
-              sim >= 0.85 ? "bad" : sim >= 0.5 ? "warning" : "good";
-            const bgColor = sim >= 0.85 ? "rgba(239,68,68,0.1)" : "";
-
-            html += `<tr style="background:${bgColor};">
-                        <td style="padding:8px;"><strong>${distLabels[i]}</strong> ↔ <strong>${distLabels[j]}</strong></td>
-                        <td style="padding:8px;"><span class="metric-badge ${simClass}">${(sim * 100).toFixed(1)}%</span></td>
-                        <td style="padding:8px;">${(dist * 100).toFixed(1)}%</td>
-                        <td style="padding:8px;">${wouldMerge ? "⚠️ Yes" : "✅ No"}</td>
-                    </tr>`;
-          }
-        }
-
-        html += "</tbody></table></div>";
-        document.getElementById("chartWrapper").innerHTML = html;
-        document.getElementById("plotDescription").textContent =
-          "Pairwise comparison of all speaker centroids. Red rows indicate pairs with high similarity that might represent the same speaker. The consolidation threshold is 85%.";
-      }
-
-      function renderDimensionsView(data) {
-        const { centroids } = data;
-        const speakers = centroids.centroids || {};
-        const labels = Object.keys(speakers);
-
-        if (mainChart) mainChart.destroy();
+        const wrapper = document.getElementById("tableWrapper");
 
         if (labels.length < 1) {
-          document.getElementById("chartWrapper").innerHTML =
-            '<div class="empty-state"><div class="icon">📏</div><p>No speaker data</p></div>';
+          wrapper.innerHTML =
+            '<div class="empty-state"><div class="icon">📋</div><p>No speaker data</p></div>';
           return;
         }
 
-        // Show top dimensions for each speaker
-        let html =
-          '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;">';
-
-        labels.forEach((label, idx) => {
-          const sp = speakers[label];
-          const topDims = sp.top_dimensions || [];
-
-          html += `<div class="comparison-card">
-                    <h4><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${getColor(idx)};margin-right:8px;"></span>${label}</h4>
-                    <div class="stat-row"><span class="stat-label">Segments</span><span class="stat-value">${sp.segment_count || 0}</span></div>
-                    <div class="stat-row"><span class="stat-label">Quality</span><span class="stat-value">${((sp.centroid_quality || 0) * 100).toFixed(0)}%</span></div>
-                    <div class="stat-row"><span class="stat-label">Centroid Norm</span><span class="stat-value">${(sp.centroid_norm || 0).toFixed(3)}</span></div>
-                    <div class="stat-row"><span class="stat-label">Active Duration</span><span class="stat-value">${(sp.active_duration || 0).toFixed(1)}s</span></div>
-                    <div style="margin-top:12px;font-weight:600;color:var(--text-secondary);">Top Dimensions:</div>`;
-
-          topDims.slice(0, 5).forEach((d) => {
-            html += `<div class="stat-row">
-                        <span class="stat-label">Dimension ${d.dim}</span>
-                        <span class="stat-value">${d.value.toFixed(4)}</span>
-                    </div>`;
+        // Build neighbor lookup
+        const neighborMap = {};
+        distLabels.forEach((l1, i) => {
+          let nearest = null,
+            nearestDist = 1;
+          distLabels.forEach((l2, j) => {
+            if (i !== j && distMatrix[i] && distMatrix[i][j] < nearestDist) {
+              nearestDist = distMatrix[i][j];
+              nearest = l2;
+            }
           });
-
-          html += "</div>";
+          neighborMap[l1] = { label: nearest, dist: nearestDist };
         });
 
-        html += "</div>";
-        document.getElementById("chartWrapper").innerHTML = html;
-        document.getElementById("plotDescription").textContent =
-          "Top embedding dimensions for each speaker centroid. These dimensions contribute most to the speaker's voice signature.";
+        let html = `<table class="data-table">
+          <thead><tr>
+            <th>Speaker</th><th>Segments</th><th>Quality</th>
+            <th>Nearest Neighbor</th><th>Distance</th>
+            <th>Active Time</th><th>First Seen</th><th>Last Seen</th>
+            <th>Top Dimensions</th>
+          </tr></thead><tbody>`;
+
+        // Add data-speaker and click handler
+        labels.forEach((label, idx) => {
+          html += `<tr data-speaker="${label}" 
+                     onclick="openSpeakerDetail('${label}')"
+                     style="cursor:pointer; transition: background 0.2s;"
+                     onmouseenter="this.style.background='rgba(59,130,246,0.08)'"
+                     onmouseleave="this.style.background=''">`;
+          const sp = speakers[label];
+          const q = sp.centroid_quality || 0;
+          const qClass = q >= 0.8 ? "good" : q >= 0.5 ? "warning" : "bad";
+          const nn = neighborMap[label] || {};
+          const nnDist = nn.dist || 1;
+          const nnClass =
+            nnDist < 0.3 ? "bad" : nnDist > 0.6 ? "good" : "warning";
+          const topDims = (sp.top_dimensions || [])
+            .slice(0, 3)
+            .map((d) => `D${d.dim}(${(d.value || 0).toFixed(2)})`)
+            .join(", ");
+
+          html += `<tr>
+            <td>
+              <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${getColor(idx)};margin-right:8px;"></span>
+              <strong>${label}</strong>
+            </td>
+            <td>${sp.segment_count || 0}</td>
+            <td>
+              <span class="metric-badge ${qClass}">${(q * 100).toFixed(0)}%</span>
+              <div class="quality-bar" style="margin-top:4px;">
+                <div class="quality-bar-fill ${qClass}" style="width:${(q * 100).toFixed(0)}%;"></div>
+              </div>
+            </td>
+            <td>${nn.label || "-"}</td>
+            <td><span class="metric-badge ${nnClass}">${(nnDist * 100).toFixed(0)}%</span></td>
+            <td>${(sp.active_duration || 0).toFixed(1)}s</td>
+            <td>${(sp.first_seen || 0).toFixed(1)}s</td>
+            <td>${(sp.last_seen || 0).toFixed(1)}s</td>
+            <td style="font-size:11px;color:var(--text-secondary);">${topDims || "N/A"}</td>
+          </tr>`;
+        });
+
+        html += "</tbody></table>";
+        wrapper.innerHTML = html;
       }
 
-      function switchView(view) {
-        currentView = view;
-        document
-          .querySelectorAll("#plotControls .btn")
-          .forEach((b) => (b.style.background = ""));
-        const btn = document.getElementById(
-          `btn${view.charAt(0).toUpperCase() + view.slice(1)}`,
+      // ===== Open speaker detail in new tab =====
+      function openSpeakerDetail(label) {
+        window.open(
+          `/speakers/plot/dimensions?speaker=${encodeURIComponent(label)}`,
+          "_blank",
         );
-        if (btn) {
-          btn.style.background = "var(--accent-blue)";
-          btn.style.color = "white";
+      }
+
+      // ===== View Switching =====
+      function switchView(view) {
+        console.log(`[SinglePlot] Switching to view: ${view}`);
+        currentView = view;
+
+        // Update tab buttons
+        document.querySelectorAll("#viewTabs .btn").forEach((btn) => {
+          btn.classList.remove("btn-active");
+          if (btn.dataset.view === view) {
+            btn.classList.add("btn-active");
+          }
+        });
+
+        // Update tab contents
+        document.querySelectorAll(".tab-content").forEach((tab) => {
+          tab.classList.remove("active");
+        });
+        const targetTab = document.getElementById("tab-" + view);
+        if (targetTab) {
+          targetTab.classList.add("active");
         }
 
-        if (!plotData) return;
+        // Render if data is available
+        if (!allData) return;
+
+        destroyAllCharts();
 
         switch (view) {
           case "scatter":
-            renderScatterView(plotData);
+            renderScatter(allData);
+            break;
+          case "segments":
+            renderSegments(allData);
+            break;
+          case "similarity":
+            renderSimilarity(allData);
             break;
           case "comparison":
-            renderComparisonView(plotData);
+            renderComparison(allData);
+            break;
+          case "timeline":
+            renderTimeline(allData);
             break;
           case "dimensions":
-            renderDimensionsView(plotData);
+            renderDimensions(allData);
+            break;
+          case "table":
+            renderTable(allData);
             break;
         }
       }
 
-      async function refreshPlot() {
-        console.log("[SinglePlot] Refreshing...");
-        const loading = document.createElement("div");
-        loading.className = "loading-overlay";
-        loading.innerHTML = '<div class="spinner"></div>';
-        document.getElementById("chartWrapper").style.position = "relative";
-        document.getElementById("chartWrapper").appendChild(loading);
+      // ===== URL Parameter Handling =====
+      function getQueryParams() {
+        const params = new URLSearchParams(window.location.search);
+        const result = {};
+        for (const [key, value] of params.entries()) {
+          result[key] = value;
+        }
+        return result;
+      }
 
-        const data = await fetchData();
+      // ===== Highlight specific speaker if passed in URL =====
+      function highlightSpeaker(label) {
+        if (!label || !allData) return;
+        console.log(`[SinglePlot] Highlighting speaker: ${label}`);
+
+        // Highlight in scatter chart
+        if (charts.scatter) {
+          charts.scatter.data.datasets.forEach((ds, i) => {
+            if (ds.label === label) {
+              ds.pointRadius = 18;
+              ds.pointBorderWidth = 4;
+              ds.pointBorderColor = "#fff";
+              ds.order = 0; // Bring to front
+            } else {
+              ds.pointRadius = Math.max(4, ds.pointRadius * 0.6);
+              ds.pointBorderWidth = 1;
+              ds.order = 1;
+            }
+          });
+          charts.scatter.update();
+        }
+
+        // Highlight in timeline
+        if (charts.timeline) {
+          charts.timeline.data.datasets.forEach((ds) => {
+            ds.backgroundColor = ds.backgroundColor.map((color, i) => {
+              if (charts.timeline.data.labels[i] === label) {
+                return color.replace("88", "FF"); // Full opacity
+              }
+              return color.replace(/[0-9A-Fa-f]{2}\)$/, "33)"); // Reduce opacity
+            });
+          });
+          charts.timeline.update();
+        }
+
+        // Scroll to speaker in table/dimensions
+        setTimeout(() => {
+          const elements = document.querySelectorAll("[data-speaker]");
+          elements.forEach((el) => {
+            if (el.dataset.speaker === label) {
+              el.style.border = "2px solid #3b82f6";
+              el.style.boxShadow = "0 0 20px rgba(59,130,246,0.3)";
+              el.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          });
+        }, 500);
+      }
+
+      // ===== Actions =====
+      async function refreshAll() {
+        console.log("[SinglePlot] Refreshing...");
+
+        // Show loading
+        document
+          .querySelectorAll(
+            ".chart-wrapper, #comparisonWrapper, #dimensionsWrapper, #tableWrapper",
+          )
+          .forEach((el) => {
+            if (el.querySelector(".loading-overlay")) return;
+            el.style.position = "relative";
+            const overlay = document.createElement("div");
+            overlay.className = "loading-overlay";
+            overlay.innerHTML = '<div class="spinner"></div>';
+            el.appendChild(overlay);
+          });
+
+        const data = await fetchAllData();
+
+        // Remove loading
         document
           .querySelectorAll(".loading-overlay")
           .forEach((el) => el.remove());
 
         if (!data) {
-          document.getElementById("chartWrapper").innerHTML =
-            '<div class="error-message">⚠️ Failed to load data</div>';
+          document
+            .querySelectorAll(
+              ".chart-wrapper, #comparisonWrapper, #dimensionsWrapper, #tableWrapper",
+            )
+            .forEach((el) => {
+              el.innerHTML =
+                '<div class="error-message">⚠️ Failed to load data. Is the speaker labeler initialized?</div>';
+            });
           return;
         }
 
-        plotData = data;
+        allData = data;
+        updateSummaryStrip(data);
         switchView(currentView);
+
+        // ===== Handle URL params =====
+        const params = getQueryParams();
+        if (params.speaker) {
+          setTimeout(() => highlightSpeaker(params.speaker), 300);
+        }
+        if (params.speaker1 && params.speaker2) {
+          setTimeout(() => {
+            switchView("comparison");
+            highlightSpeakers([params.speaker1, params.speaker2]);
+          }, 300);
+        }
+
+        console.log("[SinglePlot] Refresh complete");
       }
 
-      function downloadPlot() {
-        if (mainChart) {
-          const link = document.createElement("a");
-          link.download = `speaker_${getPlotNameFromURL()}_${new Date().toISOString().slice(0, 10)}.png`;
-          link.href = mainChart.toBase64Image();
-          link.click();
+      function highlightSpeakers(labels) {
+        if (!labels || !allData) return;
+        // Highlight specific rows in comparison table
+        setTimeout(() => {
+          const rows = document.querySelectorAll(
+            "#comparisonWrapper .data-table tbody tr",
+          );
+          rows.forEach((row) => {
+            const cells = row.querySelectorAll(
+              "td:first-child strong, td:nth-child(2) strong",
+            );
+            const rowLabels = Array.from(cells).map((c) =>
+              c.textContent.trim(),
+            );
+            if (labels.every((l) => rowLabels.includes(l))) {
+              row.style.background = "rgba(59,130,246,0.15)";
+              row.style.border = "1px solid #3b82f6";
+              row.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          });
+        }, 500);
+      }
+
+      async function mergeSpeakers(label1, label2) {
+        if (!confirm(`Merge ${label2} into ${label1}? This cannot be undone.`))
+          return;
+
+        console.log(`[SinglePlot] Merging: ${label2} → ${label1}`);
+        try {
+          const formData = new FormData();
+          formData.append("label1", label1);
+          formData.append("label2", label2);
+
+          const res = await fetch("/speakers/merge", {
+            method: "POST",
+            body: formData,
+          });
+          const result = await res.json();
+
+          if (result.success) {
+            alert(
+              `Merged ${label2} → ${label1}\nResult: ${result.merged_label}`,
+            );
+            refreshAll();
+          } else {
+            alert("Merge failed: " + (result.detail || "Unknown error"));
+          }
+        } catch (e) {
+          alert("Merge error: " + e.message);
         }
       }
 
+      async function compareSpeakers(label1, label2) {
+        console.log(`[SinglePlot] Comparing: ${label1} vs ${label2}`);
+        try {
+          const res = await fetch(
+            `/speakers/centroid-comparison?label1=${encodeURIComponent(label1)}&label2=${encodeURIComponent(label2)}`,
+          );
+          const data = await res.json();
+
+          if (data.error) {
+            alert("Comparison failed: " + data.error);
+            return;
+          }
+
+          const comp = data.comparison;
+          let msg = `${label1} ↔ ${label2}\n\n`;
+          msg += `Cosine Similarity: ${(comp.cosine_similarity * 100).toFixed(1)}%\n`;
+          msg += `Cosine Distance: ${(comp.cosine_distance * 100).toFixed(1)}%\n`;
+          msg += `Euclidean Distance: ${comp.euclidean_distance.toFixed(4)}\n`;
+          msg += `Would Merge: ${comp.would_merge ? "Yes ⚠️" : "No ✅"}\n`;
+          msg += `Merge Threshold: ${(comp.merge_threshold * 100).toFixed(0)}%\n`;
+          msg += `\nTop Different Dimensions:\n`;
+          (comp.top_different_dimensions || []).slice(0, 3).forEach((d) => {
+            msg += `  D${d.dimension}: ${d.value_speaker1.toFixed(3)} vs ${d.value_speaker2.toFixed(3)} (diff: ${d.diff.toFixed(4)})\n`;
+          });
+
+          alert(msg);
+        } catch (e) {
+          alert("Comparison error: " + e.message);
+        }
+      }
+
+      function downloadCurrentView() {
+        // Find active chart and download
+        const activeChart = Object.values(charts).find((c) => c && c.canvas);
+        if (activeChart) {
+          const link = document.createElement("a");
+          link.download = `speaker_${currentView}_${new Date().toISOString().slice(0, 10)}.png`;
+          link.href = activeChart.toBase64Image();
+          link.click();
+        } else {
+          alert("No chart available to download in this view.");
+        }
+      }
+
+      // ===== Initialize =====
       document.addEventListener("DOMContentLoaded", () => {
         console.log("[SinglePlot] Initializing...");
-        refreshPlot();
+        refreshAll();
       });
     </script>
   </body>

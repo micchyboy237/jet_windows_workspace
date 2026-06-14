@@ -1,73 +1,183 @@
-# example_basic.py
-"""
-Basic Speaker Verification Example
-===================================
-Goal: Compare two audio files to decide if they're the same speaker.
+import json
+import os
+import time
 
-What we do:
-  1. Load the smart factory function (it picks the right model for you)
-  2. Create fake audio to simulate real recordings
-  3. Extract voice fingerprints (embeddings)
-  4. Measure cosine distance between them (0 = identical, 2 = totally different)
-"""
+from headroom import compress  # pip install "headroom-ai[all]"
+from openai import OpenAI, Stream
+from openai.types.chat import ChatCompletionChunk
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.syntax import Syntax
+from rich.table import Table
 
-import numpy as np
-import torch
-from scipy.spatial.distance import cdist
+# Initialize rich console
+console = Console()
 
-from pyannote.audio.pipelines.speaker_verification import PretrainedSpeakerEmbedding
+# Local model config — matches your llama-server setup
+LOCAL_MODEL = "Qwen3.5-0.8B-Q4_K_M"  # model string (llama-server ignores it, but required by client)
+# LOCAL_BASE_URL = os.getenv("LLAMA_CPP_LLM_URL", "http://localhost:8080/v1")
+LOCAL_BASE_URL = "http://192.168.68.40:8080/v1"
 
-# ------------------------------------------------------------------
-# 1. Load the embedding model (factory auto-picks PyannoteAudio here)
-# ------------------------------------------------------------------
-get_embedding = PretrainedSpeakerEmbedding(
-    "pyannote/embedding",
-    device=torch.device("cpu"),
+# Your llama-server has: -c 8192 context, -b 1024 batch, -ub 512 micro-batch
+# Leave headroom for the system prompt, user message, and LLM output (~1500 tokens)
+TOKEN_BUDGET = 5500  # safe headroom within 8192 ctx
+
+# Example: Large tool output (e.g., search results or DB query)
+# Reduced from 500 to 50 items — 500 items would already overflow 8192 tokens
+large_tool_output = {
+    "results": [
+        {
+            "id": i,
+            "title": f"Item {i}",
+            "description": f"Long description with details {i} "
+            * 10,  # trimmed from *50
+            "score": 100 - i,
+        }
+        for i in range(50)  # reduced from 500; compress() will handle the rest
+    ],
+    "metadata": {"total": 50, "query": "example search"},
+}
+
+messages = [
+    {
+        "role": "system",
+        "content": "You are a helpful assistant. Analyze tool outputs carefully.",
+    },
+    {"role": "user", "content": "Summarize the top results from this search."},
+    {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": json.dumps(large_tool_output),
+    },
+]
+
+# === Compression Step ===
+console.print(
+    Panel.fit("[bold cyan]📦 Compression Phase[/bold cyan]", border_style="cyan")
 )
 
-print(f"Sample rate  : {get_embedding.sample_rate} Hz")
-print(f"Embedding dim: {get_embedding.dimension}")
-print(f"Distance metric: {get_embedding.metric}")
-print(f"Min audio length: {get_embedding.min_num_samples} samples "
-      f"({get_embedding.min_num_samples / get_embedding.sample_rate:.3f} sec)\n")
+with Progress(
+    SpinnerColumn(),
+    TextColumn("[progress.description]{task.description}"),
+    console=console,
+    transient=True,
+) as progress:
+    task = progress.add_task("[cyan]Compressing messages...", total=None)
+    # Pass token_budget to hard-cap tokens for your 8192-ctx local model.
+    # model= here is used by headroom to pick compression strategy (not sent to llama-server).
+    result = compress(
+        messages,
+        model="gpt-4o",  # headroom uses this for strategy selection only
+        token_budget=TOKEN_BUDGET,  # enforce fit within llama-server context
+        ccr_enabled=True,  # reversible compression (default)
+    )
+    progress.update(task, completed=True)
 
-# ------------------------------------------------------------------
-# 2. Create fake audio tensors — shape must be (batch, channels, samples)
-#    In real usage, load with torchaudio:
-#      waveform, sr = torchaudio.load("speaker.wav")
-#      waveform = waveform[None]  # add batch dimension → (1, 1, samples)
-# ------------------------------------------------------------------
-SAMPLE_RATE = get_embedding.sample_rate
-TWO_SECONDS = 2 * SAMPLE_RATE
+# Display compression stats in a table
+stats_table = Table(title="Compression Statistics", box=box.ROUNDED, style="cyan")
+stats_table.add_column("Metric", style="bold cyan")
+stats_table.add_column("Value", style="green")
+stats_table.add_row("Tokens before", f"{result.tokens_before:,}")
+stats_table.add_row("Tokens after", f"{result.tokens_after:,}")
+stats_table.add_row(
+    "Tokens saved", f"{result.tokens_saved:,} ({result.compression_ratio:.1%})"
+)
+stats_table.add_row("Transforms applied", str(result.transforms_applied))
+console.print(stats_table)
 
-# Simulate two recordings of "the same speaker" (same random seed)
-torch.manual_seed(42)
-speaker_A_clip1 = torch.randn(1, 1, TWO_SECONDS)  # (batch=1, channels=1, samples)
-speaker_A_clip2 = torch.randn(1, 1, TWO_SECONDS)  # different recording, same seed logic
+# Show compressed messages preview (fixed for non-JSON serializable object)
+if result.tokens_after > 0:
+    # Access the compressed messages directly
+    compressed_messages = result.messages if hasattr(result, "messages") else result
+    compressed_preview = json.dumps(compressed_messages, indent=2, ensure_ascii=False)[
+        :500
+    ]
+    console.print(
+        Panel(
+            Syntax(
+                compressed_preview
+                + ("..." if len(json.dumps(compressed_messages)) > 500 else ""),
+                "json",
+                theme="monokai",
+            ),
+            title="[bold]Compressed Messages Preview[/bold]",
+            border_style="blue",
+        )
+    )
 
-# Simulate a "different speaker"
-torch.manual_seed(99)
-speaker_B_clip1 = torch.randn(1, 1, TWO_SECONDS)
+# Abort if still too large (safety check)
+if result.tokens_after > TOKEN_BUDGET:
+    console.print(
+        "[bold red]❌ Error:[/bold red] Compressed messages still exceed token budget!"
+    )
+    raise RuntimeError(
+        f"Compressed messages still too large: {result.tokens_after} tokens "
+        f"(budget: {TOKEN_BUDGET}). Reduce input size or lower token_budget."
+    )
 
-# ------------------------------------------------------------------
-# 3. Extract embeddings — output shape is (batch_size, dimension)
-# ------------------------------------------------------------------
-emb_A1 = get_embedding(speaker_A_clip1)  # shape: (1, 512)
-emb_A2 = get_embedding(speaker_A_clip2)  # shape: (1, 512)
-emb_B1 = get_embedding(speaker_B_clip1)  # shape: (1, 512)
+# === Send to local llama-server ===
+client = OpenAI(
+    base_url=LOCAL_BASE_URL,
+    api_key="not-needed",  # llama-server doesn't require an API key
+)
 
-print(f"Embedding shape: {emb_A1.shape}")
+console.print(
+    Panel.fit("[bold green]🤖 LLM Generation Phase[/bold green]", border_style="green")
+)
 
-# ------------------------------------------------------------------
-# 4. Compare using cosine distance
-#    cdist computes a distance matrix; [0,0] picks the single value
-#    Cosine distance range: 0 (identical) → 2 (opposite)
-#    Typical threshold for same speaker: ~0.5–0.7 (model-dependent)
-# ------------------------------------------------------------------
-dist_same   = cdist(emb_A1, emb_A2, metric="cosine")[0, 0]
-dist_diff   = cdist(emb_A1, emb_B1, metric="cosine")[0, 0]
+# Show messages being sent
+messages_preview = json.dumps(messages, indent=2, ensure_ascii=False)[:800]
+console.print(
+    Panel(
+        Syntax(
+            messages_preview + ("..." if len(json.dumps(messages)) > 800 else ""),
+            "json",
+            theme="monokai",
+        ),
+        title="[bold]Messages to LLM[/bold]",
+        border_style="yellow",
+    )
+)
 
-THRESHOLD = 0.7  # tune this per model
+stream: Stream[ChatCompletionChunk] = client.chat.completions.create(
+    model="Qwen/Qwen3.5-2B",
+    messages=messages,
+    max_tokens=500,
+    temperature=1.0,
+    top_p=1.0,
+    presence_penalty=2.0,
+    extra_body={
+        "top_k": 20,
+        "chat_template_kwargs": {
+            "enable_thinking": False,
+        },
+    },
+    stream=True,
+)
 
-print(f"Distance A1 vs A2 (same speaker): {dist_same:.4f}  → {'SAME ✓' if dist_same < THRESHOLD else 'DIFFERENT ✗'}")
-print(f"Distance A1 vs B1 (diff speaker): {dist_diff:.4f}  → {'SAME ✓' if dist_diff < THRESHOLD else 'DIFFERENT ✗'}")
+console.print("\n[bold cyan]📝 LLM Response:[/bold cyan]")
+console.print("[dim]" + "─" * 50 + "[/dim]")
+
+# Use standard print with flush for immediate token display
+char_count = 0
+start_time = time.time()
+
+for part in stream:
+    if part.choices and part.choices[0].delta:
+        delta = part.choices[0].delta
+        if delta.content:
+            chunk = delta.content
+            char_count += len(chunk)
+            # Print with cyan color using ANSI codes, flush immediately
+            print(f"\033[36m{chunk}\033[0m", end="", flush=True)
+
+elapsed_time = time.time() - start_time
+
+print()  # New line after streaming
+console.print("[dim]" + "─" * 50 + "[/dim]")
+console.print(
+    f"[dim]📊 Response Stats: {char_count:,} chars in {elapsed_time:.2f}s ({char_count / elapsed_time:.1f} chars/s)[/dim]"
+)
+console.print("[bold green]✅ Complete![/bold green]")
