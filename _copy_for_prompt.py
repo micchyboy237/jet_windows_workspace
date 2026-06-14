@@ -292,7 +292,7 @@ def main():
     if system_message:
         clipboard_content_parts.append(f"System\n{system_message}\n")
     # Query should come before instructions
-    clipboard_content_parts.append(f"Query\n{query_message}\n")
+    clipboard_content_parts.append(f"{query_message}\n\n")
     if instructions_message:
         clipboard_content_parts.append(f"Instructions\n{instructions_message}\n")
     if INCLUDE_FILE_STRUCTURE:
