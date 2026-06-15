@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from speaker_metrics import (
     HealthStatus,
+    IntraSpeakerInput,
     compute_inter_speaker_separation,
     compute_intra_speaker_variance,
     cosine_distance,
@@ -22,51 +23,78 @@ from speaker_metrics import (
 @pytest.fixture
 def identical_embeddings():
     """Create perfectly identical embeddings."""
-    return np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-        ]
+    return IntraSpeakerInput(
+        label="SPEAKER_01",
+        embeddings=np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ]
+        ),
     )
 
 
 @pytest.fixture
 def tight_embeddings():
     """Create slightly varying embeddings forming a tight cluster."""
-    return np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.99, 0.01, 0.0],
-            [1.01, -0.01, 0.0],
-            [0.98, 0.02, 0.0],
-        ]
+    return IntraSpeakerInput(
+        label="SPEAKER_01",
+        embeddings=np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.99, 0.01, 0.0],
+                [1.01, -0.01, 0.0],
+                [0.98, 0.02, 0.0],
+            ]
+        ),
     )
 
 
 @pytest.fixture
 def spread_embeddings():
     """Create widely spread embeddings (cosine distances ~0.5-1.5)."""
-    return np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-            [-1.0, 0.0, 0.0],
-        ]
+    return IntraSpeakerInput(
+        label="SPEAKER_01",
+        embeddings=np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [-1.0, 0.0, 0.0],
+            ]
+        ),
     )
 
 
 @pytest.fixture
 def single_embedding():
     """Single embedding for edge case testing."""
-    return np.array([[1.0, 0.0, 0.0]])
+    return IntraSpeakerInput(label="SPEAKER_01", embeddings=np.array([[1.0, 0.0, 0.0]]))
 
 
 @pytest.fixture
 def custom_segment_ids():
     """Custom segment IDs for testing labeled output."""
     return ["utt_001", "utt_002", "utt_003", "utt_004"]
+
+
+@pytest.fixture
+def outlier_embeddings_with_ids():
+    """Embeddings with one clear outlier and custom IDs."""
+    speaker_input = IntraSpeakerInput(
+        label="SPEAKER_01",
+        embeddings=np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.95, 0.05, 0.0],
+                [1.05, -0.05, 0.0],
+                [0.0, 1.0, 0.0],
+            ]
+        ),
+    )
+    segment_ids = ["good_1", "good_2", "good_3", "outlier"]
+    return speaker_input, segment_ids
 
 
 @pytest.fixture
@@ -104,28 +132,14 @@ def mixed_speakers():
     }
 
 
-@pytest.fixture
-def outlier_embeddings_with_ids():
-    """Embeddings with one clear outlier and custom IDs."""
-    embeddings = np.array(
-        [
-            [1.0, 0.0, 0.0],
-            [0.95, 0.05, 0.0],
-            [1.05, -0.05, 0.0],
-            [0.0, 1.0, 0.0],  # Outlier - distance ~1.0 from centroid
-        ]
-    )
-    segment_ids = ["good_1", "good_2", "good_3", "outlier"]
-    return embeddings, segment_ids
-
-
 # ============================================================================
 # Helper: Check actual distances in test data
 # ============================================================================
 
 
-def get_actual_mean_distance(embeddings):
+def get_actual_mean_distance(speaker_input):
     """Helper to compute actual mean distance for debugging thresholds."""
+    embeddings = speaker_input["embeddings"]
     centroid = np.mean(embeddings, axis=0)
     distances = [cosine_distance(emb, centroid) for emb in embeddings]
     return float(np.mean(distances))
@@ -269,15 +283,10 @@ class TestIntraSpeakerVariance:
 
     def test_identify_problematic_segments(self, outlier_embeddings_with_ids):
         """Should be able to identify which segments are outliers."""
-        embeddings, segment_ids = outlier_embeddings_with_ids
-
-        result = compute_intra_speaker_variance(embeddings, segment_ids=segment_ids)
-
-        # Find the item with max distance
+        speaker_input, segment_ids = outlier_embeddings_with_ids
+        result = compute_intra_speaker_variance(speaker_input, segment_ids=segment_ids)
         max_item = max(result["distances"], key=lambda x: x["distance"])
         assert max_item["segment_id"] == "outlier"
-
-        # The outlier should have significantly higher distance
         other_distances = [
             item["distance"]
             for item in result["distances"]
@@ -299,17 +308,18 @@ class TestIntraSpeakerVariance:
 
     def test_thresholds_warning(self):
         """Embeddings with known distance should trigger warning when healthy threshold is below actual mean."""
-        # These vectors produce a measurable non-zero distance to centroid
-        embeddings = np.array(
-            [
-                [1.0, 0.0, 0.0],
-                [0.7, 0.3, 0.0],
-                [0.8, 0.0, 0.2],
-                [0.9, -0.1, 0.0],
-            ]
+        embeddings = IntraSpeakerInput(
+            label="SPEAKER_01",
+            embeddings=np.array(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.7, 0.3, 0.0],
+                    [0.8, 0.0, 0.2],
+                    [0.9, -0.1, 0.0],
+                ]
+            ),
         )
         actual_mean = get_actual_mean_distance(embeddings)
-        # Set healthy threshold just below actual mean, warning above
         result = compute_intra_speaker_variance(
             embeddings,
             healthy_threshold=actual_mean - 0.01,
@@ -319,16 +329,18 @@ class TestIntraSpeakerVariance:
 
     def test_thresholds_unhealthy(self):
         """Embeddings with larger spread should trigger unhealthy when both thresholds are below actual mean."""
-        embeddings = np.array(
-            [
-                [1.0, 0.0, 0.0],
-                [0.3, 0.7, 0.0],
-                [0.0, 0.8, 0.2],
-                [0.5, -0.3, 0.0],
-            ]
+        embeddings = IntraSpeakerInput(
+            label="SPEAKER_01",
+            embeddings=np.array(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.3, 0.7, 0.0],
+                    [0.0, 0.8, 0.2],
+                    [0.5, -0.3, 0.0],
+                ]
+            ),
         )
         actual_mean = get_actual_mean_distance(embeddings)
-        # Set both thresholds below actual mean
         result = compute_intra_speaker_variance(
             embeddings,
             healthy_threshold=0.01,
@@ -338,35 +350,31 @@ class TestIntraSpeakerVariance:
 
     def test_known_distance_threshold(self):
         """Test all three health states using actual measured distances."""
-        embeddings = np.array(
-            [
-                [1.0, 0.0, 0.0],
-                [0.6, 0.4, 0.0],
-                [0.5, 0.0, 0.5],
-                [0.0, 0.7, 0.3],
-            ]
+        embeddings = IntraSpeakerInput(
+            label="SPEAKER_01",
+            embeddings=np.array(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.6, 0.4, 0.0],
+                    [0.5, 0.0, 0.5],
+                    [0.0, 0.7, 0.3],
+                ]
+            ),
         )
         actual_mean = get_actual_mean_distance(embeddings)
-        # Verify we have a measurable distance
         assert actual_mean > 0.05, f"Expected measurable distance, got {actual_mean}"
-
-        # Healthy: threshold well above actual mean
         result = compute_intra_speaker_variance(
             embeddings,
             healthy_threshold=actual_mean + 0.2,
             warning_threshold=actual_mean + 0.4,
         )
         assert result["status"] == HealthStatus.HEALTHY
-
-        # Warning: healthy threshold below actual mean, warning above
         result = compute_intra_speaker_variance(
             embeddings,
             healthy_threshold=actual_mean - 0.02,
             warning_threshold=actual_mean + 0.2,
         )
         assert result["status"] == HealthStatus.WARNING
-
-        # Unhealthy: both thresholds below actual mean
         result = compute_intra_speaker_variance(
             embeddings,
             healthy_threshold=0.01,
@@ -421,17 +429,25 @@ class TestIntraSpeakerVariance:
     def test_empty_array_raises_error(self):
         """Empty array should raise ValueError."""
         with pytest.raises(ValueError, match="cannot be empty"):
-            compute_intra_speaker_variance(np.array([]))
+            compute_intra_speaker_variance(
+                IntraSpeakerInput(label="SPEAKER_01", embeddings=np.array([]))
+            )
 
     def test_1d_array_raises_error(self):
         """1D array should raise ValueError."""
         with pytest.raises(ValueError, match="must be 2D"):
-            compute_intra_speaker_variance(np.array([1.0, 2.0, 3.0]))
+            compute_intra_speaker_variance(
+                IntraSpeakerInput(
+                    label="SPEAKER_01", embeddings=np.array([1.0, 2.0, 3.0])
+                )
+            )
 
     def test_3d_array_raises_error(self):
         """3D array should raise ValueError."""
         with pytest.raises(ValueError, match="must be 2D"):
-            compute_intra_speaker_variance(np.array([[[1.0]]]))
+            compute_intra_speaker_variance(
+                IntraSpeakerInput(label="SPEAKER_01", embeddings=np.array([[[1.0]]]))
+            )
 
     def test_segment_ids_length_mismatch(self, tight_embeddings):
         """Mismatched segment IDs length should raise ValueError."""
@@ -443,8 +459,8 @@ class TestIntraSpeakerVariance:
     def test_result_keys(self, tight_embeddings):
         """Result should contain all expected keys."""
         result = compute_intra_speaker_variance(tight_embeddings)
-
         expected_keys = {
+            "label",
             "mean_distance",
             "std_distance",
             "min_distance",
@@ -454,13 +470,12 @@ class TestIntraSpeakerVariance:
             "status",
             "num_embeddings",
         }
-
         assert set(result.keys()) == expected_keys
 
     def test_result_types(self, tight_embeddings):
         """Result values should have correct types."""
         result = compute_intra_speaker_variance(tight_embeddings)
-
+        assert isinstance(result["label"], str)
         assert isinstance(result["mean_distance"], float)
         assert isinstance(result["std_distance"], float)
         assert isinstance(result["min_distance"], float)
@@ -505,8 +520,8 @@ class TestIntraSpeakerVariance:
         """All distances should be non-negative."""
         rng = np.random.RandomState(42)
         embeddings = rng.randn(10, 128)
-        result = compute_intra_speaker_variance(embeddings)
-
+        speaker_input = IntraSpeakerInput(label="SPEAKER_01", embeddings=embeddings)
+        result = compute_intra_speaker_variance(speaker_input)
         distances = [item["distance"] for item in result["distances"]]
         assert all(d >= 0 for d in distances)
 
@@ -514,8 +529,8 @@ class TestIntraSpeakerVariance:
         """Should work with high-dimensional embeddings."""
         rng = np.random.RandomState(42)
         embeddings = rng.randn(100, 512)
-        result = compute_intra_speaker_variance(embeddings)
-
+        speaker_input = IntraSpeakerInput(label="SPEAKER_01", embeddings=embeddings)
+        result = compute_intra_speaker_variance(speaker_input)
         assert result["num_embeddings"] == 100
         assert len(result["distances"]) == 100
 
@@ -875,30 +890,24 @@ class TestIntegration:
     def test_full_pipeline_healthy(self):
         """Test a complete analysis pipeline with well-separated speakers."""
         rng = np.random.RandomState(42)
-
-        # Create embeddings for 3 speakers with controlled separation
-        # Each speaker has centroid at different location with tight variance
         base_vectors = [
             np.array([1.0, 0.0, 0.0]),
             np.array([0.0, 1.0, 0.0]),
             np.array([0.0, 0.0, 1.0]),
         ]
-
         speaker_data = {}
         for i, base in enumerate(base_vectors):
-            # Add small noise around each base vector
             embeddings = base + rng.randn(10, 3) * 0.01
             speaker_data[f"speaker_{i + 1}"] = embeddings
 
-        # Intra-speaker checks: each should be tight
         for speaker_id, embeddings in speaker_data.items():
-            result = compute_intra_speaker_variance(embeddings)
+            speaker_input = IntraSpeakerInput(label=speaker_id, embeddings=embeddings)
+            result = compute_intra_speaker_variance(speaker_input)
             assert result["status"] == HealthStatus.HEALTHY, (
                 f"Speaker {speaker_id} should be healthy, got {result['mean_distance']:.4f}"
             )
             assert result["mean_distance"] < 0.1
 
-        # Inter-speaker check: centroids are orthogonal → distance ~1.0
         inter_result = compute_inter_speaker_separation(
             speaker_data, healthy_threshold=0.5
         )
@@ -910,12 +919,8 @@ class TestIntegration:
     def test_full_pipeline_unhealthy(self):
         """Test pipeline detecting both intra and inter speaker issues."""
         rng = np.random.RandomState(42)
-
-        # Generate base embeddings for speaker A
         embeddings_a = rng.randn(10, 64)
         centroid_a = np.mean(embeddings_a, axis=0)
-
-        # Speaker B: very close to speaker A's centroid (small offset + tiny noise)
         speaker_data = {
             "speaker_A": embeddings_a,
             "speaker_B": rng.randn(10, 64) * 0.02
@@ -923,9 +928,8 @@ class TestIntegration:
             + np.array([0.05] + [0.0] * 63),
         }
 
-        # Check intra-speaker variance: random 64D data has mean cosine distance ~0.67
         intra_a = compute_intra_speaker_variance(
-            speaker_data["speaker_A"],
+            IntraSpeakerInput(label="speaker_A", embeddings=speaker_data["speaker_A"]),
             healthy_threshold=0.5,
             warning_threshold=0.65,
         )
@@ -933,7 +937,6 @@ class TestIntegration:
             f"Speaker A should be unhealthy, got mean={intra_a['mean_distance']:.4f}"
         )
 
-        # Check inter-speaker separation: speaker_B is very close to speaker_A's centroid
         inter = compute_inter_speaker_separation(
             speaker_data,
             healthy_threshold=0.5,

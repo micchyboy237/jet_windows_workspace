@@ -1,9 +1,7 @@
 """
 Speaker Metrics Module
-
 Provides functions for computing intra-speaker variance and inter-speaker
 separation metrics with health status classification.
-
 Typical usage:
     >>> from speaker_metrics import compute_intra_speaker_variance
     >>> embeddings = np.random.randn(10, 256)
@@ -42,9 +40,17 @@ class PairwiseDistanceItem(TypedDict):
     distance: float
 
 
+class IntraSpeakerInput(TypedDict):
+    """Input type for intra-speaker variance analysis."""
+
+    label: str
+    embeddings: NDArray[np.float64]
+
+
 class IntraSpeakerResult(TypedDict):
     """Result type for intra-speaker variance analysis."""
 
+    label: str
     mean_distance: float
     std_distance: float
     min_distance: float
@@ -72,14 +78,11 @@ class InterSpeakerResult(TypedDict):
 def cosine_distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
     """
     Compute cosine distance between two vectors.
-
     Args:
         a: First vector
         b: Second vector
-
     Returns:
         Cosine distance (1 - cosine similarity)
-
     Examples:
         >>> import numpy as np
         >>> cosine_distance(np.array([1.0, 0.0]), np.array([0.0, 1.0]))
@@ -89,18 +92,15 @@ def cosine_distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
     """
     a_norm = np.linalg.norm(a)
     b_norm = np.linalg.norm(b)
-
     if a_norm == 0 or b_norm == 0:
         return 1.0
-
     similarity = np.dot(a, b) / (a_norm * b_norm)
-    # Clamp to [-1, 1] to handle floating point errors
     similarity = np.clip(similarity, -1.0, 1.0)
     return float(1.0 - similarity)
 
 
 def compute_intra_speaker_variance(
-    embeddings: NDArray[np.float64],
+    speaker_input: IntraSpeakerInput,
     segment_ids: List[str] | None = None,
     healthy_threshold: float = 0.3,
     warning_threshold: float = 0.5,
@@ -108,42 +108,41 @@ def compute_intra_speaker_variance(
     """
     Compute intra-speaker variance by measuring distances from each embedding
     to the speaker centroid.
-
     Low variance = all points are close to the center → "healthy" tight cluster.
-
     Args:
-        embeddings: Array of shape (n_embeddings, embedding_dim) containing
-                   all embeddings for a single speaker
+        speaker_input: Dictionary with 'label' (speaker identifier) and
+                      'embeddings' array of shape (n_embeddings, embedding_dim)
         segment_ids: Optional list of segment identifiers corresponding to each embedding.
                     If None, auto-generates IDs as "segment_0", "segment_1", etc.
         healthy_threshold: Mean distance below this is considered healthy
         warning_threshold: Mean distance below this is considered warning,
                           above is unhealthy
-
     Returns:
         IntraSpeakerResult with variance metrics, labeled distances, and health status
-
     Raises:
         ValueError: If embeddings array is empty or has invalid shape
         ValueError: If segment_ids length doesn't match number of embeddings
-
     Example:
-        >>> embeddings = np.array([[1.0, 0.0], [0.9, 0.1], [1.1, -0.1]])
-        >>> result = compute_intra_speaker_variance(embeddings)
+        >>> speaker_input = {
+        ...     "label": "SPEAKER_01",
+        ...     "embeddings": np.array([[1.0, 0.0], [0.9, 0.1], [1.1, -0.1]])
+        ... }
+        >>> result = compute_intra_speaker_variance(speaker_input)
         >>> result['status']
         'healthy'
         >>> result['distances'][0]['segment_id']
         'segment_0'
     """
+    embeddings = speaker_input["embeddings"]
+    speaker_label = speaker_input["label"]
+
     if embeddings.size == 0:
         raise ValueError("Embeddings array cannot be empty")
-
     if embeddings.ndim != 2:
         raise ValueError(f"Embeddings must be 2D array, got {embeddings.ndim}D")
 
     n_embeddings = embeddings.shape[0]
 
-    # Handle segment IDs
     if segment_ids is None:
         segment_ids = [f"segment_{i}" for i in range(n_embeddings)]
     elif len(segment_ids) != n_embeddings:
@@ -153,9 +152,9 @@ def compute_intra_speaker_variance(
         )
 
     if n_embeddings < 2:
-        # With only one embedding, variance is 0
         distance_items = [DistanceItem(segment_id=segment_ids[0], distance=0.0)]
         return IntraSpeakerResult(
+            label=speaker_label,
             mean_distance=0.0,
             std_distance=0.0,
             min_distance=0.0,
@@ -166,15 +165,10 @@ def compute_intra_speaker_variance(
             num_embeddings=1,
         )
 
-    # Compute centroid
     centroid = np.mean(embeddings, axis=0)
-
-    # Compute distances from each embedding to centroid with labels
     distance_values = np.array(
         [cosine_distance(embedding, centroid) for embedding in embeddings]
     )
-
-    # Create labeled distance items
     distance_items = [
         DistanceItem(segment_id=seg_id, distance=float(dist))
         for seg_id, dist in zip(segment_ids, distance_values)
@@ -185,7 +179,6 @@ def compute_intra_speaker_variance(
     min_dist = float(np.min(distance_values))
     max_dist = float(np.max(distance_values))
 
-    # Determine health status
     if mean_dist <= healthy_threshold:
         status = HealthStatus.HEALTHY
     elif mean_dist <= warning_threshold:
@@ -194,6 +187,7 @@ def compute_intra_speaker_variance(
         status = HealthStatus.UNHEALTHY
 
     return IntraSpeakerResult(
+        label=speaker_label,
         mean_distance=mean_dist,
         std_distance=std_dist,
         min_distance=min_dist,
@@ -213,23 +207,18 @@ def compute_inter_speaker_separation(
     """
     Compute inter-speaker separation by measuring distances between
     speaker centroids.
-
     High separation = centroids are far apart → "healthy" distinct speakers.
-
     Args:
         speaker_embeddings: Dictionary mapping speaker IDs to their embedding arrays.
                            Each array has shape (n_embeddings, embedding_dim)
         healthy_threshold: Mean separation above this is considered healthy
         warning_threshold: Mean separation above this is considered warning,
                           below is unhealthy
-
     Returns:
         InterSpeakerResult with separation metrics, labeled pairwise distances,
         and health status
-
     Raises:
         ValueError: If fewer than 2 speakers provided or embeddings are invalid
-
     Example:
         >>> spk_embs = {
         ...     'speaker_A': np.array([[1.0, 0.0], [0.9, 0.1]]),
@@ -242,7 +231,6 @@ def compute_inter_speaker_separation(
     if len(speaker_embeddings) < 2:
         raise ValueError(f"Need at least 2 speakers, got {len(speaker_embeddings)}")
 
-    # Validate all embedding arrays
     for speaker_id, embeddings in speaker_embeddings.items():
         if embeddings.size == 0:
             raise ValueError(f"Speaker '{speaker_id}' has empty embeddings")
@@ -251,17 +239,13 @@ def compute_inter_speaker_separation(
                 f"Speaker '{speaker_id}' embeddings must be 2D, got {embeddings.ndim}D"
             )
 
-    # Compute centroids for each speaker
     centroids = {
         speaker_id: np.mean(embeddings, axis=0)
         for speaker_id, embeddings in speaker_embeddings.items()
     }
 
-    # Get ordered list of speaker labels for consistent matrix indexing
     speaker_labels = sorted(centroids.keys())
     n_speakers = len(speaker_labels)
-
-    # Compute pairwise distances between all centroids
     distance_matrix = np.zeros((n_speakers, n_speakers))
     pairwise_items: List[PairwiseDistanceItem] = []
 
@@ -272,8 +256,6 @@ def compute_inter_speaker_separation(
             )
             distance_matrix[i, j] = dist
             distance_matrix[j, i] = dist
-
-            # Create labeled distance item
             pairwise_items.append(
                 PairwiseDistanceItem(
                     speaker_id_1=speaker_labels[i],
@@ -282,15 +264,12 @@ def compute_inter_speaker_separation(
                 )
             )
 
-    # Extract upper triangle (excluding diagonal) for statistics
     upper_triangle = distance_matrix[np.triu_indices(n_speakers, k=1)]
-
     mean_sep = float(np.mean(upper_triangle))
     std_sep = float(np.std(upper_triangle))
     min_sep = float(np.min(upper_triangle))
     max_sep = float(np.max(upper_triangle))
 
-    # Determine health status
     if mean_sep >= healthy_threshold:
         status = HealthStatus.HEALTHY
     elif mean_sep >= warning_threshold:
