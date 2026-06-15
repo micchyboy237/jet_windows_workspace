@@ -47,6 +47,24 @@ class IntraSpeakerInput(TypedDict):
     embeddings: NDArray[np.float64]
 
 
+class InterSpeakerInput(TypedDict):
+    """Input type for inter-speaker separation analysis.
+
+    Contains a mapping of speaker identifiers to their embedding arrays.
+    Each array has shape (n_embeddings, embedding_dim).
+
+    Example:
+        >>> speaker_embeddings: InterSpeakerInput = {
+        ...     'speakers': {
+        ...         'speaker_A': np.array([[1.0, 0.0], [0.9, 0.1]]),
+        ...         'speaker_B': np.array([[-1.0, 0.0], [-0.9, -0.1]])
+        ...     }
+        ... }
+    """
+
+    speakers: Dict[str, NDArray[np.float64]]
+
+
 class IntraSpeakerResult(TypedDict):
     """Result type for intra-speaker variance analysis."""
 
@@ -200,37 +218,48 @@ def compute_intra_speaker_variance(
 
 
 def compute_inter_speaker_separation(
-    speaker_embeddings: Dict[str, NDArray[np.float64]],
+    speaker_input: InterSpeakerInput,
     healthy_threshold: float = 0.5,
     warning_threshold: float = 0.3,
 ) -> InterSpeakerResult:
     """
     Compute inter-speaker separation by measuring distances between
     speaker centroids.
+
     High separation = centroids are far apart → "healthy" distinct speakers.
+
     Args:
-        speaker_embeddings: Dictionary mapping speaker IDs to their embedding arrays.
-                           Each array has shape (n_embeddings, embedding_dim)
+        speaker_input: InterSpeakerInput with 'speakers' dict mapping
+                      speaker IDs to their embedding arrays.
+                      Each array has shape (n_embeddings, embedding_dim)
         healthy_threshold: Mean separation above this is considered healthy
         warning_threshold: Mean separation above this is considered warning,
                           below is unhealthy
+
     Returns:
         InterSpeakerResult with separation metrics, labeled pairwise distances,
         and health status
+
     Raises:
         ValueError: If fewer than 2 speakers provided or embeddings are invalid
+
     Example:
-        >>> spk_embs = {
-        ...     'speaker_A': np.array([[1.0, 0.0], [0.9, 0.1]]),
-        ...     'speaker_B': np.array([[-1.0, 0.0], [-0.9, -0.1]])
+        >>> speaker_input = {
+        ...     'speakers': {
+        ...         'speaker_A': np.array([[1.0, 0.0], [0.9, 0.1]]),
+        ...         'speaker_B': np.array([[-1.0, 0.0], [-0.9, -0.1]])
+        ...     }
         ... }
-        >>> result = compute_inter_speaker_separation(spk_embs)
+        >>> result = compute_inter_speaker_separation(speaker_input)
         >>> result['pairwise_distances'][0]['speaker_id_1']
         'speaker_A'
     """
+    speaker_embeddings = speaker_input["speakers"]
+
     if len(speaker_embeddings) < 2:
         raise ValueError(f"Need at least 2 speakers, got {len(speaker_embeddings)}")
 
+    # Rest of the function remains the same...
     for speaker_id, embeddings in speaker_embeddings.items():
         if embeddings.size == 0:
             raise ValueError(f"Speaker '{speaker_id}' has empty embeddings")
@@ -246,6 +275,7 @@ def compute_inter_speaker_separation(
 
     speaker_labels = sorted(centroids.keys())
     n_speakers = len(speaker_labels)
+
     distance_matrix = np.zeros((n_speakers, n_speakers))
     pairwise_items: List[PairwiseDistanceItem] = []
 

@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from speaker_metrics import (
     HealthStatus,
+    InterSpeakerInput,
     IntraSpeakerInput,
     compute_inter_speaker_separation,
     compute_intra_speaker_variance,
@@ -16,7 +17,7 @@ from speaker_metrics import (
 )
 
 # ============================================================================
-# Fixtures
+# Intra Fixtures
 # ============================================================================
 
 
@@ -97,27 +98,36 @@ def outlier_embeddings_with_ids():
     return speaker_input, segment_ids
 
 
+# ============================================================================
+# Inter Fixtures
+# ============================================================================
+
+
 @pytest.fixture
-def well_separated_speakers():
+def well_separated_speakers() -> InterSpeakerInput:
     """Well-separated speakers with orthogonal centroids (distances ~1.0)."""
-    return {
-        "speaker_Alice": np.array([[1.0, 0.0, 0.0], [0.9, 0.1, 0.0]]),
-        "speaker_Bob": np.array([[0.0, 1.0, 0.0], [0.1, 0.9, 0.0]]),
-        "speaker_Charlie": np.array([[0.0, 0.0, 1.0], [-0.1, 0.0, 0.9]]),
-    }
+    return InterSpeakerInput(
+        speakers={
+            "speaker_Alice": np.array([[1.0, 0.0, 0.0], [0.9, 0.1, 0.0]]),
+            "speaker_Bob": np.array([[0.0, 1.0, 0.0], [0.1, 0.9, 0.0]]),
+            "speaker_Charlie": np.array([[0.0, 0.0, 1.0], [-0.1, 0.0, 0.9]]),
+        }
+    )
 
 
 @pytest.fixture
-def overlapping_speakers():
+def overlapping_speakers() -> InterSpeakerInput:
     """Overlapping speakers with similar embeddings (distances ~0.1-0.2)."""
-    return {
-        "speaker_X": np.array([[1.0, 0.0], [0.95, 0.05]]),
-        "speaker_Y": np.array([[0.9, 0.1], [0.85, 0.15]]),
-    }
+    return InterSpeakerInput(
+        speakers={
+            "speaker_X": np.array([[1.0, 0.0], [0.95, 0.05]]),
+            "speaker_Y": np.array([[0.9, 0.1], [0.85, 0.15]]),
+        }
+    )
 
 
 @pytest.fixture
-def mixed_speakers():
+def mixed_speakers() -> InterSpeakerInput:
     """
     Mixed separation: some close, some far.
     A-B distance: ~0.2
@@ -125,11 +135,13 @@ def mixed_speakers():
     B-C distance: ~1.6
     Mean: ~1.2
     """
-    return {
-        "person_A": np.array([[1.0, 0.0], [0.9, 0.1]]),
-        "person_B": np.array([[0.8, 0.2], [0.7, 0.3]]),
-        "person_C": np.array([[-1.0, 0.0], [-0.9, -0.1]]),
-    }
+    return InterSpeakerInput(
+        speakers={
+            "person_A": np.array([[1.0, 0.0], [0.9, 0.1]]),
+            "person_B": np.array([[0.8, 0.2], [0.7, 0.3]]),
+            "person_C": np.array([[-1.0, 0.0], [-0.9, -0.1]]),
+        }
+    )
 
 
 # ============================================================================
@@ -145,8 +157,9 @@ def get_actual_mean_distance(speaker_input):
     return float(np.mean(distances))
 
 
-def get_actual_mean_separation(speaker_embeddings):
+def get_actual_mean_separation(speaker_input: InterSpeakerInput) -> float:
     """Helper to compute actual mean separation for debugging thresholds."""
+    speaker_embeddings = speaker_input["speakers"]
     centroids = {
         spk_id: np.mean(embs, axis=0) for spk_id, embs in speaker_embeddings.items()
     }
@@ -543,14 +556,11 @@ class TestIntraSpeakerVariance:
 class TestInterSpeakerSeparation:
     """Test suite for compute_inter_speaker_separation function."""
 
-    # Basic Functionality Tests
-
     def test_well_separated_speakers(self, well_separated_speakers):
         """Well-separated speakers (mean ~1.0) should be healthy with threshold 0.5."""
         result = compute_inter_speaker_separation(
             well_separated_speakers, healthy_threshold=0.5
         )
-
         assert result["mean_separation"] > 0.5
         assert result["status"] == HealthStatus.HEALTHY
         assert result["num_speakers"] == 3
@@ -560,7 +570,6 @@ class TestInterSpeakerSeparation:
         result = compute_inter_speaker_separation(
             overlapping_speakers, healthy_threshold=0.5, warning_threshold=0.3
         )
-
         assert result["mean_separation"] < 0.3
         assert result["status"] in [HealthStatus.WARNING, HealthStatus.UNHEALTHY]
 
@@ -569,21 +578,19 @@ class TestInterSpeakerSeparation:
         result = compute_inter_speaker_separation(
             mixed_speakers, healthy_threshold=0.5, warning_threshold=0.3
         )
-
         assert result["min_separation"] < result["max_separation"]
         assert result["num_speakers"] == 3
-        # Mean should be around 1.2, definitely healthy with 0.5 threshold
         assert result["mean_separation"] > 0.5
 
     def test_two_speakers(self):
         """Two speakers should produce single pairwise distance."""
-        two_speakers = {
-            "spk1": np.array([[1.0, 0.0], [0.9, 0.1]]),
-            "spk2": np.array([[-1.0, 0.0], [-0.9, -0.1]]),
-        }
-
+        two_speakers = InterSpeakerInput(
+            speakers={
+                "spk1": np.array([[1.0, 0.0], [0.9, 0.1]]),
+                "spk2": np.array([[-1.0, 0.0], [-0.9, -0.1]]),
+            }
+        )
         result = compute_inter_speaker_separation(two_speakers)
-
         assert result["num_speakers"] == 2
         assert len(result["pairwise_distances"]) == 1
         assert result["min_separation"] == pytest.approx(result["max_separation"])
@@ -593,11 +600,9 @@ class TestInterSpeakerSeparation:
     def test_pairwise_distances_with_labels(self, well_separated_speakers):
         """Pairwise distances should include speaker labels."""
         result = compute_inter_speaker_separation(well_separated_speakers)
-
-        n = len(well_separated_speakers)
+        n = len(well_separated_speakers["speakers"])
         expected_comparisons = n * (n - 1) // 2
         assert len(result["pairwise_distances"]) == expected_comparisons
-
         for item in result["pairwise_distances"]:
             assert "speaker_id_1" in item
             assert "speaker_id_2" in item
@@ -610,28 +615,21 @@ class TestInterSpeakerSeparation:
     def test_pairwise_labels_are_complete(self, well_separated_speakers):
         """All speaker pairs should be represented."""
         result = compute_inter_speaker_separation(well_separated_speakers)
-
         pairs_in_result = set()
         for item in result["pairwise_distances"]:
             pair = tuple(sorted([item["speaker_id_1"], item["speaker_id_2"]]))
             pairs_in_result.add(pair)
-
-        speakers = sorted(well_separated_speakers.keys())
+        speakers = sorted(well_separated_speakers["speakers"].keys())
         expected_pairs = set()
         for i in range(len(speakers)):
             for j in range(i + 1, len(speakers)):
                 expected_pairs.add((speakers[i], speakers[j]))
-
         assert pairs_in_result == expected_pairs
 
     def test_identify_closest_speakers(self, mixed_speakers):
         """Should be able to identify which speakers are closest together."""
         result = compute_inter_speaker_separation(mixed_speakers)
-
-        # Find the pair with minimum distance
         min_pair = min(result["pairwise_distances"], key=lambda x: x["distance"])
-
-        # person_A and person_B should be closest (distance ~0.2)
         speakers_in_min = {min_pair["speaker_id_1"], min_pair["speaker_id_2"]}
         assert "person_A" in speakers_in_min
         assert "person_B" in speakers_in_min
@@ -640,9 +638,7 @@ class TestInterSpeakerSeparation:
     def test_identify_farthest_speakers(self, mixed_speakers):
         """Should be able to identify which speakers are farthest apart."""
         result = compute_inter_speaker_separation(mixed_speakers)
-
         max_pair = max(result["pairwise_distances"], key=lambda x: x["distance"])
-
         speakers_in_max = {max_pair["speaker_id_1"], max_pair["speaker_id_2"]}
         assert "person_C" in speakers_in_max
         assert max_pair["distance"] > 1.0
@@ -650,8 +646,6 @@ class TestInterSpeakerSeparation:
     def test_lookup_specific_pair(self, well_separated_speakers):
         """Should be able to look up distance between specific speakers."""
         result = compute_inter_speaker_separation(well_separated_speakers)
-
-        # Find distance between Alice and Bob
         target_pair = None
         for item in result["pairwise_distances"]:
             if {item["speaker_id_1"], item["speaker_id_2"]} == {
@@ -660,9 +654,7 @@ class TestInterSpeakerSeparation:
             }:
                 target_pair = item
                 break
-
         assert target_pair is not None
-        # Orthogonal vectors with slight noise → distance ~0.9-1.0
         assert target_pair["distance"] == pytest.approx(0.9, abs=0.2)
 
     # Speaker Labels and Matrix Tests
@@ -670,12 +662,11 @@ class TestInterSpeakerSeparation:
     def test_speaker_labels_sorted(self, mixed_speakers):
         """Speaker labels should be sorted alphabetically."""
         result = compute_inter_speaker_separation(mixed_speakers)
-        assert result["speaker_labels"] == sorted(mixed_speakers.keys())
+        assert result["speaker_labels"] == sorted(mixed_speakers["speakers"].keys())
 
     def test_speaker_labels_valid(self, well_separated_speakers):
         """All pairwise items should reference valid speakers."""
         result = compute_inter_speaker_separation(well_separated_speakers)
-
         valid_speakers = set(result["speaker_labels"])
         for item in result["pairwise_distances"]:
             assert item["speaker_id_1"] in valid_speakers
@@ -684,14 +675,11 @@ class TestInterSpeakerSeparation:
     def test_distance_matrix_correspondence(self, well_separated_speakers):
         """Distance matrix should match pairwise items."""
         result = compute_inter_speaker_separation(well_separated_speakers)
-
         labels = result["speaker_labels"]
         matrix = result["distance_matrix"]
-
         for item in result["pairwise_distances"]:
             i = labels.index(item["speaker_id_1"])
             j = labels.index(item["speaker_id_2"])
-
             assert item["distance"] == pytest.approx(matrix[i, j])
             assert matrix[i, j] == pytest.approx(matrix[j, i])
 
@@ -704,12 +692,9 @@ class TestInterSpeakerSeparation:
     def test_matrix_lookup_by_label(self, mixed_speakers):
         """Should be able to use speaker_labels to index into matrix."""
         result = compute_inter_speaker_separation(mixed_speakers)
-
         i = result["speaker_labels"].index("person_A")
         j = result["speaker_labels"].index("person_C")
         matrix_distance = result["distance_matrix"][i, j]
-
-        # A-C distance should be large (~1.8)
         assert matrix_distance > 1.0
 
     # Threshold Tests with Realistic Values
@@ -725,7 +710,7 @@ class TestInterSpeakerSeparation:
         """Mixed speakers (mean ~1.2) with high healthy threshold → warning."""
         result = compute_inter_speaker_separation(
             mixed_speakers,
-            healthy_threshold=1.5,  # Above actual mean of ~1.2
+            healthy_threshold=1.5,
             warning_threshold=0.5,
         )
         assert result["status"] == HealthStatus.WARNING
@@ -740,24 +725,9 @@ class TestInterSpeakerSeparation:
     @pytest.mark.parametrize(
         "healthy_threshold,warning_threshold,expected,data_key",
         [
-            (
-                0.5,
-                0.3,
-                HealthStatus.HEALTHY,
-                "well_separated_speakers",
-            ),  # ~1.0 > 0.5 → healthy
-            (
-                1.5,
-                0.5,
-                HealthStatus.WARNING,
-                "mixed_speakers",
-            ),  # 0.5 < ~1.2 < 1.5 → warning
-            (
-                0.5,
-                0.3,
-                HealthStatus.UNHEALTHY,
-                "overlapping_speakers",
-            ),  # ~0.15 < 0.3 → unhealthy
+            (0.5, 0.3, HealthStatus.HEALTHY, "well_separated_speakers"),
+            (1.5, 0.5, HealthStatus.WARNING, "mixed_speakers"),
+            (0.5, 0.3, HealthStatus.UNHEALTHY, "overlapping_speakers"),
         ],
     )
     def test_threshold_boundaries_parametrized(
@@ -776,30 +746,36 @@ class TestInterSpeakerSeparation:
 
     def test_single_speaker_raises_error(self):
         """Single speaker should raise ValueError."""
-        single_speaker = {"spk1": np.array([[1.0, 0.0], [0.9, 0.1]])}
+        single_speaker = InterSpeakerInput(
+            speakers={"spk1": np.array([[1.0, 0.0], [0.9, 0.1]])}
+        )
         with pytest.raises(ValueError, match="at least 2 speakers"):
             compute_inter_speaker_separation(single_speaker)
 
     def test_empty_dict_raises_error(self):
         """Empty dict should raise ValueError."""
         with pytest.raises(ValueError, match="at least 2 speakers"):
-            compute_inter_speaker_separation({})
+            compute_inter_speaker_separation(InterSpeakerInput(speakers={}))
 
     def test_empty_embeddings_raises_error(self):
         """Speaker with empty embeddings should raise ValueError."""
-        invalid_speakers = {
-            "spk1": np.array([[1.0, 0.0]]),
-            "spk2": np.array([]),
-        }
+        invalid_speakers = InterSpeakerInput(
+            speakers={
+                "spk1": np.array([[1.0, 0.0]]),
+                "spk2": np.array([]),
+            }
+        )
         with pytest.raises(ValueError, match="empty embeddings"):
             compute_inter_speaker_separation(invalid_speakers)
 
     def test_3d_embeddings_raises_error(self):
         """3D embeddings should raise ValueError."""
-        invalid_speakers = {
-            "spk1": np.array([[[1.0, 0.0]]]),
-            "spk2": np.array([[0.0, 1.0]]),
-        }
+        invalid_speakers = InterSpeakerInput(
+            speakers={
+                "spk1": np.array([[[1.0, 0.0]]]),
+                "spk2": np.array([[0.0, 1.0]]),
+            }
+        )
         with pytest.raises(ValueError, match="must be 2D"):
             compute_inter_speaker_separation(invalid_speakers)
 
@@ -808,7 +784,6 @@ class TestInterSpeakerSeparation:
     def test_result_keys(self, well_separated_speakers):
         """Result should contain all expected keys."""
         result = compute_inter_speaker_separation(well_separated_speakers)
-
         expected_keys = {
             "mean_separation",
             "std_separation",
@@ -820,13 +795,11 @@ class TestInterSpeakerSeparation:
             "status",
             "num_speakers",
         }
-
         assert set(result.keys()) == expected_keys
 
     def test_result_types(self, well_separated_speakers):
         """Result values should have correct types."""
         result = compute_inter_speaker_separation(well_separated_speakers)
-
         assert isinstance(result["mean_separation"], float)
         assert isinstance(result["std_separation"], float)
         assert isinstance(result["min_separation"], float)
@@ -840,31 +813,31 @@ class TestInterSpeakerSeparation:
     def test_distance_bounds(self, well_separated_speakers):
         """All distances should be within [0, 2] for cosine distance."""
         result = compute_inter_speaker_separation(well_separated_speakers)
-
         for item in result["pairwise_distances"]:
             assert 0.0 <= item["distance"] <= 2.0
 
     def test_consistency_with_different_order(self):
         """Results should be consistent regardless of dict insertion order."""
-        speakers_ordered = {
-            "A_speaker": np.array([[1.0, 0.0]]),
-            "B_speaker": np.array([[0.0, 1.0]]),
-        }
-        speakers_reversed = {
-            "B_speaker": np.array([[0.0, 1.0]]),
-            "A_speaker": np.array([[1.0, 0.0]]),
-        }
-
+        speakers_ordered = InterSpeakerInput(
+            speakers={
+                "A_speaker": np.array([[1.0, 0.0]]),
+                "B_speaker": np.array([[0.0, 1.0]]),
+            }
+        )
+        speakers_reversed = InterSpeakerInput(
+            speakers={
+                "B_speaker": np.array([[0.0, 1.0]]),
+                "A_speaker": np.array([[1.0, 0.0]]),
+            }
+        )
         result1 = compute_inter_speaker_separation(speakers_ordered)
         result2 = compute_inter_speaker_separation(speakers_reversed)
-
         assert result1["mean_separation"] == pytest.approx(result2["mean_separation"])
         assert result1["speaker_labels"] == result2["speaker_labels"]
 
     def test_statistics_consistency(self, well_separated_speakers):
         """Mean should be between min and max."""
         result = compute_inter_speaker_separation(well_separated_speakers)
-
         assert (
             result["min_separation"]
             <= result["mean_separation"]
@@ -895,7 +868,7 @@ class TestIntegration:
             np.array([0.0, 1.0, 0.0]),
             np.array([0.0, 0.0, 1.0]),
         ]
-        speaker_data = {}
+        speaker_data: Dict[str, np.ndarray] = {}
         for i, base in enumerate(base_vectors):
             embeddings = base + rng.randn(10, 3) * 0.01
             speaker_data[f"speaker_{i + 1}"] = embeddings
@@ -908,8 +881,9 @@ class TestIntegration:
             )
             assert result["mean_distance"] < 0.1
 
+        inter_input = InterSpeakerInput(speakers=speaker_data)
         inter_result = compute_inter_speaker_separation(
-            speaker_data, healthy_threshold=0.5
+            inter_input, healthy_threshold=0.5
         )
         assert inter_result["status"] == HealthStatus.HEALTHY, (
             f"Inter-speaker should be healthy, got {inter_result['mean_separation']:.4f}"
@@ -937,8 +911,9 @@ class TestIntegration:
             f"Speaker A should be unhealthy, got mean={intra_a['mean_distance']:.4f}"
         )
 
+        inter_input = InterSpeakerInput(speakers=speaker_data)
         inter = compute_inter_speaker_separation(
-            speaker_data,
+            inter_input,
             healthy_threshold=0.5,
             warning_threshold=0.1,
         )
