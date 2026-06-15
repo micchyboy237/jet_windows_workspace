@@ -2,7 +2,7 @@
 // dimension_diff_view.js
 // Dimension Difference Analysis Module
 // Dependencies: Chart.js 4.4.0+
-// Requires global: allData, getColor()
+// Requires global: allData, getColor(), getQueryParams()
 // ============================================================
 
 let dimDiffCharts = {};
@@ -44,6 +44,11 @@ function initDimensionDiffView(speakerLabels) {
   // Auto-load comparison if both speakers are set
   if (speaker1Select.value && speaker2Select.value) {
     loadDimensionDiff();
+  } else {
+    // Reset the results area to show a helpful prompt
+    showDimDiffEmpty(
+      "Select two speakers above to compare their embedding dimensions",
+    );
   }
 
   console.log("[DimensionDiff] View initialized");
@@ -67,6 +72,9 @@ async function loadDimensionDiff() {
   }
 
   console.log(`[DimensionDiff] Loading comparison: ${speaker1} vs ${speaker2}`);
+
+  // Show loading state
+  showDimDiffLoading();
 
   try {
     const response = await fetch(
@@ -381,16 +389,31 @@ function renderDimDiffChart(displayDims, speaker1, speaker2) {
 }
 
 /**
+ * Show loading state
+ */
+function showDimDiffLoading() {
+  const container = document.getElementById("dimDiffResults");
+  if (!container) return;
+  container.innerHTML = `
+    <div class="empty-state">
+      <div class="spinner" style="width:36px;height:36px;border:3px solid var(--border-color);border-top-color:var(--accent-blue);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px;"></div>
+      <p>Loading dimension comparison...</p>
+    </div>`;
+}
+
+/**
  * Show empty state
  */
 function showDimDiffEmpty(message) {
   const container = document.getElementById("dimDiffResults");
   if (!container) return;
-
   container.innerHTML = `
     <div class="empty-state">
       <div class="icon">📏</div>
       <p>${message || "Select two speakers to see dimension differences"}</p>
+      <p style="font-size:12px;color:var(--text-secondary);margin-top:8px;">
+        Compare embedding dimensions to understand what makes voices different
+      </p>
     </div>`;
 }
 
@@ -400,7 +423,6 @@ function showDimDiffEmpty(message) {
 function showDimDiffError(error) {
   const container = document.getElementById("dimDiffResults");
   if (!container) return;
-
   container.innerHTML = `
     <div class="error-message">
       <p><strong>⚠️ Error</strong></p>

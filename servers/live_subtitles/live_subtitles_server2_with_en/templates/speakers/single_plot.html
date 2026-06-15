@@ -734,39 +734,6 @@
         </div>
       </div>
 
-      <!-- Tab: Dimensions -->
-      <div class="tab-content" id="tab-dimensions">
-        <div class="plot-container">
-          <h3>
-            <span
-              style="
-                display: inline-block;
-                width: 8px;
-                height: 8px;
-                border-radius: 50%;
-                background: var(--accent-purple);
-              "
-            ></span>
-            Per-Speaker Dimension Analysis
-          </h3>
-          <div id="dimensionsWrapper">
-            <div class="empty-state">
-              <div class="icon">📏</div>
-              <p>Loading dimension data...</p>
-            </div>
-          </div>
-          <div class="plot-info">
-            <h4>📏 Dimension Analysis</h4>
-            <p>
-              Top 5 most prominent embedding dimensions for each speaker. These
-              dimensions encode the most distinctive features of each voice.
-              Compare dimensions across speakers to understand what makes them
-              different.
-            </p>
-          </div>
-        </div>
-      </div>
-
       <!-- Tab: Detail Table -->
       <div class="tab-content" id="tab-table">
         <div class="plot-container">
@@ -1028,8 +995,8 @@
       </div>
 
       <!-- Tab: Dimensions -->
+      {% if has_dimension_diff %}
       <div class="tab-content" id="tab-dimensions">
-        {% if has_dimension_diff %}
         <div class="plot-container">
           <h3>
             <span
@@ -1100,15 +1067,8 @@
             </div>
           </div>
         </div>
-        {% else %}
-        <div class="plot-container">
-          <div class="empty-state">
-            <div class="icon">📏</div>
-            <p>Dimension analysis component not available</p>
-          </div>
-        </div>
-        {% endif %}
       </div>
+      {% endif %}
 
       <!-- ============================================================ -->
       <!-- Tab: Health (conditional include) -->
@@ -2117,7 +2077,6 @@
         if (targetTab) targetTab.classList.add("active");
 
         if (!allData) return;
-
         destroyAllCharts();
 
         const speakerLabels = Object.keys(allData.centroids?.centroids || {});
@@ -2160,12 +2119,11 @@
             break;
           case "dimensions":
             if (typeof initDimensionDiffView === "function") {
-              const speakerLabels = Object.keys(
-                allData.centroids?.centroids || {},
-              );
               initDimensionDiffView(speakerLabels);
+              // Note: showDimDiffEmpty is now called inside initDimensionDiffView
+              // when no speakers are pre-selected, so no extra handling needed here
             } else {
-              // Fallback to old renderDimensions if dimension_diff_view.js not loaded
+              // Fallback to old per-speaker dimension cards
               renderDimensions(allData);
             }
             break;
@@ -2174,6 +2132,7 @@
             break;
         }
       }
+
       // ===== URL Parameter Handling =====
       function getQueryParams() {
         const params = new URLSearchParams(window.location.search);
