@@ -65,11 +65,13 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\independent_analysis.js",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\similarity_network.js",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\pairwise_comparison.html",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\speaker_embedding_plot.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\pairwise_comparison.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\speaker_embedding_plot.html",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\dimension_diff_view.html",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\similarity_gauge.html",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\speaker_embedding_plot.html",
+    r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\pairwise_comparison.js",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\similarity_network.js",
     r"",
 ]
@@ -94,30 +96,13 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix
+Also check
 
-pca?speaker=SPEAKER_01&view=dimensions:1221 [Pairwise] Component initialized (global guard)
-pca?speaker=SPEAKER_01&view=dimensions:1956 Uncaught SyntaxError: Identifier 'pairwiseData' has already been declared (at pca?speaker=SPEAKER_01&view=dimensions:1956:9)
-pca?speaker=SPEAKER_01&view=dimensions:2650 Uncaught SyntaxError: Identifier 'pairwiseData' has already been declared (at pca?speaker=SPEAKER_01&view=dimensions:2650:9)
-pairwise_comparison.js:1 Uncaught SyntaxError: Identifier 'pairwiseData' has already been declared (at pairwise_comparison.js:1:1)
-pca?speaker=SPEAKER_01&view=dimensions:5508 [SinglePlot] DOM ready, initializing...
-pca?speaker=SPEAKER_01&view=dimensions:5355 [SinglePlot] Refreshing all data...
-pca?speaker=SPEAKER_01&view=dimensions:4365 [SinglePlot] Fetching all data...
-pca?speaker=SPEAKER_01&view=dimensions:4376 [SinglePlot] Data received: {speakers: 2, dims: 512, distLabels: 2, statusKeys: Array(12)}
-pca?speaker=SPEAKER_01&view=dimensions:1244 Uncaught (in promise) ReferenceError: getSpeakerColor is not defined
-    at pca?speaker=SPEAKER_01&view=dimensions:1244:30
-    at Array.forEach (<anonymous>)
-    at pca?speaker=SPEAKER_01&view=dimensions:1240:21
-    at Array.forEach (<anonymous>)
-    at initPairwiseSelects (pca?speaker=SPEAKER_01&view=dimensions:1237:24)
-    at refreshAll (pca?speaker=SPEAKER_01&view=dimensions:5390:11)
-(anonymous) @ pca?speaker=SPEAKER_01&view=dimensions:1244
-(anonymous) @ pca?speaker=SPEAKER_01&view=dimensions:1240
-initPairwiseSelects @ pca?speaker=SPEAKER_01&view=dimensions:1237
-refreshAll @ pca?speaker=SPEAKER_01&view=dimensions:5390
-await in refreshAll
-(anonymous) @ pca?speaker=SPEAKER_01&view=dimensions:5509
-
+pca?speaker=SPEAKER_01&view=dimensions:1341 Uncaught (in promise) ReferenceError: pairwiseCharts is not defined
+    at destroyPairwiseCharts (pca?speaker=SPEAKER_01&view=dimensions:1341:17)
+    at destroyAllCharts (pca?speaker=SPEAKER_01&view=dimensions:3432:11)
+    at switchView (pca?speaker=SPEAKER_01&view=dimensions:4209:9)
+    at refreshAll (pca?speaker=SPEAKER_01&view=dimensions:4364:9)
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

@@ -2,7 +2,7 @@
 
 """Progressive segment speaker labeling with dynamic reference maintenance."""
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TypedDict, Union
 import numpy as np
 import torch
 from rich.console import Console
@@ -36,6 +36,19 @@ DEFAULT_MIN_FRAMES: int = 100
 DEFAULT_MIN_DURATION_SEC: float = 0.25
 DEFAULT_BASELINE_THRESHOLD: float = 0.1
 DEFAULT_MIN_SIMILARITY_TO_UPDATE: float = 0.25  # NEW: Minimum similarity to update centroid
+
+
+class SpeakerSegmentInfo(TypedDict):
+    label: str
+    segment_count: int
+    first_seen: float
+    last_seen: float
+    active_duration: float
+    has_valid_centroid: bool
+    centroid_quality: float
+    centroid_shape: Optional[List[int]]
+    embedding_count: int
+    embeddings: List[List[float]]  # each embedding as flat list
 
 
 @dataclass
@@ -1300,6 +1313,58 @@ class SegmentSpeakerLabeler:
     def get_all_speakers_info(self) -> Dict[str, Dict]:
         """Get information about all known speakers."""
         return {label: self.get_speaker_info(label) for label in self._speakers}
+
+    def get_segments(
+        self,
+        label: Optional[str] = None,
+    ) -> Union[SpeakerSegmentInfo, List[SpeakerSegmentInfo], None]:
+        """Get segment info and embeddings for one or all speakers.
+
+        Parameters
+        ----------
+        label : str, optional
+            Speaker label (e.g. 'SPEAKER_01'). If provided, returns a single
+            SpeakerSegmentInfo dict. If omitted, returns a list for all speakers.
+
+        Returns
+        -------
+        SpeakerSegmentInfo
+            If label is provided and found.
+        List[SpeakerSegmentInfo]
+            If label is omitted.
+        None
+            If label is provided but not found.
+        """
+        def _build(ref: SpeakerReference) -> SpeakerSegmentInfo:
+            centroid_shape = list(ref.centroid.shape) if ref.centroid is not None else None
+            embeddings_as_lists = [
+                emb.flatten().tolist() for emb in ref.embeddings
+            ]
+            return SpeakerSegmentInfo(
+                label=ref.label,
+                segment_count=ref.segment_count,
+                first_seen=ref.first_seen if ref.first_seen is not None else 0.0,
+                last_seen=ref.last_seen,
+                active_duration=ref.active_duration,
+                has_valid_centroid=ref.has_valid_centroid,
+                centroid_quality=ref.centroid_quality,
+                centroid_shape=centroid_shape,
+                embedding_count=len(ref.embeddings),
+                embeddings=embeddings_as_lists,
+            )
+
+        if label is not None:
+            if label not in self._speakers:
+                console.print(f"[yellow]get_segments: label '{label}' not found[/]")
+                return None
+            result = _build(self._speakers[label])
+            console.print(f"[dim]get_segments: returned info for {label} "
+                        f"({result['embedding_count']} embeddings)[/]")
+            return result
+
+        results = [_build(ref) for ref in self._speakers.values()]
+        console.print(f"[dim]get_segments: returned info for {len(results)} speakers[/]")
+        return results
 
     def get_health_status(self) -> Dict:
         """Get current health status of the speaker labeler."""

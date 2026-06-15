@@ -79,6 +79,39 @@ async def get_speakers():
     return get_speaker_diarization()
 
 
+@router.get("/segments")
+async def get_speaker_segments(
+    label: Optional[str] = Query(None, description="Speaker label e.g. 'SPEAKER_01'. Omit for all speakers."),
+):
+    """Get segment info and raw embeddings for one or all speakers.
+
+    Parameters
+    ----------
+    label : str, optional
+        Speaker label (e.g. 'SPEAKER_01'). If omitted, returns all speakers.
+
+    Returns
+    -------
+    Single SpeakerSegmentInfo dict if label is provided, else list of all.
+    """
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+
+    if label is not None:
+        console.print(f"[info]get_segments: fetching segment info for label='{label}'[/info]")
+        result = labeler.get_segments(label)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"Speaker '{label}' not found")
+        console.print(f"[success]get_segments: returned {result['embedding_count']} embeddings for {label}[/success]")
+        return JSONResponse(content=result)
+
+    console.print("[info]get_segments: fetching segment info for all speakers[/info]")
+    results = labeler.get_segments()
+    console.print(f"[success]get_segments: returned {len(results)} speakers[/success]")
+    return JSONResponse(content=results)
+
+
 @router.get("/status")
 def get_status() -> Dict:
     """Get current speakers health status with full report."""

@@ -5,7 +5,7 @@
   Requires global JS functions:
   - fetchSpeakerData(speakerLabel) -> Promise<speakerData>
   - fetchPairwiseComparison(label1, label2) -> Promise<comparisonData>
-  - getSpeakerColor(index) -> string
+  - getColor(index) -> string  (defined in single_plot.html)
 -->
 
 <style>
@@ -370,7 +370,7 @@
     <div class="vs-divider">
       <div
         class="similarity-circle"
-        id="similarityGauge"
+        id="pairwiseGauge"
         style="--similarity-pct: 0; --similarity-color: #334155"
       >
         <span>--%</span>
@@ -405,22 +405,41 @@
 
 <script>
   // ===== Pairwise Comparison Logic =====
-  // NOTE: SPEAKER_COLORS and getColor are defined in single_plot.html
-  // Do NOT redeclare them here to avoid "Identifier has already been declared" errors.
-  // Guard against duplicate declaration (component may be included multiple times)
-  if (typeof window._pairwiseInitialized === "undefined") {
-    window._pairwiseInitialized = true;
-    window.pairwiseData = null;
-    window.pairwiseCharts = {};
+  // Guard against duplicate initialization (component may be included multiple times)
+  if (typeof window._pairwiseInitGuard === "undefined") {
+    window._pairwiseInitGuard = true;
+    window._pairwiseData = null;
+    window._pairwiseCharts = {};
     console.log("[Pairwise] Component initialized (global guard)");
   }
-  // Use the globally declared variables - use var to avoid redeclaration errors
-  var pairwiseData = window.pairwiseData;
-  var pairwiseCharts = window.pairwiseCharts;
+
+  // Use window storage directly, don't redeclare var pairwiseData/Charts
+  // (They're already on window._pairwiseData and window._pairwiseCharts)
 
   // Helper: get speaker color (wraps global getColor)
   function getSpeakerColor(index) {
     return typeof getColor === "function" ? getColor(index) : "#94a3b8";
+  }
+
+  // ===== Pairwise-specific Gauge (uses CSS conic-gradient, element #pairwiseGauge) =====
+  function updatePairwiseGauge(similarity) {
+    const gauge = document.getElementById("pairwiseGauge");
+    if (!gauge) {
+      console.warn("[Pairwise] Gauge element #pairwiseGauge not found in DOM");
+      return;
+    }
+    const pct = Math.round(Math.max(0, Math.min(1, similarity)) * 100);
+    let color;
+    if (similarity >= 0.8)
+      color = "#ef4444"; // High - red (might merge)
+    else if (similarity >= 0.5)
+      color = "#eab308"; // Medium - yellow
+    else color = "#22c55e"; // Low - green (well separated)
+    gauge.style.setProperty("--similarity-pct", pct);
+    gauge.style.setProperty("--similarity-color", color);
+    const span = gauge.querySelector("span");
+    if (span) span.textContent = pct + "%";
+    console.log(`[Pairwise] Gauge updated: ${pct}% (${color})`);
   }
 
   // Initialize speaker dropdowns
@@ -428,6 +447,9 @@
     const select1 = document.getElementById("pairwiseSpeaker1");
     const select2 = document.getElementById("pairwiseSpeaker2");
     if (!select1 || !select2) return;
+    console.log(
+      `[Pairwise] initPairwiseSelects with ${speakerLabels.length} speakers`,
+    );
     // Save current selections
     const current1 = select1.value;
     const current2 = select2.value;
@@ -458,6 +480,7 @@
       updatePairwiseComparison();
     }
   }
+
   // Update pairwise comparison when selections change
   async function updatePairwiseComparison() {
     const label1 = document.getElementById("pairwiseSpeaker1")?.value;
@@ -473,6 +496,7 @@
           <h3>Same Speaker Selected</h3>
           <p>Please select two different speakers to compare.</p>
         </div>`;
+      updatePairwiseGauge(0);
       return;
     }
     console.log(`[Pairwise] Comparing: ${label1} ↔ ${label2}`);
@@ -485,15 +509,16 @@
       if (data.error) {
         throw new Error(data.error);
       }
-      pairwiseData = data;
+      window._pairwiseData = data;
       renderPairwiseContent(label1, label2, data);
-      updateSimilarityGauge(data.comparison?.cosine_similarity || 0);
+      updatePairwiseGauge(data.comparison?.cosine_similarity || 0);
     } catch (e) {
       console.error("[Pairwise] Error:", e);
       document.getElementById("pairwiseContent").innerHTML = `
         <div class="error-message">⚠️ Failed to load comparison: ${e.message}</div>`;
     }
   }
+
   // Show empty state
   function showEmptyPairwise() {
     document.getElementById("pairwiseContent").innerHTML = `
@@ -502,32 +527,20 @@
         <h3>Select Two Speakers</h3>
         <p>Choose two speakers above to see detailed pairwise comparison.</p>
       </div>`;
-    updateSimilarityGauge(0);
+    updatePairwiseGauge(0);
   }
-  // Update the similarity gauge circle
-  function updateSimilarityGauge(similarity) {
-    const gauge = document.getElementById("similarityGauge");
-    if (!gauge) return;
-    const pct = Math.round(similarity * 100);
-    let color;
-    if (similarity >= 0.8)
-      color = "#ef4444"; // High - red (might merge)
-    else if (similarity >= 0.5)
-      color = "#eab308"; // Medium - yellow
-    else color = "#22c55e"; // Low - green (well separated)
-    gauge.style.setProperty("--similarity-pct", pct);
-    gauge.style.setProperty("--similarity-color", color);
-    gauge.querySelector("span").textContent = pct + "%";
-  }
+
   // Destroy pairwise charts
   function destroyPairwiseCharts() {
-    Object.keys(pairwiseCharts).forEach((key) => {
-      if (pairwiseCharts[key]) {
-        pairwiseCharts[key].destroy();
-        pairwiseCharts[key] = null;
+    Object.keys(window._pairwiseCharts).forEach((key) => {
+      if (window._pairwiseCharts[key]) {
+        window._pairwiseCharts[key].destroy();
+        window._pairwiseCharts[key] = null;
       }
     });
+    console.log("[Pairwise] All charts destroyed");
   }
+
   // Render full pairwise content with tabs
   function renderPairwiseContent(label1, label2, data) {
     destroyPairwiseCharts();
@@ -676,6 +689,7 @@
       100,
     );
   }
+
   // Switch pairwise tabs
   function switchPairwiseTab(tabName) {
     // Update tab buttons
@@ -698,61 +712,12 @@
     if (targetTab) targetTab.classList.add("active");
     // Trigger chart resize if needed
     setTimeout(() => {
-      Object.values(pairwiseCharts).forEach((chart) => {
+      Object.values(window._pairwiseCharts).forEach((chart) => {
         if (chart && chart.resize) chart.resize();
       });
     }, 100);
   }
-  // Load segment data for both speakers
-  async function loadSegmentData(label1, label2, comparisonData) {
-    const list1 = document.getElementById("segmentsList1");
-    const list2 = document.getElementById("segmentsList2");
-    if (!list1 || !list2) return;
-    // Try to get segment data from the comparison response
-    const segments1 = comparisonData.segments?.[label1] || [];
-    const segments2 = comparisonData.segments?.[label2] || [];
-    if (segments1.length === 0 && segments2.length === 0) {
-      list1.innerHTML =
-        '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No segment data available</div>';
-      list2.innerHTML =
-        '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No segment data available</div>';
-      return;
-    }
-    // Render segments for speaker 1
-    list1.innerHTML =
-      segments1
-        .map((seg, i) => {
-          const sim = seg.similarity_to_own_centroid || 0;
-          const simClass = sim >= 0.7 ? "high" : sim >= 0.4 ? "medium" : "low";
-          return `
-        <div class="segment-item" title="Segment ${i + 1}: ${(seg.start || 0).toFixed(1)}s - ${(seg.end || 0).toFixed(1)}s">
-          <span style="font-size:16px;">🎤</span>
-          <span class="seg-time">${(seg.start || 0).toFixed(1)}s</span>
-          <span style="flex:1;">Segment ${i + 1}</span>
-          <span class="seg-similarity ${simClass}">${(sim * 100).toFixed(0)}%</span>
-        </div>
-      `;
-        })
-        .join("") ||
-      '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No segments</div>';
-    // Render segments for speaker 2
-    list2.innerHTML =
-      segments2
-        .map((seg, i) => {
-          const sim = seg.similarity_to_own_centroid || 0;
-          const simClass = sim >= 0.7 ? "high" : sim >= 0.4 ? "medium" : "low";
-          return `
-        <div class="segment-item" title="Segment ${i + 1}: ${(seg.start || 0).toFixed(1)}s - ${(seg.end || 0).toFixed(1)}s">
-          <span style="font-size:16px;">🎤</span>
-          <span class="seg-time">${(seg.start || 0).toFixed(1)}s</span>
-          <span style="flex:1;">Segment ${i + 1}</span>
-          <span class="seg-similarity ${simClass}">${(sim * 100).toFixed(0)}%</span>
-        </div>
-      `;
-        })
-        .join("") ||
-      '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No segments</div>';
-  }
+
   // Render embedding comparison chart
   function renderEmbeddingComparison(label1, label2, data, color1, color2) {
     const canvas = document.getElementById("embeddingComparisonChart");
@@ -771,8 +736,9 @@
       { length: Math.max(centroid1.length, centroid2.length) },
       (_, i) => `D${i}`,
     );
-    if (pairwiseCharts.embedding) pairwiseCharts.embedding.destroy();
-    pairwiseCharts.embedding = new Chart(ctx, {
+    if (window._pairwiseCharts.embedding)
+      window._pairwiseCharts.embedding.destroy();
+    window._pairwiseCharts.embedding = new Chart(ctx, {
       type: "line",
       data: {
         labels: labels,
@@ -842,6 +808,7 @@
       },
     });
   }
+
   // Render dimension differences
   function renderDimensionDiffs(label1, label2, data, color1, color2) {
     const comparison = data.comparison || {};
@@ -850,8 +817,9 @@
     const canvas = document.getElementById("dimensionDiffChart");
     if (canvas && topDims.length > 0) {
       const ctx = canvas.getContext("2d");
-      if (pairwiseCharts.dimDiff) pairwiseCharts.dimDiff.destroy();
-      pairwiseCharts.dimDiff = new Chart(ctx, {
+      if (window._pairwiseCharts.dimDiff)
+        window._pairwiseCharts.dimDiff.destroy();
+      window._pairwiseCharts.dimDiff = new Chart(ctx, {
         type: "bar",
         data: {
           labels: topDims.map((d) => `D${d.dimension}`),
@@ -940,7 +908,459 @@
       })
       .join("");
   }
-  // Expose to global scope
+
+  // ===== SEGMENT START ===== //
+
+  // ===== Cross-Segment Similarity Matrix =====
+  function computeCrossMatrix(embeddings1, embeddings2) {
+    function cosineSim(a, b) {
+      let dot = 0,
+        normA = 0,
+        normB = 0;
+      for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+      }
+      return dot / (Math.sqrt(normA) * Math.sqrt(normB) + 1e-8);
+    }
+
+    // Returns matrix[i][j] = similarity between embs1[i] and embs2[j]
+    const matrix = embeddings1.map((e1) =>
+      embeddings2.map((e2) => parseFloat(cosineSim(e1, e2).toFixed(4))),
+    );
+    console.log(
+      `[Pairwise] Cross matrix: ${embeddings1.length}×${embeddings2.length}`,
+    );
+    return matrix;
+  }
+
+  // Compute centroid (mean) from embedding array
+  function computeCentroid(embeddings) {
+    const dim = embeddings[0].length;
+    const centroid = new Array(dim).fill(0);
+    embeddings.forEach((emb) =>
+      emb.forEach((v, i) => {
+        centroid[i] += v;
+      }),
+    );
+    centroid.forEach((_, i) => {
+      centroid[i] /= embeddings.length;
+    });
+    return centroid;
+  }
+
+  // Cosine similarity (reusable)
+  function cosineSim(a, b) {
+    let dot = 0,
+      normA = 0,
+      normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    return dot / (Math.sqrt(normA) * Math.sqrt(normB) + 1e-8);
+  }
+
+  // Similarity CSS class
+  function simClass(sim) {
+    return sim >= 0.7 ? "high" : sim >= 0.4 ? "medium" : "low";
+  }
+
+  // Interpolated timestamp label
+  function segTimeLabel(idx, count, firstSeen, activeDuration) {
+    if (!activeDuration || count <= 1) return `#${idx + 1}`;
+    const t = firstSeen + (idx / (count - 1)) * activeDuration;
+    return `${t.toFixed(1)}s`;
+  }
+
+  // ===== Render segment list with own-centroid sim + best cross-match badge =====
+  function renderSegmentList(
+    container,
+    settledResult,
+    label,
+    crossMatrix,
+    isFirst,
+  ) {
+    if (settledResult.status === "rejected") {
+      console.error(
+        `[Pairwise] Failed to load segments for ${label}:`,
+        settledResult.reason,
+      );
+      container.innerHTML = `
+        <div style="text-align:center;padding:20px;color:var(--accent-red);">
+          Failed to load: ${settledResult.reason.message}
+        </div>`;
+      return;
+    }
+
+    const data = settledResult.value;
+    const embeddings = data.embeddings || [];
+
+    if (embeddings.length === 0) {
+      console.warn(`[Pairwise] No embeddings for ${label}`);
+      container.innerHTML = `
+        <div style="text-align:center;padding:20px;color:var(--text-secondary);">
+          No segments found
+        </div>`;
+      return;
+    }
+
+    const centroid = computeCentroid(embeddings);
+    const count = embeddings.length;
+
+    console.log(
+      `[Pairwise] Rendering ${count} segments for ${label} with cross-match badges`,
+    );
+
+    container.innerHTML = embeddings
+      .map((emb, idx) => {
+        const ownSim = cosineSim(emb, centroid);
+
+        // Best cross-match: row if isFirst (S1→S2), col if !isFirst (S2→S1)
+        let bestCrossSim = null;
+        let bestCrossIdx = null;
+        if (crossMatrix) {
+          const crossSims = isFirst
+            ? crossMatrix[idx] // S1 row idx vs all S2
+            : crossMatrix.map((row) => row[idx]); // all S1 vs S2 col idx
+          bestCrossSim = Math.max(...crossSims);
+          bestCrossIdx = crossSims.indexOf(bestCrossSim);
+        }
+
+        const timeLabel = segTimeLabel(
+          idx,
+          count,
+          data.first_seen || 0,
+          data.active_duration || 0,
+        );
+
+        return `
+        <div class="segment-item"
+            title="Seg ${idx + 1} — own centroid: ${(ownSim * 100).toFixed(1)}%${bestCrossSim !== null ? ` | best cross-match: Seg ${bestCrossIdx + 1} (${(bestCrossSim * 100).toFixed(1)}%)` : ""}">
+          <span style="font-size:16px;">🎤</span>
+          <span class="seg-time">${timeLabel}</span>
+          <span style="flex:1;">Seg ${idx + 1}</span>
+          <span class="seg-similarity ${simClass(ownSim)}"
+                title="Similarity to own centroid">
+            ${(ownSim * 100).toFixed(0)}%
+          </span>
+          ${
+            bestCrossSim !== null
+              ? `
+          <span class="seg-similarity ${simClass(bestCrossSim)}"
+                style="margin-left:4px;opacity:0.75;"
+                title="Best match: other Seg ${bestCrossIdx + 1}">
+            ↔${(bestCrossSim * 100).toFixed(0)}%
+          </span>`
+              : ""
+          }
+        </div>`;
+      })
+      .join("");
+  }
+
+  // ===== Render cross-segment heatmap (n×m canvas grid) =====
+  function renderCrossHeatmap(canvasId, matrix, label1, label2) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || !matrix.length) return;
+
+    const rows = matrix.length; // S1 segments
+    const cols = matrix[0].length; // S2 segments
+    const cellSize = Math.max(
+      18,
+      Math.min(48, Math.floor(480 / Math.max(rows, cols))),
+    );
+    const padL = 48,
+      padT = 48,
+      padR = 16,
+      padB = 16;
+
+    canvas.width = padL + cols * cellSize + padR;
+    canvas.height = padT + rows * cellSize + padB;
+
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Color scale: low=blue, mid=yellow, high=red
+    function simToColor(sim) {
+      const t = Math.max(0, Math.min(1, sim));
+      if (t < 0.5) {
+        const r = Math.round(t * 2 * 234);
+        return `rgb(${r},${Math.round(59 + t * 2 * (179 - 59))},${Math.round(246 - t * 2 * (246 - 8))})`;
+      }
+      const u = (t - 0.5) * 2;
+      return `rgb(${Math.round(234 + u * (239 - 234))},${Math.round(179 - u * (179 - 68))},${Math.round(8 - u * 8)})`;
+    }
+
+    // Draw cells
+    for (let i = 0; i < rows; i++) {
+      for (let j = 0; j < cols; j++) {
+        const sim = matrix[i][j];
+        ctx.fillStyle = simToColor(sim);
+        ctx.fillRect(
+          padL + j * cellSize,
+          padT + i * cellSize,
+          cellSize - 1,
+          cellSize - 1,
+        );
+
+        // Value label if cell is large enough
+        if (cellSize >= 28) {
+          ctx.fillStyle = sim > 0.6 ? "#000" : "#fff";
+          ctx.font = `${Math.max(9, cellSize * 0.32)}px monospace`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(
+            `${Math.round(sim * 100)}`,
+            padL + j * cellSize + cellSize / 2,
+            padT + i * cellSize + cellSize / 2,
+          );
+        }
+      }
+    }
+
+    // Axis labels — S1 rows (left), S2 cols (top)
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < rows; i++) {
+      ctx.fillText(`S${i + 1}`, padL - 4, padT + i * cellSize + cellSize / 2);
+    }
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    for (let j = 0; j < cols; j++) {
+      ctx.fillText(`S${j + 1}`, padL + j * cellSize + cellSize / 2, padT - 4);
+    }
+
+    // Axis titles
+    ctx.save();
+    ctx.translate(10, padT + (rows * cellSize) / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#64748b";
+    ctx.font = "11px sans-serif";
+    ctx.fillText(label1, 0, 0);
+    ctx.restore();
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#64748b";
+    ctx.fillText(label2, padL + (cols * cellSize) / 2, 12);
+
+    console.log(
+      `[Pairwise] Heatmap rendered: ${rows}×${cols} cells (cellSize=${cellSize})`,
+    );
+  }
+
+  // ===== Render best/worst match panel =====
+  function renderBestWorstMatches(
+    containerId,
+    matrix,
+    label1,
+    label2,
+    color1,
+    color2,
+  ) {
+    const el = document.getElementById(containerId);
+    if (!el || !matrix.length) return;
+
+    // S1 perspective: for each S1 segment, find best/worst S2 match
+    const s1Stats = matrix.map((row, i) => {
+      const best = Math.max(...row);
+      const worst = Math.min(...row);
+      const avg = row.reduce((a, b) => a + b, 0) / row.length;
+      return {
+        idx: i,
+        best,
+        bestIdx: row.indexOf(best),
+        worst,
+        worstIdx: row.indexOf(worst),
+        avg,
+      };
+    });
+
+    // S2 perspective: for each S2 segment, find best/worst S1 match
+    const cols = matrix[0].length;
+    const s2Stats = Array.from({ length: cols }, (_, j) => {
+      const col = matrix.map((row) => row[j]);
+      const best = Math.max(...col);
+      const worst = Math.min(...col);
+      const avg = col.reduce((a, b) => a + b, 0) / col.length;
+      return {
+        idx: j,
+        best,
+        bestIdx: col.indexOf(best),
+        worst,
+        worstIdx: col.indexOf(worst),
+        avg,
+      };
+    });
+
+    // Overall cross stats
+    const allVals = matrix.flat();
+    const overallAvg = allVals.reduce((a, b) => a + b, 0) / allVals.length;
+    const overallMax = Math.max(...allVals);
+    const overallMin = Math.min(...allVals);
+
+    function statRow(seg, stat, otherLabel) {
+      return `
+        <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;
+                    background:var(--bg-primary);border-radius:8px;font-size:12px;">
+          <span style="min-width:36px;font-weight:600;color:var(--text-secondary);">
+            Seg ${seg + 1}
+          </span>
+          <span style="flex:1;color:var(--text-secondary);">
+            avg <strong style="color:var(--text-primary);">${(stat.avg * 100).toFixed(0)}%</strong>
+          </span>
+          <span class="seg-similarity ${simClass(stat.best)}" title="Best match in ${otherLabel}">
+            ▲ ${(stat.best * 100).toFixed(0)}% → Seg ${stat.bestIdx + 1}
+          </span>
+          <span class="seg-similarity ${simClass(stat.worst)}" title="Worst match in ${otherLabel}">
+            ▼ ${(stat.worst * 100).toFixed(0)}% → Seg ${stat.worstIdx + 1}
+          </span>
+        </div>`;
+    }
+
+    el.innerHTML = `
+      <!-- Overall stats -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+        <div class="mini-card">
+          <div class="mini-icon bg-green">▲</div>
+          <div class="mini-info">
+            <div class="mini-value">${(overallMax * 100).toFixed(0)}%</div>
+            <div class="mini-label">Highest Cross-Sim</div>
+          </div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-icon bg-blue">≈</div>
+          <div class="mini-info">
+            <div class="mini-value">${(overallAvg * 100).toFixed(0)}%</div>
+            <div class="mini-label">Avg Cross-Sim</div>
+          </div>
+        </div>
+        <div class="mini-card">
+          <div class="mini-icon bg-red">▼</div>
+          <div class="mini-info">
+            <div class="mini-value">${(overallMin * 100).toFixed(0)}%</div>
+            <div class="mini-label">Lowest Cross-Sim</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Per-speaker breakdown -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:${color1};margin-bottom:8px;">
+            ${label1} → vs ${label2}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto;">
+            ${s1Stats.map((s) => statRow(s.idx, s, label2)).join("")}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:600;color:${color2};margin-bottom:8px;">
+            ${label2} → vs ${label1}
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto;">
+            ${s2Stats.map((s) => statRow(s.idx, s, label1)).join("")}
+          </div>
+        </div>
+      </div>`;
+
+    console.log(
+      `[Pairwise] Best/worst panel rendered: ${s1Stats.length} S1 segs, ${s2Stats.length} S2 segs, overall avg=${(overallAvg * 100).toFixed(1)}%`,
+    );
+  }
+
+  // ===== Main load function =====
+  async function loadSegmentData(label1, label2, comparisonData) {
+    const list1 = document.getElementById("segmentsList1");
+    const list2 = document.getElementById("segmentsList2");
+    if (!list1 || !list2) return;
+
+    console.log(`[Pairwise] Loading segment data for ${label1} and ${label2}`);
+    list1.innerHTML =
+      '<div style="text-align:center;padding:20px;color:var(--text-secondary);">Loading...</div>';
+    list2.innerHTML =
+      '<div style="text-align:center;padding:20px;color:var(--text-secondary);">Loading...</div>';
+
+    const [result1, result2] = await Promise.allSettled([
+      fetch(`/speakers/segments?label=${encodeURIComponent(label1)}`).then(
+        (r) => r.json(),
+      ),
+      fetch(`/speakers/segments?label=${encodeURIComponent(label2)}`).then(
+        (r) => r.json(),
+      ),
+    ]);
+
+    // Build cross matrix if both succeeded
+    let crossMatrix = null;
+    if (result1.status === "fulfilled" && result2.status === "fulfilled") {
+      const embs1 = result1.value.embeddings || [];
+      const embs2 = result2.value.embeddings || [];
+      if (embs1.length > 0 && embs2.length > 0) {
+        crossMatrix = computeCrossMatrix(embs1, embs2);
+      }
+    }
+
+    const color1 = getSpeakerColor(0);
+    const color2 = getSpeakerColor(1);
+
+    renderSegmentList(list1, result1, label1, crossMatrix, true);
+    renderSegmentList(list2, result2, label2, crossMatrix, false);
+
+    // Inject heatmap + best/worst sections below the grid
+    const segmentGrid = document.getElementById("segmentGrid");
+    if (segmentGrid && crossMatrix) {
+      // Remove previous extras if re-loading
+      document.getElementById("crossHeatmapSection")?.remove();
+      document.getElementById("bestWorstSection")?.remove();
+
+      // Heatmap section
+      const heatmapSection = document.createElement("div");
+      heatmapSection.id = "crossHeatmapSection";
+      heatmapSection.className = "plot-container";
+      heatmapSection.style.gridColumn = "1 / -1";
+      heatmapSection.innerHTML = `
+        <h3 style="margin-bottom:12px;">
+          Cross-Segment Similarity Heatmap
+          <span style="font-size:12px;font-weight:400;color:var(--text-secondary);margin-left:8px;">
+            ${label1} (rows) × ${label2} (cols) — color: 🔵 low → 🟡 mid → 🔴 high
+          </span>
+        </h3>
+        <div style="overflow:auto;">
+          <canvas id="crossHeatmapCanvas"></canvas>
+        </div>`;
+      segmentGrid.after(heatmapSection);
+
+      // Best/worst section
+      const bestWorstSection = document.createElement("div");
+      bestWorstSection.id = "bestWorstSection";
+      bestWorstSection.className = "plot-container";
+      bestWorstSection.innerHTML = `<h3 style="margin-bottom:12px;">Best / Worst Cross-Segment Matches</h3>
+        <div id="bestWorstContent"></div>`;
+      heatmapSection.after(bestWorstSection);
+
+      // Render both
+      setTimeout(() => {
+        renderCrossHeatmap("crossHeatmapCanvas", crossMatrix, label1, label2);
+        renderBestWorstMatches(
+          "bestWorstContent",
+          crossMatrix,
+          label1,
+          label2,
+          color1,
+          color2,
+        );
+      }, 50);
+    }
+  }
+
+  // ===== SEGMENT END ===== //
+
+  // Expose to global scope — ONLY pairwise-specific functions
   window.initPairwiseSelects = initPairwiseSelects;
   window.updatePairwiseComparison = updatePairwiseComparison;
   window.switchPairwiseTab = switchPairwiseTab;
