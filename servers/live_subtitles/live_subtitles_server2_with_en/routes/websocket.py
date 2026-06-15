@@ -76,8 +76,9 @@ async def websocket_endpoint(websocket: WebSocket):
             try:
                 header_dict, audio_bytes = split_message(message)
                 uuid_ = header_dict.get("uuid", "???")
+                segment_id = header_dict.get("segment_id", "???")
                 console.rule(style="dim")
-                console.print(f"[info]Processing[/info] [uuid]{uuid_[-6:]}…[/uuid]")
+                console.print(f"[info]Processing[/info] [uuid]{segment_id}…[/uuid]")
                 
                 future = asyncio.get_running_loop().run_in_executor(
                     executor,
@@ -89,17 +90,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 sent = await safe_send(websocket, response)
                 if not sent:
-                    logger.info(f"Client gone before result sent uuid={uuid_[-6:]}…")
+                    logger.info(f"Client gone before result sent uuid={segment_id}…")
                     break
                 
                 if response["success"]:
                     console.print(
-                        f"[success]Processed successfully[/success] [uuid]{uuid_[-6:]}…[/uuid]"
+                        f"[success]Processed successfully[/success] [uuid]{segment_id}…[/uuid]"
                     )
                 else:
                     console.print(
                         f"[warning]Empty response sent: {response.get('message', '')}[/warning]"
-                        f" [uuid]{uuid_[-6:]}…[/uuid]"
+                        f" [uuid]{segment_id}…[/uuid]"
                     )
                 console.rule(style="dim")
                 

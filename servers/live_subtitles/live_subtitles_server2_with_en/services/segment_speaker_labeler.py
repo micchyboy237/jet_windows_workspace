@@ -5,14 +5,17 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, TypedDict, Union
 import numpy as np
 import torch
+import uuid
 from rich.console import Console
 from scipy.spatial.distance import cdist
 try:
     from services.speech_waves import extract_pure_speech_audio
     from services.config import SAMPLE_RATE
+    from services.speaker_metrics_mixin import SpeakerMetricsMixin
 except ImportError:
     from speech_waves import extract_pure_speech_audio
     from config import SAMPLE_RATE
+    from speaker_metrics_mixin import SpeakerMetricsMixin
 
 console = Console()
 
@@ -56,16 +59,37 @@ class SpeakerReference:
     """Maintains reference data for a single speaker."""
     label: str
     embeddings: List[np.ndarray] = field(default_factory=list)
+    embedding_metadata: List[Dict] = field(default_factory=list)
     centroid: Optional[np.ndarray] = None
     first_seen: Optional[float] = None
     last_seen: float = 0.0
     segment_count: int = 0
     
-    def add_embedding(self, embedding: np.ndarray, timestamp: float) -> None:
-        """Add a new embedding and update centroid using median for robustness."""
+    def add_embedding(self, embedding: np.ndarray, timestamp: float,
+                      segment_id: Optional[str] = None) -> None:
+        """Add a new embedding and update centroid using median for robustness.
+        
+        Parameters
+        ----------
+        embedding : np.ndarray
+            The embedding vector to add.
+        timestamp : float
+            Timestamp when this segment was processed.
+        segment_id : str, optional
+            Unique identifier for the segment that produced this embedding.
+        """
         if embedding.ndim == 1:
             embedding = embedding.reshape(1, -1)
         self.embeddings.append(embedding)
+        
+        # NEW: Store segment metadata
+        self.embedding_metadata.append({
+            'segment_id': segment_id or f"unknown_{len(self.embeddings)}",
+            'timestamp': timestamp,
+            'index': len(self.embeddings) - 1,
+            'added_at': timestamp
+        })
+        
         self.segment_count += 1
         if len(self.embeddings) >= 3:
             try:
@@ -83,7 +107,7 @@ class SpeakerReference:
             self.first_seen = timestamp
         if timestamp > self.last_seen:
             self.last_seen = timestamp
-    
+
     @property
     def active_duration(self) -> float:
         """Total active duration of this speaker."""
@@ -109,7 +133,7 @@ class SpeakerReference:
             return 0.3
 
 
-class SegmentSpeakerLabeler:
+class SegmentSpeakerLabeler(SpeakerMetricsMixin):
     """Dynamically labels speaker segments with progressive reference building.
     
     Parameters
@@ -386,25 +410,58 @@ class SegmentSpeakerLabeler:
         self,
         embedding: np.ndarray,
         timestamp: float,
+        segment_id: Optional[str] = None,  # NEW: Optional segment ID parameter
     ) -> str:
-        """Create a new speaker reference."""
+        """Create a new speaker reference.
+        
+        Parameters
+        ----------
+        embedding : np.ndarray
+            The embedding vector for the first segment.
+        timestamp : float
+            Timestamp when this speaker was first detected.
+        segment_id : str, optional
+            Unique identifier for the segment that triggered this new speaker.
+            If not provided, one will be generated automatically.
+        
+        Returns
+        -------
+        str
+            Label of the newly created speaker (e.g., 'SPEAKER_03').
+        
+        Notes
+        -----
+        The speaker label format is 'SPEAKER_XX' where XX is a zero-padded
+        incrementing number (01, 02, etc.).
+        The embedding is stored along with its segment_id metadata for
+        traceability.
+        """
         label = f"SPEAKER_{self._next_speaker_id:02d}"
         self._next_speaker_id += 1
         self.total_speakers_created += 1
         
+        # Generate segment_id if not provided
+        if segment_id is None:
+            segment_id = self._generate_segment_id()
+        
         ref = SpeakerReference(label=label)
-        ref.add_embedding(embedding, timestamp)
+        ref.add_embedding(
+            embedding=embedding,
+            timestamp=timestamp,
+            segment_id=segment_id  # NEW: Pass segment ID to add_embedding
+        )
         self._speakers[label] = ref
         
-        # NEW: Track creation time
+        # Track creation time for merge protection
         self._speaker_creation_times[label] = timestamp
         
         if self.debug:
             console.print(
                 f"[green]Created new speaker: {label} "
-                f"(segment_count={ref.segment_count}, "
+                f"(segment_id: {segment_id}, "  # NEW: Log segment ID
+                f"segment_count={ref.segment_count}, "
                 f"total_speakers={len(self._speakers)}, "
-                f"next_id={self._next_speaker_id})[/]"  # Debug: show next ID
+                f"next_id={self._next_speaker_id})[/]"
             )
         
         return label
@@ -542,17 +599,38 @@ class SegmentSpeakerLabeler:
         label: str,
         embedding: np.ndarray,
         timestamp: float,
+        segment_id: Optional[str] = None,  # NEW parameter
     ) -> None:
-        """Update speaker reference with new embedding."""
+        """Update speaker reference with new embedding.
+        
+        Parameters
+        ----------
+        label : str
+            Speaker label to update.
+        embedding : np.ndarray
+            New embedding to add.
+        timestamp : float
+            Timestamp of the segment.
+        segment_id : str, optional
+            Unique segment identifier. Auto-generated if not provided.
+        """
         if label not in self._speakers:
             self._speakers[label] = SpeakerReference(label=label)
         
+        # Generate segment_id if not provided
+        if segment_id is None:
+            segment_id = self._generate_segment_id()
+        
         ref = self._speakers[label]
-        ref.add_embedding(embedding, timestamp)
+        ref.add_embedding(embedding, timestamp, segment_id)  # Pass segment_id
         
         # Trim embeddings if exceeding max
         if len(ref.embeddings) > self.max_embeddings_per_speaker:
+            # Also trim metadata
             ref.embeddings = ref.embeddings[-self.max_embeddings_per_speaker:]
+            ref.embedding_metadata = ref.embedding_metadata[-self.max_embeddings_per_speaker:]
+            
+            # Recalculate centroid after trimming
             if ref.embeddings:
                 if len(ref.embeddings) >= 3:
                     stacked = np.vstack(ref.embeddings)
@@ -560,6 +638,29 @@ class SegmentSpeakerLabeler:
                 else:
                     stacked = np.vstack(ref.embeddings)
                     ref.centroid = np.mean(stacked, axis=0, keepdims=True)
+
+    def _generate_segment_id(self, prefix: str = "segment") -> str:
+        """Generate a unique segment identifier with UUID suffix.
+        
+        Parameters
+        ----------
+        prefix : str
+            Prefix for the segment ID (default: "segment")
+        
+        Returns
+        -------
+        str
+            Unique segment ID in format: '{prefix}_{uuid_short}'
+            Example: 'segment_a3f2b1c4'
+        
+        Notes
+        -----
+        Uses UUID4 (random) for uniqueness across sessions/machines.
+        Shortened to 8 characters for readability while maintaining
+        extremely low collision probability (16^8 = ~4.3 billion combinations).
+        """
+        uuid_short = uuid.uuid4().hex[:8]
+        return f"{prefix}_{uuid_short}"
 
     def _get_speaker_categories(self) -> Dict[str, Dict]:
         """Categorize speakers by reliability for maintenance decisions.
@@ -974,13 +1075,43 @@ class SegmentSpeakerLabeler:
         timestamp: float,
         context: Optional[Dict] = None,
         top_k: Optional[int] = None,
+        segment_id: Optional[str] = None,  # NEW: Optional external segment ID
     ) -> List[Dict]:
         """Label a speech segment with multiple possible speaker identities.
         
+        Parameters
+        ----------
+        waveform : torch.Tensor
+            Audio waveform of the segment.
+        sample_rate : int
+            Sample rate of the audio.
+        timestamp : float
+            Timestamp of the segment in seconds.
+        context : dict, optional
+            Additional context like previous speaker info.
+        top_k : int, optional
+            Number of top matches to return.
+        segment_id : str, optional
+            External segment identifier. If not provided, one will be generated
+            automatically using UUID. This allows callers to maintain their own
+            segment tracking system.
+        
+        Returns
+        -------
+        list of dict
+            List of speaker matches with confidence scores and segment_id.
+        
+        Notes
+        -----
         NEW: Added centroid contamination protection. Embeddings with low
         similarity to existing speakers are no longer added to centroids.
+        Each embedding now tracked with unique segment ID.
         """
         self.total_segments_processed += 1
+        
+        # Use provided segment_id or generate new one
+        if segment_id is None:
+            segment_id = self._generate_segment_id()
         
         if top_k is None:
             top_k = self.top_k_speakers
@@ -995,7 +1126,8 @@ class SegmentSpeakerLabeler:
         if self.debug:
             console.print(
                 f"[dim]Embedding shape: {embedding.shape}, "
-                f"ndim: {embedding.ndim}[/]"
+                f"ndim: {embedding.ndim}, "
+                f"segment_id: {segment_id}[/]"
             )
         
         # Find top matches
@@ -1004,6 +1136,7 @@ class SegmentSpeakerLabeler:
         if self.debug:
             console.print(
                 f"[dim]Computed embedding for t={timestamp:.2f}s, "
+                f"segment_id={segment_id}, "
                 f"got {len(top_matches)} top matches[/]"
             )
         
@@ -1028,8 +1161,12 @@ class SegmentSpeakerLabeler:
         just_created_speaker = False
         
         if should_create or not top_matches:
-            # Create new speaker (already adds embedding)
-            new_label = self.create_new_speaker(embedding, timestamp)
+            # Create new speaker with segment ID
+            new_label = self.create_new_speaker(
+                embedding=embedding,
+                timestamp=timestamp,
+                segment_id=segment_id
+            )
             just_created_speaker = True
             
             if self.debug:
@@ -1037,7 +1174,8 @@ class SegmentSpeakerLabeler:
                 new_ref = self._speakers[new_label]
                 console.print(
                     f"[yellow]⚠️  New speaker: {new_label} "
-                    f"(segments: {new_ref.segment_count}, "
+                    f"(segment_id: {segment_id}, "
+                    f"segments: {new_ref.segment_count}, "
                     f"best sim: {actual_best_score:.3f}, "
                     f"mature: {len(categories['mature'])}, "
                     f"young: {len(categories['young'])}, "
@@ -1052,6 +1190,7 @@ class SegmentSpeakerLabeler:
                 "is_new_speaker": True,
                 "segment_count": 1,
                 "last_seen": timestamp,
+                "segment_id": segment_id,
             })
             seen_labels.add(new_label)
             
@@ -1066,6 +1205,7 @@ class SegmentSpeakerLabeler:
                         "is_new_speaker": False,
                         "segment_count": match["segment_count"],
                         "last_seen": match["last_seen"],
+                        "segment_id": segment_id,
                     })
                     seen_labels.add(match["label"])
         
@@ -1106,7 +1246,8 @@ class SegmentSpeakerLabeler:
                             if self.debug:
                                 console.print(
                                     f"[blue]Context match: {prev_speaker} "
-                                    f"(sim={prev_sim:.3f})[/blue]"
+                                    f"(segment_id: {segment_id}, "
+                                    f"sim={prev_sim:.3f})[/blue]"
                                 )
                 
                 results.append({
@@ -1117,6 +1258,7 @@ class SegmentSpeakerLabeler:
                     "is_new_speaker": False,
                     "segment_count": match["segment_count"],
                     "last_seen": match["last_seen"],
+                    "segment_id": segment_id,
                 })
                 seen_labels.add(label)
                 
@@ -1126,37 +1268,46 @@ class SegmentSpeakerLabeler:
             # Deduplicate results
             results = self._deduplicate_results(results)
             
-            # NEW: Only update reference if similarity is sufficient
+            # Only update reference if similarity is sufficient
             primary_result = results[0]
             
-            # FIXED: Pass embedding to _should_update_reference
             should_update, reason = self._should_update_reference(
                 label=primary_result["label"],
                 similarity=primary_result["confidence"],
                 match_type=primary_result["match_type"],
                 timestamp=timestamp,
-                embedding=embedding,  # FIXED: Added missing argument
+                embedding=embedding,
             )
             
             if should_update:
                 self.update_reference(
-                    primary_result["label"], embedding, timestamp
+                    label=primary_result["label"],
+                    embedding=embedding,
+                    timestamp=timestamp,
+                    segment_id=segment_id
                 )
                 if self.debug:
                     console.print(
                         f"[green]✓ Updated {primary_result['label']} "
-                        f"(sim={primary_result['confidence']:.3f}, "
+                        f"(segment_id: {segment_id}, "
+                        f"sim={primary_result['confidence']:.3f}, "
                         f"reason={reason})[/]"
                     )
             else:
-                # NEW: If similarity too low for update, create new speaker instead
+                # If similarity too low for update, create new speaker instead
                 if self.debug:
                     console.print(
                         f"[red]✗ Rejected update to {primary_result['label']}: "
+                        f"segment_id: {segment_id}, "
                         f"{reason}. Creating new speaker.[/]"
                     )
                 
-                new_label = self.create_new_speaker(embedding, timestamp)
+                # Create new speaker with the same segment ID
+                new_label = self.create_new_speaker(
+                    embedding=embedding,
+                    timestamp=timestamp,
+                    segment_id=segment_id
+                )
                 just_created_speaker = True
                 
                 # Update primary result to new speaker
@@ -1165,10 +1316,12 @@ class SegmentSpeakerLabeler:
                 primary_result["match_type"] = "new_speaker"
                 primary_result["is_new_speaker"] = True
                 primary_result["segment_count"] = 1
+                primary_result["segment_id"] = segment_id
                 
                 if self.debug:
                     console.print(
-                        f"[yellow]⚠️  Created new speaker instead: {new_label}[/]"
+                        f"[yellow]⚠️  Created new speaker instead: {new_label} "
+                        f"(segment_id: {segment_id})[/]"
                     )
         
         # Run maintenance
@@ -1181,7 +1334,9 @@ class SegmentSpeakerLabeler:
             )
             console.print(
                 f"[dim]Segment {self.total_segments_processed}: "
-                f"t={timestamp:.2f}s → [{speakers_str}] "
+                f"t={timestamp:.2f}s, "
+                f"segment_id={segment_id}, "
+                f"→ [{speakers_str}] "
                 f"(primary: {results[0]['label']}, "
                 f"speakers: {len(self._speakers)}, "
                 f"rejected: {self._rejected_updates})[/]"
@@ -1195,14 +1350,38 @@ class SegmentSpeakerLabeler:
         sample_rate: int,
         timestamp: float,
         context: Optional[Dict] = None,
+        segment_id: Optional[str] = None,  # NEW: Optional external segment ID
     ) -> Tuple[str, float, Dict]:
-        """Label a speech segment with a single speaker identity."""
-        results = self.label_segments(  # ← DELEGATES HERE
+        """Label a speech segment with a single speaker identity.
+        
+        Parameters
+        ----------
+        waveform : torch.Tensor
+            Audio waveform of the segment.
+        sample_rate : int
+            Sample rate of the audio.
+        timestamp : float
+            Timestamp of the segment in seconds.
+        context : dict, optional
+            Additional context like previous speaker info.
+        segment_id : str, optional
+            External segment identifier. If not provided, one will be generated
+            automatically. Passed through to label_segments().
+        
+        Returns
+        -------
+        tuple
+            (speaker_label, confidence_score, metadata_dict)
+            metadata includes: timestamp, is_new_speaker, match_type, 
+            all_scores, and segment_id
+        """
+        results = self.label_segments(
             waveform=waveform,
             sample_rate=sample_rate,
             timestamp=timestamp,
             context=context,
             top_k=1,
+            segment_id=segment_id,  # NEW: Pass segment_id through
         )
         primary = results[0]
         metadata = {
@@ -1210,6 +1389,7 @@ class SegmentSpeakerLabeler:
             "is_new_speaker": primary.get("is_new_speaker", False),
             "match_type": primary["match_type"],
             "all_scores": {},
+            "segment_id": primary.get("segment_id"),  # NEW: Include segment_id in metadata
         }
         return primary["label"], primary["confidence"], metadata
 

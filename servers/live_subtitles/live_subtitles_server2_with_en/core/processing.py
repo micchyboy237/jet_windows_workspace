@@ -137,6 +137,7 @@ def label_speakers_for_segment(
     sample_rate: int,
     timestamp: Optional[float] = None,
     return_multiple: bool = True,
+    segment_id: Optional[str] = None,
 ) -> tuple:
     """Label speakers for an audio segment using the progressive labeler."""
     if waveform.size == 0:
@@ -176,6 +177,7 @@ def label_speakers_for_segment(
             sample_rate=sample_rate,
             timestamp=timestamp,
             context=context,
+            segment_id=segment_id,
         )
         primary = (
             speaker_results[0]
@@ -246,9 +248,11 @@ def blocking_process_audio(audio_bytes: bytes, header: dict) -> dict:
     n_segment_results = get_n_segment_results()
 
     uuid_ = header.get("uuid")
-    if not uuid_:
-        console.print("[error]Missing UUID in header[/error]")
-        return {"message": "missing uuid", "success": False}
+    segment_id = header.get("segment_id")
+    segment_number = header.get("segment_number")
+    if not segment_id:
+        console.print("[error]Missing segment ID in header[/error]")
+        return {"message": "missing segment_id", "success": False}
 
     sample_rate = header.get("sample_rate", 16000)
     language = header.get("language", "auto")
@@ -290,6 +294,8 @@ def blocking_process_audio(audio_bytes: bytes, header: dict) -> dict:
         )
         return {
             "uuid": uuid_,
+            "segment_id": segment_id,
+            "segment_number": segment_number,
             "new_duration": header.get("duration_sec", 0),
             "context_uuid": uuid_,
             "context_duration": 0,
@@ -470,6 +476,7 @@ def _perform_speaker_labeling(
     sample_rate: int,
     header: dict,
     full_word_segments_text: str,
+    segment_id: Optional[str] = None,
 ) -> tuple:
     """Perform speaker labeling if text content is sufficient."""
     text_has_sufficient_content = should_label_speaker(
@@ -490,6 +497,7 @@ def _perform_speaker_labeling(
                 sample_rate=sample_rate,
                 timestamp=segment_timestamp,
                 return_multiple=use_multiple,
+                segment_id=segment_id,
             )
         )
         if len(speaker_results) > 1:
@@ -547,7 +555,10 @@ def _process_non_japanese(
     console.print(f"[bright_white]{en_text}[/bright_white]")
     console.print(f"[dim]Language: {language} | Words: {len(full_word_segments)}[/dim]")
 
-    segment_num = get_next_segment_number()
+    segment_id = header.get("segment_id")
+    segment_num = header.get("segment_number")
+    # segment_num = get_next_segment_number()
+
     segment_dir = prepare_segment_directory(
         segment_num,
         segments_dir=last_n_segments_dir,
@@ -567,7 +578,11 @@ def _process_non_japanese(
         primary_confidence,
         speaker_metadata,
     ) = _perform_speaker_labeling(
-        audio_np, sample_rate, header, full_word_segments_text
+        audio_np,
+        sample_rate,
+        header,
+        full_word_segments_text,
+        segment_id=segment_id,
     )
 
     # Save tagging events to segment directory now that we have it
@@ -621,6 +636,8 @@ def _process_non_japanese(
         audio_np,
         {
             "uuid": header["uuid"],
+            "segment_id": segment_id,
+            "segment_number": segment_num,
             "forced": header["forced"],
             "vad_reason": header["vad_reason"],
             "start_sec": header["start_sec"],
@@ -646,6 +663,7 @@ def _process_non_japanese(
 
     console.print("[bold green]✅ Non-Japanese Response Summary:[/bold green]")
     console.print(f"  UUID: [uuid]{uuid_[-6:]}[/uuid]")
+    console.print(f"  UUID: [uuid]{uuid_[-6:]}[/uuid]")
     console.print(f"  Language: [value]{language}[/value]")
     console.print(f"  Text length: [number]{len(en_text)}[/number] chars")
     console.print(f"  Speaker: [speaker]{primary_label}[/speaker]")
@@ -653,6 +671,8 @@ def _process_non_japanese(
 
     return {
         "uuid": uuid_,
+        "segment_id": segment_id,
+        "segment_number": segment_num,
         "new_duration": header["duration_sec"],
         "context_uuid": context_buffer.get_context_uuid() or uuid_,
         "context_duration": context_buffer.get_total_duration(),
@@ -719,7 +739,10 @@ def _process_japanese(
     console.print(f"[bright_white]{full_ja_text}[/bright_white]")
     console.print(f"[dim]Sentences: {len(full_ja_sents)}[/dim]")
 
-    segment_num = get_next_segment_number()
+    segment_id = header.get("segment_id")
+    segment_num = header.get("segment_number")
+    # segment_num = get_next_segment_number()
+
     segment_dir = prepare_segment_directory(
         segment_num,
         segments_dir=last_n_segments_dir,
@@ -739,7 +762,11 @@ def _process_japanese(
         primary_confidence,
         speaker_metadata,
     ) = _perform_speaker_labeling(
-        audio_np, sample_rate, header, full_word_segments_text
+        audio_np,
+        sample_rate,
+        header,
+        full_word_segments_text,
+        segment_id=segment_id,
     )
 
     # Save tagging events to segment directory now that we have it
@@ -801,6 +828,8 @@ def _process_japanese(
         if not new_clean:
             return {
                 "uuid": uuid_,
+                "segment_id": segment_id,
+                "segment_number": segment_num,
                 "ja_text": "",
                 "en_text": "",
                 "speaker_label": primary_label,
@@ -854,6 +883,8 @@ def _process_japanese(
         else:
             return {
                 "uuid": uuid_,
+                "segment_id": segment_id,
+                "segment_number": segment_num,
                 "ja_text": "",
                 "en_text": "",
                 "speaker_label": primary_label,
@@ -914,6 +945,8 @@ def _process_japanese(
         audio_np,
         {
             "uuid": header["uuid"],
+            "segment_id": segment_id,
+            "segment_number": segment_num,
             "forced": header["forced"],
             "vad_reason": header["vad_reason"],
             "start_sec": header["start_sec"],
@@ -950,6 +983,8 @@ def _process_japanese(
 
     return {
         "uuid": uuid_,
+        "segment_id": segment_id,
+        "segment_number": segment_num,
         "new_duration": header["duration_sec"],
         "context_uuid": context_buffer.get_context_uuid() or uuid_,
         "context_duration": context_buffer.get_total_duration(),

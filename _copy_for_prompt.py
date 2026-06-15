@@ -59,8 +59,9 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
-    # # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\dashboard.html",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\single_plot.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\dashboard.html",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\speaker_metrics.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\single_plot.html",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\health_diagnostics.js",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\independent_analysis.js",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\similarity_network.js",
@@ -74,8 +75,15 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\pairwise_comparison.js",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\similarity_network.js",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\dimension_diff_view.js",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\dimension_diff_view.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\static\js\speakers\dimension_diff_view.js",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\dimension_diff_view.html",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_metrics_mixin.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\helpers\speaker_metrics.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler_health_mixin.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_segment_speaker_labeler_mixin_inheritance.py",
     r"",
 ]
 
@@ -99,46 +107,10 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-The plot is still not showing
-
-pca?speaker=SPEAKER_01&view=dimensions:1218 [Pairwise] Component initialized (global guard)
-pairwise_comparison.js:26 [PairwiseJS] External module loaded, patching into existing pairwise system
-pairwise_comparison.js:74 [PairwiseJS] PairwiseComparison API exposed at window.PairwiseComparison
-pca?speaker=SPEAKER_01&view=dimensions:4841 [SinglePlot] DOM ready, initializing...
-pca?speaker=SPEAKER_01&view=dimensions:4688 [SinglePlot] Refreshing all data...
-pca?speaker=SPEAKER_01&view=dimensions:3674 [SinglePlot] Fetching all data...
-pca?speaker=SPEAKER_01&view=dimensions:3685 [SinglePlot] Data received: Object
-pca?speaker=SPEAKER_01&view=dimensions:1255 [Pairwise] initPairwiseSelects with 2 speakers
-pca?speaker=SPEAKER_01&view=dimensions:1307 [Pairwise] Comparing: SPEAKER_01 ↔ SPEAKER_02
-independent_analysis.js:63 [IndieAnalysis] All charts destroyed
-independent_analysis.js:48 [IndieAnalysis] Initialized with 2 speakers
-pca?speaker=SPEAKER_01&view=dimensions:4530 [SinglePlot] Switching to view: scatter
-pca?speaker=SPEAKER_01&view=dimensions:1346 [Pairwise] All charts destroyed
-independent_analysis.js:63 [IndieAnalysis] All charts destroyed
-health_diagnostics.js:39 [Health] All charts destroyed
-dimension_diff_view.js:485 [DimensionDiff] All charts destroyed
-pca?speaker=SPEAKER_01&view=dimensions:4740 [SinglePlot] Refresh complete
-independent_analysis.js:174 [IndieAnalysis] Using similarity_gauge component
-pca?speaker=SPEAKER_01&view=dimensions:2837 [SimilarityGauge] Updated #indie-gauge-main: 24% (low-sim)
-independent_analysis.js:211 [IndieAnalysis] Using dimension_diff_view component
-independent_analysis.js:230 [IndieAnalysis] Updated: SPEAKER_01 vs SPEAKER_02
-pca?speaker=SPEAKER_01&view=dimensions:1346 [Pairwise] All charts destroyed
-pca?speaker=SPEAKER_01&view=dimensions:2088 [Pairwise] Loading segment data for SPEAKER_01 and SPEAKER_02
-pca?speaker=SPEAKER_01&view=dimensions:1247 [Pairwise] Gauge updated: 24% (#22c55e)
-pca?speaker=SPEAKER_01&view=dimensions:1737 [Pairwise] Cross matrix: 2×2
-pca?speaker=SPEAKER_01&view=dimensions:1818 [Pairwise] Rendering 2 segments for SPEAKER_01 with cross-match badges
-pca?speaker=SPEAKER_01&view=dimensions:1818 [Pairwise] Rendering 2 segments for SPEAKER_02 with cross-match badges
-pca?speaker=SPEAKER_01&view=dimensions:4641 [SinglePlot] Highlighting speaker: SPEAKER_01
-pca?speaker=SPEAKER_01&view=dimensions:1957 [Pairwise] Heatmap rendered: 2×2 cells (cellSize=48)
-pca?speaker=SPEAKER_01&view=dimensions:2077 [Pairwise] Best/worst panel rendered: 2 S1 segs, 2 S2 segs, overall avg=19.2%
-pca?speaker=SPEAKER_01&view=dimensions:4530 [SinglePlot] Switching to view: dimensions
-pca?speaker=SPEAKER_01&view=dimensions:1346 [Pairwise] All charts destroyed
-independent_analysis.js:63 [IndieAnalysis] All charts destroyed
-health_diagnostics.js:39 [Health] All charts destroyed
-dimension_diff_view.js:485 [DimensionDiff] All charts destroyed
-dimension_diff_view.js:15 [DimensionDiff] Initializing view with 2 speakers
-dimension_diff_view.js:54 [DimensionDiff] View initialized
-
+Analyze speaker_metrics.html on all the data it needs from server.
+Then check segment_speaker_labeler on how to complete the speaker_metrics_mixin functions to be used for new endpoint routes based from speaker_metrics.
+Then add the endpoints for speaker metrics that will be used by the html.
+Include a html response route.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

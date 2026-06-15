@@ -822,6 +822,165 @@ async def export_speaker_data(
     return JSONResponse(content=export_data)
 
 
+# ============================================================
+# Speaker Metrics Endpoints (uses SpeakerMetricsMixin methods)
+# ============================================================
+
+@router.get("/metrics/data")
+async def get_speaker_metrics_data(
+    label: Optional[str] = Query(
+        None,
+        description="Filter intra-speaker metrics to a specific speaker label (e.g., 'SPEAKER_01')",
+    ),
+):
+    """
+    Get comprehensive speaker metrics data for the frontend dashboard.
+    
+    Returns intra-speaker variance (per speaker) and inter-speaker separation
+    (pairwise between centroids). Used by speaker_metrics.html.
+    
+    Parameters
+    ----------
+    label : str, optional
+        Specific speaker label to filter intra-speaker results.
+    
+    Returns
+    -------
+    JSON with structure:
+    {
+        "intra_speaker": {
+            "speakers": [{label, segmentsCount, health, meanDist, stdDev, 
+                          minDist, maxDist, segments: [{id, d}]}],
+            "overall_status": "healthy|warning|unhealthy",
+            "total_speakers_analyzed": int
+        },
+        "inter_speaker": {
+            "meanSeparation", "stdSeparation", "minSeparation", "maxSeparation",
+            "health": "healthy|warning|unhealthy",
+            "pairwise": [{from, to, distance}],
+            "num_speakers": int
+        },
+        "timestamp": "ISO datetime"
+    }
+    """
+    labeler = get_speaker_labeler()
+    if not labeler:
+        console.print("[error]Speaker labeler not initialized for metrics[/]")
+        raise HTTPException(
+            status_code=400,
+            detail="Speaker labeler not initialized. Process some audio segments first."
+        )
+
+    # Check if the labeler has the mixin methods
+    if not hasattr(labeler, 'get_speaker_metrics'):
+        console.print("[error]SpeakerMetricsMixin not applied to labeler[/]")
+        raise HTTPException(
+            status_code=500,
+            detail="Speaker metrics not available. Mixin not applied."
+        )
+
+    console.print(f"[info]Fetching speaker metrics data (label={label or 'all'})[/]")
+    try:
+        metrics_data = labeler.get_speaker_metrics(label=label)
+        console.print(
+            f"[success]Speaker metrics: {metrics_data['intra_speaker']['total_speakers_analyzed']} "
+            f"intra, {metrics_data['inter_speaker']['num_speakers']} inter speakers[/]"
+        )
+        return JSONResponse(content=metrics_data)
+    except Exception as e:
+        console.print(f"[error]Failed to compute speaker metrics: {e}[/]")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to compute speaker metrics: {str(e)}"
+        )
+
+
+@router.get("/metrics/intra")
+async def get_intra_speaker_metrics(
+    label: Optional[str] = Query(None, description="Filter to specific speaker label"),
+):
+    """Get intra-speaker variance metrics only."""
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    if not hasattr(labeler, 'compute_intra_speaker_metrics'):
+        raise HTTPException(status_code=500, detail="Speaker metrics mixin not applied")
+    
+    console.print(f"[info]Fetching intra-speaker metrics (label={label or 'all'})[/]")
+    result = labeler.compute_intra_speaker_metrics(label=label)
+    return JSONResponse(content=result)
+
+
+@router.get("/metrics/inter")
+async def get_inter_speaker_metrics():
+    """Get inter-speaker separation metrics only."""
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    if not hasattr(labeler, 'compute_inter_speaker_metrics'):
+        raise HTTPException(status_code=500, detail="Speaker metrics mixin not applied")
+    
+    console.print("[info]Fetching inter-speaker metrics[/]")
+    result = labeler.compute_inter_speaker_metrics()
+    return JSONResponse(content=result)
+
+
+@router.get("/metrics", response_class=HTMLResponse)
+async def get_speaker_metrics_page(request: Request):
+    """
+    Serve the speaker metrics HTML dashboard page.
+    
+    This returns the speaker_metrics.html template as a complete page.
+    The frontend JavaScript will then fetch data from /speakers/metrics/data.
+    """
+    labeler = get_speaker_labeler()
+    if not labeler:
+        console.print("[warning]Speaker labeler not initialized for metrics page[/]")
+        # Still serve the page - it will show empty/error state
+
+    console.print("[info]Serving speaker metrics HTML page[/]")
+    try:
+        html_content = render_template("speaker_metrics.html", {
+            "title": "Speaker Metrics Dashboard",
+            "timestamp": datetime.now().isoformat(),
+        })
+        console.print("[success]Speaker metrics page rendered[/]")
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        console.print(f"[error]Failed to render speaker metrics page: {e}[/]")
+        # Try serving the raw file if template rendering fails
+        metrics_html_path = _templates_dir / "speaker_metrics.html"
+        if metrics_html_path.exists():
+            console.print("[info]Falling back to raw HTML file[/]")
+            return HTMLResponse(content=metrics_html_path.read_text(encoding='utf-8'))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to render metrics page: {str(e)}"
+        )
+
+
+@router.get("/metrics/health")
+async def get_speaker_metrics_health():
+    """
+    Quick health check endpoint for speaker metrics.
+    Returns a simple summary of overall speaker health.
+    """
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    if not hasattr(labeler, 'get_speaker_metrics'):
+        raise HTTPException(status_code=500, detail="Speaker metrics mixin not applied")
+    
+    metrics = labeler.get_speaker_metrics()
+    return JSONResponse(content={
+        "intra_overall_status": metrics["intra_speaker"]["overall_status"],
+        "inter_health": metrics["inter_speaker"]["health"],
+        "total_speakers": metrics["intra_speaker"]["total_speakers_analyzed"],
+        "mean_separation": metrics["inter_speaker"]["meanSeparation"],
+        "timestamp": metrics["timestamp"],
+    })
+
+
 # ---------------------------------------------------------------------------
 # Fallback HTML helper
 # ---------------------------------------------------------------------------
