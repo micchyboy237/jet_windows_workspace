@@ -69,7 +69,6 @@ function destroyIndieCharts() {
 async function updateIndependentAnalysis() {
   const label1 = document.getElementById("indieSpeaker1")?.value;
   const label2 = document.getElementById("indieSpeaker2")?.value;
-
   if (!label1 && !label2) return;
 
   destroyIndieCharts();
@@ -81,12 +80,39 @@ async function updateIndependentAnalysis() {
   if (label1 && allData) {
     const sp1 = allData.centroids?.centroids?.[label1];
     if (sp1) {
-      _renderSingleEmbedding(
+      const container1 = document.getElementById(
         "embedding-speaker1-container",
-        label1,
-        sp1,
-        color1,
       );
+      if (
+        container1 &&
+        container1._useComponent &&
+        typeof renderSpeakerEmbedding === "function"
+      ) {
+        // Use the component's renderer
+        console.log(
+          "[IndieAnalysis] Using speaker_embedding_plot component for Speaker 1",
+        );
+        renderSpeakerEmbedding(
+          "embedding-speaker1-container",
+          {
+            ...sp1,
+            label: label1,
+          },
+          {
+            color: color1,
+            chartType: "line",
+            showStats: true,
+          },
+        );
+      } else if (typeof _renderSingleEmbedding === "function") {
+        // Fallback to independent_analysis.js renderer
+        _renderSingleEmbedding(
+          "embedding-speaker1-container",
+          label1,
+          sp1,
+          color1,
+        );
+      }
     }
   }
 
@@ -94,12 +120,37 @@ async function updateIndependentAnalysis() {
   if (label2 && allData) {
     const sp2 = allData.centroids?.centroids?.[label2];
     if (sp2) {
-      _renderSingleEmbedding(
+      const container2 = document.getElementById(
         "embedding-speaker2-container",
-        label2,
-        sp2,
-        color2,
       );
+      if (
+        container2 &&
+        container2._useComponent &&
+        typeof renderSpeakerEmbedding === "function"
+      ) {
+        console.log(
+          "[IndieAnalysis] Using speaker_embedding_plot component for Speaker 2",
+        );
+        renderSpeakerEmbedding(
+          "embedding-speaker2-container",
+          {
+            ...sp2,
+            label: label2,
+          },
+          {
+            color: color2,
+            chartType: "line",
+            showStats: true,
+          },
+        );
+      } else if (typeof _renderSingleEmbedding === "function") {
+        _renderSingleEmbedding(
+          "embedding-speaker2-container",
+          label2,
+          sp2,
+          color2,
+        );
+      }
     }
   }
 
@@ -110,21 +161,72 @@ async function updateIndependentAnalysis() {
         `/speakers/centroid-comparison?label1=${encodeURIComponent(label1)}&label2=${encodeURIComponent(label2)}`,
       );
       const data = await res.json();
-
       if (!data.error) {
-        _renderIndieSimilarityGauge(
-          data.comparison?.cosine_similarity || 0,
-          label1,
-          label2,
+        const similarity = data.comparison?.cosine_similarity || 0;
+
+        // Similarity Gauge - use component if available
+        const gaugeContainer = document.getElementById("indie-gauge-container");
+        if (
+          gaugeContainer &&
+          gaugeContainer._useComponent &&
+          typeof updateSimilarityGauge === "function"
+        ) {
+          console.log("[IndieAnalysis] Using similarity_gauge component");
+          // The include already created the gauge structure, just update it
+          const gaugeEl = gaugeContainer.querySelector(".sim-gauge-container");
+          if (gaugeEl) {
+            updateSimilarityGauge(
+              gaugeEl.id || "indie-gauge-container",
+              similarity,
+              {
+                speaker1: label1,
+                speaker2: label2,
+              },
+            );
+          } else {
+            // Create new gauge
+            const gauge = createSimilarityGauge("indie-gauge-main", {
+              size: "lg",
+            });
+            gaugeContainer.innerHTML = "";
+            gaugeContainer.appendChild(gauge);
+            updateSimilarityGauge("indie-gauge-main", similarity, {
+              speaker1: label1,
+              speaker2: label2,
+            });
+          }
+        } else if (typeof _renderIndieSimilarityGauge === "function") {
+          _renderIndieSimilarityGauge(similarity, label1, label2);
+        }
+
+        // Dimension Diff - use component if available
+        const dimDiffContainer = document.getElementById(
+          "indie-dimdiff-content",
         );
-        _renderIndieDimensionDiff(data, label1, label2, color1, color2);
-        _renderIndieComparisonTable(data, label1, label2, color1, color2);
+        if (
+          dimDiffContainer &&
+          dimDiffContainer._useComponent &&
+          typeof renderDimensionDiff === "function"
+        ) {
+          console.log("[IndieAnalysis] Using dimension_diff_view component");
+          renderDimensionDiff("indie-dimdiff-content", data, {
+            speaker1Label: label1,
+            speaker2Label: label2,
+            colors: { speaker1: color1, speaker2: color2 },
+          });
+        } else if (typeof _renderIndieDimensionDiff === "function") {
+          _renderIndieDimensionDiff(data, label1, label2, color1, color2);
+        }
+
+        // Comparison table (always use the JS version since no component exists for this)
+        if (typeof _renderIndieComparisonTable === "function") {
+          _renderIndieComparisonTable(data, label1, label2, color1, color2);
+        }
       }
     } catch (e) {
       console.error("[IndieAnalysis] Error fetching comparison:", e);
     }
   }
-
   console.log(`[IndieAnalysis] Updated: ${label1 || "?"} vs ${label2 || "?"}`);
 }
 

@@ -1,8 +1,6 @@
-<!-- templates/speakers/components/pairwise_comparison.html -->
 <!--
   Pairwise Speaker Comparison with Independent Segment Tabs
   Dependencies: Chart.js 4.4.0+
-  Usage: {% include 'components/pairwise_comparison.html' %}
   
   Requires global JS functions:
   - fetchSpeakerData(speakerLabel) -> Promise<speakerData>
@@ -407,21 +405,32 @@
 
 <script>
   // ===== Pairwise Comparison Logic =====
+  // NOTE: SPEAKER_COLORS and getColor are defined in single_plot.html
+  // Do NOT redeclare them here to avoid "Identifier has already been declared" errors.
+  // Guard against duplicate declaration (component may be included multiple times)
+  if (typeof window._pairwiseInitialized === "undefined") {
+    window._pairwiseInitialized = true;
+    window.pairwiseData = null;
+    window.pairwiseCharts = {};
+    console.log("[Pairwise] Component initialized (global guard)");
+  }
+  // Use the globally declared variables - use var to avoid redeclaration errors
+  var pairwiseData = window.pairwiseData;
+  var pairwiseCharts = window.pairwiseCharts;
 
-  let pairwiseData = null;
-  let pairwiseCharts = {};
+  // Helper: get speaker color (wraps global getColor)
+  function getSpeakerColor(index) {
+    return typeof getColor === "function" ? getColor(index) : "#94a3b8";
+  }
 
   // Initialize speaker dropdowns
   function initPairwiseSelects(speakerLabels) {
     const select1 = document.getElementById("pairwiseSpeaker1");
     const select2 = document.getElementById("pairwiseSpeaker2");
-
     if (!select1 || !select2) return;
-
     // Save current selections
     const current1 = select1.value;
     const current2 = select2.value;
-
     // Rebuild options
     [select1, select2].forEach((select) => {
       // Keep placeholder
@@ -430,15 +439,13 @@
         const option = document.createElement("option");
         option.value = label;
         option.textContent = `${label} (${i + 1})`;
-        option.style.color = getSpeakerColor ? getSpeakerColor(i) : "#94a3b8";
+        option.style.color = getSpeakerColor(i);
         select.appendChild(option);
       });
     });
-
     // Restore selections if still valid
     if (speakerLabels.includes(current1)) select1.value = current1;
     if (speakerLabels.includes(current2)) select2.value = current2;
-
     // Auto-select first two if none selected
     if (!current1 && speakerLabels.length >= 1) {
       select1.value = speakerLabels[0];
@@ -446,23 +453,19 @@
     if (!current2 && speakerLabels.length >= 2) {
       select2.value = speakerLabels[1];
     }
-
     // Trigger update if we have two selections
     if (select1.value && select2.value) {
       updatePairwiseComparison();
     }
   }
-
   // Update pairwise comparison when selections change
   async function updatePairwiseComparison() {
     const label1 = document.getElementById("pairwiseSpeaker1")?.value;
     const label2 = document.getElementById("pairwiseSpeaker2")?.value;
-
     if (!label1 || !label2) {
       showEmptyPairwise();
       return;
     }
-
     if (label1 === label2) {
       document.getElementById("pairwiseContent").innerHTML = `
         <div class="empty-comparison">
@@ -472,20 +475,16 @@
         </div>`;
       return;
     }
-
     console.log(`[Pairwise] Comparing: ${label1} ↔ ${label2}`);
-
     try {
       // Fetch comparison data
       const res = await fetch(
         `/speakers/centroid-comparison?label1=${encodeURIComponent(label1)}&label2=${encodeURIComponent(label2)}`,
       );
       const data = await res.json();
-
       if (data.error) {
         throw new Error(data.error);
       }
-
       pairwiseData = data;
       renderPairwiseContent(label1, label2, data);
       updateSimilarityGauge(data.comparison?.cosine_similarity || 0);
@@ -495,7 +494,6 @@
         <div class="error-message">⚠️ Failed to load comparison: ${e.message}</div>`;
     }
   }
-
   // Show empty state
   function showEmptyPairwise() {
     document.getElementById("pairwiseContent").innerHTML = `
@@ -506,12 +504,10 @@
       </div>`;
     updateSimilarityGauge(0);
   }
-
   // Update the similarity gauge circle
   function updateSimilarityGauge(similarity) {
     const gauge = document.getElementById("similarityGauge");
     if (!gauge) return;
-
     const pct = Math.round(similarity * 100);
     let color;
     if (similarity >= 0.8)
@@ -519,12 +515,10 @@
     else if (similarity >= 0.5)
       color = "#eab308"; // Medium - yellow
     else color = "#22c55e"; // Low - green (well separated)
-
     gauge.style.setProperty("--similarity-pct", pct);
     gauge.style.setProperty("--similarity-color", color);
     gauge.querySelector("span").textContent = pct + "%";
   }
-
   // Destroy pairwise charts
   function destroyPairwiseCharts() {
     Object.keys(pairwiseCharts).forEach((key) => {
@@ -534,18 +528,14 @@
       }
     });
   }
-
   // Render full pairwise content with tabs
   function renderPairwiseContent(label1, label2, data) {
     destroyPairwiseCharts();
-
     const comparison = data.comparison || {};
     const similarity = comparison.cosine_similarity || 0;
     const wouldMerge = similarity >= (comparison.merge_threshold || 0.85);
-
-    const color1 = getSpeakerColor ? getSpeakerColor(0) : "#3b82f6";
-    const color2 = getSpeakerColor ? getSpeakerColor(1) : "#f97316";
-
+    const color1 = getSpeakerColor(0);
+    const color2 = getSpeakerColor(1);
     let html = `
       <!-- Comparison Tabs -->
       <div class="comparison-tabs" id="pairwiseTabs">
@@ -562,7 +552,6 @@
           📏 Dimension Diff
         </button>
       </div>
-      
       <!-- Tab: Overview -->
       <div class="comparison-tab-content active" id="pairwiseTab-overview">
         <div class="plot-container">
@@ -597,7 +586,6 @@
               </div>
             </div>
           </div>
-          
           <!-- Speaker detail cards -->
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px;">
             <div class="speaker-panel speaker1-panel">
@@ -625,7 +613,6 @@
           </div>
         </div>
       </div>
-      
       <!-- Tab: Segments -->
       <div class="comparison-tab-content" id="pairwiseTab-segments">
         <div class="segment-tabs-grid" id="segmentGrid">
@@ -653,7 +640,6 @@
           </div>
         </div>
       </div>
-      
       <!-- Tab: Embeddings -->
       <div class="comparison-tab-content" id="pairwiseTab-embeddings">
         <div class="plot-container">
@@ -663,7 +649,6 @@
           </div>
         </div>
       </div>
-      
       <!-- Tab: Dimensions -->
       <div class="comparison-tab-content" id="pairwiseTab-dimensions">
         <div class="plot-container">
@@ -677,25 +662,20 @@
         </div>
       </div>
     `;
-
     document.getElementById("pairwiseContent").innerHTML = html;
-
     // Load segment data
     loadSegmentData(label1, label2, data);
-
     // Render embedding chart
     setTimeout(
       () => renderEmbeddingComparison(label1, label2, data, color1, color2),
       100,
     );
-
     // Render dimension differences
     setTimeout(
       () => renderDimensionDiffs(label1, label2, data, color1, color2),
       100,
     );
   }
-
   // Switch pairwise tabs
   function switchPairwiseTab(tabName) {
     // Update tab buttons
@@ -708,7 +688,6 @@
       `#pairwiseTabs .comparison-tab-btn[onclick*="${tabName}"]`,
     );
     if (activeBtn) activeBtn.classList.add("active");
-
     // Update tab contents
     document
       .querySelectorAll("#pairwiseContent .comparison-tab-content")
@@ -717,7 +696,6 @@
       });
     const targetTab = document.getElementById(`pairwiseTab-${tabName}`);
     if (targetTab) targetTab.classList.add("active");
-
     // Trigger chart resize if needed
     setTimeout(() => {
       Object.values(pairwiseCharts).forEach((chart) => {
@@ -725,18 +703,14 @@
       });
     }, 100);
   }
-
   // Load segment data for both speakers
   async function loadSegmentData(label1, label2, comparisonData) {
     const list1 = document.getElementById("segmentsList1");
     const list2 = document.getElementById("segmentsList2");
-
     if (!list1 || !list2) return;
-
     // Try to get segment data from the comparison response
     const segments1 = comparisonData.segments?.[label1] || [];
     const segments2 = comparisonData.segments?.[label2] || [];
-
     if (segments1.length === 0 && segments2.length === 0) {
       list1.innerHTML =
         '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No segment data available</div>';
@@ -744,7 +718,6 @@
         '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No segment data available</div>';
       return;
     }
-
     // Render segments for speaker 1
     list1.innerHTML =
       segments1
@@ -762,7 +735,6 @@
         })
         .join("") ||
       '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No segments</div>';
-
     // Render segments for speaker 2
     list2.innerHTML =
       segments2
@@ -781,32 +753,25 @@
         .join("") ||
       '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No segments</div>';
   }
-
   // Render embedding comparison chart
   function renderEmbeddingComparison(label1, label2, data, color1, color2) {
     const canvas = document.getElementById("embeddingComparisonChart");
     if (!canvas) return;
-
     const ctx = canvas.getContext("2d");
-
     // Get centroid vectors (first 50 dimensions for visibility)
     const comparison = data.comparison || {};
     const centroid1 = comparison.speaker1_centroid_vector?.slice(0, 50) || [];
     const centroid2 = comparison.speaker2_centroid_vector?.slice(0, 50) || [];
-
     if (centroid1.length === 0 && centroid2.length === 0) {
       canvas.parentElement.innerHTML =
         '<div class="empty-state"><p>No centroid data available</p></div>';
       return;
     }
-
     const labels = Array.from(
       { length: Math.max(centroid1.length, centroid2.length) },
       (_, i) => `D${i}`,
     );
-
     if (pairwiseCharts.embedding) pairwiseCharts.embedding.destroy();
-
     pairwiseCharts.embedding = new Chart(ctx, {
       type: "line",
       data: {
@@ -877,19 +842,15 @@
       },
     });
   }
-
   // Render dimension differences
   function renderDimensionDiffs(label1, label2, data, color1, color2) {
     const comparison = data.comparison || {};
     const topDims = comparison.top_different_dimensions || [];
-
     // Render chart
     const canvas = document.getElementById("dimensionDiffChart");
     if (canvas && topDims.length > 0) {
       const ctx = canvas.getContext("2d");
-
       if (pairwiseCharts.dimDiff) pairwiseCharts.dimDiff.destroy();
-
       pairwiseCharts.dimDiff = new Chart(ctx, {
         type: "bar",
         data: {
@@ -947,19 +908,15 @@
         },
       });
     }
-
     // Render list
     const listEl = document.getElementById("dimensionDiffList");
     if (!listEl) return;
-
     if (topDims.length === 0) {
       listEl.innerHTML =
         '<div style="text-align:center;padding:20px;color:var(--text-secondary);">No dimension data available</div>';
       return;
     }
-
     const maxAbsDiff = Math.max(...topDims.map((d) => Math.abs(d.diff)), 0.001);
-
     listEl.innerHTML = topDims
       .map((d) => {
         const absVal1 = Math.abs(d.value_speaker1);
@@ -968,7 +925,6 @@
         const pct1 = ((absVal1 / maxVal) * 50).toFixed(1);
         const pct2 = ((absVal2 / maxVal) * 50).toFixed(1);
         const diffSign = d.diff >= 0 ? "positive" : "negative";
-
         return `
         <div class="dimension-diff-item">
           <span class="dim-label">D${d.dimension}</span>
@@ -984,7 +940,6 @@
       })
       .join("");
   }
-
   // Expose to global scope
   window.initPairwiseSelects = initPairwiseSelects;
   window.updatePairwiseComparison = updatePairwiseComparison;

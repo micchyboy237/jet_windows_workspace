@@ -512,22 +512,28 @@ async def get_single_plot(
         "independent_analysis": (js_dir / "independent_analysis.js").exists(),
         "similarity_network": (js_dir / "similarity_network.js").exists(),
         "health_diagnostics": (js_dir / "health_diagnostics.js").exists(),
+        "dimension_diff_view": (js_dir / "dimension_diff_view.js").exists(),
     }
     
     template_context = {
         "plot_name": plot_name,
         "title": f"Speaker {plot_name.title()} Plot",
         "timestamp": datetime.now().isoformat(),
-        # Feature flags for the template
-        "include_pairwise": has_pairwise and query_params.get("view") in (None, "pairwise"),
-        "include_speaker_analysis": query_params.get("view") in (None, "speaker-analysis"),
-        "include_network": query_params.get("view") in (None, "similarity-network"),
-        "include_health": query_params.get("view") in (None, "health"),
+        # Tab visibility flags
+        "include_pairwise": has_pairwise,
+        "include_speaker_analysis": True,
+        "include_network": True,
+        "include_health": True,
+        # Component availability flags (NEW - these were computed but not passed!)
+        "has_similarity_gauge": has_similarity_gauge,
+        "has_embedding_plot": has_embedding_plot,
+        "has_dimension_diff": has_dimension_diff,
         # JS availability flags
         "has_pairwise_js": js_files["pairwise_comparison"],
         "has_independent_js": js_files["independent_analysis"],
-        "has_network_js": js_files["similarity_network"],
+        "has_similarity_js": js_files["similarity_network"],
         "has_health_js": js_files["health_diagnostics"],
+        "has_dimension_diff_js": js_files["dimension_diff_view"],
         # Query params forwarded for frontend
         "query_speaker": query_params.get("speaker", ""),
         "query_speaker1": query_params.get("speaker1", ""),

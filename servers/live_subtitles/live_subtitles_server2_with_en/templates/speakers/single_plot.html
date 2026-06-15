@@ -829,10 +829,11 @@
       </div>
 
       <!-- ============================================================ -->
-      <!-- Tab: Independent Speaker Analysis (conditional include) -->
+      <!-- Tab: Independent Speaker Analysis (with components) -->
       <!-- ============================================================ -->
       <div class="tab-content" id="tab-speaker-analysis">
         {% if include_speaker_analysis %}
+        <!-- Speaker Selection -->
         <div class="plot-container">
           <h3>🎯 Select Speakers for Independent Analysis</h3>
           <div
@@ -848,7 +849,15 @@
               id="indieSpeaker1"
               class="speaker-select speaker1"
               onchange="updateIndependentAnalysis()"
-              style="flex: 1; min-width: 200px"
+              style="
+                flex: 1;
+                min-width: 200px;
+                padding: 8px 12px;
+                background: var(--bg-card);
+                color: var(--text-primary);
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+              "
             >
               <option value="">-- Select Speaker 1 --</option>
             </select>
@@ -859,30 +868,61 @@
               id="indieSpeaker2"
               class="speaker-select speaker2"
               onchange="updateIndependentAnalysis()"
-              style="flex: 1; min-width: 200px"
+              style="
+                flex: 1;
+                min-width: 200px;
+                padding: 8px 12px;
+                background: var(--bg-card);
+                color: var(--text-primary);
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+              "
             >
               <option value="">-- Select Speaker 2 --</option>
             </select>
           </div>
         </div>
+
+        <!-- Embedding Plots Side by Side -->
         <div class="grid-2" style="margin-top: 16px">
           <div id="embedding-speaker1-container">
+            {% if has_embedding_plot %} {% include
+            'components/speaker_embedding_plot.html' %}
+            <script>
+              // Override the container after include to work with our flow
+              document.getElementById(
+                "embedding-speaker1-container",
+              )._useComponent = true;
+            </script>
+            {% else %}
             <div class="plot-container">
               <div class="empty-state">
                 <div class="icon">🔬</div>
-                <p>Select Speaker 1</p>
+                <p>Select Speaker 1 to see embedding</p>
               </div>
             </div>
+            {% endif %}
           </div>
           <div id="embedding-speaker2-container">
+            {% if has_embedding_plot %} {% include
+            'components/speaker_embedding_plot.html' %}
+            <script>
+              document.getElementById(
+                "embedding-speaker2-container",
+              )._useComponent = true;
+            </script>
+            {% else %}
             <div class="plot-container">
               <div class="empty-state">
                 <div class="icon">🔬</div>
-                <p>Select Speaker 2</p>
+                <p>Select Speaker 2 to see embedding</p>
               </div>
             </div>
+            {% endif %}
           </div>
         </div>
+
+        <!-- Similarity Gauge (centered) -->
         <div class="plot-container" style="text-align: center">
           <h3>🔗 Speaker Similarity</h3>
           <div
@@ -895,27 +935,47 @@
               min-height: 120px;
             "
           >
+            {% if has_similarity_gauge %} {% include
+            'components/similarity_gauge.html' %}
+            <script>
+              document.getElementById("indie-gauge-container")._useComponent =
+                true;
+            </script>
+            {% else %}
             <div class="empty-state" style="padding: 20px">
               <div class="icon">🎯</div>
-              <p>Select two speakers</p>
+              <p>Select two speakers to calculate similarity</p>
             </div>
+            {% endif %}
           </div>
         </div>
+
+        <!-- Dimension Differences -->
         <div class="plot-container" id="indie-dimension-diff-container">
           <h3>📏 Dimension Differences</h3>
           <div id="indie-dimdiff-content">
+            {% if has_dimension_diff %} {% include
+            'components/dimension_diff_view.html' %}
+            <script>
+              document.getElementById("indie-dimdiff-content")._useComponent =
+                true;
+            </script>
+            {% else %}
             <div class="empty-state">
               <div class="icon">📏</div>
-              <p>Select two speakers</p>
+              <p>Select two speakers to see dimension differences</p>
             </div>
+            {% endif %}
           </div>
         </div>
+
+        <!-- Comparison Summary Table (always rendered by JS) -->
         <div class="plot-container" id="indie-comparison-table-container">
           <h3>📋 Comparison Details</h3>
           <div id="indie-comparison-table-content">
             <div class="empty-state">
               <div class="icon">📋</div>
-              <p>Select two speakers</p>
+              <p>Select two speakers to see comparison details</p>
             </div>
           </div>
         </div>
@@ -962,6 +1022,89 @@
           <div class="empty-state">
             <div class="icon">🕸️</div>
             <p>Network visualization component not available</p>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Tab: Dimensions -->
+      <div class="tab-content" id="tab-dimensions">
+        {% if has_dimension_diff %}
+        <div class="plot-container">
+          <h3>
+            <span
+              style="
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--accent-purple);
+              "
+            ></span>
+            Dimension Difference Analysis
+          </h3>
+          <div
+            style="
+              display: flex;
+              gap: 12px;
+              align-items: center;
+              flex-wrap: wrap;
+              margin-bottom: 16px;
+            "
+          >
+            <select
+              id="dimDiffSpeaker1"
+              onchange="loadDimensionDiff()"
+              style="
+                flex: 1;
+                min-width: 200px;
+                padding: 8px 12px;
+                background: var(--bg-card);
+                color: var(--text-primary);
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+              "
+            >
+              <option value="">-- Select Speaker 1 --</option>
+            </select>
+            <span style="color: var(--text-secondary); font-weight: 600"
+              >vs</span
+            >
+            <select
+              id="dimDiffSpeaker2"
+              onchange="loadDimensionDiff()"
+              style="
+                flex: 1;
+                min-width: 200px;
+                padding: 8px 12px;
+                background: var(--bg-card);
+                color: var(--text-primary);
+                border: 1px solid var(--border-color);
+                border-radius: 8px;
+              "
+            >
+              <option value="">-- Select Speaker 2 --</option>
+            </select>
+            <button
+              class="btn btn-sm"
+              onclick="exportDimDiffCSV()"
+              title="Export as CSV"
+            >
+              📥 CSV
+            </button>
+          </div>
+          <div id="dimDiffResults">
+            <div class="empty-state">
+              <div class="icon">📏</div>
+              <p>Select two speakers to see dimension differences</p>
+            </div>
+          </div>
+        </div>
+        {% else %}
+        <div class="plot-container">
+          <div class="empty-state">
+            <div class="icon">📏</div>
+            <p>Dimension analysis component not available</p>
           </div>
         </div>
         {% endif %}
@@ -1036,10 +1179,12 @@
     <script src="/static/js/speakers/pairwise_comparison.js"></script>
     {% endif %} {% if has_independent_js %}
     <script src="/static/js/speakers/independent_analysis.js"></script>
-    {% endif %} {% if has_network_js %}
+    {% endif %} {% if has_similarity_js %}
     <script src="/static/js/speakers/similarity_network.js"></script>
     {% endif %} {% if has_health_js %}
     <script src="/static/js/speakers/health_diagnostics.js"></script>
+    {% endif %} {% if has_dimension_diff_js %}
+    <script src="/static/js/speakers/dimension_diff_view.js"></script>
     {% endif %}
 
     <script>
@@ -1198,8 +1343,10 @@
         if (typeof destroyPairwiseCharts === "function")
           destroyPairwiseCharts();
         if (typeof destroyIndieCharts === "function") destroyIndieCharts();
-        if (typeof destroyNetworkCharts === "function") destroyNetworkCharts();
+        if (typeof destroySimilarityCharts === "function")
+          destroySimilarityCharts();
         if (typeof destroyHealthCharts === "function") destroyHealthCharts();
+        if (typeof destroyDimDiffCharts === "function") destroyDimDiffCharts();
       }
 
       // ===== View: Scatter =====
@@ -2012,7 +2159,15 @@
             renderTimeline(allData);
             break;
           case "dimensions":
-            renderDimensions(allData);
+            if (typeof initDimensionDiffView === "function") {
+              const speakerLabels = Object.keys(
+                allData.centroids?.centroids || {},
+              );
+              initDimensionDiffView(speakerLabels);
+            } else {
+              // Fallback to old renderDimensions if dimension_diff_view.js not loaded
+              renderDimensions(allData);
+            }
             break;
           case "table":
             renderTable(allData);

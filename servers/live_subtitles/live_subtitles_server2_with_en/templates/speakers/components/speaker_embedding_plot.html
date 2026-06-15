@@ -1,8 +1,6 @@
-<!-- templates/speakers/components/speaker_embedding_plot.html -->
 <!--
   Per-Speaker Embedding Visualization Component
   Dependencies: Chart.js 4.4.0+
-  Usage: {% include 'components/speaker_embedding_plot.html' %}
   
   Creates interactive plots showing individual speaker embedding data.
   Call renderSpeakerEmbedding(containerId, speakerData, options) to use.
@@ -23,12 +21,10 @@
     padding: 20px;
     transition: all 0.3s ease;
   }
-
   .speaker-embed-container.highlighted {
     border-color: var(--accent-blue, #3b82f6);
     box-shadow: 0 0 30px rgba(59, 130, 246, 0.15);
   }
-
   .speaker-embed-header {
     display: flex;
     align-items: center;
@@ -37,31 +33,26 @@
     flex-wrap: wrap;
     gap: 12px;
   }
-
   .speaker-embed-title {
     display: flex;
     align-items: center;
     gap: 10px;
   }
-
   .speaker-embed-dot {
     width: 12px;
     height: 12px;
     border-radius: 50%;
     flex-shrink: 0;
   }
-
   .speaker-embed-title h4 {
     margin: 0;
     font-size: 15px;
     color: var(--text-primary, #f1f5f9);
   }
-
   .speaker-embed-actions {
     display: flex;
     gap: 6px;
   }
-
   .speaker-embed-btn {
     padding: 6px 12px;
     border: 1px solid var(--border-color, #334155);
@@ -74,28 +65,23 @@
     transition: all 0.2s;
     white-space: nowrap;
   }
-
   .speaker-embed-btn:hover {
     background: rgba(255, 255, 255, 0.05);
     color: var(--text-primary, #f1f5f9);
   }
-
   .speaker-embed-btn.active {
     background: var(--accent-blue, #3b82f6);
     color: white;
     border-color: var(--accent-blue, #3b82f6);
   }
-
   .speaker-embed-chart-wrapper {
     position: relative;
     width: 100%;
     height: 300px;
   }
-
   .speaker-embed-chart-wrapper.large {
     height: 400px;
   }
-
   .speaker-embed-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -104,18 +90,15 @@
     padding-top: 14px;
     border-top: 1px solid var(--border-color, #334155);
   }
-
   .speaker-embed-stat {
     text-align: center;
   }
-
   .speaker-embed-stat .stat-value {
     font-size: 18px;
     font-weight: 700;
     color: var(--text-primary, #f1f5f9);
     line-height: 1.2;
   }
-
   .speaker-embed-stat .stat-label {
     font-size: 10px;
     color: var(--text-secondary, #94a3b8);
@@ -123,7 +106,6 @@
     letter-spacing: 0.3px;
     margin-top: 2px;
   }
-
   .speaker-embed-legend {
     display: flex;
     gap: 16px;
@@ -131,363 +113,16 @@
     font-size: 12px;
     color: var(--text-secondary, #94a3b8);
   }
-
   .speaker-embed-legend-item {
     display: flex;
     align-items: center;
     gap: 6px;
   }
-
   .speaker-embed-legend-dot {
     width: 8px;
     height: 8px;
     border-radius: 2px;
   }
 </style>
-
-<script>
-  /**
-   * Render a speaker embedding chart
-   * @param {string} containerId - The container element ID
-   * @param {object} speakerData - Speaker data object
-   * @param {object} options - Configuration options
-   */
-  function renderSpeakerEmbedding(containerId, speakerData, options = {}) {
-    const container = document.getElementById(containerId);
-    if (!container) {
-      console.warn(`[SpeakerEmbedding] Container #${containerId} not found`);
-      return null;
-    }
-
-    const config = {
-      chartType: "line",
-      maxDimensions: 50,
-      color: "#3b82f6",
-      showStats: true,
-      compareWith: null,
-      title: speakerData?.label || "Speaker",
-      ...options,
-    };
-
-    // Get centroid vector
-    const centroidVector =
-      speakerData?.centroid_vector || speakerData?.centroid_coordinates || [];
-    const flatVector = Array.isArray(centroidVector[0])
-      ? centroidVector.flat()
-      : centroidVector;
-    const displayVector = flatVector.slice(0, config.maxDimensions);
-
-    if (displayVector.length === 0) {
-      container.innerHTML = `
-        <div class="speaker-embed-container">
-          <div style="text-align:center; padding:40px; color:var(--text-secondary);">
-            <div style="font-size:32px; margin-bottom:8px;">🔬</div>
-            <p>No embedding data available</p>
-          </div>
-        </div>`;
-      return null;
-    }
-
-    // Build HTML
-    const chartId = `${containerId}-chart`;
-    let html = `
-      <div class="speaker-embed-container" id="${containerId}-inner">
-        <div class="speaker-embed-header">
-          <div class="speaker-embed-title">
-            <span class="speaker-embed-dot" style="background: ${config.color};"></span>
-            <h4>${config.title}</h4>
-          </div>
-          <div class="speaker-embed-actions">
-            <button class="speaker-embed-btn active" onclick="switchEmbedChartType('${containerId}', 'line')">📈 Line</button>
-            <button class="speaker-embed-btn" onclick="switchEmbedChartType('${containerId}', 'bar')">📊 Bar</button>
-            <button class="speaker-embed-btn" onclick="switchEmbedChartType('${containerId}', 'radar')">🕸️ Radar</button>
-          </div>
-        </div>
-        <div class="speaker-embed-chart-wrapper">
-          <canvas id="${chartId}"></canvas>
-        </div>`;
-
-    // Stats section
-    if (config.showStats) {
-      const norm =
-        speakerData?.centroid_norm ||
-        Math.sqrt(displayVector.reduce((sum, v) => sum + v * v, 0));
-      const nonZeroDims = displayVector.filter(
-        (v) => Math.abs(v) > 0.001,
-      ).length;
-      const maxDim = Math.max(...displayVector.map(Math.abs));
-      const minDim = Math.min(...displayVector.map(Math.abs));
-
-      html += `
-        <div class="speaker-embed-stats">
-          <div class="speaker-embed-stat">
-            <div class="stat-value">${norm.toFixed(3)}</div>
-            <div class="stat-label">Vector Norm</div>
-          </div>
-          <div class="speaker-embed-stat">
-            <div class="stat-value">${displayVector.length}</div>
-            <div class="stat-label">Dimensions</div>
-          </div>
-          <div class="speaker-embed-stat">
-            <div class="stat-value">${nonZeroDims}</div>
-            <div class="stat-label">Active Dims</div>
-          </div>
-          <div class="speaker-embed-stat">
-            <div class="stat-value">${maxDim.toFixed(4)}</div>
-            <div class="stat-label">Max Value</div>
-          </div>
-        </div>`;
-    }
-
-    // Legend for comparison mode
-    if (config.compareWith && config.compareWith.centroid_vector) {
-      const compareColor = config.compareWithColor || "#f97316";
-      html += `
-        <div class="speaker-embed-legend">
-          <div class="speaker-embed-legend-item">
-            <span class="speaker-embed-legend-dot" style="background:${config.color};"></span>
-            ${config.title}
-          </div>
-          <div class="speaker-embed-legend-item">
-            <span class="speaker-embed-legend-dot" style="background:${compareColor};"></span>
-            ${config.compareWith.label || "Comparison"}
-          </div>
-        </div>`;
-    }
-
-    html += `</div>`;
-    container.innerHTML = html;
-
-    // Store data for chart type switching
-    container._embedData = {
-      speakerData,
-      config,
-      chartId,
-      currentType: config.chartType,
-      chart: null,
-    };
-
-    // Render initial chart
-    _renderEmbedChart(container, config.chartType);
-
-    return container;
-  }
-
-  /**
-   * Internal: Render the actual chart
-   */
-  function _renderEmbedChart(container, chartType) {
-    const data = container._embedData;
-    if (!data) return;
-
-    const { speakerData, config, chartId } = data;
-    container._embedData.currentType = chartType;
-
-    const canvas = document.getElementById(chartId);
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-
-    // Destroy existing chart
-    if (container._embedData.chart) {
-      container._embedData.chart.destroy();
-      container._embedData.chart = null;
-    }
-
-    // Prepare data
-    const centroidVector =
-      speakerData?.centroid_vector || speakerData?.centroid_coordinates || [];
-    const flatVector = Array.isArray(centroidVector[0])
-      ? centroidVector.flat()
-      : centroidVector;
-    const displayVector = flatVector.slice(0, config.maxDimensions);
-    const labels = displayVector.map((_, i) => `D${i}`);
-
-    const datasets = [
-      {
-        label: config.title,
-        data: displayVector,
-        borderColor: config.color,
-        backgroundColor: config.color + "33",
-        borderWidth: 2,
-        pointRadius: chartType === "radar" ? 2 : 0,
-        pointHoverRadius: 5,
-        fill: chartType === "radar",
-      },
-    ];
-
-    // Add comparison dataset if present
-    if (config.compareWith && config.compareWith.centroid_vector) {
-      const compareVector = Array.isArray(config.compareWith.centroid_vector[0])
-        ? config.compareWith.centroid_vector.flat()
-        : config.compareWith.centroid_vector;
-      const compareDisplay = compareVector.slice(0, config.maxDimensions);
-      const compareColor = config.compareWithColor || "#f97316";
-
-      datasets.push({
-        label: config.compareWith.label || "Comparison",
-        data: compareDisplay,
-        borderColor: compareColor,
-        backgroundColor: compareColor + "33",
-        borderWidth: 2,
-        pointRadius: chartType === "radar" ? 2 : 0,
-        pointHoverRadius: 5,
-        fill: chartType === "radar",
-        borderDash: [5, 5],
-      });
-    }
-
-    // Chart type specific configs
-    let chartConfig;
-
-    if (chartType === "radar") {
-      chartConfig = {
-        type: "radar",
-        data: { labels, datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            r: {
-              grid: { color: "rgba(148,163,184,0.1)" },
-              ticks: {
-                color: "#64748b",
-                backdropColor: "transparent",
-                maxTicksLimit: 5,
-                callback: (v) => v.toFixed(2),
-              },
-              pointLabels: {
-                color: "#64748b",
-                font: { size: 8 },
-              },
-            },
-          },
-          plugins: {
-            legend: {
-              position: "bottom",
-              labels: {
-                color: "#94a3b8",
-                usePointStyle: true,
-                padding: 12,
-                font: { size: 11 },
-              },
-            },
-          },
-        },
-      };
-    } else if (chartType === "bar") {
-      chartConfig = {
-        type: "bar",
-        data: {
-          labels,
-          datasets: datasets.map((d) => ({ ...d, borderRadius: 2 })),
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: "bottom",
-              labels: { color: "#94a3b8", usePointStyle: true, padding: 12 },
-            },
-          },
-          scales: {
-            x: {
-              grid: { display: false },
-              ticks: {
-                color: "#64748b",
-                maxTicksLimit: 15,
-                callback: (v, i) => (i % 3 === 0 ? labels[i] : ""),
-              },
-            },
-            y: {
-              grid: { color: "rgba(148,163,184,0.06)" },
-              ticks: { color: "#64748b" },
-            },
-          },
-        },
-      };
-    } else {
-      // Line chart (default)
-      chartConfig = {
-        type: "line",
-        data: { labels, datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: "bottom",
-              labels: { color: "#94a3b8", usePointStyle: true, padding: 12 },
-            },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => `${ctx.dataset.label}: ${ctx.raw.toFixed(6)}`,
-              },
-            },
-          },
-          scales: {
-            x: {
-              grid: { color: "rgba(148,163,184,0.06)" },
-              ticks: {
-                color: "#64748b",
-                maxTicksLimit: 10,
-                callback: (v, i) => (i % 5 === 0 ? labels[i] : ""),
-              },
-              title: { display: true, text: "Dimension", color: "#94a3b8" },
-            },
-            y: {
-              grid: { color: "rgba(148,163,184,0.06)" },
-              ticks: { color: "#64748b" },
-              title: { display: true, text: "Value", color: "#94a3b8" },
-            },
-          },
-        },
-      };
-    }
-
-    container._embedData.chart = new Chart(ctx, chartConfig);
-  }
-
-  /**
-   * Switch chart type for a speaker embedding
-   */
-  function switchEmbedChartType(containerId, chartType) {
-    const container = document.getElementById(containerId);
-    if (!container || !container._embedData) return;
-
-    // Update button states
-    const inner = document.getElementById(`${containerId}-inner`);
-    if (inner) {
-      inner.querySelectorAll(".speaker-embed-btn").forEach((btn) => {
-        btn.classList.remove("active");
-      });
-      const activeBtn = inner.querySelector(
-        `.speaker-embed-btn[onclick*="${chartType}"]`,
-      );
-      if (activeBtn) activeBtn.classList.add("active");
-    }
-
-    // Re-render chart
-    _renderEmbedChart(container, chartType);
-  }
-
-  /**
-   * Highlight a speaker embedding container
-   */
-  function highlightEmbeddingContainer(containerId, highlight = true) {
-    const container = document.getElementById(`${containerId}-inner`);
-    if (container) {
-      if (highlight) {
-        container.classList.add("highlighted");
-      } else {
-        container.classList.remove("highlighted");
-      }
-    }
-  }
-
-  // Expose globally
-  window.renderSpeakerEmbedding = renderSpeakerEmbedding;
-  window.switchEmbedChartType = switchEmbedChartType;
-  window.highlightEmbeddingContainer = highlightEmbeddingContainer;
-</script>
+<!-- REMOVED: The entire <script> block that duplicated pairwise comparison logic -->
+<!-- That logic belongs ONLY in pairwise_comparison.html -->
