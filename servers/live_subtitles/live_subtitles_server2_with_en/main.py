@@ -77,6 +77,70 @@ def initialize_detector():
     set_audio_language_detector(detector)
     console.print("Detector initialized successfully!\n")
 
+def initialize_labeler():
+    import json
+    from core.state import (
+        get_speaker_labeler,
+        get_audio_tagger,
+        get_speaker_state_path,
+        set_embedding_inference,
+        set_speaker_labeler,
+    )
+    from pyannote.audio import Inference, Model
+    from services.segment_speaker_labeler import SegmentSpeakerLabeler
+    from services.embedding_model_factory import (
+        EmbeddingModelType,
+        create_embedding_model,
+        list_available_models,
+    )
+
+    MODEL_TYPE = EmbeddingModelType.PYANNOTE
+
+    console.print(f"[bold]Available embedding models:[/bold]")
+    for name, info in list_available_models().items():
+        console.print(f"  • {name} (dim={info['embedding_dim']})")
+
+    with console.status(
+        f"[bold green]Loading embedding model '{MODEL_TYPE.value}'...[/bold green]",
+        spinner="dots",
+    ):
+        embedding_inference = create_embedding_model(MODEL_TYPE)
+
+    set_embedding_inference(embedding_inference)
+
+    speaker_state_path = get_speaker_state_path()
+    tagger = get_audio_tagger()
+    if speaker_state_path.exists():
+        try:
+            with open(speaker_state_path, "r") as f:
+                state = json.load(f)
+            labeler = SegmentSpeakerLabeler.from_dict(
+                state,
+                embedding_model=embedding_inference,
+                audio_tagger=tagger,
+            )
+            set_speaker_labeler(labeler)
+            console.print(
+                f"[success]Restored speaker state: "
+                f"{labeler.speaker_count} speaker(s), "
+                f"{labeler.total_segments_processed} segments processed[/success]"
+            )
+            return labeler
+        except Exception as e:
+            console.print(
+                f"[warning]Could not restore speaker state: {e}[/warning]"
+            )
+
+    labeler = SegmentSpeakerLabeler(
+        embedding_model=embedding_inference,
+        debug=True,
+    )
+    set_speaker_labeler(labeler)
+    console.print("[success]Speaker labeler initialized[/success]")
+
+    return labeler
+
+
 def initialize_tagger():
     """
     Initialize the audio tagger at startup.
@@ -89,7 +153,6 @@ def initialize_tagger():
     console.print("Initializing AudioTagger...")
     try:
         tagger = AudioTagger(
-            top_k=5,
             debug=False,
         )
         set_audio_tagger(tagger)
@@ -135,6 +198,7 @@ atexit.register(cleanup_on_shutdown)
 if __name__ == "__main__":
     initialize_detector()
     initialize_tagger()
+    initialize_labeler()
     
     segment_index_path = get_segment_index_path()
     segment_counter = load_segment_counter(segment_index_path)

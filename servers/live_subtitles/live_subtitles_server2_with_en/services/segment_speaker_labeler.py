@@ -13,11 +13,13 @@ try:
     from services.embedding_model_factory import BaseEmbeddingModel
     from services.speaker_metrics_mixin import SpeakerMetricsMixin
     from services.speech_waves import extract_pure_speech_audio
+    from services.audio_tagger import AudioTagger
 except ImportError:
     from config import SAMPLE_RATE
     from embedding_model_factory import BaseEmbeddingModel
     from speaker_metrics_mixin import SpeakerMetricsMixin
     from speech_waves import extract_pure_speech_audio
+    from audio_tagger import AudioTagger
 
 console = Console()
 
@@ -192,8 +194,9 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         min_frames: int = DEFAULT_MIN_FRAMES,
         min_duration_sec: float = DEFAULT_MIN_DURATION_SEC,
         baseline_threshold: float = DEFAULT_BASELINE_THRESHOLD,
-        young_merge_threshold: float = 0.65,  # NEW: Higher threshold for young merges
-        min_speaker_age_for_merge: float = 15.0,  # NEW: Min seconds before merging
+        young_merge_threshold: float = 0.65,  # Higher threshold for young merges
+        min_speaker_age_for_merge: float = 15.0,  # Min seconds before merging
+        audio_tagger: AudioTagger | None = None,  # NEW: Enable pure speech extraction
         debug: bool = False,
     ):
         self.embedding_model = embedding_model
@@ -232,6 +235,8 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         self.min_speaker_age_for_merge = min_speaker_age_for_merge  # NEW
         self._speaker_creation_times: Dict[str, float] = {}  # NEW: Track creation times
         self._merge_history: List[Dict] = []  # NEW: Track all merges
+
+        self.audio_tagger = audio_tagger
 
     @property
     def known_speakers(self) -> List[str]:
@@ -1755,24 +1760,33 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         
         # Convert float32 [-1,1] back to int16 for VAD processing
         audio_int16 = (waveform_np * 32768.0).astype(np.int16)
+
+        if self.audio_tagger:
+            pure_speech = self.audio_tagger.extract_speech_only(
+                audio_int16,
+                sample_rate=SAMPLE_RATE,
+                edges_only=True,
+            )
+        else:
+            pure_speech = audio_int16
         
-        # Call the self-contained extraction function
-        pure_speech = extract_pure_speech_audio(
-            audio=audio_int16,
-            sampling_rate=SAMPLE_RATE,  # assumed, could be parameterized
-            vad_threshold=0.3,
-            min_prominence=self.min_prominence,
-            min_excursion=self.min_excursion,
-            min_peak_prob=self.min_peak_prob,
-            min_frames=self.min_frames,
-            min_duration_sec=self.min_duration_sec,
-            baseline_threshold=self.baseline_threshold,
-        )
+        # # Call the self-contained extraction function
+        # pure_speech = extract_pure_speech_audio(
+        #     audio=audio_int16,
+        #     sampling_rate=SAMPLE_RATE,  # assumed, could be parameterized
+        #     vad_threshold=0.3,
+        #     min_prominence=self.min_prominence,
+        #     min_excursion=self.min_excursion,
+        #     min_peak_prob=self.min_peak_prob,
+        #     min_frames=self.min_frames,
+        #     min_duration_sec=self.min_duration_sec,
+        #     baseline_threshold=self.baseline_threshold,
+        # )
         
-        if pure_speech.size == 0:
-            if self.debug:
-                console.print("[warning]No pure speech extracted, using original[/warning]")
-            return waveform, False
+        # if pure_speech.size == 0:
+        #     if self.debug:
+        #         console.print("[warning]No pure speech extracted, using original[/warning]")
+        #     return waveform, False
         
         # Convert back to float32 tensor
         waveform_float = pure_speech.astype(np.float32) / 32768.0
@@ -1970,7 +1984,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         }
 
     @classmethod
-    def from_dict(cls, data: Dict, embedding_model) -> "SegmentSpeakerLabeler":
+    def from_dict(cls, data: Dict, embedding_model, audio_tagger=None) -> "SegmentSpeakerLabeler":
         """Create a labeler from serialized state."""
         labeler = cls(
             embedding_model=embedding_model,
@@ -1981,6 +1995,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             young_segment_count=data.get("young_segment_count", DEFAULT_YOUNG_SEGMENT_COUNT),
             top_k_speakers=data.get("top_k_speakers", DEFAULT_TOP_K_SPEAKERS),
             consolidation_threshold=data.get("consolidation_threshold", DEFAULT_CONSOLIDATION_THRESHOLD),
+            audio_tagger=audio_tagger,
         )
         labeler._next_speaker_id = data.get("next_speaker_id", 1)
         labeler.total_segments_processed = data.get("total_segments_processed", 0)

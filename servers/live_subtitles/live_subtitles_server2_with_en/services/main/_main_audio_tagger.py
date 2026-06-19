@@ -3,119 +3,199 @@ import json
 import shutil
 import time
 from pathlib import Path
+from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 from rich.traceback import install as install_rich_traceback
+from custom_logging import linkify
+from audio_tagger import (
+    AUDIO_TAGGING_MODEL,
+    CLASS_LABELS_INDICES_CSV,
+    AudioTagger,
+)
+
 install_rich_traceback(show_locals=True)
 console = Console()
 
-def main():
-    from custom_logging import linkify
-    from audio_tagger import (
-        AUDIO_TAGGING_MODEL,
-        CLASS_LABELS_INDICES_CSV,
-        AudioTagger,
-    )
-    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-    shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    
+OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def get_args(default_audio: Optional[str] = None):
+    DEFAULT_AUDIO = default_audio or r"C:\Users\druiv\.cache\files\audio\sub_audio\start_5s_recording_1_speaker.wav"
+
     parser = argparse.ArgumentParser(
         description="Audio tagging with Sherpa-ONNX models",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("audio_path", type=str, help="Path to input audio file")
     parser.add_argument(
-        "--model-path",
+        "audio_path",
+        type=str,
+        nargs="?",
+        default=DEFAULT_AUDIO,
+        help="Path to input audio file"
+    )
+    parser.add_argument(
+        "-m", "--model-path",
         type=str,
         default=str(AUDIO_TAGGING_MODEL),
         help="Path to ONNX model file",
     )
     parser.add_argument(
-        "--labels-path",
+        "-l", "--labels-path",
         type=str,
         default=str(CLASS_LABELS_INDICES_CSV),
         help="Path to class labels CSV file",
     )
     parser.add_argument(
-        "--top-k",
+        "-k", "--top-k",
         type=int,
         default=5,
         help="Number of top predictions to return",
     )
     parser.add_argument(
-        "--num-threads",
+        "-j", "--num-threads",
         type=int,
         default=1,
-        help="Number of CPU threads",
+        help="Number of CPU threads (jobs)",
     )
     parser.add_argument(
-        "--provider",
+        "-p", "--provider",
         type=str,
         default="cpu",
         choices=["cpu", "cuda", "coreml"],
         help="Computation provider",
     )
     parser.add_argument(
-        "--debug",
+        "-d", "--debug",
         action="store_true",
         help="Enable debug mode for Sherpa-ONNX",
     )
     parser.add_argument(
-        "--speech-threshold",
+        "-t", "--speech-threshold",
         type=float,
         default=AudioTagger.DEFAULT_SPEECH_PROB_THRESHOLD,
         help="Minimum probability for speech detection",
     )
     parser.add_argument(
-        "--speech-top-n",
+        "-n", "--speech-top-n",
         type=int,
         default=AudioTagger.DEFAULT_SPEECH_TOP_N,
         help="Check top N predictions for speech",
     )
     parser.add_argument(
-        "--output-dir",
+        "-o", "--output-dir",
         type=str,
         default=str(OUTPUT_DIR),
         help="Output directory for results",
     )
     parser.add_argument(
-        "--check-speech",
+        "-c", "--check-speech",
         action="store_true",
         help="Check if audio contains speech",
     )
     parser.add_argument(
-        "--save-summary",
+        "-S", "--save-summary",
         action="store_true",
         help="Save comprehensive summary",
     )
     parser.add_argument(
-        "--chunk",
+        "-C", "--chunk",
         action="store_true",
         help="Use tag_audio_chunks instead of tag_audio",
     )
     parser.add_argument(
-        "--chunk-duration",
+        "-D", "--chunk-duration",
         type=float,
         default=AudioTagger.DEFAULT_CHUNK_DURATION,
         help="Duration of each chunk in seconds",
     )
     parser.add_argument(
-        "--chunk-overlap",
+        "-O", "--chunk-overlap",
         type=float,
         default=AudioTagger.DEFAULT_CHUNK_OVERLAP,
         help="Overlap between chunks in seconds",
     )
     parser.add_argument(
-        "--display-threshold",
+        "-T", "--display-threshold",
         type=float,
         default=0.3,
         help="Minimum probability to display predictions in chunk table",
     )
     
     args = parser.parse_args()
+    return args
+
+
+def _format_predictions_with_emphasis(predictions, threshold=0.3, max_display=3):
+    """
+    Format multiple predictions with visual emphasis based on probability magnitude.
+    Args:
+        predictions: List of prediction dicts with 'name' and 'prob' keys
+        threshold: Minimum probability to display
+        max_display: Maximum number of predictions to show
+    Returns:
+        Rich Text object with color-coded predictions
+    Probability magnitude emphasis:
+        - High (≥0.7): Bold green
+        - Medium (0.4-0.7): Yellow
+        - Low (0.3-0.4): Dim white
+        - Below threshold: Not shown
+    """
+    text = Text()
+    qualified = [p for p in predictions if p.get("prob", 0) >= threshold]
+    qualified.sort(key=lambda x: x.get("prob", 0), reverse=True)
+    if not qualified:
+        return Text("—", style="dim")
+    for i, pred in enumerate(qualified[:max_display]):
+        prob = pred["prob"]
+        name = pred["name"]
+        display_name = name[:35] + "…" if len(name) > 35 else name
+        if prob >= 0.7:
+            style = "bold green"
+            emoji = "🔴"
+        elif prob >= 0.4:
+            style = "yellow"
+            emoji = "🟡"
+        else:
+            style = "dim white"
+            emoji = "⚪"
+        if i > 0:
+            text.append("\n")
+        prob_bar = _get_probability_bar(prob)
+        text.append(f"{emoji} ", style="")
+        text.append(f"{display_name} ", style=style)
+        text.append(f"{prob:.1%} ", style=style)
+        text.append(f"[{prob_bar}]", style="dim")
+    return text
+
+
+def _get_probability_bar(probability, width=10):
+    """
+    Create a visual bar indicating probability magnitude.
+    Args:
+        probability: Float between 0 and 1
+        width: Total width of the bar in characters
+    Returns:
+        String with filled and empty blocks representing probability
+    """
+    filled = int(probability * width)
+    empty = width - filled
+    if probability >= 0.7:
+        bar_char = "█"
+    elif probability >= 0.4:
+        bar_char = "▓"
+    else:
+        bar_char = "▒"
+    return f"{bar_char * filled}{'░' * empty}"
+
+
+def main():
+    args = get_args()
+
     audio_path = args.audio_path
     
     tagger = AudioTagger(
@@ -407,69 +487,6 @@ def main():
             )
         )
         raise
-
-
-def _format_predictions_with_emphasis(predictions, threshold=0.3, max_display=3):
-    """
-    Format multiple predictions with visual emphasis based on probability magnitude.
-    Args:
-        predictions: List of prediction dicts with 'name' and 'prob' keys
-        threshold: Minimum probability to display
-        max_display: Maximum number of predictions to show
-    Returns:
-        Rich Text object with color-coded predictions
-    Probability magnitude emphasis:
-        - High (≥0.7): Bold green
-        - Medium (0.4-0.7): Yellow
-        - Low (0.3-0.4): Dim white
-        - Below threshold: Not shown
-    """
-    text = Text()
-    qualified = [p for p in predictions if p.get("prob", 0) >= threshold]
-    qualified.sort(key=lambda x: x.get("prob", 0), reverse=True)
-    if not qualified:
-        return Text("—", style="dim")
-    for i, pred in enumerate(qualified[:max_display]):
-        prob = pred["prob"]
-        name = pred["name"]
-        display_name = name[:35] + "…" if len(name) > 35 else name
-        if prob >= 0.7:
-            style = "bold green"
-            emoji = "🔴"
-        elif prob >= 0.4:
-            style = "yellow"
-            emoji = "🟡"
-        else:
-            style = "dim white"
-            emoji = "⚪"
-        if i > 0:
-            text.append("\n")
-        prob_bar = _get_probability_bar(prob)
-        text.append(f"{emoji} ", style="")
-        text.append(f"{display_name} ", style=style)
-        text.append(f"{prob:.1%} ", style=style)
-        text.append(f"[{prob_bar}]", style="dim")
-    return text
-
-
-def _get_probability_bar(probability, width=10):
-    """
-    Create a visual bar indicating probability magnitude.
-    Args:
-        probability: Float between 0 and 1
-        width: Total width of the bar in characters
-    Returns:
-        String with filled and empty blocks representing probability
-    """
-    filled = int(probability * width)
-    empty = width - filled
-    if probability >= 0.7:
-        bar_char = "█"
-    elif probability >= 0.4:
-        bar_char = "▓"
-    else:
-        bar_char = "▒"
-    return f"{bar_char * filled}{'░' * empty}"
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from core.state import (
     get_audio_language_detector,
+    get_audio_tagger,
     get_context_buffer,
     get_current_speaker,
     get_last_n_segments_dir,
@@ -284,8 +285,6 @@ def blocking_process_audio(audio_bytes: bytes, header: dict) -> dict:
             audio_np=audio_np,
             sample_rate=sample_rate,
             segment_dir=None,  # No segment dir yet, we'll save later
-            chunk_duration=2.0,
-            overlap_duration=1.0,
         )
         speech_detected = tagging_events.get("speech_detected", False)
         console.print(
@@ -1071,8 +1070,6 @@ def perform_audio_tagging(
         Dictionary with speech_detected, speech_duration, 
         max_speech_probability, and detailed predictions
     """
-    from core.state import get_audio_tagger, set_audio_tagger
-
     console.print("[info]🎵 Starting audio tagging...[/info]")
     console.print(
         f"[info]Audio shape: {audio_np.shape}, Sample rate: {sample_rate}[/info]"
@@ -1081,17 +1078,8 @@ def perform_audio_tagging(
     console.print(f"[info]Audio duration: {audio_duration:.2f}s[/info]")
 
     try:
-        # Get or create tagger singleton
+        # Get tagger singleton
         tagger = get_audio_tagger()
-        if tagger is None:
-            tagger = AudioTagger(
-                top_k=5,
-                speech_prob_threshold=speech_prob_threshold,
-                chunk_duration=chunk_duration,
-                chunk_overlap=overlap_duration,
-                debug=False,
-            )
-            set_audio_tagger(tagger)
 
         # Convert to float32 for the tagger
         audio_float = audio_np.astype(np.float32) / 32768.0
