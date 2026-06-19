@@ -1,35 +1,23 @@
+import nemo.collections.asr as nemo_asr
 import torch
-from pyannote.audio import Model, Inference
-from pyannote.audio.pipelines import VoiceActivityDetection
-from pyannote.core import Segment
-import numpy as np
-from scipy.spatial.distance import cdist
 
-# Load models
-embedding_model = Model.from_pretrained("pyannote/embedding", 
-                                        use_auth_token="YOUR_HF_TOKEN")
-embedding_inference = Inference(embedding_model, window="whole")
+# Load model
+speaker_model = nemo_asr.models.EncDecSpeakerLabelModel.from_pretrained(
+    model_name="titanet_large"
+)
 
-vad_model = Model.from_pretrained("pyannote/segmentation-3.0", 
-                                  use_auth_token="YOUR_HF_TOKEN")
-vad = VoiceActivityDetection(segmentation=vad_model)
-vad.instantiate({"min_duration_on": 0.0, "min_duration_off": 0.0})
+audio_path1 = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_speech_waves\waves\segment_001_wave_002\sound.wav"
+audio_path2 = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_speech_waves\waves\segment_001_wave_005\sound.wav"
 
-# Run VAD
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav"
-vad_annotation = vad(audio_path)  # pyannote.core.Annotation
+# Extract embeddings
+emb1 = speaker_model.get_embedding(audio_path1)
+emb2 = speaker_model.get_embedding(audio_path2)
 
-# Extract clean speech segments (filter to 3s+)
-embeddings = []
-segments = []
+# Compute cosine similarity
+def cosine_similarity(a, b):
+    a = a.squeeze()
+    b = b.squeeze()
+    return torch.dot(a, b) / (torch.norm(a) * torch.norm(b))
 
-for segment, _, _ in vad_annotation.itertracks(yield_label=True):
-    if segment.duration >= 3.0:  # Best practice: 3–15s+
-        waveform, sr = embedding_inference.audio.crop(audio_path, segment)
-        emb = embedding_inference.crop(audio_path, segment)  # or use waveform
-        embeddings.append(emb.squeeze())  # (D,)
-        segments.append(segment)
-
-embeddings = np.array(embeddings)  # (N, D)
-
-print(f"Extracted {len(embeddings)} clean speech segments")
+sim = cosine_similarity(emb1, emb2).item()
+print(f"Cosine Similarity: {sim:.4f}")

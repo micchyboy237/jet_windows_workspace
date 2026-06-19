@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 import librosa
 import numpy as np
 import numpy.typing as npt
+import soundfile as sf
 import torch
-import torchaudio
 from fireredvad.core.constants import SAMPLE_RATE
 from fireredvad.stream_vad import FireRedStreamVad, FireRedStreamVadConfig
 from rich.console import Console
@@ -53,6 +53,7 @@ DEFAULT_MAX_BUFFER_SEC = 1.2
 
 # Single global cached instance to avoid repeated model loading
 _global_vad_cache: Optional["FireRedVAD"] = None
+_global_vad_cache_config: Optional[dict] = None  # Track the config used
 
 
 def get_global_vad(
@@ -61,11 +62,28 @@ def get_global_vad(
     min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_SEC,
     max_speech_duration_sec: float = DEFAULT_MAX_SPEECH_SEC,
     smooth_window_size: int = DEFAULT_SMOOTH_WINDOW_SIZE,
+    pad_start_frame: int = DEFAULT_PAD_START_FRAME,
     max_buffer_sec: float = DEFAULT_MAX_BUFFER_SEC,
     **model_kwargs,
 ) -> "FireRedVAD":
-    """Get or create the global cached VAD instance."""
-    global _global_vad_cache
+    """Get or create the global cached VAD instance.
+    
+    If parameters change, the existing instance is reused as-is (with a warning)
+    since the underlying VAD model cannot be reconfigured without reinitialization.
+    For parameter changes to take effect, clear the cache first.
+    """
+    global _global_vad_cache, _global_vad_cache_config
+    
+    current_config = {
+        "threshold": threshold,
+        "min_silence_duration_sec": min_silence_duration_sec,
+        "min_speech_duration_sec": min_speech_duration_sec,
+        "max_speech_duration_sec": max_speech_duration_sec,
+        "smooth_window_size": smooth_window_size,
+        "pad_start_frame": pad_start_frame,
+        "max_buffer_sec": max_buffer_sec,
+    }
+    current_config.update(model_kwargs)
 
     if _global_vad_cache is None:
         with console.status(
@@ -78,16 +96,40 @@ def get_global_vad(
                 min_speech_duration_sec=min_speech_duration_sec,
                 max_speech_duration_sec=max_speech_duration_sec,
                 smooth_window_size=smooth_window_size,
+                pad_start_frame=pad_start_frame,
                 max_buffer_sec=max_buffer_sec,
                 **model_kwargs,
             )
+            _global_vad_cache_config = current_config
     else:
-        # Optional: update parameters if they differ significantly
-        _global_vad_cache.threshold = threshold
-        _global_vad_cache.min_silence_duration_sec = min_silence_duration_sec
-        # Add other param updates as needed
+        # Check if config differs from cached version
+        if _global_vad_cache_config != current_config:
+            # Log warning about parameter mismatch
+            changed_params = {
+                k: (v, current_config[k])
+                for k, v in _global_vad_cache_config.items()
+                if k in current_config and v != current_config[k]
+            }
+            console.print(
+                f"[yellow]Warning: VAD parameters differ from cached model. "
+                f"Reusing existing model. Changed params: {changed_params}. "
+                f"Call clear_global_vad_cache() first if you need the new parameters.[/yellow]"
+            )
 
     return _global_vad_cache
+
+
+def clear_global_vad_cache() -> None:
+    """Clear the global VAD cache, forcing a fresh model load on next use."""
+    global _global_vad_cache, _global_vad_cache_config
+    if _global_vad_cache is not None:
+        # Clean up GPU memory if needed
+        del _global_vad_cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    _global_vad_cache = None
+    _global_vad_cache_config = None
+    console.print("[dim]VAD global cache cleared.[/dim]")
 
 
 class FireRedVAD:
@@ -212,8 +254,7 @@ def extract_speech_timestamps(
     if sr != 16000:
         raise ValueError(f"FireRedVAD requires 16000 Hz, got {sr}")
 
-    vad = get_global_vad(
-        model_dir=SAVE_DIR,
+    vad = get_global_vad(  # Fixed: removed model_dir parameter
         threshold=threshold,
         min_silence_duration_sec=min_silence_duration_sec,
         min_speech_duration_sec=min_speech_duration_sec,
@@ -498,13 +539,7 @@ def save_segments(
             # ── 1. WAV ────────────────────────────────────────────────────
             wav_path = seg_dir / "sound.wav"
             try:
-                torchaudio.save(
-                    str(wav_path),
-                    torch.from_numpy(audio_np).unsqueeze(0),
-                    16000,
-                    encoding="PCM_S",
-                    bits_per_sample=16,
-                )
+                sf.write(str(wav_path), audio_np, 16000, subtype='PCM_16')
             except Exception as exc:
                 console.print(f"[red]Failed to save WAV {wav_path}: {exc}[/red]")
                 progress.advance(task)

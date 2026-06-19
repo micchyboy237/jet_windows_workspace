@@ -332,6 +332,169 @@ def check_speech_waves(
     return waves
 
 
+def get_valid_speech_waves(
+    audio: np.ndarray,
+    sampling_rate: int = SAMPLE_RATE,
+    vad_threshold: float = DEFAULT_THRESHOLD,
+    min_prominence: float = 0.05,
+    min_excursion: float = 0.04,
+    min_peak_prob: float = 0.55,
+    min_frames: int = 3,
+    min_duration_sec: float = 0.25,
+    baseline_threshold: float = 0.1,
+    min_speech_duration_ms: int = 250,
+    min_silence_duration_ms: int = 100,
+) -> List[SpeechWave]:
+    """
+    Identify valid speech waves from raw audio using VAD and shape analysis.
+    
+    This function:
+    1. Runs VAD to get speech probability scores
+    2. Identifies speech waves using shape analysis
+    3. Filters to only valid (high-confidence) waves
+    
+    Args:
+        audio: Raw audio as numpy array (int16 or float32)
+        sampling_rate: Audio sampling rate in Hz
+        vad_threshold: VAD probability threshold (above = speech)
+        min_prominence: Minimum peak prominence above baseline
+        min_excursion: Minimum peak-to-valley excursion
+        min_peak_prob: Minimum peak probability
+        min_frames: Minimum frames per wave
+        min_duration_sec: Minimum wave duration in seconds
+        baseline_threshold: Probability threshold for silence/baseline
+        min_speech_duration_ms: Minimum speech segment for VAD
+        min_silence_duration_ms: Minimum silence gap for VAD
+    
+    Returns:
+        List[SpeechWave]: List of valid speech waves.
+        Returns empty list if no valid speech found or VAD fails.
+    """
+    # Build WaveShapeConfig from parameters
+    shape_cfg = WaveShapeConfig(
+        min_prominence=min_prominence,
+        min_excursion=min_excursion,
+        min_peak_prob=min_peak_prob,
+        min_frames=min_frames,
+        min_duration_sec=min_duration_sec,
+        baseline_threshold=baseline_threshold,
+    )
+    
+    # Run VAD to get probability scores
+    try:
+        _, scores = extract_speech_timestamps(
+            audio=audio,
+            include_non_speech=False,
+            threshold=vad_threshold,
+            min_speech_duration_sec=min_speech_duration_ms / 1000.0,
+            min_silence_duration_sec=min_silence_duration_ms / 1000.0,
+            with_scores=True,
+        )
+    except Exception as e:
+        console = Console()
+        console.print(f"[error]VAD extraction failed: {e}[/error]")
+        return []
+    
+    if not scores:
+        return []
+    
+    # Identify all speech waves (including invalid ones)
+    all_waves = check_speech_waves(
+        speech_probs=scores,
+        threshold=vad_threshold,
+        sampling_rate=sampling_rate,
+        shape_cfg=shape_cfg,
+    )
+    
+    # Filter to valid waves only
+    valid_waves: List[SpeechWave] = []
+    for wave in all_waves:
+        if wave is None:
+            continue
+        if not isinstance(wave, dict):
+            continue
+        if not wave.get("is_valid", False):
+            continue
+        valid_waves.append(wave)
+    
+    return valid_waves
+
+
+def extract_pure_speech_segments(
+    audio: np.ndarray,
+    sampling_rate: int = SAMPLE_RATE,
+    hop_size: int = HOP_SIZE,
+    vad_threshold: float = DEFAULT_THRESHOLD,
+    min_prominence: float = 0.05,
+    min_excursion: float = 0.04,
+    min_peak_prob: float = 0.55,
+    min_frames: int = 3,
+    min_duration_sec: float = 0.25,
+    baseline_threshold: float = 0.1,
+    min_speech_duration_ms: int = 250,
+    min_silence_duration_ms: int = 100,
+) -> List[np.ndarray]:
+    """
+    Extract high-confidence speech audio segments from a raw waveform.
+    
+    This function:
+    1. Calls get_valid_speech_waves to identify valid speech waves
+    2. Extracts audio samples for each wave based on frame indices
+    
+    Args:
+        audio: Raw audio as numpy array (int16 or float32)
+        sampling_rate: Audio sampling rate in Hz
+        hop_size: Frame hop size for VAD processing
+        vad_threshold: VAD probability threshold (above = speech)
+        min_prominence: Minimum peak prominence above baseline
+        min_excursion: Minimum peak-to-valley excursion
+        min_peak_prob: Minimum peak probability
+        min_frames: Minimum frames per wave
+        min_duration_sec: Minimum wave duration in seconds
+        baseline_threshold: Probability threshold for silence/baseline
+        min_speech_duration_ms: Minimum speech segment for VAD
+        min_silence_duration_ms: Minimum silence gap for VAD
+    
+    Returns:
+        List[np.ndarray]: List of speech audio segments (same dtype as input).
+        Returns empty list if no valid speech found.
+    """
+    # Get valid speech waves
+    valid_waves = get_valid_speech_waves(
+        audio=audio,
+        sampling_rate=sampling_rate,
+        vad_threshold=vad_threshold,
+        min_prominence=min_prominence,
+        min_excursion=min_excursion,
+        min_peak_prob=min_peak_prob,
+        min_frames=min_frames,
+        min_duration_sec=min_duration_sec,
+        baseline_threshold=baseline_threshold,
+        min_speech_duration_ms=min_speech_duration_ms,
+        min_silence_duration_ms=min_silence_duration_ms,
+    )
+    
+    if not valid_waves:
+        return []
+    
+    # Extract audio segments from each valid wave
+    speech_segments = []
+    for wave in valid_waves:
+        frame_start = wave["details"]["frame_start"]
+        frame_end = wave["details"]["frame_end"]
+        
+        start_sample = frame_start * hop_size
+        end_sample = (frame_end + 1) * hop_size
+        
+        start_sample = max(0, start_sample)
+        end_sample = min(len(audio), end_sample)
+        
+        if end_sample > start_sample:
+            speech_segments.append(audio[start_sample:end_sample])
+    
+    return speech_segments
+
+
 def extract_pure_speech_audio(
     audio: np.ndarray,
     sampling_rate: int = SAMPLE_RATE,
@@ -347,13 +510,11 @@ def extract_pure_speech_audio(
     min_silence_duration_ms: int = 100,
 ) -> np.ndarray:
     """
-    Extract high-confidence speech audio from a raw waveform.
+    Extract high-confidence speech audio from a raw waveform and concatenate.
     
-    This is a self-contained function that:
-    1. Runs VAD to get speech probability scores
-    2. Identifies valid speech waves using shape analysis
-    3. Filters to high-confidence waves
-    4. Concatenates and returns pure speech audio
+    This is a convenience wrapper that:
+    1. Calls extract_pure_speech_segments to get individual speech segments
+    2. Concatenates them into a single audio array
     
     Args:
         audio: Raw audio as numpy array (int16 or float32)
@@ -373,73 +534,23 @@ def extract_pure_speech_audio(
         numpy.ndarray: Combined pure speech audio (same dtype as input).
         Returns empty array if no valid speech found.
     """
-    # Step 1: Build WaveShapeConfig from parameters
-    shape_cfg = WaveShapeConfig(
+    # Get individual speech segments
+    speech_segments = extract_pure_speech_segments(
+        audio=audio,
+        sampling_rate=sampling_rate,
+        hop_size=hop_size,
+        vad_threshold=vad_threshold,
         min_prominence=min_prominence,
         min_excursion=min_excursion,
         min_peak_prob=min_peak_prob,
         min_frames=min_frames,
         min_duration_sec=min_duration_sec,
         baseline_threshold=baseline_threshold,
+        min_speech_duration_ms=min_speech_duration_ms,
+        min_silence_duration_ms=min_silence_duration_ms,
     )
     
-    # Step 2: Run VAD to get probability scores
-    try:
-        _, scores = extract_speech_timestamps(
-            audio=audio,
-            include_non_speech=False,
-            threshold=vad_threshold,
-            min_speech_duration_sec=min_speech_duration_ms / 1000.0,
-            min_silence_duration_sec=min_silence_duration_ms / 1000.0,
-            with_scores=True,
-        )
-    except Exception as e:
-        console = Console()
-        console.print(f"[error]VAD extraction failed: {e}[/error]")
-        return np.array([], dtype=audio.dtype)
-    
-    if not scores:
-        return np.array([], dtype=audio.dtype)
-    
-    # Step 3: Identify valid speech waves using check_speech_waves directly
-    # (bypasses get_speech_waves which does unnecessary audio loading and
-    #  can return None entries due to the TypedDict initialization quirk)
-    all_waves = check_speech_waves(
-        speech_probs=scores,
-        threshold=vad_threshold,
-        sampling_rate=sampling_rate,
-        shape_cfg=shape_cfg,
-    )
-    
-    # Filter to valid waves only, with None guard for safety
-    valid_waves: List[SpeechWave] = []
-    for wave in all_waves:
-        if wave is None:
-            continue
-        if not isinstance(wave, dict):
-            continue
-        if not wave.get("is_valid", False):
-            continue
-        valid_waves.append(wave)
-    
-    if not valid_waves:
-        return np.array([], dtype=audio.dtype)
-    
-    # Step 4: Extract and concatenate audio segments
-    speech_segments = []
-    for wave in valid_waves:
-        frame_start = wave["details"]["frame_start"]
-        frame_end = wave["details"]["frame_end"]
-        
-        start_sample = frame_start * hop_size
-        end_sample = (frame_end + 1) * hop_size
-        
-        start_sample = max(0, start_sample)
-        end_sample = min(len(audio), end_sample)
-        
-        if end_sample > start_sample:
-            speech_segments.append(audio[start_sample:end_sample])
-    
+    # Concatenate and return
     if not speech_segments:
         return np.array([], dtype=audio.dtype)
     

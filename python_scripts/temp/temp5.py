@@ -1,44 +1,35 @@
-import os
+import librosa
 import torch
-import soundfile as sf  # <-- ADD THIS
-from pyannote.audio import Pipeline
-from pyannote.audio.pipelines.utils.hook import ProgressHook
-import argparse
+import numpy as np
+from speechbrain.inference.speaker import EncoderClassifier
 
-DEFAULT_AUDIO = r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers_mono_16k.wav"
-
-parser = argparse.ArgumentParser(description="Speaker diarization with pyannote.audio")
-parser.add_argument("audio_path", nargs="?", default=DEFAULT_AUDIO,
-                    help="Path to the audio file (default: use hardcoded path)")
-args = parser.parse_args()
-
-audio_path = args.audio_path
-
-# Community-1 open-source speaker diarization pipeline
-pipeline = Pipeline.from_pretrained(
-    "pyannote/speaker-diarization-community-1",
-    token=os.getenv("HF_TOKEN"))
-
-# send pipeline to GPU (when available)
-pipeline.to(torch.device("cuda"))
-
-# === PRELOAD AUDIO (this is the fix) ===
-waveform_np, sample_rate = sf.read(
-    audio_path,
-    always_2d=True,      # ensures (time, channels) shape even for mono
-    dtype="float32"
+# Load model
+classifier = EncoderClassifier.from_hparams(
+    source="speechbrain/spkrec-ecapa-voxceleb"
 )
-waveform = torch.from_numpy(waveform_np.T)  # convert to (channels, time) torch.Tensor
 
-preloaded_audio = {
-    "waveform": waveform,      # must be (channel, time) tensor
-    "sample_rate": sample_rate
-}
+audio_path1 = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_speech_waves\waves\segment_001_wave_002\sound.wav"
+audio_path2 = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_speech_waves\waves\segment_001_wave_005\sound.wav"
 
-# apply pretrained pipeline (with optional progress hook)
-with ProgressHook() as hook:
-    output = pipeline(preloaded_audio, hook=hook)  # <-- pass dict instead of str path
+# Load two audio files with librosa
+signal1, fs1 = librosa.load(audio_path1, sr=None)  # sr=None preserves original sample rate
+signal2, fs2 = librosa.load(audio_path2, sr=None)
 
-# print the result
-for turn, speaker in output.speaker_diarization:
-    print(f"start={turn.start:.1f}s stop={turn.end:.1f}s speaker_{speaker}")
+# Convert numpy arrays to torch tensors and add batch dimension
+# librosa returns shape (samples,) so we need to reshape to (1, samples)
+signal1_tensor = torch.from_numpy(signal1).unsqueeze(0).float()
+signal2_tensor = torch.from_numpy(signal2).unsqueeze(0).float()
+
+# Extract embeddings
+emb1 = classifier.encode_batch(signal1_tensor)  # [1, 1, 192]
+emb2 = classifier.encode_batch(signal2_tensor)
+
+# Compute cosine similarity
+cos_sim = torch.nn.functional.cosine_similarity(
+    emb1.squeeze(0).squeeze(0), 
+    emb2.squeeze(0).squeeze(0), 
+    dim=0
+).item()
+
+print(f"Cosine Similarity: {cos_sim:.4f}")
+# Same speaker if high (e.g. > 0.7)
