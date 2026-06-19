@@ -603,6 +603,11 @@ def main():
         DEFAULT_THRESHOLD_POSSIBLE,
         DEFAULT_THRESHOLD_NEW_SPEAKER,
     )
+    from embedding_model_factory import (
+        EmbeddingModelType,
+        create_embedding_model,
+        list_available_models,
+    )
 
     console = Console()
     
@@ -644,6 +649,13 @@ def main():
         action="store_true",
         help="Skip visualization generation",
     )
+    parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default="pyannote",
+        choices=[e.value for e in EmbeddingModelType],
+        help="Speaker embedding model backend.",
+    )
     args = parser.parse_args()
     
     sample_rate = 16000
@@ -667,12 +679,28 @@ def main():
     )
     audio_data = list(zip(waveforms, audio_files))
     
-    with console.status("[bold green]Loading pyannote embedding model...[/bold green]", spinner="dots"):
-        model = Model.from_pretrained("pyannote/embedding")
-        inference = Inference(model, window="whole")
+    # with console.status("[bold green]Loading pyannote embedding model...[/bold green]", spinner="dots"):
+    #     model = Model.from_pretrained("pyannote/embedding")
+    #     inference = Inference(model, window="whole")
+
+    # --- NEW: Select model type (configurable) ---------------------------------
+    # You can change this line or accept via command-line arg:
+    # MODEL_TYPE = EmbeddingModelType.PYANNOTE  # default, backward-compatible
+    MODEL_TYPE = EmbeddingModelType(args.embedding_model)
+
+    console.print(f"[bold]Available embedding models:[/bold]")
+    for name, info in list_available_models().items():
+        console.print(f"  • {name} (dim={info['embedding_dim']})")
+
+    with console.status(
+        f"[bold green]Loading embedding model '{MODEL_TYPE.value}'...[/bold green]",
+        spinner="dots",
+    ):
+        embedding_model = create_embedding_model(MODEL_TYPE)
     
     labeler = SegmentSpeakerLabeler(
-        embedding_model=inference,
+        # embedding_model=inference,
+        embedding_model=embedding_model,
         threshold_same=args.threshold_same,
         threshold_possible=args.threshold_possible,
         threshold_new_speaker=args.threshold_new_speaker,

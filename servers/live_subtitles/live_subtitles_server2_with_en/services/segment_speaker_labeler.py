@@ -246,26 +246,32 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         waveform: torch.Tensor,
         sample_rate: int,
     ) -> np.ndarray:
-        """Compute speaker embedding from waveform segment."""
+        """Compute speaker embedding from waveform segment.
+
+        Uses the ``BaseEmbeddingModel.encode()`` interface so that any
+        registered backend (pyannote, SpeechBrain, NeMo) works transparently.
+        """
         try:
             if waveform.dim() == 1:
                 waveform = waveform.unsqueeze(0)
-            embedding = self.embedding_model(
-                {
-                    "waveform": waveform,
-                    "sample_rate": sample_rate,
-                }
-            )
+
+            # ---- unified encode() call ----------------------------------------
+            embedding = self.embedding_model.encode(waveform, sample_rate)
+            # -------------------------------------------------------------------
+
             if hasattr(embedding, "detach"):
                 embedding = embedding.detach().cpu().numpy()
+
             if embedding.ndim == 1:
                 embedding = embedding.reshape(1, -1)
+
             return embedding
+
         except Exception as e:
             if self.debug:
                 console.print(f"[red]Error computing embedding: {e}[/]")
             raise
-    
+
     def find_best_match(
         self,
         embedding: np.ndarray,
