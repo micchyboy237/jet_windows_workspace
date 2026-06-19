@@ -16,7 +16,7 @@ class SpeakerAutoLabeler:
     Fully automatic with intelligent cluster merging
     """
     
-    def __init__(self, model_name="pyannote/embedding", duration=3.0, step=1.0):
+    def __init__(self, model_name="pyannote/embedding", duration=3.0, step=0.5):
         """
         Initialize speaker labeler with pyannote model
         
@@ -306,7 +306,7 @@ class SpeakerAutoLabeler:
 def main(
     audio_path: str,
     duration: float = 3.0,
-    step: float = 1.0,
+    step: float = 0.5,
     min_segment_duration: float = 1.0,
     method: Literal["agglomerative", "spectral"] = "agglomerative",
     merge_threshold: float = 0.40,
@@ -460,7 +460,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-s", "--step",
         type=float,
-        default=1.0,
+        default=0.5,
         help="Window step in seconds for sliding window"
     )
     
