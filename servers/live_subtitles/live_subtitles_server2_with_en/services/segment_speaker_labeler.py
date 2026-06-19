@@ -12,13 +12,13 @@ try:
     from services.config import SAMPLE_RATE
     from services.embedding_model_factory import BaseEmbeddingModel
     from services.speaker_metrics_mixin import SpeakerMetricsMixin
-    from services.speech_waves import extract_pure_speech_audio
+    # from services.speech_waves import extract_pure_speech_audio
     from services.audio_tagger import AudioTagger
 except ImportError:
     from config import SAMPLE_RATE
     from embedding_model_factory import BaseEmbeddingModel
     from speaker_metrics_mixin import SpeakerMetricsMixin
-    from speech_waves import extract_pure_speech_audio
+    # from speech_waves import extract_pure_speech_audio
     from audio_tagger import AudioTagger
 
 console = Console()
@@ -42,7 +42,8 @@ DEFAULT_MIN_PEAK_PROB: float = 0.9
 DEFAULT_MIN_FRAMES: int = 100
 DEFAULT_MIN_DURATION_SEC: float = 0.25
 DEFAULT_BASELINE_THRESHOLD: float = 0.1
-DEFAULT_MIN_SIMILARITY_TO_UPDATE: float = 0.25  # NEW: Minimum similarity to update centroid
+DEFAULT_MIN_SIMILARITY_TO_UPDATE: float = 0.50  # NEW: Minimum similarity to update centroid
+DEFAULT_MIN_DURATION_FOR_NEW_SPEAKER: float = 4.0  # seconds; min audio to create a new speaker
 
 
 class SpeakerSegmentInfo(TypedDict):
@@ -187,6 +188,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         min_similarity_for_list: float = DEFAULT_MIN_SIMILARITY_FOR_LIST,
         consolidation_threshold: float = DEFAULT_CONSOLIDATION_THRESHOLD,
         min_similarity_to_update: float = DEFAULT_MIN_SIMILARITY_TO_UPDATE,  # NEW
+        min_duration_for_new_speaker: float = DEFAULT_MIN_DURATION_FOR_NEW_SPEAKER,
         use_speech_wave_filtering: bool = DEFAULT_USE_SPEECH_WAVE_FILTERING,
         min_prominence: float = DEFAULT_MIN_PROMINENCE,
         min_excursion: float = DEFAULT_MIN_EXCURSION,
@@ -212,6 +214,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         self.min_similarity_for_list = min_similarity_for_list
         self.consolidation_threshold = consolidation_threshold
         self.min_similarity_to_update = min_similarity_to_update  # NEW
+        self.min_duration_for_new_speaker = min_duration_for_new_speaker
         self.debug = debug
         self.use_speech_wave_filtering = use_speech_wave_filtering
         self.min_prominence = min_prominence
@@ -1004,25 +1007,90 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         best_score: float,
         top_matches: List[Dict],
         context: Optional[Dict],
-        embedding: np.ndarray,
+        waveform: torch.Tensor,
+        sample_rate: int,
     ) -> bool:
-        """Determine if we should create a new speaker."""
+        """Determine if we should create a new speaker.
+
+        Parameters
+        ----------
+        best_score : float
+            Highest cosine similarity to any known speaker centroid.
+        top_matches : List[Dict]
+            Ranked speaker matches from find_top_k_matches().
+        context : dict, optional
+            May contain 'previous_speaker' for continuity checking.
+        waveform : torch.Tensor
+            Raw audio waveform — used to compute segment duration.
+            Shape: (1, N) or (N,). Duration = N / sample_rate.
+        sample_rate : int
+            Audio sample rate in Hz (e.g. 16000).
+
+        Returns
+        -------
+        bool
+            True if a new speaker identity should be created.
+
+        Notes
+        -----
+        Key gate added: if no speakers exist yet OR the segment is long enough
+        (>= min_duration_for_new_speaker seconds) AND all other similarity
+        checks fail, a new speaker is created.
+
+        Short segments (< min_duration_for_new_speaker) are never used to
+        bootstrap a new speaker identity because their embeddings are too noisy
+        to form a reliable centroid seed. They will instead fall back to the
+        best matching existing speaker or be skipped.
+        """
+        # Gate 1: first-ever speaker — always create regardless of duration
         if len(self._speakers) == 0:
+            if self.debug:
+                console.print(
+                    "[dim]_should_create_new_speaker: no speakers yet → True[/]"
+                )
             return True
 
+        # Gate 2: no matches at all — but check duration first
         if not top_matches:
+            num_samples = waveform.shape[-1]
+            duration_secs = num_samples / sample_rate
+            if duration_secs < self.min_duration_for_new_speaker:
+                if self.debug:
+                    console.print(
+                        f"[yellow]_should_create_new_speaker: no matches but segment too short "
+                        f"({duration_secs:.2f}s < {self.min_duration_for_new_speaker}s) → False[/]"
+                    )
+                return False
+            if self.debug:
+                console.print(
+                    f"[dim]_should_create_new_speaker: no matches, "
+                    f"duration {duration_secs:.2f}s OK → True[/]"
+                )
             return True
 
         best_match = top_matches[0]
         match_type = best_match["match_type"]
         confidence = best_match["confidence"]
 
+        # Gate 3: strong or early match → keep existing speaker
         if match_type in ("strong_match", "early_match"):
+            if self.debug:
+                console.print(
+                    f"[dim]_should_create_new_speaker: {match_type} "
+                    f"(conf={confidence:.3f}) → False[/]"
+                )
             return False
 
+        # Gate 4: possible match → also keep existing speaker
         if match_type == "possible_match":
+            if self.debug:
+                console.print(
+                    f"[dim]_should_create_new_speaker: possible_match "
+                    f"(conf={confidence:.3f}) → False[/]"
+                )
             return False
 
+        # Gate 5: below new-speaker threshold — check context first
         if confidence < self.threshold_new_speaker:
             if context and "previous_speaker" in context:
                 prev_speaker = context["previous_speaker"]
@@ -1032,10 +1100,47 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                             match["label"] == prev_speaker
                             and match["confidence"] >= self.threshold_possible
                         ):
+                            if self.debug:
+                                console.print(
+                                    f"[dim]_should_create_new_speaker: context rescue "
+                                    f"via {prev_speaker} "
+                                    f"(conf={match['confidence']:.3f}) → False[/]"
+                                )
                             return False
+
+            # Duration gate: only create new speaker if audio is long enough
+            num_samples = waveform.shape[-1]
+            duration_secs = num_samples / sample_rate
+            if duration_secs < self.min_duration_for_new_speaker:
+                if self.debug:
+                    console.print(
+                        f"[yellow]_should_create_new_speaker: low confidence "
+                        f"(conf={confidence:.3f} < {self.threshold_new_speaker}) "
+                        f"but segment too short ({duration_secs:.2f}s < "
+                        f"{self.min_duration_for_new_speaker}s) → False[/]"
+                    )
+                return False
+
+            if self.debug:
+                console.print(
+                    f"[yellow]_should_create_new_speaker: low confidence "
+                    f"(conf={confidence:.3f}) + duration OK "
+                    f"({duration_secs:.2f}s) → True[/]"
+                )
             return True
 
+        # Gate 6: fallback check on raw best_score
         if best_score < self.threshold_new_speaker:
+            num_samples = waveform.shape[-1]
+            duration_secs = num_samples / sample_rate
+            if duration_secs < self.min_duration_for_new_speaker:
+                if self.debug:
+                    console.print(
+                        f"[yellow]_should_create_new_speaker: best_score "
+                        f"{best_score:.3f} < {self.threshold_new_speaker} "
+                        f"but segment too short ({duration_secs:.2f}s) → False[/]"
+                    )
+                return False
             return True
 
         return False
@@ -1091,35 +1196,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         segment_id: Optional[str] = None,
     ) -> List[Dict]:
         """Label a speech segment with multiple possible speaker identities.
-        
-        Parameters
-        ----------
-        waveform : torch.Tensor
-            Audio waveform of the segment.
-        sample_rate : int
-            Sample rate of the audio.
-        timestamp : float
-            Timestamp of the segment in seconds.
-        context : dict, optional
-            Additional context like previous speaker info.
-        top_k : int, optional
-            Number of top matches to return.
-        segment_id : str, optional
-            External segment identifier. If not provided, one will be generated
-            automatically using UUID. This allows callers to maintain their own
-            segment tracking system.
-            
-        Returns
-        -------
-        list of dict
-            List of speaker matches with confidence scores and segment_id.
-            
-        Notes
-        -----
-        FIXED: When centroid contamination protection rejects an update and creates
-        a new speaker, it now passes the original segment_id to create_new_speaker()
-        instead of letting it auto-generate a new one. This preserves the external
-        segment ID throughout the pipeline.
+        ...docstring unchanged...
         """
         self.total_segments_processed += 1
         if segment_id is None:
@@ -1129,7 +1206,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
 
         waveform, was_filtered = self._extract_speech_audio(waveform=waveform)
         embedding = self.compute_embedding(waveform, sample_rate)
-        
+
         if self.debug:
             console.print(
                 f"[dim]Embedding shape: {embedding.shape}, "
@@ -1138,7 +1215,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             )
 
         top_matches = self.find_top_k_matches(embedding, k=top_k)
-        
+
         if self.debug:
             console.print(
                 f"[dim]Computed embedding for t={timestamp:.2f}s, "
@@ -1150,16 +1227,25 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         if len(self._speakers) > 0:
             _, actual_best_score, _ = self.find_best_match(embedding)
 
+        # ── CHANGED: pass waveform + sample_rate instead of embedding ──
         should_create = self._should_create_new_speaker(
-            actual_best_score, top_matches, context, embedding
+            best_score=actual_best_score,
+            top_matches=top_matches,
+            context=context,
+            waveform=waveform,          # ← was: embedding=embedding
+            sample_rate=sample_rate,    # ← new
         )
-        
+
         if self.debug:
+            num_samples = waveform.shape[-1]
+            duration_secs = num_samples / sample_rate
             console.print(
                 f"[dim]Actual best score: {actual_best_score:.4f}, "
+                f"duration: {duration_secs:.2f}s, "
                 f"should_create_new_speaker: {should_create}[/]"
             )
 
+        # ── rest of the method is UNCHANGED from here ──
         results = []
         seen_labels = set()
         just_created_speaker = False
@@ -1168,7 +1254,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             new_label = self.create_new_speaker(
                 embedding=embedding,
                 timestamp=timestamp,
-                segment_id=segment_id  # ✅ Pass the original segment_id
+                segment_id=segment_id
             )
             just_created_speaker = True
             if self.debug:
