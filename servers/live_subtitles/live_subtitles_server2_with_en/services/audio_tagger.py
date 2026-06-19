@@ -1163,6 +1163,184 @@ class AudioTagger:
         
         return summary
 
+    def split_speech_audio(
+        self,
+        audio: AudioInput,
+        sample_rate: Optional[int] = None,
+        prob_threshold: Optional[float] = None,
+        top_n: Optional[int] = None,
+        chunk_duration: Optional[float] = None,
+        overlap_duration: Optional[float] = None,
+        min_chunk_duration: Optional[float] = None,
+        min_speech_duration: float = 0.5,
+        merge_gap: Optional[float] = None,
+    ) -> List[np.ndarray]:
+        """
+        Split audio into individual speech segments, returning each as a numpy array.
+
+        Uses chunk-based audio tagging to detect speech regions, merges overlapping
+        speech chunks into continuous segments, and extracts the audio for each segment.
+
+        Args:
+            audio: Audio input (file path, bytes, numpy array, or torch tensor)
+            sample_rate: Sample rate for raw audio data (default: SAMPLE_RATE)
+            prob_threshold: Minimum speech probability threshold (default: self.speech_prob_threshold)
+            top_n: Number of top predictions to check for speech classes (default: self.speech_top_n)
+            chunk_duration: Duration of each analysis chunk in seconds (default: self.chunk_duration)
+            overlap_duration: Overlap between consecutive chunks (default: self.chunk_overlap)
+            min_chunk_duration: Minimum duration for the last chunk (default: self.min_chunk_duration)
+            min_speech_duration: Minimum duration in seconds for a valid speech segment (default: 0.5s)
+            merge_gap: Maximum gap in seconds to merge nearby segments (default: chunk_duration/2)
+
+        Returns:
+            List of numpy arrays, each containing a continuous speech segment
+            (mono, float32, at the given sample_rate)
+
+        Example:
+            >>> tagger = AudioTagger()
+            >>> speech_segments = tagger.split_speech_audio("recording.wav")
+            >>> for i, segment in enumerate(speech_segments):
+            ...     print(f"Segment {i+1}: {len(segment)/16000:.2f}s")
+            >>> # Use with ASR
+            >>> for segment in speech_segments:
+            ...     transcription = asr_model.transcribe(segment)
+
+        Debug logs trace:
+            - Audio loading details
+            - Chunk-based speech detection
+            - Identified speech segments with timestamps
+            - Filtering of segments below min_speech_duration
+            - Final segment count and total speech duration
+        """
+        console.print(
+            Panel.fit(
+                f"[bold cyan]split_speech_audio[/bold cyan]\n"
+                f"prob_threshold={prob_threshold or self.speech_prob_threshold}\n"
+                f"min_speech_duration={min_speech_duration}s\n"
+                f"merge_gap={merge_gap or (chunk_duration or self.chunk_duration) / 2}s",
+                title="Speech Splitting",
+                border_style="cyan",
+            )
+        )
+        
+        # Step 1: Load audio
+        try:
+            waveform, actual_sr = load_audio(
+                audio, sr=sample_rate or SAMPLE_RATE, mono=True
+            )
+        except Exception as e:
+            console.print(f"[red]❌ Failed to load audio: {e}[/red]")
+            raise
+        
+        total_samples = len(waveform)
+        total_duration = total_samples / actual_sr
+        console.print(
+            f"[dim]📊 Audio loaded: {total_duration:.2f}s, "
+            f"{actual_sr}Hz, {total_samples} samples[/dim]"
+        )
+        
+        # Step 2: Run chunk-based speech detection
+        summary = self.tag_audio_chunks(
+            audio=audio,
+            sample_rate=sample_rate,
+            chunk_duration=chunk_duration,
+            overlap_duration=overlap_duration,
+            min_chunk_duration=min_chunk_duration,
+        )
+        
+        chunks = summary.get("chunks", [])
+        if not chunks:
+            console.print("[yellow]⚠ No chunks produced, returning empty list[/yellow]")
+            return []
+        
+        # Step 3: Re-evaluate speech detection with custom parameters if needed
+        threshold = prob_threshold if prob_threshold is not None else self.speech_prob_threshold
+        n_check = top_n if top_n is not None else self.speech_top_n
+        
+        if prob_threshold is not None or top_n is not None:
+            console.print(
+                f"[dim]🔧 Re-evaluating speech detection with "
+                f"threshold={threshold}, top_n={n_check}[/dim]"
+            )
+            for chunk in chunks:
+                predictions = chunk.get("predictions", [])
+                speech_detected, chunk_prob = self._chunk_has_speech(
+                    predictions, top_n=n_check
+                )
+                chunk["speech_detected"] = speech_detected and chunk_prob >= threshold
+                chunk["speech_probability"] = round(chunk_prob, 4)
+        
+        # Step 4: Identify continuous speech segments from chunk results
+        speech_segments = self._identify_speech_segments(
+            chunks=chunks,
+            total_duration=total_duration,
+            edges_only=False,  # We want all segments, not just edges
+        )
+        
+        if not speech_segments:
+            console.print("[yellow]⚠ No speech segments detected[/yellow]")
+            return []
+        
+        # Step 5: Merge nearby segments if gap is small
+        _chunk_dur = chunk_duration if chunk_duration is not None else self.chunk_duration
+        merge_threshold = merge_gap if merge_gap is not None else _chunk_dur / 2.0
+        
+        merged_segments = self._merge_close_segments(
+            speech_segments, max_gap=merge_threshold
+        )
+        
+        console.print(
+            f"[dim]🔗 Merged {len(speech_segments)} raw segments into "
+            f"{len(merged_segments)} segments (gap threshold: {merge_threshold:.3f}s)[/dim]"
+        )
+        
+        # Step 6: Extract audio for each segment, filtering by minimum duration
+        speech_arrays: List[np.ndarray] = []
+        total_speech_duration = 0.0
+        
+        for i, (start_sec, end_sec) in enumerate(merged_segments):
+            duration = end_sec - start_sec
+            
+            if duration < min_speech_duration:
+                console.print(
+                    f"[dim]⏭ Skipping segment {i+1}: {start_sec:.3f}s - {end_sec:.3f}s "
+                    f"(duration {duration:.3f}s < min {min_speech_duration}s)[/dim]"
+                )
+                continue
+            
+            start_sample = int(start_sec * actual_sr)
+            end_sample = int(end_sec * actual_sr)
+            start_sample = max(0, start_sample)
+            end_sample = min(total_samples, end_sample)
+            
+            if end_sample <= start_sample:
+                console.print(
+                    f"[yellow]⚠ Segment {i+1} has no valid samples, skipping[/yellow]"
+                )
+                continue
+            
+            segment_audio = waveform[start_sample:end_sample].copy()
+            speech_arrays.append(segment_audio)
+            total_speech_duration += duration
+            
+            console.print(
+                f"[green]🎤 Segment {len(speech_arrays)}: {start_sec:.3f}s - {end_sec:.3f}s "
+                f"(duration: {duration:.3f}s, samples: {len(segment_audio)})[/green]"
+            )
+        
+        # Step 7: Log summary
+        if speech_arrays:
+            console.print(
+                f"[bold green]✅ Extracted {len(speech_arrays)} speech segment(s) "
+                f"totaling {total_speech_duration:.2f}s[/bold green]"
+            )
+        else:
+            console.print(
+                "[yellow]⚠ No speech segments met the minimum duration criteria[/yellow]"
+            )
+        
+        return speech_arrays
+
     def extract_speech_only(
         self,
         audio: AudioInput,

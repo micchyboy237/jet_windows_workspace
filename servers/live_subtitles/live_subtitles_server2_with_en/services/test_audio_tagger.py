@@ -3,6 +3,7 @@ import json
 import shutil
 import time
 from pathlib import Path
+import soundfile as sf
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -47,9 +48,17 @@ console.print(f"\n[bold]Analyzing audio: {linkify(audio_path)}[/bold]\n")
 # ── FIX: Pass output_dir when --save-speech-chunks is set ──
 output_dir_param = Path(args.output_dir)
 
-# ── NEW: Save filtered speech audio ──
-import soundfile as sf
+# ── NEW: Split speech then save all splitted speech audio ──
+splitted_speeches_dir = output_dir_param / "splitted_speeches"
+splitted_speeches_dir.mkdir(parents=True, exist_ok=True)
+splitted_speeches = tagger.split_speech_audio(audio_path, prob_threshold=args.speech_threshold)
+for idx, speech_part in enumerate(splitted_speeches):
+    speech_part_path = splitted_speeches_dir / f"speech_part_{idx + 1}.wav"
+    sf.write(str(speech_part_path), speech_part, SAMPLE_RATE)
+    console.print(f"[green]💾 Splitted speech part {idx + 1} saved to: {linkify(str(speech_part_path))}[/green]")
+# ───────────────────────────────────────
 
+# ── NEW: Save filtered speech audio ──
 filtered_speech_only_audio = tagger.extract_speech_only(audio_path, prob_threshold=args.speech_threshold)
 filtered_audio_path = output_dir_param / "filtered_speech_audio.wav"
 sf.write(str(filtered_audio_path), filtered_speech_only_audio, SAMPLE_RATE)
@@ -215,4 +224,3 @@ if speech_chunks_dir.exists():
         f"{linkify(str(speech_chunks_dir))}[/green]"
     )
 # ───────────────────────────────────────
-
