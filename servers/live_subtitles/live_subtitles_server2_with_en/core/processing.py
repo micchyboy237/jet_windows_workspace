@@ -66,8 +66,27 @@ def _get_speaker_labeler():
 
     console.print("[info]Loading speaker embedding model...[/info]")
     try:
-        embedding_model = Model.from_pretrained("pyannote/embedding")
-        embedding_inference = Inference(embedding_model, window="whole")
+        # embedding_model = Model.from_pretrained("pyannote/embedding")
+        # embedding_inference = Inference(embedding_model, window="whole")
+
+        from services.embedding_model_factory import (
+            EmbeddingModelType,
+            create_embedding_model,
+            list_available_models,
+        )
+
+        MODEL_TYPE = EmbeddingModelType.PYANNOTE
+
+        console.print(f"[bold]Available embedding models:[/bold]")
+        for name, info in list_available_models().items():
+            console.print(f"  • {name} (dim={info['embedding_dim']})")
+
+        with console.status(
+            f"[bold green]Loading embedding model '{MODEL_TYPE.value}'...[/bold green]",
+            spinner="dots",
+        ):
+            embedding_inference = create_embedding_model(MODEL_TYPE)
+
         set_embedding_inference(embedding_inference)
 
         speaker_state_path = get_speaker_state_path()

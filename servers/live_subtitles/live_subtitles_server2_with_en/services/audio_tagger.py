@@ -4,7 +4,7 @@ import csv
 import json
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, TypedDict, Union
+from typing import Dict, List, Optional, Tuple, TypedDict, Union
 
 import numpy as np
 import sherpa_onnx
@@ -1162,6 +1162,271 @@ class AudioTagger:
         }
         
         return summary
+
+    def extract_speech_only(
+        self,
+        audio: AudioInput,
+        sample_rate: Optional[int] = None,
+        edges_only: bool = False,
+        prob_threshold: Optional[float] = None,
+        chunk_duration: Optional[float] = None,
+        overlap_duration: Optional[float] = None,
+        min_chunk_duration: Optional[float] = None,
+        top_n: Optional[int] = None,
+    ) -> np.ndarray:
+        """
+        Extract speech-only audio by removing non-speech segments.
+        
+        Uses tag_audio_chunks internally to detect speech regions,
+        then trims the audio to keep only speech portions.
+        
+        Args:
+            audio: Audio input (file path, bytes, numpy array, or torch tensor)
+            sample_rate: Sample rate for raw audio data (default: SAMPLE_RATE)
+            edges_only: If True, only trim leading/trailing non-speech;
+                    if False (default), remove all non-speech segments
+            prob_threshold: Override default speech probability threshold
+            chunk_duration: Override default chunk duration in seconds
+            overlap_duration: Override default overlap between chunks
+            min_chunk_duration: Override minimum chunk duration
+            top_n: Override number of top predictions to check for speech
+        
+        Returns:
+            Trimmed numpy audio array containing only speech portions
+        
+        Example:
+            >>> tagger = AudioTagger()
+            >>> speech_audio = tagger.extract_speech_only("recording.wav")
+            >>> trimmed = tagger.extract_speech_only("recording.wav", edges_only=True)
+        
+        Debug logs trace:
+            - Input parameters
+            - Chunk tagging results
+            - Identified speech segments
+            - Trimmed audio duration vs original
+        """
+        console.print(
+            Panel.fit(
+                f"[bold cyan]extract_speech_only[/bold cyan]\n"
+                f"edges_only={edges_only}\n"
+                f"prob_threshold={prob_threshold or self.speech_prob_threshold}",
+                title="Speech Extraction",
+                border_style="cyan",
+            )
+        )
+        
+        # Load the full waveform first (we need sample-accurate trimming)
+        try:
+            waveform, actual_sr = load_audio(
+                audio, sr=sample_rate or SAMPLE_RATE, mono=True
+            )
+        except Exception as e:
+            console.print(f"[red]❌ Failed to load audio: {e}[/red]")
+            raise
+        
+        total_samples = len(waveform)
+        total_duration = total_samples / actual_sr
+        console.print(
+            f"[dim]📊 Audio loaded: {total_duration:.2f}s, "
+            f"{actual_sr}Hz, {total_samples} samples[/dim]"
+        )
+        
+        # Tag chunks to identify speech regions
+        summary = self.tag_audio_chunks(
+            audio=audio,
+            sample_rate=sample_rate,
+            chunk_duration=chunk_duration,
+            overlap_duration=overlap_duration,
+            min_chunk_duration=min_chunk_duration,
+        )
+        
+        chunks = summary.get("chunks", [])
+        if not chunks:
+            console.print("[yellow]⚠ No chunks produced, returning empty array[/yellow]")
+            return np.array([], dtype=np.float32)
+        
+        # Override speech detection threshold if provided
+        threshold = prob_threshold if prob_threshold is not None else self.speech_prob_threshold
+        n_check = top_n if top_n is not None else self.speech_top_n
+        
+        # Re-evaluate speech detection with potentially overridden threshold
+        # (tag_audio_chunks uses instance defaults; we may need stricter/looser)
+        if prob_threshold is not None or top_n is not None:
+            console.print(
+                f"[dim]🔧 Re-evaluating speech detection with "
+                f"threshold={threshold}, top_n={n_check}[/dim]"
+            )
+            for chunk in chunks:
+                predictions = chunk.get("predictions", [])
+                speech_detected, chunk_prob = self._chunk_has_speech(
+                    predictions, top_n=n_check
+                )
+                # Override with custom threshold
+                speech_detected = chunk_prob >= threshold
+                chunk["speech_detected"] = speech_detected
+                chunk["speech_probability"] = round(chunk_prob, 4)
+        
+        # Identify speech segments from chunks
+        speech_segments = self._identify_speech_segments(
+            chunks=chunks,
+            total_duration=total_duration,
+            edges_only=edges_only,
+        )
+        
+        if not speech_segments:
+            console.print("[yellow]⚠ No speech segments found, returning empty array[/yellow]")
+            return np.array([], dtype=np.float32)
+        
+        console.print(f"[green]🎤 Found {len(speech_segments)} speech segment(s):[/green]")
+        for i, (start, end) in enumerate(speech_segments):
+            console.print(f"[green]   Segment {i + 1}: {start:.3f}s - {end:.3f}s "
+                        f"(duration: {end - start:.3f}s)[/green]")
+        
+        # Extract speech portions from waveform
+        trimmed_waveforms = []
+        for start_sec, end_sec in speech_segments:
+            start_sample = int(start_sec * actual_sr)
+            end_sample = int(end_sec * actual_sr)
+            start_sample = max(0, start_sample)
+            end_sample = min(total_samples, end_sample)
+            if end_sample > start_sample:
+                trimmed_waveforms.append(waveform[start_sample:end_sample].copy())
+        
+        if not trimmed_waveforms:
+            console.print("[yellow]⚠ No valid speech samples extracted[/yellow]")
+            return np.array([], dtype=np.float32)
+        
+        result = np.concatenate(trimmed_waveforms)
+        result_duration = len(result) / actual_sr
+        reduction_pct = (1 - len(result) / total_samples) * 100 if total_samples > 0 else 0
+        
+        console.print(
+            f"[bold green]✅ Speech extracted: {result_duration:.2f}s "
+            f"(removed {reduction_pct:.1f}% of audio)[/bold green]"
+        )
+        
+        return result.astype(np.float32)
+
+    def _identify_speech_segments(
+        self,
+        chunks: List[ChunkTaggingResult],
+        total_duration: float,
+        edges_only: bool = False,
+    ) -> List[Tuple[float, float]]:
+        """
+        Identify speech segments from chunk tagging results.
+        
+        Args:
+            chunks: List of chunk results with speech_detected flags
+            total_duration: Total audio duration in seconds
+            edges_only: If True, return a single segment covering from
+                    first speech to last speech (trim edges only);
+                    if False, return all speech segments with gaps removed
+        
+        Returns:
+            List of (start_time, end_time) tuples in seconds
+        
+        Debug logs trace:
+            - Number of chunks processed
+            - Edges_only mode
+            - Identified segment boundaries
+        """
+        if not chunks:
+            return []
+        
+        sorted_chunks = sorted(chunks, key=lambda c: c["start_time"])
+        
+        if edges_only:
+            # Find first and last speech chunks
+            first_speech_start = None
+            last_speech_end = None
+            
+            for chunk in sorted_chunks:
+                if chunk.get("speech_detected", False):
+                    if first_speech_start is None:
+                        first_speech_start = chunk["start_time"]
+                    last_speech_end = chunk["end_time"]
+            
+            if first_speech_start is not None and last_speech_end is not None:
+                console.print(
+                    f"[dim]🔍 Edges-only: first speech at {first_speech_start:.3f}s, "
+                    f"last speech at {last_speech_end:.3f}s[/dim]"
+                )
+                return [(first_speech_start, last_speech_end)]
+            else:
+                return []
+        
+        # Full mode: merge consecutive speech chunks, remove all gaps
+        speech_segments = []
+        current_start = None
+        current_end = None
+        
+        for chunk in sorted_chunks:
+            if chunk.get("speech_detected", False):
+                chunk_start = chunk["start_time"]
+                chunk_end = chunk["end_time"]
+                
+                if current_start is None:
+                    current_start = chunk_start
+                    current_end = chunk_end
+                elif chunk_start <= current_end:
+                    # Overlapping or adjacent - merge
+                    current_end = max(current_end, chunk_end)
+                else:
+                    # Gap detected - save previous segment
+                    speech_segments.append((current_start, current_end))
+                    current_start = chunk_start
+                    current_end = chunk_end
+        
+        # Don't forget the last segment
+        if current_start is not None:
+            speech_segments.append((current_start, current_end))
+        
+        # Merge very close segments (within 1 chunk duration)
+        merged = self._merge_close_segments(speech_segments)
+        
+        return merged
+
+    def _merge_close_segments(
+        self,
+        segments: List[Tuple[float, float]],
+        max_gap: Optional[float] = None,
+    ) -> List[Tuple[float, float]]:
+        """
+        Merge speech segments that are very close together.
+        
+        Small gaps (e.g., brief pauses) between speech segments
+        are likely still part of the same speech event.
+        
+        Args:
+            segments: List of (start, end) time tuples
+            max_gap: Maximum gap in seconds to merge (default: chunk_duration / 2)
+        
+        Returns:
+            Merged list of (start, end) tuples
+        """
+        if not segments:
+            return []
+        
+        gap_threshold = max_gap if max_gap is not None else self.chunk_duration / 2.0
+        
+        merged = [list(segments[0])]
+        
+        for start, end in segments[1:]:
+            prev_start, prev_end = merged[-1]
+            gap = start - prev_end
+            
+            if gap <= gap_threshold:
+                # Merge: extend previous segment
+                merged[-1][1] = end
+                console.print(
+                    f"[dim]🔗 Merged close segments: gap={gap:.3f}s "
+                    f"(threshold={gap_threshold:.3f}s)[/dim]"
+                )
+            else:
+                merged.append([start, end])
+        
+        return [(s, e) for s, e in merged]
 
     def reset(self) -> None:
         """Reset the tagger instance (useful for testing or model updates)."""
