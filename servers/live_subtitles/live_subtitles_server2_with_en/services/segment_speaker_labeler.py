@@ -1088,7 +1088,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         timestamp: float,
         context: Optional[Dict] = None,
         top_k: Optional[int] = None,
-        segment_id: Optional[str] = None,  # NEW: Optional external segment ID
+        segment_id: Optional[str] = None,
     ) -> List[Dict]:
         """Label a speech segment with multiple possible speaker identities.
         
@@ -1108,42 +1108,35 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             External segment identifier. If not provided, one will be generated
             automatically using UUID. This allows callers to maintain their own
             segment tracking system.
-        
+            
         Returns
         -------
         list of dict
             List of speaker matches with confidence scores and segment_id.
-        
+            
         Notes
         -----
-        NEW: Added centroid contamination protection. Embeddings with low
-        similarity to existing speakers are no longer added to centroids.
-        Each embedding now tracked with unique segment ID.
+        FIXED: When centroid contamination protection rejects an update and creates
+        a new speaker, it now passes the original segment_id to create_new_speaker()
+        instead of letting it auto-generate a new one. This preserves the external
+        segment ID throughout the pipeline.
         """
         self.total_segments_processed += 1
-        
-        # Use provided segment_id or generate new one
         if segment_id is None:
             segment_id = self._generate_segment_id()
-        
         if top_k is None:
             top_k = self.top_k_speakers
-        
-        # Extract pure speech audio
+
         waveform, was_filtered = self._extract_speech_audio(waveform=waveform)
-        
-        # Compute embedding
         embedding = self.compute_embedding(waveform, sample_rate)
         
-        # Debug: log embedding shape
         if self.debug:
             console.print(
                 f"[dim]Embedding shape: {embedding.shape}, "
                 f"ndim: {embedding.ndim}, "
                 f"segment_id: {segment_id}[/]"
             )
-        
-        # Find top matches
+
         top_matches = self.find_top_k_matches(embedding, k=top_k)
         
         if self.debug:
@@ -1152,13 +1145,11 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 f"segment_id={segment_id}, "
                 f"got {len(top_matches)} top matches[/]"
             )
-        
-        # Get actual best score
+
         actual_best_score = 0.0
         if len(self._speakers) > 0:
             _, actual_best_score, _ = self.find_best_match(embedding)
-        
-        # Determine if new speaker needed
+
         should_create = self._should_create_new_speaker(
             actual_best_score, top_matches, context, embedding
         )
@@ -1168,20 +1159,18 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 f"[dim]Actual best score: {actual_best_score:.4f}, "
                 f"should_create_new_speaker: {should_create}[/]"
             )
-        
+
         results = []
         seen_labels = set()
         just_created_speaker = False
-        
+
         if should_create or not top_matches:
-            # Create new speaker with segment ID
             new_label = self.create_new_speaker(
                 embedding=embedding,
                 timestamp=timestamp,
-                segment_id=segment_id
+                segment_id=segment_id  # ✅ Pass the original segment_id
             )
             just_created_speaker = True
-            
             if self.debug:
                 categories = self._get_speaker_categories()
                 new_ref = self._speakers[new_label]
@@ -1194,7 +1183,6 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                     f"young: {len(categories['young'])}, "
                     f"total: {len(self._speakers)})[/yellow]"
                 )
-            
             results.append({
                 "label": new_label,
                 "confidence": 1.0,
@@ -1206,8 +1194,6 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 "segment_id": segment_id,
             })
             seen_labels.add(new_label)
-            
-            # Add alternatives
             for match in top_matches:
                 if match["label"] not in seen_labels and len(results) < top_k + 1:
                     results.append({
@@ -1221,21 +1207,16 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                         "segment_id": segment_id,
                     })
                     seen_labels.add(match["label"])
-        
         else:
-            # Match to existing speakers
             all_scores = {m["label"]: m["confidence"] for m in top_matches}
-            
             for i, match in enumerate(top_matches):
                 if match["label"] in seen_labels:
                     continue
-                
                 label = match["label"]
                 confidence = match["confidence"]
                 match_type = match["match_type"]
                 is_primary = (i == 0)
-                
-                # Apply temporal smoothing for possible matches
+
                 if is_primary and match_type == "possible_match":
                     smoothed_label = self.apply_temporal_smoothing(
                         label, timestamp, confidence
@@ -1245,8 +1226,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                         if smoothed_confidence >= self.threshold_possible:
                             label = smoothed_label
                             confidence = smoothed_confidence
-                
-                # Apply context matching for primary
+
                 if is_primary and context and "previous_speaker" in context:
                     prev_speaker = context["previous_speaker"]
                     if (prev_speaker and prev_speaker in all_scores
@@ -1262,7 +1242,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                                     f"(segment_id: {segment_id}, "
                                     f"sim={prev_sim:.3f})[/blue]"
                                 )
-                
+
                 results.append({
                     "label": label,
                     "confidence": round(confidence, 4),
@@ -1274,16 +1254,12 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                     "segment_id": segment_id,
                 })
                 seen_labels.add(label)
-                
                 if len(results) >= top_k:
                     break
-            
-            # Deduplicate results
+
             results = self._deduplicate_results(results)
             
-            # Only update reference if similarity is sufficient
             primary_result = results[0]
-            
             should_update, reason = self._should_update_reference(
                 label=primary_result["label"],
                 similarity=primary_result["confidence"],
@@ -1307,37 +1283,33 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                         f"reason={reason})[/]"
                     )
             else:
-                # If similarity too low for update, create new speaker instead
+                # ⚠️ FIXED: Pass the original segment_id when creating new speaker
+                # Previously this was create_new_speaker(embedding, timestamp) 
+                # which auto-generated a NEW segment_id, losing the caller's ID.
                 if self.debug:
                     console.print(
                         f"[red]✗ Rejected update to {primary_result['label']}: "
                         f"segment_id: {segment_id}, "
                         f"{reason}. Creating new speaker.[/]"
                     )
-                
-                # Create new speaker with the same segment ID
                 new_label = self.create_new_speaker(
                     embedding=embedding,
                     timestamp=timestamp,
-                    segment_id=segment_id
+                    segment_id=segment_id  # ✅ FIX: Preserve the original segment_id
                 )
                 just_created_speaker = True
-                
-                # Update primary result to new speaker
                 primary_result["label"] = new_label
                 primary_result["confidence"] = 1.0
                 primary_result["match_type"] = "new_speaker"
                 primary_result["is_new_speaker"] = True
                 primary_result["segment_count"] = 1
-                primary_result["segment_id"] = segment_id
-                
+                primary_result["segment_id"] = segment_id  # ✅ Keep original segment_id in result
                 if self.debug:
                     console.print(
                         f"[yellow]⚠️  Created new speaker instead: {new_label} "
                         f"(segment_id: {segment_id})[/]"
                     )
-        
-        # Run maintenance
+
         self.run_smart_maintenance(timestamp, just_created_speaker=just_created_speaker)
         
         if self.debug:
@@ -1354,7 +1326,6 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 f"speakers: {len(self._speakers)}, "
                 f"rejected: {self._rejected_updates})[/]"
             )
-        
         return results
 
     def label_segment(

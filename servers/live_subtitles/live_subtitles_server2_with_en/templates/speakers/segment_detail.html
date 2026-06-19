@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes"
+    />
+    <title>{{ title }}</title>
+    <style>
+      :root {
+        --color-bg: #ffffff;
+        --color-surface-primary: #ffffff;
+        --color-surface-secondary: #f5f6f8;
+        --color-text-primary: #0f1825;
+        --color-text-secondary: #5a6270;
+        --color-text-tertiary: #8b919d;
+        --color-border-tertiary: #e3e6ec;
+        --color-accent: #3b82f6;
+        --color-accent-hover: #2563eb;
+        --color-success: #1d9e75;
+        --border-radius-md: 10px;
+        --border-radius-lg: 16px;
+        --font-sans:
+          system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+          sans-serif;
+        --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.02);
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background: var(--color-bg);
+        font-family: var(--font-sans);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        padding: 1.5rem;
+        color: var(--color-text-primary);
+      }
+      .page {
+        max-width: 560px;
+        width: 100%;
+        background: var(--color-bg);
+      }
+      .card {
+        background: var(--color-surface-primary);
+        border: 0.5px solid var(--color-border-tertiary);
+        border-radius: var(--border-radius-lg);
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: var(--shadow-sm);
+      }
+      .card-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 1.25rem;
+      }
+      .segment-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: #eeedfe;
+        color: #3c3489;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .segment-id-display {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        word-break: break-all;
+      }
+      .segment-meta {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+      .info-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-bottom: 1rem;
+      }
+      .info-item {
+        background: var(--color-surface-secondary);
+        border-radius: var(--border-radius-md);
+        padding: 10px 14px;
+      }
+      .info-label {
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--color-text-tertiary);
+        margin-bottom: 4px;
+      }
+      .info-value {
+        font-size: 16px;
+        font-weight: 500;
+        color: var(--color-text-primary);
+      }
+      .speaker-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--color-accent);
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .speaker-link:hover {
+        color: var(--color-accent-hover);
+        text-decoration: underline;
+      }
+      .btn-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 18px;
+        border-radius: 40px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+        text-decoration: none;
+        transition: 0.2s;
+        border: 0.5px solid var(--color-border-tertiary);
+        background: white;
+        color: var(--color-text-primary);
+      }
+      .btn:hover {
+        background: #f0f2f5;
+      }
+      .btn-primary {
+        background: var(--color-accent);
+        color: white;
+        border-color: var(--color-accent);
+      }
+      .btn-primary:hover {
+        background: var(--color-accent-hover);
+      }
+      .btn-play {
+        background: var(--color-success);
+        color: white;
+        border-color: var(--color-success);
+      }
+      .btn-play:hover {
+        background: #168a63;
+      }
+      .btn-download {
+        background: white;
+        color: var(--color-accent);
+        border-color: var(--color-accent);
+      }
+      .btn-download:hover {
+        background: #eff6ff;
+      }
+      .btn-disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+      .not-found {
+        text-align: center;
+        padding: 2rem;
+      }
+      .not-found-icon {
+        font-size: 48px;
+        margin-bottom: 1rem;
+      }
+      .back-link {
+        display: inline-block;
+        margin-top: 1rem;
+        color: var(--color-accent);
+        text-decoration: none;
+        font-size: 13px;
+      }
+      .back-link:hover {
+        text-decoration: underline;
+      }
+      .audio-section {
+        margin-top: 1rem;
+      }
+      .audio-player {
+        width: 100%;
+        margin-top: 0.5rem;
+        border-radius: 8px;
+      }
+      .timestamp-badge {
+        font-size: 11px;
+        background: var(--color-surface-secondary);
+        padding: 2px 8px;
+        border-radius: 99px;
+        color: var(--color-text-secondary);
+      }
+      @media (max-width: 500px) {
+        .info-grid {
+          grid-template-columns: 1fr;
+        }
+        .btn-row {
+          flex-direction: column;
+        }
+        body {
+          padding: 0.8rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      {% if found %}
+      <!-- Segment Found -->
+      <div class="card">
+        <div class="card-header">
+          <div class="segment-icon">S</div>
+          <div>
+            <div class="segment-id-display">{{ segment_id }}</div>
+            <div class="segment-meta">
+              Speaker:
+              <a
+                href="/speakers/metrics?label={{ speaker_label }}"
+                class="speaker-link"
+                >{{ speaker_label }}</a
+              >
+              <span class="timestamp-badge" style="margin-left: 8px"
+                >embedding #{{ embedding_index + 1 }}</span
+              >
+            </div>
+          </div>
+        </div>
+
+        <!-- Key Metrics -->
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">Timestamp</div>
+            <div class="info-value">
+              {{ "%.2f"|format(segment_timestamp) }}s
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Duration</div>
+            <div class="info-value">
+              {% if segment_duration > 0 %} {% if segment_duration < 1.0 %} {{
+              "%.0f"|format(segment_duration * 1000) }}ms {% else %} {{
+              "%.2f"|format(segment_duration) }}s {% endif %} {% else %} — {%
+              endif %}
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Embedding Dim</div>
+            <div class="info-value">{{ embedding_dim }}</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Speaker Segments</div>
+            <div class="info-value">{{ speaker_segment_count }}</div>
+          </div>
+        </div>
+
+        <!-- Speaker Context -->
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">Speaker First Seen</div>
+            <div class="info-value">
+              {{ "%.1f"|format(speaker_first_seen) }}s
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Speaker Last Seen</div>
+            <div class="info-value">
+              {{ "%.1f"|format(speaker_last_seen) }}s
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Active Duration</div>
+            <div class="info-value">
+              {{ "%.1f"|format(speaker_active_duration) }}s
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Centroid Quality</div>
+            <div class="info-value">{{ "%.2f"|format(centroid_quality) }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Audio Section -->
+      <div class="card audio-section">
+        <div style="font-size: 14px; font-weight: 500; margin-bottom: 0.5rem">
+          🔊 Audio
+        </div>
+
+        {% if has_audio %}
+        <p
+          style="
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            margin-bottom: 0.75rem;
+          "
+        >
+          Source: {{ audio_source }} · {{ "%.2f"|format(audio_duration) }}s · {{
+          audio_sample_rate }}Hz
+        </p>
+
+        <!-- Audio player -->
+        <audio controls class="audio-player" preload="auto">
+          <source
+            src="/speakers/segment/{{ segment_id }}/audio"
+            type="audio/wav"
+          />
+          Your browser does not support the audio element.
+        </audio>
+
+        <div class="btn-row" style="margin-top: 1rem">
+          <button
+            class="btn btn-play"
+            onclick="document.querySelector('.audio-player').play()"
+          >
+            ▶ Play
+          </button>
+          <a
+            href="/speakers/segment/{{ segment_id }}/audio?download=true"
+            class="btn btn-download"
+            download="{{ segment_id }}.wav"
+          >
+            ⬇ Download WAV
+          </a>
+        </div>
+        {% else %}
+        <p
+          style="
+            font-size: 13px;
+            color: var(--color-text-secondary);
+            margin-bottom: 0.75rem;
+          "
+        >
+          ⚠️ Audio data not available for this segment.
+        </p>
+        <p style="font-size: 12px; color: var(--color-text-tertiary)">
+          Audio may have been evicted from the context buffer. Only recent
+          segments retain their audio data for playback.
+        </p>
+        {% endif %}
+      </div>
+
+      <!-- Navigation -->
+      <div style="text-align: center; margin-top: 1rem">
+        <a href="/speakers/metrics" class="back-link"
+          >← Back to Speaker Metrics</a
+        >
+        <span style="color: var(--color-border-tertiary); margin: 0 8px"
+          >|</span
+        >
+        <a href="/speakers/dashboard" class="back-link">Speaker Dashboard</a>
+      </div>
+
+      {% else %}
+      <!-- Segment Not Found -->
+      <div class="card not-found">
+        <div class="not-found-icon">🔍</div>
+        <h2 style="font-size: 18px; margin-bottom: 0.5rem">
+          Segment Not Found
+        </h2>
+        <p style="font-size: 14px; color: var(--color-text-secondary)">
+          Segment
+          <code
+            style="
+              background: var(--color-surface-secondary);
+              padding: 2px 6px;
+              border-radius: 4px;
+            "
+            >{{ segment_id }}</code
+          >
+          was not found in any speaker's data.
+        </p>
+        <p
+          style="
+            font-size: 12px;
+            color: var(--color-text-tertiary);
+            margin-top: 0.5rem;
+          "
+        >
+          This could mean:
+        </p>
+        <ul
+          style="
+            font-size: 12px;
+            color: var(--color-text-tertiary);
+            text-align: left;
+            margin: 0.5rem auto;
+            max-width: 300px;
+          "
+        >
+          <li>The segment ID is incorrect</li>
+          <li>The segment was merged/cleaned up</li>
+          <li>The speaker labeler was reset</li>
+        </ul>
+        <a href="/speakers/metrics" class="back-link"
+          >← Back to Speaker Metrics</a
+        >
+      </div>
+      {% endif %}
+    </div>
+
+    <script>
+      // Log page load
+      console.log("[SegmentDetail] Page loaded for: {{ segment_id }}");
+      console.log("[SegmentDetail] Found: {{ found }}");
+      {% if found %}
+      console.log("[SegmentDetail] Speaker: {{ speaker_label }}, Duration: {{ segment_duration }}s");
+      {% endif %}
+
+      // Handle audio player errors gracefully
+      document.addEventListener('DOMContentLoaded', function() {
+        const audioEl = document.querySelector('.audio-player');
+        if (audioEl) {
+          audioEl.addEventListener('error', function(e) {
+            console.warn("[SegmentDetail] Audio playback error:", e);
+            const audioSection = document.querySelector('.audio-section');
+            if (audioSection) {
+              const errorMsg = document.createElement('p');
+              errorMsg.style.cssText = 'font-size: 12px; color: #E24B4A; margin-top: 8px;';
+              errorMsg.textContent = '⚠️ Audio playback failed. The file may be corrupted or unavailable.';
+              audioSection.appendChild(errorMsg);
+            }
+          });
+          audioEl.addEventListener('loadeddata', function() {
+            console.log("[SegmentDetail] Audio loaded successfully");
+          });
+        }
+      });
+    </script>
+  </body>
+</html>

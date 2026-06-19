@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 from pathlib import Path
 
 import numpy as np
+import torch
 from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -19,6 +20,7 @@ from core.state import (
     get_context_buffer,
     save_speaker_state,
     get_speaker_state_path,
+    get_last_n_segments_dir,
 )
 from core.processing import get_speaker_diarization
 from config import TEMPLATES_DIR
@@ -820,6 +822,260 @@ async def export_speaker_data(
     
     console.print(f"[success]Exported data: {len(export_data['speakers'])} speakers[/success]")
     return JSONResponse(content=export_data)
+
+
+@router.get("/segment/{segment_id}/audio")
+async def get_segment_audio(segment_id: str, request: Request):
+    """
+    Get the audio data for a specific segment (for playback/download).
+    
+    Returns the raw WAV audio bytes with appropriate content-type header.
+    
+    Parameters
+    ----------
+    segment_id : str
+        The unique segment identifier
+    """
+    from fastapi.responses import Response
+    
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    
+    console.print(f"[info]Fetching audio for segment: {segment_id}[/]")
+    
+    # Check context buffer for audio data
+    # context_buffer.segments is a list of (segment_audio, metadata) tuples
+    # where metadata is a dict that may contain 'segment_id'
+    try:
+        context_buffer = get_context_buffer()
+        if context_buffer and hasattr(context_buffer, 'segments'):
+            for segment_audio, metadata in context_buffer.segments:
+                # The metadata dict stores the segment_id from label_segments
+                meta_segment_id = metadata.get('segment_id', '')
+                if meta_segment_id == segment_id:
+                    import io
+                    import wave
+                    
+                    # Convert audio to numpy array
+                    if isinstance(segment_audio, torch.Tensor):
+                        audio_np = segment_audio.detach().cpu().numpy()
+                    elif isinstance(segment_audio, np.ndarray):
+                        audio_np = segment_audio
+                    else:
+                        audio_np = np.array(segment_audio, dtype=np.float32)
+                    
+                    # Ensure 1D array
+                    if audio_np.ndim > 1:
+                        audio_np = audio_np.flatten()
+                    
+                    # Convert float [-1,1] to int16 PCM
+                    audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+                    
+                    buf = io.BytesIO()
+                    with wave.open(buf, 'wb') as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)  # 16-bit = 2 bytes
+                        wf.setframerate(16000)
+                        wf.writeframes(audio_int16.tobytes())
+                    
+                    buf.seek(0)
+                    
+                    duration_sec = len(audio_int16) / 16000.0
+                    console.print(
+                        f"[success]Audio found for {segment_id}: "
+                        f"{len(audio_int16)} samples, {duration_sec:.2f}s[/]"
+                    )
+                    
+                    return Response(
+                        content=buf.read(),
+                        media_type="audio/wav",
+                        headers={
+                            "Content-Disposition": f"inline; filename={segment_id}.wav",
+                            "X-Segment-ID": segment_id,
+                            "X-Audio-Source": "context_buffer",
+                            "X-Audio-Duration": str(round(duration_sec, 3)),
+                            "X-Audio-Samples": str(len(audio_int16)),
+                        }
+                    )
+    except Exception as e:
+        console.print(f"[warning]Error searching context buffer for audio: {e}[/]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/]")
+    
+    # Also check LAST_N_SEGMENTS_DIR for saved audio files
+    try:
+        last_n_dir = get_last_n_segments_dir()
+        if last_n_dir and last_n_dir.exists():
+            # Look for files matching the segment_id pattern
+            audio_path = last_n_dir / f"{segment_id}.wav"
+            if audio_path.exists():
+                console.print(f"[success]Audio found on disk: {audio_path}[/]")
+                return Response(
+                    content=audio_path.read_bytes(),
+                    media_type="audio/wav",
+                    headers={
+                        "Content-Disposition": f"inline; filename={segment_id}.wav",
+                        "X-Segment-ID": segment_id,
+                        "X-Audio-Source": "disk",
+                    }
+                )
+            
+            # Try searching for files containing the segment_id
+            for audio_file in last_n_dir.glob("*.wav"):
+                if segment_id in audio_file.name:
+                    console.print(f"[success]Audio found on disk (partial match): {audio_file}[/]")
+                    return Response(
+                        content=audio_file.read_bytes(),
+                        media_type="audio/wav",
+                        headers={
+                            "Content-Disposition": f"inline; filename={audio_file.name}",
+                            "X-Segment-ID": segment_id,
+                            "X-Audio-Source": "disk_partial_match",
+                        }
+                    )
+    except Exception as e:
+        console.print(f"[warning]Error checking disk for audio: {e}[/]")
+    
+    console.print(f"[error]No audio found for segment: {segment_id}[/]")
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            f"No audio data found for segment '{segment_id}'. "
+            f"Audio may have been evicted from the context buffer or not saved to disk."
+        )
+    )
+
+
+@router.get("/segment/{segment_id}", response_class=HTMLResponse)
+async def get_segment_detail_page(request: Request, segment_id: str):
+    """
+    Serve a detailed page for a specific segment with play/download audio buttons.
+    
+    Shows:
+    - Segment ID and speaker label
+    - Timestamp and duration
+    - Embedding index and dimension
+    - Speaker metadata (first seen, last seen, active duration)
+    - Audio playback button (if audio available)
+    - Audio download button (if audio available)
+    
+    Parameters
+    ----------
+    segment_id : str
+        The unique segment identifier (e.g., 'segment_a3f2b1c4')
+    """
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(
+            status_code=400,
+            detail="Speaker labeler not initialized. Process some audio segments first."
+        )
+    
+    console.print(f"[info]Rendering segment detail page for: {segment_id}[/]")
+    
+    # Get segment detail from the labeler
+    if not hasattr(labeler, 'get_segment_detail'):
+        raise HTTPException(
+            status_code=500,
+            detail="Segment detail not available. Update speaker_metrics_mixin."
+        )
+    
+    segment_info = labeler.get_segment_detail(segment_id)
+    if segment_info is None:
+        console.print(f"[warning]Segment not found: {segment_id}[/]")
+        try:
+            html_content = render_template("segment_detail.html", {
+                "title": f"Segment: {segment_id}",
+                "segment_id": segment_id,
+                "found": False,
+                "timestamp": datetime.now().isoformat(),
+            })
+            return HTMLResponse(content=html_content, status_code=404)
+        except Exception:
+            return HTMLResponse(
+                content=_fallback_html(
+                    f"Segment: {segment_id}",
+                    f"Segment '{segment_id}' not found in any speaker's data.",
+                    [("📊 Metrics", "/speakers/metrics"), ("🏠 Dashboard", "/speakers/dashboard")],
+                ),
+                status_code=404,
+            )
+    
+    # Check if audio exists in context buffer
+    has_audio = False
+    audio_source = ""
+    audio_duration = 0.0
+    audio_sample_rate = 16000
+    
+    try:
+        context_buffer = get_context_buffer()
+        if context_buffer and hasattr(context_buffer, 'segments'):
+            for segment_audio, metadata in context_buffer.segments:
+                if metadata.get('segment_id') == segment_id:
+                    has_audio = True
+                    audio_source = "context_buffer"
+                    if isinstance(segment_audio, torch.Tensor):
+                        audio_duration = segment_audio.shape[-1] / 16000.0 if segment_audio.dim() > 0 else 0.0
+                    elif isinstance(segment_audio, np.ndarray):
+                        audio_duration = len(segment_audio) / 16000.0
+                    break
+    except Exception as e:
+        console.print(f"[dim]Could not check audio availability: {e}[/]")
+    
+    # Also check disk
+    if not has_audio:
+        try:
+            last_n_dir = get_last_n_segments_dir()
+            if last_n_dir and last_n_dir.exists():
+                audio_path = last_n_dir / f"{segment_id}.wav"
+                if audio_path.exists():
+                    has_audio = True
+                    audio_source = "disk"
+                    audio_duration = audio_path.stat().st_size / (16000 * 2)  # rough estimate
+        except Exception:
+            pass
+    
+    console.print(
+        f"[info]Segment detail: speaker={segment_info['speaker_label']}, "
+        f"timestamp={segment_info['timestamp']:.2f}s, "
+        f"duration={segment_info['segment_duration']:.3f}s, "
+        f"audio={'yes' if has_audio else 'no'} ({audio_source})[/]"
+    )
+    
+    try:
+        html_content = render_template("segment_detail.html", {
+            "title": f"Segment: {segment_id}",
+            "segment_id": segment_id,
+            "found": True,
+            "speaker_label": segment_info["speaker_label"],
+            "timestamp": datetime.now().isoformat(),
+            "segment_timestamp": segment_info["timestamp"],
+            "segment_duration": segment_info["segment_duration"],
+            "embedding_index": segment_info["embedding_index"],
+            "embedding_dim": segment_info["embedding_dim"],
+            "speaker_segment_count": segment_info["speaker_segment_count"],
+            "speaker_first_seen": segment_info["speaker_first_seen"],
+            "speaker_last_seen": segment_info["speaker_last_seen"],
+            "speaker_active_duration": segment_info["speaker_active_duration"],
+            "centroid_quality": segment_info["centroid_quality"],
+            "has_audio": has_audio,
+            "audio_source": audio_source,
+            "audio_sample_rate": audio_sample_rate,
+            "audio_duration": audio_duration,
+        })
+        console.print(f"[success]Segment detail page rendered for {segment_id}[/]")
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        console.print(f"[error]Failed to render segment detail: {e}[/]")
+        return HTMLResponse(
+            content=_fallback_html(
+                f"Segment: {segment_id}",
+                str(e),
+                [("📊 Metrics", "/speakers/metrics"), ("🏠 Dashboard", "/speakers/dashboard")],
+            ),
+            status_code=200,
+        )
 
 
 # ============================================================

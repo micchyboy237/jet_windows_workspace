@@ -24,13 +24,11 @@
           sans-serif;
         --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.02);
       }
-
       * {
         margin: 0;
         padding: 0;
         box-sizing: border-box;
       }
-
       body {
         background: var(--color-bg);
         font-family: var(--font-sans);
@@ -42,14 +40,12 @@
         padding: 1.5rem;
         color: var(--color-text-primary);
       }
-
       .dashboard {
         max-width: 720px;
         width: 100%;
         background: var(--color-bg);
         padding: 1.25rem 0.5rem;
       }
-
       /* ── reused component styles ── */
       .section-label {
         font-size: 11px;
@@ -59,13 +55,11 @@
         color: var(--color-text-tertiary);
         margin: 0 0 10px;
       }
-
       .metric-card {
         background: var(--color-surface-secondary);
         border-radius: var(--border-radius-md);
         padding: 12px 16px;
       }
-
       .metric-val {
         font-size: 22px;
         font-weight: 500;
@@ -73,12 +67,10 @@
         margin: 2px 0 0;
         line-height: 1.2;
       }
-
       .metric-lbl {
         font-size: 12px;
         color: var(--color-text-secondary);
       }
-
       .speaker-card {
         background: var(--color-surface-primary);
         border: 0.5px solid var(--color-border-tertiary);
@@ -87,7 +79,6 @@
         margin-bottom: 10px;
         box-shadow: var(--shadow-sm);
       }
-
       .badge {
         display: inline-block;
         font-size: 11px;
@@ -96,22 +87,18 @@
         border-radius: 99px;
         line-height: 1.4;
       }
-
       .badge-healthy {
         background: #eaf3de;
         color: #3b6d11;
       }
-
       .badge-warning {
         background: #faeeda;
         color: #854f0b;
       }
-
       .badge-unhealthy {
         background: #fcebeb;
         color: #a32d2d;
       }
-
       .dist-bar-bg {
         background: var(--color-surface-secondary);
         border-radius: 4px;
@@ -119,26 +106,35 @@
         overflow: hidden;
         width: 100%;
       }
-
       .dist-bar-fill {
         height: 100%;
         border-radius: 4px;
         width: 0%;
       }
-
       .seg-row {
         display: flex;
         align-items: center;
         gap: 8px;
         margin-bottom: 6px;
       }
-
       .seg-id {
         font-size: 12px;
-        color: var(--color-text-secondary);
-        min-width: 80px;
+        color: #3b82f6;
+        min-width: 100px;
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        transition: color 0.15s;
       }
-
+      .seg-id:hover {
+        color: #1d4ed8;
+      }
+      .seg-duration {
+        font-size: 11px;
+        color: var(--color-text-tertiary);
+        min-width: 48px;
+        text-align: right;
+      }
       .seg-val {
         font-size: 12px;
         color: var(--color-text-primary);
@@ -146,7 +142,6 @@
         text-align: right;
         font-weight: 500;
       }
-
       .pair-row {
         display: flex;
         align-items: center;
@@ -155,31 +150,26 @@
         border-bottom: 0.5px solid var(--color-border-tertiary);
         font-size: 13px;
       }
-
       .pair-row:last-child {
         border-bottom: none;
       }
-
       .grid-4 {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
         gap: 10px;
         margin-bottom: 1.5rem;
       }
-
       .grid-2 {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 12px;
       }
-
       .speaker-header {
         display: flex;
         align-items: center;
         gap: 8px;
         margin-bottom: 10px;
       }
-
       .avatar {
         width: 32px;
         height: 32px;
@@ -190,25 +180,21 @@
         font-size: 11px;
         font-weight: 500;
       }
-
       .speaker-name {
         font-size: 14px;
         font-weight: 500;
         color: var(--color-text-primary);
       }
-
       .speaker-meta {
         font-size: 11px;
         color: var(--color-text-secondary);
       }
-
       .flex-between {
         display: flex;
         align-items: center;
         justify-content: space-between;
         margin-bottom: 1.5rem;
       }
-
       button {
         background: var(--color-surface-secondary);
         border: 0.5px solid var(--color-border-tertiary);
@@ -221,11 +207,9 @@
         background: white;
         transition: 0.2s;
       }
-
       button:hover {
         background: #f0f2f5;
       }
-
       .sr-only {
         position: absolute;
         width: 1px;
@@ -236,7 +220,6 @@
         clip: rect(0, 0, 0, 0);
         border: 0;
       }
-
       @media (max-width: 500px) {
         .grid-4 {
           grid-template-columns: repeat(2, 1fr);
@@ -254,7 +237,6 @@
     <div class="dashboard" id="dashboard-root">
       <!-- JS will inject everything here -->
     </div>
-
     <script>
       (function () {
         // ───────────────────────────────────
@@ -263,6 +245,9 @@
         const API_BASE = "/speakers/metrics";
         const DATA_URL = `${API_BASE}/data`;
         const HEALTH_URL = `${API_BASE}/health`;
+        const SEGMENT_BASE = "/speakers/segment";
+
+        console.log("[SpeakerMetrics] Initialized - auto-refresh disabled");
 
         // ───────────────────────────────────
         // Fetch real data from server
@@ -288,6 +273,21 @@
         }
 
         // ───────────────────────────────────
+        // Open segment detail in new tab
+        // ───────────────────────────────────
+        function openSegmentDetail(segmentId) {
+          if (!segmentId || segmentId === "unknown") {
+            console.warn(
+              "[SpeakerMetrics] Cannot open detail for unknown segment",
+            );
+            return;
+          }
+          const url = `${SEGMENT_BASE}/${encodeURIComponent(segmentId)}`;
+          console.log(`[SpeakerMetrics] Opening segment detail: ${url}`);
+          window.open(url, "_blank");
+        }
+
+        // ───────────────────────────────────
         // Transform API data to frontend format
         // ───────────────────────────────────
         function transformSpeakerData(apiData) {
@@ -298,10 +298,8 @@
               stats: null,
               overallHealth: "unhealthy",
             };
-
           const intra = apiData.intra_speaker || {};
           const inter = apiData.inter_speaker || {};
-
           // Map colors for speakers
           const colorPalette = [
             { color: "#3C3489", bg: "#EEEDFE" },
@@ -310,7 +308,6 @@
             { color: "#1B4F72", bg: "#E8F4FD" },
             { color: "#7B241C", bg: "#FDEDEC" },
           ];
-
           const speakers = (intra.speakers || []).map((spk, idx) => {
             const palette = colorPalette[idx % colorPalette.length];
             return {
@@ -327,25 +324,22 @@
               segments: (spk.segments || []).map((seg) => ({
                 id: seg.id || "unknown",
                 d: seg.d || 0,
+                duration: seg.duration || 0,
               })),
             };
           });
-
           const pairs = (inter.pairwise || []).map((p) => ({
             from: p.from,
             to: p.to,
             distance: p.distance || 0,
           }));
-
           const stats = {
             mean: inter.meanSeparation || 0,
             stdDev: inter.stdSeparation || 0,
             min: inter.minSeparation || 0,
             max: inter.maxSeparation || 0,
           };
-
           const overallHealth = inter.health || "unhealthy";
-
           return { speakers, pairs, stats, overallHealth };
         }
 
@@ -356,6 +350,18 @@
           if (d <= 0.3) return "#1D9E75";
           if (d <= 0.5) return "#EF9F27";
           return "#E24B4A";
+        }
+
+        // ───────────────────────────────────
+        // Format duration in seconds to readable string
+        // ───────────────────────────────────
+        function formatDuration(seconds) {
+          if (!seconds || seconds <= 0) return "—";
+          if (seconds < 1.0) return (seconds * 1000).toFixed(0) + "ms";
+          if (seconds < 60) return seconds.toFixed(1) + "s";
+          const mins = Math.floor(seconds / 60);
+          const secs = (seconds % 60).toFixed(0);
+          return `${mins}m ${secs}s`;
         }
 
         // ───────────────────────────────────
@@ -370,7 +376,6 @@
                 : "badge-unhealthy";
           const meanFixed = stats.mean.toFixed(2);
           const maxDistInData = Math.max(...pairs.map((p) => p.distance), 1.0);
-
           return `
         <div class="speaker-card" style="margin-bottom: 1.5rem;">
           <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 1rem;">
@@ -418,7 +423,6 @@
               : speaker.health === "warning"
                 ? "badge-warning"
                 : "badge-unhealthy";
-
           const metricsHtml = `
         <div class="grid-4" style="margin-bottom: 12px;">
           <div class="metric-card"><div class="metric-lbl">Mean dist</div><div class="metric-val" style="font-size: 17px;">${speaker.meanDist.toFixed(2)}</div></div>
@@ -427,14 +431,15 @@
           <div class="metric-card"><div class="metric-lbl">Max</div><div class="metric-val" style="font-size: 17px;">${speaker.maxDist.toFixed(2)}</div></div>
         </div>
       `;
-
           const maxSegVal = Math.max(...speaker.segments.map((s) => s.d), 0.8);
           const segmentsHtml = speaker.segments
             .map((s) => {
               const widthPercent = (s.d / maxSegVal) * 100;
+              const durationStr = formatDuration(s.duration);
               return `
             <div class="seg-row">
-              <span class="seg-id">${s.id}</span>
+              <span class="seg-id" onclick="event.stopPropagation(); window._speakerMetrics.openSegmentDetail('${s.id}')" title="Open segment details in new tab">${s.id}</span>
+              <span class="seg-duration">${durationStr}</span>
               <div class="dist-bar-bg" style="flex:1">
                 <div class="dist-bar-fill" style="width:${widthPercent.toFixed(1)}%; background:${barColor(s.d)};"></div>
               </div>
@@ -443,7 +448,6 @@
           `;
             })
             .join("");
-
           return `
         <div class="speaker-card" style="${isFullWidth ? "grid-column: 1 / -1;" : ""}">
           <div class="speaker-header">
@@ -468,10 +472,8 @@
           if (speakers.length === 0) {
             return '<div style="padding: 2rem; text-align: center; color: var(--color-text-secondary);">No speakers available yet. Process some audio segments first.</div>';
           }
-
           const firstTwo = speakers.slice(0, 2);
           const rest = speakers.slice(2);
-
           let html = '<div class="grid-2">';
           firstTwo.forEach((s) => {
             html += renderSpeakerCard(s, false);
@@ -488,7 +490,6 @@
         // ───────────────────────────────────
         async function renderDashboard() {
           const root = document.getElementById("dashboard-root");
-
           // Show loading state
           root.innerHTML = `
         <div style="padding: 3rem; text-align: center; color: var(--color-text-secondary);">
@@ -496,11 +497,9 @@
           <div style="font-size: 13px;">Fetching data from server</div>
         </div>
       `;
-
           const apiData = await fetchMetricsData();
           const { speakers, pairs, stats, overallHealth } =
             transformSpeakerData(apiData);
-
           if (!apiData) {
             root.innerHTML = `
           <div style="padding: 3rem; text-align: center;">
@@ -515,7 +514,6 @@
         `;
             return;
           }
-
           const html = `
         <h2 class="sr-only">Speaker diarization metrics dashboard showing intra-speaker variance and inter-speaker separation results</h2>
         <div style="padding: 1rem 0;">
@@ -541,27 +539,28 @@
           ${renderSpeakersGrid(speakers)}
         </div>
       `;
-
           root.innerHTML = html;
-
           // Attach refresh handler
           document
             .getElementById("refreshBtn")
             ?.addEventListener("click", renderDashboard);
-
           console.log("[SpeakerMetrics] Dashboard rendered successfully");
         }
 
         // ───────────────────────────────────
-        // Initial paint
+        // Expose openSegmentDetail globally for onclick handlers
+        // ───────────────────────────────────
+        window._speakerMetrics = {
+          openSegmentDetail: openSegmentDetail,
+        };
+
+        // ───────────────────────────────────
+        // Initial paint (NO auto-refresh - manual only)
         // ───────────────────────────────────
         renderDashboard();
-
-        // Auto-refresh every 30 seconds
-        setInterval(() => {
-          console.log("[SpeakerMetrics] Auto-refreshing...");
-          renderDashboard();
-        }, 30000);
+        console.log(
+          "[SpeakerMetrics] Dashboard loaded - auto-refresh disabled",
+        );
       })();
     </script>
   </body>
