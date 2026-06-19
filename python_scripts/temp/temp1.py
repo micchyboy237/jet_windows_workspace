@@ -1,5 +1,6 @@
 # python_scripts\temp\temp10.py
 import numpy as np
+from typing import Literal
 from pyannote.audio import Model, Inference
 from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
@@ -292,20 +293,26 @@ class SpeakerAutoLabeler:
         return timeline
 
 
-def main(audio_path: str):
+def main(
+    audio_path: str,
+    duration: float = 3.0,
+    step: float = 1.0,
+    min_segment_duration: float = 1.0,
+    method: Literal["agglomerative", "spectral"] = "agglomerative",
+):
     """Main execution flow - FULLY AUTOMATIC WITH SMART MERGING"""
     logger.info("=" * 60)
     logger.info("AUTO SPEAKER LABELING WITH INTELLIGENT MERGING")
     logger.info("=" * 60)
     
     # Initialize labeler
-    labeler = SpeakerAutoLabeler(duration=3.0, step=1.0)
+    labeler = SpeakerAutoLabeler(duration=duration, step=step)
     
     # Extract embeddings
     embeddings, timestamps = labeler.extract_embeddings(audio_path)
     
     # Auto-detect AND auto-merge speakers
-    labels, n_speakers = labeler.cluster_speakers(embeddings, method='agglomerative')
+    labels, n_speakers = labeler.cluster_speakers(embeddings, method=method)
     
     # Compute centroids
     centroids, speaker_stats = labeler.compute_speaker_centroids(embeddings, labels)
@@ -314,7 +321,7 @@ def main(audio_path: str):
     refined_labels, confidences = labeler.assign_speaker_labels(embeddings, centroids, threshold=0.60)
     
     # Generate timeline
-    timeline = labeler.generate_timeline(timestamps, refined_labels, min_segment_duration=1.0)
+    timeline = labeler.generate_timeline(timestamps, refined_labels, min_segment_duration=min_segment_duration)
     
     # Display Results
     print("\n" + "="*60)
@@ -405,6 +412,63 @@ def main(audio_path: str):
 
 
 if __name__ == "__main__":
-    audio_path = r"C:\Users\druiv\.cache\files\audio\recording_1_speaker.wav"
+    import argparse
+    
+    DEFAULT_AUDIO = r"C:\Users\druiv\.cache\files\audio\recording_1_speaker.wav"
 
-    results = main(audio_path)
+    parser = argparse.ArgumentParser(
+        description="Automatic speaker labeling with pyannote embeddings",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    
+    # Audio path argument
+    parser.add_argument(
+        "audio_path",
+        type=str,
+        nargs="?",
+        default=DEFAULT_AUDIO,
+        help="Path to input audio file"
+    )
+    
+    # Duration argument with shorthand
+    parser.add_argument(
+        "-d", "--duration",
+        type=float,
+        default=3.0,
+        help="Window duration in seconds for embedding extraction"
+    )
+    
+    # Step argument with shorthand
+    parser.add_argument(
+        "-s", "--step",
+        type=float,
+        default=1.0,
+        help="Window step in seconds for sliding window"
+    )
+    
+    # Min segment duration with shorthand
+    parser.add_argument(
+        "-m", "--min-segment-duration",
+        type=float,
+        default=1.0,
+        help="Minimum duration in seconds for a speaker segment to be included"
+    )
+    
+    # Clustering method with shorthand
+    parser.add_argument(
+        "-c", "--clustering-method",
+        type=str,
+        choices=["agglomerative", "spectral"],
+        default="agglomerative",
+        help="Clustering method to use for speaker grouping"
+    )
+
+    args = parser.parse_args()
+
+    results = main(
+        audio_path=args.audio_path,
+        duration=args.duration,
+        step=args.step,
+        min_segment_duration=args.min_segment_duration,
+        method=args.clustering_method
+    )
