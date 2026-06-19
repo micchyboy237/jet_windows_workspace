@@ -166,9 +166,14 @@ class SpeakerAutoLabeler:
         
         return merged_labels, merge_map
     
-    def cluster_speakers(self, embeddings, method='agglomerative'):
+    def cluster_speakers(self, embeddings, method='agglomerative', merge_threshold=0.40):
         """
         Cluster embeddings into speaker groups with auto-detection and auto-merging
+        
+        Args:
+            embeddings: Normalized embedding vectors
+            method: Clustering method ('agglomerative' or 'spectral')
+            merge_threshold: Similarity threshold for merging clusters (lower = more aggressive merging)
         
         Returns:
             labels: Array of cluster labels
@@ -194,16 +199,21 @@ class SpeakerAutoLabeler:
             clustering = AgglomerativeClustering(n_clusters=initial_n)
             labels = clustering.fit_predict(embeddings)
         
-        # Step 3: Merge similar clusters
-        merged_labels, merge_map = self.merge_similar_clusters(embeddings, labels, similarity_threshold=0.40)
+        # Step 3: Merge similar clusters with configurable threshold
+        merged_labels, merge_map = self.merge_similar_clusters(
+            embeddings, labels, similarity_threshold=merge_threshold
+        )
         n_speakers = len(set(merged_labels)) - (1 if -1 in merged_labels else 0)
         
-        logger.info(f"After merging: {n_speakers} speakers")
+        logger.info(f"After merging (threshold={merge_threshold}): {n_speakers} speakers")
         
         # Step 4: If we still have too many, try more aggressive merging
         if n_speakers > 4:  # Assume reasonable max for typical conversations
-            logger.info(f"Still have {n_speakers} speakers, trying more aggressive merging (threshold=0.35)")
-            merged_labels, merge_map = self.merge_similar_clusters(embeddings, labels, similarity_threshold=0.35)
+            aggressive_threshold = merge_threshold - 0.05
+            logger.info(f"Still have {n_speakers} speakers, trying more aggressive merging (threshold={aggressive_threshold})")
+            merged_labels, merge_map = self.merge_similar_clusters(
+                embeddings, labels, similarity_threshold=aggressive_threshold
+            )
             n_speakers = len(set(merged_labels)) - (1 if -1 in merged_labels else 0)
             logger.info(f"After aggressive merging: {n_speakers} speakers")
         
@@ -214,7 +224,7 @@ class SpeakerAutoLabeler:
                 logger.info(f"  Final Speaker {speaker}: {count} frames ({count * self.step:.1f}s)")
         
         return merged_labels, n_speakers
-    
+
     def compute_speaker_centroids(self, embeddings, labels):
         """Compute centroid for each speaker cluster"""
         unique_labels = [l for l in set(labels) if l != -1]
@@ -299,11 +309,15 @@ def main(
     step: float = 1.0,
     min_segment_duration: float = 1.0,
     method: Literal["agglomerative", "spectral"] = "agglomerative",
+    merge_threshold: float = 0.40,
+    assign_threshold: float = 0.60,
 ):
     """Main execution flow - FULLY AUTOMATIC WITH SMART MERGING"""
     logger.info("=" * 60)
     logger.info("AUTO SPEAKER LABELING WITH INTELLIGENT MERGING")
     logger.info("=" * 60)
+    logger.info(f"Merge threshold: {merge_threshold}")
+    logger.info(f"Assignment threshold: {assign_threshold}")
     
     # Initialize labeler
     labeler = SpeakerAutoLabeler(duration=duration, step=step)
@@ -311,14 +325,18 @@ def main(
     # Extract embeddings
     embeddings, timestamps = labeler.extract_embeddings(audio_path)
     
-    # Auto-detect AND auto-merge speakers
-    labels, n_speakers = labeler.cluster_speakers(embeddings, method=method)
+    # Auto-detect AND auto-merge speakers with configurable threshold
+    labels, n_speakers = labeler.cluster_speakers(
+        embeddings, method=method, merge_threshold=merge_threshold
+    )
     
     # Compute centroids
     centroids, speaker_stats = labeler.compute_speaker_centroids(embeddings, labels)
     
-    # Refine assignments
-    refined_labels, confidences = labeler.assign_speaker_labels(embeddings, centroids, threshold=0.60)
+    # Refine assignments with configurable threshold
+    refined_labels, confidences = labeler.assign_speaker_labels(
+        embeddings, centroids, threshold=assign_threshold
+    )
     
     # Generate timeline
     timeline = labeler.generate_timeline(timestamps, refined_labels, min_segment_duration=min_segment_duration)
@@ -462,6 +480,22 @@ if __name__ == "__main__":
         default="agglomerative",
         help="Clustering method to use for speaker grouping"
     )
+    
+    # Merge threshold with shorthand
+    parser.add_argument(
+        "-t", "--merge-threshold",
+        type=float,
+        default=0.40,
+        help="Similarity threshold for merging speaker clusters (0.30-0.50 recommended, lower = more aggressive merging)"
+    )
+    
+    # Assignment threshold with shorthand
+    parser.add_argument(
+        "-a", "--assign-threshold",
+        type=float,
+        default=0.60,
+        help="Minimum similarity threshold for assigning a frame to a speaker (0.50-0.70 recommended)"
+    )
 
     args = parser.parse_args()
 
@@ -470,5 +504,7 @@ if __name__ == "__main__":
         duration=args.duration,
         step=args.step,
         min_segment_duration=args.min_segment_duration,
-        method=args.clustering_method
+        method=args.clustering_method,
+        merge_threshold=args.merge_threshold,
+        assign_threshold=args.assign_threshold
     )
