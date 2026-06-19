@@ -42,7 +42,7 @@ DEFAULT_MIN_PEAK_PROB: float = 0.9
 DEFAULT_MIN_FRAMES: int = 100
 DEFAULT_MIN_DURATION_SEC: float = 0.25
 DEFAULT_BASELINE_THRESHOLD: float = 0.1
-DEFAULT_MIN_SIMILARITY_TO_UPDATE: float = 0.50  # NEW: Minimum similarity to update centroid
+DEFAULT_MIN_SIMILARITY_TO_UPDATE: float = 0.25  # NEW: Minimum similarity to update centroid
 
 
 class SpeakerSegmentInfo(TypedDict):
