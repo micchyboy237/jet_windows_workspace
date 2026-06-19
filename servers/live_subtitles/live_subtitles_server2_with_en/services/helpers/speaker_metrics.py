@@ -25,14 +25,12 @@ class HealthStatus(str, Enum):
 
 class DistanceItem(TypedDict):
     """Individual distance measurement with identifiers."""
-
     segment_id: str
     distance: float
 
 
 class PairwiseDistanceItem(TypedDict):
     """Pairwise distance between two speakers."""
-
     speaker_id_1: str
     speaker_id_2: str
     distance: float
@@ -50,18 +48,23 @@ class InterSpeakerInput(TypedDict):
 class IntraSpeakerResult(TypedDict):
     label: str
     mean_similarity: float  # Most interpretable: "85% similar to own centroid"
-    std_similarity: float  # Spread: "±5% variation"
-    min_similarity: float  # Worst outlier: catch contamination
-    silhouette_score: float  # How distinct this speaker is from others
+    std_similarity: float   # Spread: "±5% variation"
+    min_similarity: float   # Worst outlier: catch contamination
+    silhouette_score: float # How distinct this speaker is from others
     num_embeddings: int
-    is_mature: bool  # Has enough data to be reliable
+    is_mature: bool         # Has enough data to be reliable
     status: HealthStatus
 
 
 class InterSpeakerResult(TypedDict):
-    mean_separation: float  # Average centroid-to-centroid distance
-    min_separation: float  # Closest pair — merge risk indicator
-    closest_pair: tuple  # Which speakers are closest
+    mean_separation: float
+    std_separation: float                      # ✅ RESTORED
+    min_separation: float
+    max_separation: float                      # ✅ RESTORED
+    pairwise_distances: List[PairwiseDistanceItem]  # ✅ RESTORED
+    distance_matrix: NDArray[np.float64]       # ✅ RESTORED
+    speaker_labels: List[str]                  # ✅ RESTORED
+    closest_pair: tuple
     num_speakers: int
     status: HealthStatus
 
@@ -167,9 +170,11 @@ def compute_inter_speaker_separation(
     warning_threshold: float = 0.3,  # Mean distance > 0.3 = borderline
 ) -> InterSpeakerResult:
     """
-    Compute inter-speaker separation with the bare minimum:
+    Compute inter-speaker separation with full pairwise distance matrix:
     - Mean separation (are speakers generally distinct?)
     - Closest pair (who's at risk of merging?)
+    - Full pairwise distances (for dashboard visualization)
+    - Distance matrix (for heatmaps/clustering)
 
     Your labeler already handles merge detection operationally,
     so this is just for monitoring/dashboard visibility.
@@ -181,22 +186,39 @@ def compute_inter_speaker_separation(
 
     centroids = {sid: np.mean(embs, axis=0) for sid, embs in speaker_embeddings.items()}
 
-    labels = sorted(centroids.keys())
-    n = len(labels)
+    speaker_labels = sorted(centroids.keys())
+    n_speakers = len(speaker_labels)
 
-    separations = []
+    # ✅ RESTORED: Build full distance matrix and pairwise items
+    distance_matrix = np.zeros((n_speakers, n_speakers))
+    pairwise_items: List[PairwiseDistanceItem] = []
+
     min_sep = float("inf")
-    closest_pair = (labels[0], labels[1])
+    closest_pair = (speaker_labels[0], speaker_labels[1])
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = cosine_distance(centroids[labels[i]], centroids[labels[j]])
-            separations.append(dist)
+    for i in range(n_speakers):
+        for j in range(i + 1, n_speakers):
+            dist = cosine_distance(
+                centroids[speaker_labels[i]], centroids[speaker_labels[j]]
+            )
+            distance_matrix[i, j] = dist
+            distance_matrix[j, i] = dist
+            pairwise_items.append(
+                PairwiseDistanceItem(
+                    speaker_id_1=speaker_labels[i],
+                    speaker_id_2=speaker_labels[j],
+                    distance=float(dist),
+                )
+            )
             if dist < min_sep:
                 min_sep = dist
-                closest_pair = (labels[i], labels[j])
+                closest_pair = (speaker_labels[i], speaker_labels[j])
 
-    mean_sep = float(np.mean(separations))
+    # ✅ RESTORED: Use upper triangle for aggregate stats
+    upper_triangle = distance_matrix[np.triu_indices(n_speakers, k=1)]
+    mean_sep = float(np.mean(upper_triangle))
+    std_sep = float(np.std(upper_triangle))
+    max_sep = float(np.max(upper_triangle))
 
     # Simple health rules
     if mean_sep >= healthy_threshold and min_sep >= 0.3:
@@ -208,8 +230,13 @@ def compute_inter_speaker_separation(
 
     return InterSpeakerResult(
         mean_separation=round(mean_sep, 4),
+        std_separation=round(std_sep, 4),           # ✅ RESTORED
         min_separation=round(min_sep, 4),
+        max_separation=round(max_sep, 4),           # ✅ RESTORED
+        pairwise_distances=pairwise_items,          # ✅ RESTORED
+        distance_matrix=distance_matrix,            # ✅ RESTORED
+        speaker_labels=speaker_labels,              # ✅ RESTORED
         closest_pair=closest_pair,
-        num_speakers=n,
+        num_speakers=n_speakers,
         status=status,
     )

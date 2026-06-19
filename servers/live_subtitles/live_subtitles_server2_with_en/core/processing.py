@@ -223,6 +223,7 @@ def label_speakers_for_segment(
             sample_rate=sample_rate,
             timestamp=timestamp,
             context=context,
+            segment_id=segment_id,
         )
         primary_label = label
         primary_confidence = confidence
