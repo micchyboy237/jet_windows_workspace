@@ -951,19 +951,6 @@ async def get_segment_audio(segment_id: str, request: Request):
 async def get_segment_detail_page(request: Request, segment_id: str):
     """
     Serve a detailed page for a specific segment with play/download audio buttons.
-    
-    Shows:
-    - Segment ID and speaker label
-    - Timestamp and duration
-    - Embedding index and dimension
-    - Speaker metadata (first seen, last seen, active duration)
-    - Audio playback button (if audio available)
-    - Audio download button (if audio available)
-    
-    Parameters
-    ----------
-    segment_id : str
-        The unique segment identifier (e.g., 'segment_a3f2b1c4')
     """
     labeler = get_speaker_labeler()
     if not labeler:
@@ -974,7 +961,6 @@ async def get_segment_detail_page(request: Request, segment_id: str):
     
     console.print(f"[info]Rendering segment detail page for: {segment_id}[/]")
     
-    # Get segment detail from the labeler
     if not hasattr(labeler, 'get_segment_detail'):
         raise HTTPException(
             status_code=500,
@@ -1002,10 +988,10 @@ async def get_segment_detail_page(request: Request, segment_id: str):
                 status_code=404,
             )
     
-    # Check if audio exists in context buffer
+    # Check audio availability (context buffer first, then disk)
     has_audio = False
     audio_source = ""
-    audio_duration = 0.0
+    audio_duration = segment_info.get("segment_duration", 0.0)  # ✅ Prefer metadata duration
     audio_sample_rate = 16000
     
     try:
@@ -1015,15 +1001,21 @@ async def get_segment_detail_page(request: Request, segment_id: str):
                 if metadata.get('segment_id') == segment_id:
                     has_audio = True
                     audio_source = "context_buffer"
+                    # ✅ Use actual waveform duration for accuracy (may differ from filtered speech)
                     if isinstance(segment_audio, torch.Tensor):
-                        audio_duration = segment_audio.shape[-1] / 16000.0 if segment_audio.dim() > 0 else 0.0
+                        raw_duration = segment_audio.shape[-1] / 16000.0 if segment_audio.dim() > 0 else 0.0
                     elif isinstance(segment_audio, np.ndarray):
-                        audio_duration = len(segment_audio) / 16000.0
+                        raw_duration = len(segment_audio) / 16000.0
+                    else:
+                        raw_duration = 0.0
+                    # Only override if metadata duration is 0 (fallback)
+                    if audio_duration <= 0.0 and raw_duration > 0.0:
+                        audio_duration = raw_duration
                     break
     except Exception as e:
         console.print(f"[dim]Could not check audio availability: {e}[/]")
     
-    # Also check disk
+    # Check disk fallback
     if not has_audio:
         try:
             last_n_dir = get_last_n_segments_dir()
@@ -1032,7 +1024,11 @@ async def get_segment_detail_page(request: Request, segment_id: str):
                 if audio_path.exists():
                     has_audio = True
                     audio_source = "disk"
-                    audio_duration = audio_path.stat().st_size / (16000 * 2)  # rough estimate
+                    # ✅ Accurate duration: (file_size - WAV_header) / bytes_per_second
+                    data_size = max(0, audio_path.stat().st_size - 44)
+                    disk_duration = data_size / (16000 * 2)
+                    if audio_duration <= 0.0:
+                        audio_duration = disk_duration
         except Exception:
             pass
     
@@ -1040,7 +1036,8 @@ async def get_segment_detail_page(request: Request, segment_id: str):
         f"[info]Segment detail: speaker={segment_info['speaker_label']}, "
         f"timestamp={segment_info['timestamp']:.2f}s, "
         f"duration={segment_info['segment_duration']:.3f}s, "
-        f"audio={'yes' if has_audio else 'no'} ({audio_source})[/]"
+        f"audio={'yes' if has_audio else 'no'} ({audio_source}), "
+        f"audio_duration={audio_duration:.3f}s[/]"  # ✅ Log both
     )
     
     try:
@@ -1051,7 +1048,7 @@ async def get_segment_detail_page(request: Request, segment_id: str):
             "speaker_label": segment_info["speaker_label"],
             "timestamp": datetime.now().isoformat(),
             "segment_timestamp": segment_info["timestamp"],
-            "segment_duration": segment_info["segment_duration"],
+            "segment_duration": segment_info["segment_duration"],  # Metadata duration (speech-filtered)
             "embedding_index": segment_info["embedding_index"],
             "embedding_dim": segment_info["embedding_dim"],
             "speaker_segment_count": segment_info["speaker_segment_count"],
@@ -1062,7 +1059,7 @@ async def get_segment_detail_page(request: Request, segment_id: str):
             "has_audio": has_audio,
             "audio_source": audio_source,
             "audio_sample_rate": audio_sample_rate,
-            "audio_duration": audio_duration,
+            "audio_duration": audio_duration,  # Raw waveform duration for playback info
         })
         console.print(f"[success]Segment detail page rendered for {segment_id}[/]")
         return HTMLResponse(content=html_content)

@@ -18,8 +18,6 @@ from numpy.typing import NDArray
 
 
 class HealthStatus(str, Enum):
-    """Health status classification for speaker metrics."""
-
     HEALTHY = "healthy"
     WARNING = "warning"
     UNHEALTHY = "unhealthy"
@@ -41,73 +39,34 @@ class PairwiseDistanceItem(TypedDict):
 
 
 class IntraSpeakerInput(TypedDict):
-    """Input type for intra-speaker variance analysis."""
-
     label: str
     embeddings: NDArray[np.float64]
 
 
 class InterSpeakerInput(TypedDict):
-    """Input type for inter-speaker separation analysis.
-
-    Contains a mapping of speaker identifiers to their embedding arrays.
-    Each array has shape (n_embeddings, embedding_dim).
-
-    Example:
-        >>> speaker_embeddings: InterSpeakerInput = {
-        ...     'speakers': {
-        ...         'speaker_A': np.array([[1.0, 0.0], [0.9, 0.1]]),
-        ...         'speaker_B': np.array([[-1.0, 0.0], [-0.9, -0.1]])
-        ...     }
-        ... }
-    """
-
     speakers: Dict[str, NDArray[np.float64]]
 
 
 class IntraSpeakerResult(TypedDict):
-    """Result type for intra-speaker variance analysis."""
-
     label: str
-    mean_distance: float
-    std_distance: float
-    min_distance: float
-    max_distance: float
-    distances: List[DistanceItem]
-    distance_values: NDArray[np.float64]
-    status: HealthStatus
+    mean_similarity: float  # Most interpretable: "85% similar to own centroid"
+    std_similarity: float  # Spread: "±5% variation"
+    min_similarity: float  # Worst outlier: catch contamination
+    silhouette_score: float  # How distinct this speaker is from others
     num_embeddings: int
+    is_mature: bool  # Has enough data to be reliable
+    status: HealthStatus
 
 
 class InterSpeakerResult(TypedDict):
-    """Result type for inter-speaker separation analysis."""
-
-    mean_separation: float
-    std_separation: float
-    min_separation: float
-    max_separation: float
-    pairwise_distances: List[PairwiseDistanceItem]
-    distance_matrix: NDArray[np.float64]
-    speaker_labels: List[str]
-    status: HealthStatus
+    mean_separation: float  # Average centroid-to-centroid distance
+    min_separation: float  # Closest pair — merge risk indicator
+    closest_pair: tuple  # Which speakers are closest
     num_speakers: int
+    status: HealthStatus
 
 
 def cosine_distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
-    """
-    Compute cosine distance between two vectors.
-    Args:
-        a: First vector
-        b: Second vector
-    Returns:
-        Cosine distance (1 - cosine similarity)
-    Examples:
-        >>> import numpy as np
-        >>> cosine_distance(np.array([1.0, 0.0]), np.array([0.0, 1.0]))
-        1.0
-        >>> cosine_distance(np.array([1.0, 0.0]), np.array([1.0, 0.0]))
-        0.0
-    """
     a_norm = np.linalg.norm(a)
     b_norm = np.linalg.norm(b)
     if a_norm == 0 or b_norm == 0:
@@ -119,37 +78,18 @@ def cosine_distance(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
 
 def compute_intra_speaker_variance(
     speaker_input: IntraSpeakerInput,
-    segment_ids: List[str] | None = None,
-    healthy_threshold: float = 0.3,
-    warning_threshold: float = 0.5,
+    healthy_threshold: float = 0.70,  # Mean similarity > 0.70 = healthy
+    warning_threshold: float = 0.55,  # Mean similarity > 0.55 = warning
+    min_embeddings_for_mature: int = 5,
+    other_centroids: Dict[str, NDArray[np.float64]] | None = None,
 ) -> IntraSpeakerResult:
     """
-    Compute intra-speaker variance by measuring distances from each embedding
-    to the speaker centroid.
-    Low variance = all points are close to the center → "healthy" tight cluster.
-    Args:
-        speaker_input: Dictionary with 'label' (speaker identifier) and
-                      'embeddings' array of shape (n_embeddings, embedding_dim)
-        segment_ids: Optional list of segment identifiers corresponding to each embedding.
-                    If None, auto-generates IDs as "segment_0", "segment_1", etc.
-        healthy_threshold: Mean distance below this is considered healthy
-        warning_threshold: Mean distance below this is considered warning,
-                          above is unhealthy
-    Returns:
-        IntraSpeakerResult with variance metrics, labeled distances, and health status
-    Raises:
-        ValueError: If embeddings array is empty or has invalid shape
-        ValueError: If segment_ids length doesn't match number of embeddings
-    Example:
-        >>> speaker_input = {
-        ...     "label": "SPEAKER_01",
-        ...     "embeddings": np.array([[1.0, 0.0], [0.9, 0.1], [1.1, -0.1]])
-        ... }
-        >>> result = compute_intra_speaker_variance(speaker_input)
-        >>> result['status']
-        'healthy'
-        >>> result['distances'][0]['segment_id']
-        'segment_0'
+    Compute intra-speaker health with 3 key signals:
+    1. Mean similarity to centroid (is this speaker coherent?)
+    2. Silhouette score (is this speaker distinct from others?)
+    3. Maturity check (do we have enough data?)
+
+    These 3 signals catch: contamination, premature clusters, and noise.
     """
     embeddings = speaker_input["embeddings"]
     speaker_label = speaker_input["label"]
@@ -160,161 +100,116 @@ def compute_intra_speaker_variance(
         raise ValueError(f"Embeddings must be 2D array, got {embeddings.ndim}D")
 
     n_embeddings = embeddings.shape[0]
+    is_mature = n_embeddings >= min_embeddings_for_mature
 
-    if segment_ids is None:
-        segment_ids = [f"segment_{i}" for i in range(n_embeddings)]
-    elif len(segment_ids) != n_embeddings:
-        raise ValueError(
-            f"Number of segment_ids ({len(segment_ids)}) must match "
-            f"number of embeddings ({n_embeddings})"
-        )
-
+    # Single embedding = can't measure variance
     if n_embeddings < 2:
-        distance_items = [DistanceItem(segment_id=segment_ids[0], distance=0.0)]
         return IntraSpeakerResult(
             label=speaker_label,
-            mean_distance=0.0,
-            std_distance=0.0,
-            min_distance=0.0,
-            max_distance=0.0,
-            distances=distance_items,
-            distance_values=np.array([0.0]),
-            status=HealthStatus.HEALTHY,
+            mean_similarity=1.0,
+            std_similarity=0.0,
+            min_similarity=1.0,
+            silhouette_score=1.0 if not other_centroids else 0.0,
             num_embeddings=1,
+            is_mature=False,
+            status=HealthStatus.WARNING,
         )
 
     centroid = np.mean(embeddings, axis=0)
-    distance_values = np.array(
-        [cosine_distance(embedding, centroid) for embedding in embeddings]
+    similarities = np.array(
+        [1.0 - cosine_distance(emb, centroid) for emb in embeddings]
     )
-    distance_items = [
-        DistanceItem(segment_id=seg_id, distance=float(dist))
-        for seg_id, dist in zip(segment_ids, distance_values)
-    ]
 
-    mean_dist = float(np.mean(distance_values))
-    std_dist = float(np.std(distance_values))
-    min_dist = float(np.min(distance_values))
-    max_dist = float(np.max(distance_values))
+    mean_sim = float(np.mean(similarities))
+    std_sim = float(np.std(similarities))
+    min_sim = float(np.min(similarities))
 
-    if mean_dist <= healthy_threshold:
+    # Compute silhouette only if we have other speakers to compare against
+    silhouette = 0.0
+    if other_centroids and len(other_centroids) > 0:
+        # Filter out own centroid
+        other_centroids_filtered = {
+            k: v for k, v in other_centroids.items() if k != speaker_label
+        }
+        if other_centroids_filtered:
+            a = 1.0 - mean_sim  # intra-cluster distance
+            b = min(
+                cosine_distance(centroid, other_c)
+                for other_c in other_centroids_filtered.values()
+            )
+            silhouette = float((b - a) / max(a, b)) if max(a, b) > 0 else 0.0
+
+    # Health determination — simple, clear rules
+    if not is_mature:
+        status = HealthStatus.WARNING  # Can't trust immature clusters
+    elif mean_sim >= healthy_threshold and silhouette >= 0.3:
         status = HealthStatus.HEALTHY
-    elif mean_dist <= warning_threshold:
+    elif mean_sim >= warning_threshold and silhouette >= 0.1:
         status = HealthStatus.WARNING
     else:
         status = HealthStatus.UNHEALTHY
 
     return IntraSpeakerResult(
         label=speaker_label,
-        mean_distance=mean_dist,
-        std_distance=std_dist,
-        min_distance=min_dist,
-        max_distance=max_dist,
-        distances=distance_items,
-        distance_values=distance_values,
-        status=status,
+        mean_similarity=round(mean_sim, 4),
+        std_similarity=round(std_sim, 4),
+        min_similarity=round(min_sim, 4),
+        silhouette_score=round(silhouette, 4),
         num_embeddings=n_embeddings,
+        is_mature=is_mature,
+        status=status,
     )
 
 
 def compute_inter_speaker_separation(
     speaker_input: InterSpeakerInput,
-    healthy_threshold: float = 0.5,
-    warning_threshold: float = 0.3,
+    healthy_threshold: float = 0.5,  # Mean distance > 0.5 = well separated
+    warning_threshold: float = 0.3,  # Mean distance > 0.3 = borderline
 ) -> InterSpeakerResult:
     """
-    Compute inter-speaker separation by measuring distances between
-    speaker centroids.
+    Compute inter-speaker separation with the bare minimum:
+    - Mean separation (are speakers generally distinct?)
+    - Closest pair (who's at risk of merging?)
 
-    High separation = centroids are far apart → "healthy" distinct speakers.
-
-    Args:
-        speaker_input: InterSpeakerInput with 'speakers' dict mapping
-                      speaker IDs to their embedding arrays.
-                      Each array has shape (n_embeddings, embedding_dim)
-        healthy_threshold: Mean separation above this is considered healthy
-        warning_threshold: Mean separation above this is considered warning,
-                          below is unhealthy
-
-    Returns:
-        InterSpeakerResult with separation metrics, labeled pairwise distances,
-        and health status
-
-    Raises:
-        ValueError: If fewer than 2 speakers provided or embeddings are invalid
-
-    Example:
-        >>> speaker_input = {
-        ...     'speakers': {
-        ...         'speaker_A': np.array([[1.0, 0.0], [0.9, 0.1]]),
-        ...         'speaker_B': np.array([[-1.0, 0.0], [-0.9, -0.1]])
-        ...     }
-        ... }
-        >>> result = compute_inter_speaker_separation(speaker_input)
-        >>> result['pairwise_distances'][0]['speaker_id_1']
-        'speaker_A'
+    Your labeler already handles merge detection operationally,
+    so this is just for monitoring/dashboard visibility.
     """
     speaker_embeddings = speaker_input["speakers"]
 
     if len(speaker_embeddings) < 2:
         raise ValueError(f"Need at least 2 speakers, got {len(speaker_embeddings)}")
 
-    # Rest of the function remains the same...
-    for speaker_id, embeddings in speaker_embeddings.items():
-        if embeddings.size == 0:
-            raise ValueError(f"Speaker '{speaker_id}' has empty embeddings")
-        if embeddings.ndim != 2:
-            raise ValueError(
-                f"Speaker '{speaker_id}' embeddings must be 2D, got {embeddings.ndim}D"
-            )
+    centroids = {sid: np.mean(embs, axis=0) for sid, embs in speaker_embeddings.items()}
 
-    centroids = {
-        speaker_id: np.mean(embeddings, axis=0)
-        for speaker_id, embeddings in speaker_embeddings.items()
-    }
+    labels = sorted(centroids.keys())
+    n = len(labels)
 
-    speaker_labels = sorted(centroids.keys())
-    n_speakers = len(speaker_labels)
+    separations = []
+    min_sep = float("inf")
+    closest_pair = (labels[0], labels[1])
 
-    distance_matrix = np.zeros((n_speakers, n_speakers))
-    pairwise_items: List[PairwiseDistanceItem] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = cosine_distance(centroids[labels[i]], centroids[labels[j]])
+            separations.append(dist)
+            if dist < min_sep:
+                min_sep = dist
+                closest_pair = (labels[i], labels[j])
 
-    for i in range(n_speakers):
-        for j in range(i + 1, n_speakers):
-            dist = cosine_distance(
-                centroids[speaker_labels[i]], centroids[speaker_labels[j]]
-            )
-            distance_matrix[i, j] = dist
-            distance_matrix[j, i] = dist
-            pairwise_items.append(
-                PairwiseDistanceItem(
-                    speaker_id_1=speaker_labels[i],
-                    speaker_id_2=speaker_labels[j],
-                    distance=float(dist),
-                )
-            )
+    mean_sep = float(np.mean(separations))
 
-    upper_triangle = distance_matrix[np.triu_indices(n_speakers, k=1)]
-    mean_sep = float(np.mean(upper_triangle))
-    std_sep = float(np.std(upper_triangle))
-    min_sep = float(np.min(upper_triangle))
-    max_sep = float(np.max(upper_triangle))
-
-    if mean_sep >= healthy_threshold:
+    # Simple health rules
+    if mean_sep >= healthy_threshold and min_sep >= 0.3:
         status = HealthStatus.HEALTHY
-    elif mean_sep >= warning_threshold:
+    elif mean_sep >= warning_threshold and min_sep >= 0.15:
         status = HealthStatus.WARNING
     else:
         status = HealthStatus.UNHEALTHY
 
     return InterSpeakerResult(
-        mean_separation=mean_sep,
-        std_separation=std_sep,
-        min_separation=min_sep,
-        max_separation=max_sep,
-        pairwise_distances=pairwise_items,
-        distance_matrix=distance_matrix,
-        speaker_labels=speaker_labels,
+        mean_separation=round(mean_sep, 4),
+        min_separation=round(min_sep, 4),
+        closest_pair=closest_pair,
+        num_speakers=n,
         status=status,
-        num_speakers=n_speakers,
     )

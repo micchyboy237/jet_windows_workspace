@@ -252,9 +252,11 @@
             <div class="info-label">Duration</div>
             <div class="info-value">
               {% if segment_duration > 0 %} {% if segment_duration < 1.0 %} {{
-              "%.0f"|format(segment_duration * 1000) }}ms {% else %} {{
-              "%.2f"|format(segment_duration) }}s {% endif %} {% else %} — {%
-              endif %}
+              "%.0f"|format(segment_duration * 1000) }}ms {% elif
+              segment_duration < 60 %} {{ "%.1f"|format(segment_duration) }}s {%
+              else %} {{ (segment_duration // 60)|int }}m {{
+              "%.0f"|format(segment_duration % 60) }}s {% endif %} {% else %} —
+              {% endif %}
             </div>
           </div>
           <div class="info-item">

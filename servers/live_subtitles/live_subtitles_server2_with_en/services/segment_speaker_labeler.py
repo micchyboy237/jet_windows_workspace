@@ -12,13 +12,13 @@ try:
     from services.config import SAMPLE_RATE
     from services.embedding_model_factory import BaseEmbeddingModel
     from services.speaker_metrics_mixin import SpeakerMetricsMixin
-    from services.speech_waves import extract_pure_speech_audio
+    # from services.speech_waves import extract_pure_speech_audio
     from services.audio_tagger import AudioTagger
 except ImportError:
     from config import SAMPLE_RATE
     from embedding_model_factory import BaseEmbeddingModel
     from speaker_metrics_mixin import SpeakerMetricsMixin
-    from speech_waves import extract_pure_speech_audio
+    # from speech_waves import extract_pure_speech_audio
     from audio_tagger import AudioTagger
 
 console = Console()
@@ -69,8 +69,13 @@ class SpeakerReference:
     last_seen: float = 0.0
     segment_count: int = 0
     
-    def add_embedding(self, embedding: np.ndarray, timestamp: float,
-                      segment_id: Optional[str] = None) -> None:
+    def add_embedding(
+        self,
+        embedding: np.ndarray,
+        timestamp: float,
+        segment_id: Optional[str] = None,
+        audio_duration: float = 0.0,
+    ) -> None:
         """Add a new embedding and update centroid using median for robustness.
         
         Parameters
@@ -91,7 +96,8 @@ class SpeakerReference:
             'segment_id': segment_id or f"unknown_{len(self.embeddings)}",
             'timestamp': timestamp,
             'index': len(self.embeddings) - 1,
-            'added_at': timestamp
+            'added_at': timestamp,
+            'audio_duration': audio_duration,  # Store actual waveform duration
         })
         
         self.segment_count += 1
@@ -423,7 +429,8 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         self,
         embedding: np.ndarray,
         timestamp: float,
-        segment_id: Optional[str] = None,  # NEW: Optional segment ID parameter
+        segment_id: Optional[str] = None,
+        audio_duration: float = 0.0,
     ) -> str:
         """Create a new speaker reference.
         
@@ -461,7 +468,8 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         ref.add_embedding(
             embedding=embedding,
             timestamp=timestamp,
-            segment_id=segment_id  # NEW: Pass segment ID to add_embedding
+            segment_id=segment_id,
+            audio_duration=audio_duration,
         )
         self._speakers[label] = ref
         
@@ -612,7 +620,8 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         label: str,
         embedding: np.ndarray,
         timestamp: float,
-        segment_id: Optional[str] = None,  # NEW parameter
+        segment_id: Optional[str] = None,
+        audio_duration: float = 0.0,  # NEW parameter
     ) -> None:
         """Update speaker reference with new embedding.
         
@@ -635,7 +644,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             segment_id = self._generate_segment_id()
         
         ref = self._speakers[label]
-        ref.add_embedding(embedding, timestamp, segment_id)  # Pass segment_id
+        ref.add_embedding(embedding, timestamp, segment_id, audio_duration=audio_duration)
         
         # Trim embeddings if exceeding max
         if len(ref.embeddings) > self.max_embeddings_per_speaker:
@@ -1128,6 +1137,13 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             top_k = self.top_k_speakers
 
         waveform, was_filtered = self._extract_speech_audio(waveform=waveform)
+
+        # Calculate actual audio duration
+        if isinstance(waveform, torch.Tensor):
+            audio_duration = waveform.shape[-1] / sample_rate if waveform.dim() > 0 else 0.0
+        else:
+            audio_duration = len(waveform) / sample_rate
+
         embedding = self.compute_embedding(waveform, sample_rate)
         
         if self.debug:
@@ -1168,7 +1184,8 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             new_label = self.create_new_speaker(
                 embedding=embedding,
                 timestamp=timestamp,
-                segment_id=segment_id  # ✅ Pass the original segment_id
+                segment_id=segment_id,
+                audio_duration=audio_duration,
             )
             just_created_speaker = True
             if self.debug:
@@ -1273,7 +1290,8 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                     label=primary_result["label"],
                     embedding=embedding,
                     timestamp=timestamp,
-                    segment_id=segment_id
+                    segment_id=segment_id,
+                    audio_duration=audio_duration,
                 )
                 if self.debug:
                     console.print(
@@ -1295,7 +1313,8 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 new_label = self.create_new_speaker(
                     embedding=embedding,
                     timestamp=timestamp,
-                    segment_id=segment_id  # ✅ FIX: Preserve the original segment_id
+                    segment_id=segment_id,
+                    audio_duration=audio_duration,  
                 )
                 just_created_speaker = True
                 primary_result["label"] = new_label

@@ -109,14 +109,17 @@ class SpeakerMetricsMixin:
                 # Estimate segment duration from timestamps
                 # If we have consecutive segments, duration = time diff to next segment
                 # For the last segment, use the difference from previous to last
-                duration = 0.0
+                # NEW - Use actual audio duration from metadata if available:
+                duration = meta.get('audio_duration', 0.0)  # Primary: actual waveform duration
                 timestamp = meta.get('timestamp', 0.0)
-                if hasattr(ref, 'embedding_metadata') and len(ref.embedding_metadata) > 1:
+
+                # Fallback: estimate from timestamp gaps if audio_duration not stored
+                if duration <= 0.0 and hasattr(ref, 'embedding_metadata') and len(ref.embedding_metadata) > 1:
                     if i < len(ref.embedding_metadata) - 1:
                         next_ts = ref.embedding_metadata[i + 1].get('timestamp', timestamp)
                         duration = max(0.0, next_ts - timestamp)
                     else:
-                        # Last segment: use the average gap between segments as estimate
+                        # Last segment: use average gap as rough estimate
                         gaps = []
                         for j in range(len(ref.embedding_metadata) - 1):
                             t1 = ref.embedding_metadata[j].get('timestamp', 0)
@@ -125,8 +128,6 @@ class SpeakerMetricsMixin:
                                 gaps.append(t2 - t1)
                         if gaps:
                             duration = sum(gaps) / len(gaps)
-                        else:
-                            duration = 0.0
                 segment_durations.append(duration)
 
             if len(embeddings_list) == 0:
@@ -361,8 +362,10 @@ class SpeakerMetricsMixin:
             for i, meta in enumerate(ref.embedding_metadata):
                 if meta.get('segment_id') == segment_id:
                     # Calculate duration
-                    duration = 0.0
-                    if len(ref.embedding_metadata) > 1:
+                    duration = meta.get('audio_duration', 0.0)  # Primary: actual waveform duration
+
+                    # Fallback to timestamp gaps if no audio_duration stored
+                    if duration <= 0.0 and len(ref.embedding_metadata) > 1:
                         if i < len(ref.embedding_metadata) - 1:
                             next_ts = ref.embedding_metadata[i + 1].get('timestamp', meta.get('timestamp', 0))
                             duration = max(0.0, next_ts - meta.get('timestamp', 0))
