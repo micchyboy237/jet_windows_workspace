@@ -3,8 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Howler.js — Partial Range Streaming</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+    <title>Native Audio Element — Partial Range Streaming</title>
     <style>
       body {
         font-family: system-ui, sans-serif;
@@ -87,13 +86,13 @@
   </head>
   <body>
     <div class="player-container">
-      <span class="badge">PARTIAL RANGE · html5: true</span>
+      <span class="badge">PARTIAL RANGE · Native &lt;audio&gt;</span>
       <h2>🎵 Progressive Streaming Demo</h2>
       <p class="info">
-        Uses Howler's <code>html5: true</code> mode, which delegates to the
-        browser's native &lt;audio&gt; element. This means the browser issues
-        real HTTP <code>Range</code> requests as you seek &mdash; you can jump
-        to any point in the track before the full file has downloaded.
+        Uses the browser's native <strong>&lt;audio&gt;</strong> element
+        directly (no Howler.js). The browser issues real HTTP
+        <code>Range</code> requests as you seek &mdash; you can jump to any
+        point in the track before the full file has downloaded.
       </p>
       <div class="controls">
         <button id="playBtn">▶ Play</button>
@@ -105,12 +104,20 @@
       <input type="range" id="seekBar" min="0" max="100" value="0" />
       <div class="status">
         <div><strong>State:</strong> <span id="stateText">idle</span></div>
-        <div><strong>Position:</strong> <span id="posText">0:00</span> / <span id="durText">0:00</span></div>
-        <div><strong>Mode:</strong> <span id="modeText">html5 (native &lt;audio&gt;, Range-capable)</span></div>
+        <div>
+          <strong>Position:</strong> <span id="posText">0:00</span> /
+          <span id="durText">0:00</span>
+        </div>
+        <div>
+          <strong>Mode:</strong>
+          <span id="modeText"
+            >Native &lt;audio&gt; (browser handles Range requests
+            automatically)</span
+          >
+        </div>
       </div>
       <div id="log"></div>
     </div>
-
     <script>
       // ---- Logging helper: mirrors console + on-page log panel ----
       const logPanel = document.getElementById("log");
@@ -122,6 +129,8 @@
         logPanel.scrollTop = logPanel.scrollHeight;
       }
 
+      log("Initialized — using native <audio> element (no Howler.js)");
+
       const stateText = document.getElementById("stateText");
       const posText = document.getElementById("posText");
       const durText = document.getElementById("durText");
@@ -132,101 +141,189 @@
       function formatTime(sec) {
         if (!isFinite(sec) || sec < 0) return "0:00";
         const m = Math.floor(sec / 60);
-        const s = Math.floor(sec % 60).toString().padStart(2, "0");
+        const s = Math.floor(sec % 60)
+          .toString()
+          .padStart(2, "0");
         return `${m}:${s}`;
       }
 
-      log("Initializing Howl with html5: true (forces native <audio>, enables Range requests)");
+      // ---- Native <audio> element ----
+      // The browser natively handles Range requests when seeking
+      // in an <audio> element pointed at a server that supports 206 Partial Content.
+      const audio = new Audio();
+      audio.src = "/audio";
+      audio.preload = "metadata"; // Only fetch metadata/header first, not the whole file
 
-      // html5: true is the key flag here. It tells Howler to use an
-      // HTML5 <audio> element instead of decoding via Web Audio API.
-      // The browser then natively issues Range requests as the user
-      // seeks, matching the server's /audio 206 Partial Content support.
-      const sound = new Howl({
-        src: ["/audio"],
-        format: ["wav"],
-        html5: true, // <-- enables progressive/Range-based streaming
-        preload: "metadata", // only fetch duration first, not the whole file
-        onload: () => {
-          log(`Loaded metadata. Duration: ${formatTime(sound.duration())}`);
-          durText.textContent = formatTime(sound.duration());
-        },
-        onplay: () => {
-          log("Playback started");
-          stateText.textContent = "playing";
-          playBtn.disabled = true;
-          pauseBtn.disabled = false;
-          requestAnimationFrame(updateProgress);
-        },
-        onpause: () => {
-          log("Playback paused");
-          stateText.textContent = "paused";
-          playBtn.disabled = false;
-          pauseBtn.disabled = true;
-        },
-        onend: () => {
-          log("Playback ended");
-          stateText.textContent = "ended";
-          playBtn.disabled = false;
-          pauseBtn.disabled = true;
-        },
-        onseek: () => {
-          log(`Seek triggered -> browser issues a new Range request near ${formatTime(sound.seek())}`);
-        },
-        onloaderror: (id, err) => {
-          log(`Load error: ${err}`);
-          stateText.textContent = "error";
-        },
-        onplayerror: (id, err) => {
-          log(`Play error: ${err}`);
-        },
-      });
+      log("Audio element created — preload='metadata', src='/audio'");
+      log(
+        "Browser will issue Range requests automatically during seek operations",
+      );
 
+      /**
+       * Update the progress display based on audio element state
+       */
       function updateProgress() {
-        if (sound.playing()) {
-          const pos = sound.seek() || 0;
-          const dur = sound.duration() || 1;
+        if (!audio.paused) {
+          const pos = audio.currentTime;
+          const dur = audio.duration || 1;
           posText.textContent = formatTime(pos);
           seekBar.value = (pos / dur) * 100;
           requestAnimationFrame(updateProgress);
         }
       }
 
+      /**
+       * Seek to a fraction of the total duration.
+       * The browser will automatically issue a Range request to fetch
+       * the relevant portion of the file from the server.
+       */
+      function seekTo(fraction) {
+        const dur = audio.duration;
+        if (!dur || !isFinite(dur)) {
+          log("Seek requested before duration known — ignoring");
+          return;
+        }
+        const target = dur * fraction;
+        log(
+          `Seeking to ${formatTime(target)} (${Math.round(fraction * 100)}%) — browser will issue Range request`,
+        );
+        audio.currentTime = target;
+      }
+
+      // ---- Audio element event handlers ----
+
+      audio.addEventListener("loadstart", () => {
+        log("Audio load started — browser fetching metadata/initial data");
+        stateText.textContent = "loading";
+      });
+
+      audio.addEventListener("loadedmetadata", () => {
+        const dur = audio.duration;
+        log(
+          `Metadata loaded. Duration: ${formatTime(dur)}${isFinite(dur) ? "" : " (streaming — duration may update)"}`,
+        );
+        if (isFinite(dur)) {
+          durText.textContent = formatTime(dur);
+        }
+        stateText.textContent = "ready";
+        playBtn.disabled = false;
+      });
+
+      audio.addEventListener("canplay", () => {
+        log("Audio can start playing — enough data buffered");
+      });
+
+      audio.addEventListener("play", () => {
+        log("Playback started");
+        stateText.textContent = "playing";
+        playBtn.disabled = true;
+        pauseBtn.disabled = false;
+        updateProgress();
+      });
+
+      audio.addEventListener("pause", () => {
+        log("Playback paused");
+        stateText.textContent = "paused";
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+      });
+
+      audio.addEventListener("ended", () => {
+        log("Playback ended");
+        stateText.textContent = "ended";
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+      });
+
+      audio.addEventListener("seeking", () => {
+        log(`Seeking started — browser issuing Range request...`);
+        stateText.textContent = "seeking";
+      });
+
+      audio.addEventListener("seeked", () => {
+        log(`Seek complete — now at ${formatTime(audio.currentTime)}`);
+        if (!audio.paused) {
+          stateText.textContent = "playing";
+        } else {
+          stateText.textContent = "paused";
+        }
+      });
+
+      audio.addEventListener("timeupdate", () => {
+        // This fires during playback — we also update from rAF for smoother updates
+        const pos = audio.currentTime;
+        const dur = audio.duration || 1;
+        posText.textContent = formatTime(pos);
+        seekBar.value = (pos / dur) * 100;
+      });
+
+      audio.addEventListener("error", (e) => {
+        const error = audio.error;
+        const errorMsg = error
+          ? `code=${error.code}, message=${error.message}`
+          : "Unknown error";
+        log(`Audio error: ${errorMsg}`);
+        stateText.textContent = "error";
+      });
+
+      audio.addEventListener("stalled", () => {
+        log("Audio stalled — waiting for data...");
+      });
+
+      audio.addEventListener("waiting", () => {
+        log("Audio buffering — waiting for more data...");
+      });
+
+      audio.addEventListener("progress", () => {
+        // This fires as the browser loads the file progressively
+        // We could show buffered ranges if needed
+        if (audio.buffered.length > 0) {
+          const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+          const dur = audio.duration;
+          if (dur && isFinite(dur)) {
+            const pct = Math.round((bufferedEnd / dur) * 100);
+            log(
+              `Buffered: ${formatTime(bufferedEnd)} / ${formatTime(dur)} (${pct}%)`,
+            );
+          }
+        }
+      });
+
+      // ---- Button Event Listeners ----
+
       playBtn.addEventListener("click", () => {
         log("Play button clicked");
-        sound.play();
+        audio.play().catch((err) => {
+          log(`Play failed: ${err.message}`);
+        });
       });
 
       pauseBtn.addEventListener("click", () => {
         log("Pause button clicked");
-        sound.pause();
+        audio.pause();
       });
 
       document.getElementById("seekStartBtn").addEventListener("click", () => {
         seekTo(0);
       });
+
       document.getElementById("seekMidBtn").addEventListener("click", () => {
         seekTo(0.5);
       });
+
       document.getElementById("seekEndBtn").addEventListener("click", () => {
         seekTo(0.9);
       });
 
-      function seekTo(fraction) {
-        const dur = sound.duration();
-        if (!dur) {
-          log("Seek requested before duration known — ignoring");
-          return;
-        }
-        const target = dur * fraction;
-        log(`Seeking to ${formatTime(target)} (${Math.round(fraction * 100)}%) — this works even mid-download because the server supports byte ranges`);
-        sound.seek(target);
-      }
-
       seekBar.addEventListener("input", () => {
-        const dur = sound.duration();
-        if (!dur) return;
         seekTo(seekBar.value / 100);
+      });
+
+      // Cleanup
+      window.addEventListener("beforeunload", () => {
+        audio.pause();
+        audio.src = "";
+        log("Audio element cleaned up");
       });
     </script>
   </body>

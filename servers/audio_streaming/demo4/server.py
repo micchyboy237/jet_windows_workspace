@@ -4,7 +4,6 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from routers.audio_router import router as audio_router
 from routers.pages_router import router as pages_router
 
@@ -35,7 +34,7 @@ app.include_router(pages_router)
 
 
 if __name__ == "__main__":
-    port = 8000
+    port = 8001
     logger.info(f"Server listening on http://localhost:{port}")
     logger.info(f"Audio file: {audio_file_path}")
     logger.info(f"HTML client: {client_html_path}")
