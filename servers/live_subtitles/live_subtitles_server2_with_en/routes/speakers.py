@@ -830,8 +830,14 @@ async def export_speaker_data(
 async def get_segment_audio(segment_id: str, request: Request):
     """
     Get the audio data for a specific segment (for playback/download).
+    Supports HTTP Range requests for proper streaming/seeking.
+    
+    CRITICAL: Always returns 206 Partial Content, even on first request.
+    This ensures the browser knows the total file size and can calculate
+    byte offsets for seeking.
     """
-    from fastapi.responses import Response
+    from fastapi.responses import Response, StreamingResponse
+    import os
     
     labeler = get_speaker_labeler()
     if not labeler:
@@ -839,136 +845,309 @@ async def get_segment_audio(segment_id: str, request: Request):
     
     console.print(f"[info]Fetching audio for segment: {segment_id}[/]")
     
+    audio_path = None
+    audio_source = "unknown"
+    
     # === APPROACH 1: Check permanent segment audio directory ===
     try:
         from services.config import SEGMENT_AUDIO_DIR
         if SEGMENT_AUDIO_DIR and SEGMENT_AUDIO_DIR.exists():
-            audio_path = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
-            if audio_path.exists():
+            candidate = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
+            if candidate.exists():
+                audio_path = candidate
+                audio_source = "permanent_storage"
                 console.print(f"[success]Audio found in permanent storage: {audio_path}[/]")
-                
-                # ✅ Use utility for file duration
-                duration_sec = get_audio_duration(str(audio_path))
-                
-                return Response(
-                    content=audio_path.read_bytes(),
-                    media_type="audio/wav",
-                    headers={
-                        "Content-Disposition": f"inline; filename={segment_id}.wav",
-                        "X-Segment-ID": segment_id,
-                        "X-Audio-Source": "permanent_storage",
-                        "X-Audio-Duration": str(round(duration_sec, 3)),
-                    }
-                )
     except Exception as e:
-        console.print(f"[warning]Error checking permanent storage for audio: {e}[/]")
+        console.print(f"[warning]Error checking permanent storage: {e}[/]")
     
-    # === APPROACH 2: Check context buffer ===
-    try:
-        context_buffer = get_context_buffer()
-        if context_buffer and hasattr(context_buffer, 'segments'):
-            for segment_audio, metadata in context_buffer.segments:
-                meta_segment_id = metadata.get('segment_id', '')
-                if meta_segment_id == segment_id:
-                    import io
-                    import wave
-                    
-                    # Convert audio to numpy array
-                    if isinstance(segment_audio, torch.Tensor):
-                        audio_np = segment_audio.detach().cpu().numpy()
-                    elif isinstance(segment_audio, np.ndarray):
-                        audio_np = segment_audio
-                    else:
-                        audio_np = np.array(segment_audio, dtype=np.float32)
-                    
-                    # Ensure 1D array
-                    if audio_np.ndim > 1:
-                        audio_np = audio_np.flatten()
-                    
-                    # Convert float [-1,1] to int16 PCM
-                    audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
-                    
-                    buf = io.BytesIO()
-                    with wave.open(buf, 'wb') as wf:
-                        wf.setnchannels(1)
-                        wf.setsampwidth(2)
-                        wf.setframerate(SAMPLE_RATE)
-                        wf.writeframes(audio_int16.tobytes())
-                    
-                    buf.seek(0)
-                    
-                    # ✅ Use utility for duration
-                    duration_sec = get_audio_duration(audio_int16, sr=SAMPLE_RATE)
-                    console.print(
-                        f"[success]Audio found in context buffer for {segment_id}: "
-                        f"{len(audio_int16)} samples, {duration_sec:.2f}s[/]"
-                    )
-                    
-                    return Response(
-                        content=buf.read(),
-                        media_type="audio/wav",
-                        headers={
-                            "Content-Disposition": f"inline; filename={segment_id}.wav",
-                            "X-Segment-ID": segment_id,
-                            "X-Audio-Source": "context_buffer",
-                            "X-Audio-Duration": str(round(duration_sec, 3)),
-                            "X-Audio-Samples": str(len(audio_int16)),
-                        }
-                    )
-    except Exception as e:
-        console.print(f"[warning]Error searching context buffer for audio: {e}[/]")
+    # === APPROACH 2: Check context buffer (fallback) ===
+    if not audio_path:
+        try:
+            context_buffer = get_context_buffer()
+            if context_buffer and hasattr(context_buffer, 'segments'):
+                for segment_audio, metadata in context_buffer.segments:
+                    meta_segment_id = metadata.get('segment_id', '')
+                    if meta_segment_id == segment_id:
+                        import io
+                        import wave
+                        import tempfile
+                        
+                        # Convert audio to numpy array
+                        if isinstance(segment_audio, torch.Tensor):
+                            audio_np = segment_audio.detach().cpu().numpy()
+                        elif isinstance(segment_audio, np.ndarray):
+                            audio_np = segment_audio
+                        else:
+                            audio_np = np.array(segment_audio, dtype=np.float32)
+                        
+                        # Ensure 1D array
+                        if audio_np.ndim > 1:
+                            audio_np = audio_np.flatten()
+                        
+                        # Convert float [-1,1] to int16 PCM
+                        audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+                        
+                        # Write to temp file for streaming
+                        tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+                        with wave.open(tmp.name, 'wb') as wf:
+                            wf.setnchannels(1)
+                            wf.setsampwidth(2)
+                            wf.setframerate(SAMPLE_RATE)
+                            wf.writeframes(audio_int16.tobytes())
+                        
+                        audio_path = Path(tmp.name)
+                        audio_source = "context_buffer"
+                        console.print(f"[success]Audio created from context buffer: {len(audio_int16)} samples[/]")
+                        break
+        except Exception as e:
+            console.print(f"[warning]Error creating audio from context buffer: {e}[/]")
     
-    # === APPROACH 3: Check disk ===
-    try:
-        last_n_dir = get_last_n_segments_dir()
-        if last_n_dir and last_n_dir.exists():
-            audio_path = last_n_dir / f"{segment_id}.wav"
-            if audio_path.exists():
-                console.print(f"[success]Audio found on disk: {audio_path}[/]")
-                
-                # ✅ Use utility for file duration
-                duration_sec = get_audio_duration(str(audio_path))
-                
-                return Response(
-                    content=audio_path.read_bytes(),
-                    media_type="audio/wav",
-                    headers={
-                        "Content-Disposition": f"inline; filename={segment_id}.wav",
-                        "X-Segment-ID": segment_id,
-                        "X-Audio-Source": "disk",
-                        "X-Audio-Duration": str(round(duration_sec, 3)),
-                    }
-                )
+    # === APPROACH 3: Check disk fallback ===
+    if not audio_path:
+        try:
+            last_n_dir = get_last_n_segments_dir()
+            if last_n_dir and last_n_dir.exists():
+                candidate = last_n_dir / f"{segment_id}.wav"
+                if candidate.exists():
+                    audio_path = candidate
+                    audio_source = "disk"
+                    console.print(f"[success]Audio found on disk: {audio_path}[/]")
+                else:
+                    # Try partial match
+                    for f in last_n_dir.glob("*.wav"):
+                        if segment_id in f.name:
+                            audio_path = f
+                            audio_source = "disk_partial_match"
+                            console.print(f"[success]Audio found on disk (partial): {audio_path}[/]")
+                            break
+        except Exception as e:
+            console.print(f"[warning]Error checking disk: {e}[/]")
+    
+    if not audio_path or not audio_path.exists():
+        console.print(f"[error]No audio found for segment: {segment_id}[/]")
+        raise HTTPException(status_code=404, detail="No audio data found")
+    
+    # ═══════════════════════════════════════════════════════════
+    # ✅ CRITICAL FIX: Always serve with Range support
+    # ═══════════════════════════════════════════════════════════
+    file_size = audio_path.stat().st_size
+    duration_sec = get_audio_duration(str(audio_path))
+    
+    # ✅ Define initial buffer size (like demo1's INITIAL_BUFFER)
+    INITIAL_BUFFER = 512 * 1024  # 512 KB initial chunk
+    
+    # Parse Range header (or use default initial chunk)
+    range_header = request.headers.get("range")
+    
+    if range_header:
+        # Handle explicit Range request from browser
+        try:
+            range_value = range_header.replace("bytes=", "")
+            start_str, end_str = range_value.split("-")
+            start = int(start_str) if start_str else 0
+            end = int(end_str) if end_str else file_size - 1
             
-            # Try partial match
-            for audio_file in last_n_dir.glob("*.wav"):
-                if segment_id in audio_file.name:
-                    console.print(f"[success]Audio found on disk (partial match): {audio_file}[/]")
-                    
-                    # ✅ Use utility for file duration
-                    duration_sec = get_audio_duration(str(audio_file))
-                    
-                    return Response(
-                        content=audio_file.read_bytes(),
-                        media_type="audio/wav",
-                        headers={
-                            "Content-Disposition": f"inline; filename={audio_file.name}",
-                            "X-Segment-ID": segment_id,
-                            "X-Audio-Source": "disk_partial_match",
-                            "X-Audio-Duration": str(round(duration_sec, 3)),
-                        }
-                    )
-    except Exception as e:
-        console.print(f"[warning]Error checking disk for audio: {e}[/]")
+            if start >= file_size:
+                raise HTTPException(status_code=416, detail="Range not satisfiable")
+            
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+            
+            console.print(
+                f"[info]Serving audio range: bytes {start}-{end}/{file_size} "
+                f"({chunk_size} bytes)[/]"
+            )
+        except (ValueError, IndexError) as e:
+            console.print(f"[warning]Invalid Range header: {range_header} - {e}[/]")
+            # Fall through to default initial chunk
+            start = 0
+            end = min(INITIAL_BUFFER - 1, file_size - 1)
+            chunk_size = end - start + 1
+    else:
+        # ✅ CRITICAL: No Range header → serve initial chunk as 206
+        # This is the same behavior as demo1's parse_range_header
+        # The browser needs this to know the total file size
+        start = 0
+        end = min(INITIAL_BUFFER - 1, file_size - 1)
+        chunk_size = end - start + 1
+        console.print(
+            f"[info]No Range header → serving initial chunk: "
+            f"bytes {start}-{end}/{file_size} ({chunk_size} bytes)[/]"
+        )
     
-    console.print(f"[error]No audio found for segment: {segment_id}[/]")
-    raise HTTPException(status_code=404, detail="No audio data found")
+    # ✅ ALWAYS return 206 Partial Content
+    def file_iterator(file_path, start_byte, end_byte):
+        with open(file_path, "rb") as f:
+            f.seek(start_byte)
+            remaining = end_byte - start_byte + 1
+            while remaining > 0:
+                read_size = min(8192, remaining)
+                data = f.read(read_size)
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+    
+    headers = {
+        "Content-Range": f"bytes {start}-{end}/{file_size}",
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(chunk_size),
+        "Content-Type": "audio/wav",
+        "Content-Disposition": f"inline; filename={segment_id}.wav",
+        "X-Segment-ID": segment_id,
+        "X-Audio-Source": audio_source,
+        "X-Audio-Duration": str(round(duration_sec, 3)),
+        "Cache-Control": "public, max-age=3600",
+        "X-Accel-Buffering": "no",  # ✅ Like demo1 - disable proxy buffering
+    }
+    
+    console.print(
+        f"[success]Serving 206: bytes {start}-{end}/{file_size} "
+        f"({chunk_size} bytes, source={audio_source})[/]"
+    )
+    
+    return StreamingResponse(
+        file_iterator(audio_path, start, end),
+        status_code=206,  # ✅ ALWAYS 206
+        headers=headers,
+        media_type="audio/wav",
+    )
+
+
+@router.head("/segment/{segment_id}/audio")
+async def get_segment_audio_head(segment_id: str, request: Request):
+    """
+    HEAD request returns headers only (duration, size, type).
+    Allows browser to probe audio availability without downloading the file.
+    
+    The browser may send HEAD before GET to check:
+    - Whether the resource exists (404 check)
+    - Content-Type for proper handling
+    - Content-Length for download progress calculation
+    - Accept-Ranges to know if seeking is supported
+    """
+    from fastapi.responses import Response
+    
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    
+    console.print(f"[info]HEAD request for segment audio: {segment_id}[/]")
+    
+    audio_path = None
+    audio_source = "unknown"
+    
+    # === APPROACH 1: Check permanent segment audio directory ===
+    try:
+        from services.config import SEGMENT_AUDIO_DIR
+        if SEGMENT_AUDIO_DIR and SEGMENT_AUDIO_DIR.exists():
+            candidate = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
+            if candidate.exists():
+                audio_path = candidate
+                audio_source = "permanent_storage"
+                console.print(f"[dim]HEAD: Audio found in permanent storage: {audio_path}[/]")
+    except Exception as e:
+        console.print(f"[dim]HEAD: Error checking permanent storage: {e}[/]")
+    
+    # === APPROACH 2: Check context buffer (fallback) ===
+    if not audio_path:
+        try:
+            context_buffer = get_context_buffer()
+            if context_buffer and hasattr(context_buffer, 'segments'):
+                for segment_audio, metadata in context_buffer.segments:
+                    meta_segment_id = metadata.get('segment_id', '')
+                    if meta_segment_id == segment_id:
+                        import wave
+                        import tempfile
+                        
+                        # Convert audio to numpy array
+                        if isinstance(segment_audio, torch.Tensor):
+                            audio_np = segment_audio.detach().cpu().numpy()
+                        elif isinstance(segment_audio, np.ndarray):
+                            audio_np = segment_audio
+                        else:
+                            audio_np = np.array(segment_audio, dtype=np.float32)
+                        
+                        # Ensure 1D array
+                        if audio_np.ndim > 1:
+                            audio_np = audio_np.flatten()
+                        
+                        # Convert float [-1,1] to int16 PCM
+                        audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+                        
+                        # Write to temp file
+                        tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+                        with wave.open(tmp.name, 'wb') as wf:
+                            wf.setnchannels(1)
+                            wf.setsampwidth(2)
+                            wf.setframerate(SAMPLE_RATE)
+                            wf.writeframes(audio_int16.tobytes())
+                        
+                        audio_path = Path(tmp.name)
+                        audio_source = "context_buffer"
+                        console.print(f"[dim]HEAD: Audio created from context buffer: {len(audio_int16)} samples[/]")
+                        break
+        except Exception as e:
+            console.print(f"[dim]HEAD: Error creating audio from context buffer: {e}[/]")
+    
+    # === APPROACH 3: Check disk fallback ===
+    if not audio_path:
+        try:
+            last_n_dir = get_last_n_segments_dir()
+            if last_n_dir and last_n_dir.exists():
+                candidate = last_n_dir / f"{segment_id}.wav"
+                if candidate.exists():
+                    audio_path = candidate
+                    audio_source = "disk"
+                    console.print(f"[dim]HEAD: Audio found on disk: {audio_path}[/]")
+                else:
+                    # Try partial match
+                    for f in last_n_dir.glob("*.wav"):
+                        if segment_id in f.name:
+                            audio_path = f
+                            audio_source = "disk_partial_match"
+                            console.print(f"[dim]HEAD: Audio found on disk (partial): {audio_path}[/]")
+                            break
+        except Exception as e:
+            console.print(f"[dim]HEAD: Error checking disk: {e}[/]")
+    
+    if not audio_path or not audio_path.exists():
+        console.print(f"[warning]HEAD: No audio found for segment: {segment_id}[/]")
+        raise HTTPException(status_code=404, detail="No audio data found")
+    
+    # === Serve HEAD response (headers only, no body) ===
+    file_size = audio_path.stat().st_size
+    duration_sec = get_audio_duration(str(audio_path))
+    
+    console.print(
+        f"[dim]HEAD: Returning metadata for {segment_id}: "
+        f"size={file_size} bytes, duration={duration_sec:.3f}s, "
+        f"source={audio_source}[/]"
+    )
+    
+    headers = {
+        "Content-Length": str(file_size),
+        "Accept-Ranges": "bytes",
+        "Content-Type": "audio/wav",
+        "Content-Disposition": f"inline; filename={segment_id}.wav",
+        "X-Segment-ID": segment_id,
+        "X-Audio-Source": audio_source,
+        "X-Audio-Duration": str(round(duration_sec, 3)),
+        "Cache-Control": "public, max-age=3600",
+    }
+    
+    # HEAD response: 200 OK with headers, no body
+    return Response(
+        status_code=200,
+        headers=headers,
+    )
 
 
 @router.get("/segment/{segment_id}", response_class=HTMLResponse)
 async def get_segment_detail_page(request: Request, segment_id: str):
     """
     Serve a detailed page for a specific segment with play/download audio buttons.
+    Uses reusable audio_player.html template with Howler.js for robust streaming.
     """
     labeler = get_speaker_labeler()
     if not labeler:
@@ -994,6 +1173,8 @@ async def get_segment_detail_page(request: Request, segment_id: str):
                 "segment_id": segment_id,
                 "found": False,
                 "timestamp": datetime.now().isoformat(),
+                "has_audio": False,
+                "audio_api_base": "/speakers/segment",
             })
             return HTMLResponse(content=html_content, status_code=404)
         except Exception:
@@ -1066,7 +1247,7 @@ async def get_segment_detail_page(request: Request, segment_id: str):
         f"timestamp={segment_info['timestamp']:.2f}s, "
         f"duration={segment_info['segment_duration']:.3f}s, "
         f"audio={'yes' if has_audio else 'no'} ({audio_source}), "
-        f"audio_duration={audio_duration:.3f}s[/]"  # ✅ Log both
+        f"audio_duration={audio_duration:.3f}s[/]"
     )
     
     try:
@@ -1089,6 +1270,8 @@ async def get_segment_detail_page(request: Request, segment_id: str):
             "audio_source": audio_source,
             "audio_sample_rate": audio_sample_rate,
             "audio_duration": audio_duration,  # Raw waveform duration for playback info
+            # ✅ NEW: Pass API base URL so the reusable audio_player.html knows where to fetch audio
+            "audio_api_base": "/speakers/segment",
         })
         console.print(f"[success]Segment detail page rendered for {segment_id}[/]")
         return HTMLResponse(content=html_content)

@@ -93,8 +93,16 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp10.py",
    #  r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_audio_tagger.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\config.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_config.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\segment_detail.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\state.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_metrics_mixin.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo1\player.html",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo1\main.py",
     r"",
 ]
 
@@ -118,113 +126,344 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix
+Analyze carefully why demo1 works and audio player in segment detail does not.
 
-python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_audio_tagger.py
-╭─── AudioTagger Configuration ────╮
-│ AudioTagger Initialized          │
-│ Model: model.onnx                │
-│ Labels: class_labels_indices.csv │
-│ Speech Threshold: 0.5            │
-│ Speech Top N: 3                  │
-│ Chunk Duration: 1.0s             │
-│ Chunk Overlap: 0.5s              │
-│ Min Chunk Duration: 0.5s         │
-╰──────────────────────────────────╯
+Now refactor segment_detail.html to move out all audio player logic on a separate audio_player.html. Use include.
 
-Analyzing audio: sound.wav
+Then also implement with howler.
 
-╭─ Speech Extraction ─╮
-│ extract_speech_only │
-│ edges_only=False    │
-│ prob_threshold=0.5  │
-╰─────────────────────╯
-📊 Audio loaded: 5.94s, 16000Hz, 95040 samples
-📊 Audio loaded: 5.94s, 16000Hz, 95040 samples
-🔧 Chunk config: 1.0s chunks, 0.5s overlap, hop=8000 samples
-📏 Calculated 11 chunk positions
-🔍 Processing chunk 1/11: 0.00s - 1.00s
-   ✅ Tagged successfully: 5 predictions
-   🔇 No speech detected (speech_prob=0.0882)
-🔍 Processing chunk 2/11: 0.50s - 1.50s
-   ✅ Tagged successfully: 5 predictions
-   🔇 No speech detected (speech_prob=0.2187)
-🔍 Processing chunk 3/11: 1.00s - 2.00s
-   ✅ Tagged successfully: 5 predictions
-   🔇 No speech detected (speech_prob=0.0953)
-🔍 Processing chunk 4/11: 1.50s - 2.50s
-   ✅ Tagged successfully: 5 predictions
-   🔇 No speech detected (speech_prob=0.0000)
-🔍 Processing chunk 5/11: 2.00s - 3.00s
-   ✅ Tagged successfully: 5 predictions
-   🎤 Speech detected! speech_prob=0.8202
-🔍 Processing chunk 6/11: 2.50s - 3.50s
-   ✅ Tagged successfully: 5 predictions
-   🎤 Speech detected! speech_prob=0.8922
-🔍 Processing chunk 7/11: 3.00s - 4.00s
-   ✅ Tagged successfully: 5 predictions
-   🎤 Speech detected! speech_prob=0.9941
-🔍 Processing chunk 8/11: 3.50s - 4.50s
-   ✅ Tagged successfully: 5 predictions
-   🎤 Speech detected! speech_prob=0.9548
-🔍 Processing chunk 9/11: 4.00s - 5.00s
-   ✅ Tagged successfully: 5 predictions
-   🎤 Speech detected! speech_prob=0.9551
-🔍 Processing chunk 10/11: 4.50s - 5.50s
-   ✅ Tagged successfully: 5 predictions
-   🎤 Speech detected! speech_prob=0.5206
-🔍 Processing chunk 11/11: 5.00s - 5.94s
-   ✅ Tagged successfully: 5 predictions
-   🎤 Speech detected! speech_prob=0.8810
-📊 Avg speech probability: 0.8597 (from 7 speech chunks)
-⏱ Total processing: 1.82s, RTF: 0.306x
-🎤 Found 1 speech segment(s):
-   Segment 1: 2.000s - 5.940s (duration: 3.940s)
-✅ Speech extracted: 3.94s (removed 33.7% of audio)
-╭─────────────────────────────── Traceback (most recent call last) ────────────────────────────────╮
-│ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_ser │
-│ ver2_with_en\services\test_audio_tagger.py:54 in <module>                                        │
-│                                                                                                  │
-│    51                                                                                            │
-│    52 filtered_speech_only_audio = tagger.extract_speech_only(audio_path)                        │
-│    53 filtered_audio_path = output_dir_param / "filtered_speech_audio.wav"                       │
-│ ❱  54 sf.write(str(filtered_audio_path), filtered_speech_only_audio, tagger.sample_rate)         │
-│    55 console.print(f"[green]💾 Filtered speech audio saved to: {linkify(str(filtered_audio_pa   │
-│    56 # ───────────────────────────────────────                                                  │
-│    57                                                                                            │
-│                                                                                                  │
-│ ╭─────────────────────────────────────────── locals ───────────────────────────────────────────╮ │
-│ │                   argparse = <module 'argparse' from                                         │ │
-│ │                              'C:\\Users\\druiv\\.pyenv\\pyenv-win\\versions\\3.12.10\\Lib\\… │ │
-│ │                       args = Namespace(audio_path='C:\\Users\\druiv\\Desktop\\Jet_Files\\Je… │ │
-│ │                              model_path='C:\\Users\\druiv\\.cache\\pretrained_models\\sherp… │ │
-│ │                              labels_path='C:\\Users\\druiv\\.cache\\pretrained_models\\sher… │ │
-│ │                              top_k=5, num_threads=1, provider='cpu', debug=False,            │ │
-│ │                              speech_threshold=0.5, speech_top_n=3,                           │ │
-│ │                              output_dir='C:\\Users\\druiv\\Desktop\\Jet_Files\\Jet_Windows_… │ │
-│ │                              check_speech=False, save_summary=False, chunk=False,            │ │
-│ │                              chunk_duration=1.0, chunk_overlap=0.5, display_threshold=0.3)   │ │
-│ │                 audio_path = 'C:\\Users\\druiv\\Desktop\\Jet_Files\\Jet_Windows_Workspace\\… │ │
-│ │        AUDIO_TAGGING_MODEL = WindowsPath('C:/Users/druiv/.cache/pretrained_models/sherpa-on… │ │
-│ │   CLASS_LABELS_INDICES_CSV = WindowsPath('C:/Users/druiv/.cache/pretrained_models/sherpa-on… │ │
-│ │                    console = <console width=120 ColorSystem.TRUECOLOR>                       │ │
-│ │        filtered_audio_path = WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Work… │ │
-│ │ filtered_speech_only_audio = array([-0.13855316, -0.04555886,  0.08118675, ..., -0.01847396, │ │
-│ │                              │      -0.03038125, -0.02694323], dtype=float32)                │ │
-│ │                       json = <module 'json' from                                             │ │
-│ │                              'C:\\Users\\druiv\\.pyenv\\pyenv-win\\versions\\3.12.10\\Lib\\… │ │
-│ │                 OUTPUT_DIR = WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Work… │ │
-│ │           output_dir_param = WindowsPath('C:/Users/druiv/Desktop/Jet_Files/Jet_Windows_Work… │ │
-│ │                         sf = <module 'soundfile' from                                        │ │
-│ │                              'C:\\Users\\druiv\\.cache\\venv\\servers\\jet_venv\\Lib\\site-… │ │
-│ │                     shutil = <module 'shutil' from                                           │ │
-│ │                              'C:\\Users\\druiv\\.pyenv\\pyenv-win\\versions\\3.12.10\\Lib\\… │ │
-│ │                     tagger = <audio_tagger.AudioTagger object at 0x0000021912523E30>         │ │
-│ │                       time = <module 'time' (built-in)>                                      │ │
-│ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-AttributeError: 'AudioTagger' object has no attribute 'sample_rate'
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
+
+# "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py
+
+@router.get("/segment/{segment_id}/audio")
+async def get_segment_audio(segment_id: str, request: Request):
+    \"\"\"
+    Get the audio data for a specific segment (for playback/download).
+    Supports HTTP Range requests for proper streaming/seeking.
+    \"\"\"
+    from fastapi.responses import Response, StreamingResponse
+    import os
+    
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    
+    console.print(f"[info]Fetching audio for segment: {segment_id}[/]")
+    
+    audio_path = None
+    audio_source = "unknown"
+    
+    # === APPROACH 1: Check permanent segment audio directory ===
+    try:
+        from services.config import SEGMENT_AUDIO_DIR
+        if SEGMENT_AUDIO_DIR and SEGMENT_AUDIO_DIR.exists():
+            candidate = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
+            if candidate.exists():
+                audio_path = candidate
+                audio_source = "permanent_storage"
+                console.print(f"[success]Audio found in permanent storage: {audio_path}[/]")
+    except Exception as e:
+        console.print(f"[warning]Error checking permanent storage: {e}[/]")
+    
+    # === APPROACH 2: Check context buffer (fallback) ===
+    if not audio_path:
+        try:
+            context_buffer = get_context_buffer()
+            if context_buffer and hasattr(context_buffer, 'segments'):
+                for segment_audio, metadata in context_buffer.segments:
+                    meta_segment_id = metadata.get('segment_id', '')
+                    if meta_segment_id == segment_id:
+                        import io
+                        import wave
+                        import tempfile
+                        
+                        # Convert audio to numpy array
+                        if isinstance(segment_audio, torch.Tensor):
+                            audio_np = segment_audio.detach().cpu().numpy()
+                        elif isinstance(segment_audio, np.ndarray):
+                            audio_np = segment_audio
+                        else:
+                            audio_np = np.array(segment_audio, dtype=np.float32)
+                        
+                        # Ensure 1D array
+                        if audio_np.ndim > 1:
+                            audio_np = audio_np.flatten()
+                        
+                        # Convert float [-1,1] to int16 PCM
+                        audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
+                        
+                        # Write to temp file for streaming
+                        import tempfile
+                        tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+                        with wave.open(tmp.name, 'wb') as wf:
+                            wf.setnchannels(1)
+                            wf.setsampwidth(2)
+                            wf.setframerate(SAMPLE_RATE)
+                            wf.writeframes(audio_int16.tobytes())
+                        
+                        audio_path = Path(tmp.name)
+                        audio_source = "context_buffer"
+                        console.print(f"[success]Audio created from context buffer: {len(audio_int16)} samples[/]")
+                        break
+        except Exception as e:
+            console.print(f"[warning]Error creating audio from context buffer: {e}[/]")
+    
+    # === APPROACH 3: Check disk fallback ===
+    if not audio_path:
+        try:
+            last_n_dir = get_last_n_segments_dir()
+            if last_n_dir and last_n_dir.exists():
+                candidate = last_n_dir / f"{segment_id}.wav"
+                if candidate.exists():
+                    audio_path = candidate
+                    audio_source = "disk"
+                    console.print(f"[success]Audio found on disk: {audio_path}[/]")
+                else:
+                    # Try partial match
+                    for f in last_n_dir.glob("*.wav"):
+                        if segment_id in f.name:
+                            audio_path = f
+                            audio_source = "disk_partial_match"
+                            console.print(f"[success]Audio found on disk (partial): {audio_path}[/]")
+                            break
+        except Exception as e:
+            console.print(f"[warning]Error checking disk: {e}[/]")
+    
+    if not audio_path or not audio_path.exists():
+        console.print(f"[error]No audio found for segment: {segment_id}[/]")
+        raise HTTPException(status_code=404, detail="No audio data found")
+    
+    # === Serve with Range request support ===
+    file_size = audio_path.stat().st_size
+    duration_sec = get_audio_duration(str(audio_path))
+    
+    # Parse Range header
+    range_header = request.headers.get("range")
+    
+    if range_header:
+        # Handle partial content request
+        try:
+            range_value = range_header.replace("bytes=", "")
+            start_str, end_str = range_value.split("-")
+            start = int(start_str) if start_str else 0
+            end = int(end_str) if end_str else file_size - 1
+            
+            if start >= file_size:
+                raise HTTPException(
+                    status_code=416,
+                    detail="Range not satisfiable"
+                )
+            
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+            
+            console.print(
+                f"[info]Serving audio range: bytes {start}-{end}/{file_size} "
+                f"({chunk_size} bytes)[/]"
+            )
+            
+            # Read only the requested chunk
+            def file_iterator(file_path, start_byte, end_byte):
+                with open(file_path, "rb") as f:
+                    f.seek(start_byte)
+                    remaining = end_byte - start_byte + 1
+                    chunk_size = min(8192, remaining)
+                    while remaining > 0:
+                        data = f.read(min(chunk_size, remaining))
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            
+            headers = {
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(chunk_size),
+                "Content-Type": "audio/wav",
+                "Content-Disposition": f"inline; filename={segment_id}.wav",
+                "X-Segment-ID": segment_id,
+                "X-Audio-Source": audio_source,
+                "X-Audio-Duration": str(round(duration_sec, 3)),
+                "Cache-Control": "public, max-age=3600",
+            }
+            
+            return StreamingResponse(
+                file_iterator(audio_path, start, end),
+                status_code=206,  # Partial Content
+                headers=headers,
+                media_type="audio/wav",
+            )
+            
+        except (ValueError, IndexError) as e:
+            console.print(f"[warning]Invalid Range header: {range_header} - {e}[/]")
+            # Fall through to serve full file
+    
+    # Full file response with proper headers
+    console.print(f"[info]Serving full audio file: {file_size} bytes[/]")
+    
+    headers = {
+        "Content-Length": str(file_size),
+        "Accept-Ranges": "bytes",
+        "Content-Type": "audio/wav",
+        "Content-Disposition": f"inline; filename={segment_id}.wav",
+        "X-Segment-ID": segment_id,
+        "X-Audio-Source": audio_source,
+        "X-Audio-Duration": str(round(duration_sec, 3)),
+        "Cache-Control": "public, max-age=3600",
+    }
+    
+    # Use streaming for consistent behavior
+    def full_file_iterator(file_path):
+        with open(file_path, "rb") as f:
+            while chunk := f.read(8192):
+                yield chunk
+    
+    return StreamingResponse(
+        full_file_iterator(audio_path),
+        status_code=200,
+        headers=headers,
+        media_type="audio/wav",
+    )
+
+
+@router.get("/segment/{segment_id}", response_class=HTMLResponse)
+async def get_segment_detail_page(request: Request, segment_id: str):
+    \"\"\"
+    Serve a detailed page for a specific segment with play/download audio buttons.
+    \"\"\"
+    labeler = get_speaker_labeler()
+    if not labeler:
+        raise HTTPException(
+            status_code=400,
+            detail="Speaker labeler not initialized. Process some audio segments first."
+        )
+    
+    console.print(f"[info]Rendering segment detail page for: {segment_id}[/]")
+    
+    if not hasattr(labeler, 'get_segment_detail'):
+        raise HTTPException(
+            status_code=500,
+            detail="Segment detail not available. Update speaker_metrics_mixin."
+        )
+    
+    segment_info = labeler.get_segment_detail(segment_id)
+    if segment_info is None:
+        console.print(f"[warning]Segment not found: {segment_id}[/]")
+        try:
+            html_content = render_template("segment_detail.html", {
+                "title": f"Segment: {segment_id}",
+                "segment_id": segment_id,
+                "found": False,
+                "timestamp": datetime.now().isoformat(),
+            })
+            return HTMLResponse(content=html_content, status_code=404)
+        except Exception:
+            return HTMLResponse(
+                content=_fallback_html(
+                    f"Segment: {segment_id}",
+                    f"Segment '{segment_id}' not found in any speaker's data.",
+                    [("📊 Metrics", "/speakers/metrics"), ("🏠 Dashboard", "/speakers/dashboard")],
+                ),
+                status_code=404,
+            )
+    
+    # Check audio availability (permanent storage first, then context buffer, then disk)
+    has_audio = False
+    audio_source = ""
+    audio_duration = segment_info.get("segment_duration", 0.0)
+    audio_sample_rate = SAMPLE_RATE
+    
+    # === Check permanent storage ===
+    try:
+        from services.config import SEGMENT_AUDIO_DIR
+        if SEGMENT_AUDIO_DIR and SEGMENT_AUDIO_DIR.exists():
+            audio_path = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
+            if audio_path.exists():
+                has_audio = True
+                audio_source = "permanent_storage"
+                # ✅ Use utility for file duration
+                disk_duration = get_audio_duration(str(audio_path))
+                if audio_duration <= 0.0 or disk_duration > 0:
+                    audio_duration = disk_duration
+                console.print(f"[dim]Audio found in permanent storage: {audio_path} ({disk_duration:.3f}s)[/]")
+    except Exception as e:
+        console.print(f"[dim]Error checking permanent storage: {e}[/]")
+    
+    # === Check context buffer ===
+    if not has_audio:
+        try:
+            context_buffer = get_context_buffer()
+            if context_buffer and hasattr(context_buffer, 'segments'):
+                for segment_audio, metadata in context_buffer.segments:
+                    if metadata.get('segment_id') == segment_id:
+                        has_audio = True
+                        audio_source = "context_buffer"
+                        # ✅ Use utility for duration
+                        raw_duration = get_audio_duration(segment_audio, sr=SAMPLE_RATE) if segment_audio is not None else 0.0
+                        if audio_duration <= 0.0 and raw_duration > 0.0:
+                            audio_duration = raw_duration
+                        break
+        except Exception as e:
+            console.print(f"[dim]Could not check audio availability: {e}[/]")
+    
+    # === Check disk fallback ===
+    if not has_audio:
+        try:
+            last_n_dir = get_last_n_segments_dir()
+            if last_n_dir and last_n_dir.exists():
+                audio_path = last_n_dir / f"{segment_id}.wav"
+                if audio_path.exists():
+                    has_audio = True
+                    audio_source = "disk"
+                    # ✅ Use utility for file duration
+                    disk_duration = get_audio_duration(str(audio_path))
+                    if audio_duration <= 0.0:
+                        audio_duration = disk_duration
+        except Exception:
+            pass
+
+    console.print(
+        f"[info]Segment detail: speaker={segment_info['speaker_label']}, "
+        f"timestamp={segment_info['timestamp']:.2f}s, "
+        f"duration={segment_info['segment_duration']:.3f}s, "
+        f"audio={'yes' if has_audio else 'no'} ({audio_source}), "
+        f"audio_duration={audio_duration:.3f}s[/]"  # ✅ Log both
+    )
+    
+    try:
+        html_content = render_template("segment_detail.html", {
+            "title": f"Segment: {segment_id}",
+            "segment_id": segment_id,
+            "found": True,
+            "speaker_label": segment_info["speaker_label"],
+            "timestamp": datetime.now().isoformat(),
+            "segment_timestamp": segment_info["timestamp"],
+            "segment_duration": segment_info["segment_duration"],  # Metadata duration (speech-filtered)
+            "embedding_index": segment_info["embedding_index"],
+            "embedding_dim": segment_info["embedding_dim"],
+            "speaker_segment_count": segment_info["speaker_segment_count"],
+            "speaker_first_seen": segment_info["speaker_first_seen"],
+            "speaker_last_seen": segment_info["speaker_last_seen"],
+            "speaker_active_duration": segment_info["speaker_active_duration"],
+            "centroid_quality": segment_info["centroid_quality"],
+            "has_audio": has_audio,
+            "audio_source": audio_source,
+            "audio_sample_rate": audio_sample_rate,
+            "audio_duration": audio_duration,  # Raw waveform duration for playback info
+        })
+        console.print(f"[success]Segment detail page rendered for {segment_id}[/]")
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        console.print(f"[error]Failed to render segment detail: {e}[/]")
+        return HTMLResponse(
+            content=_fallback_html(
+                f"Segment: {segment_id}",
+                str(e),
+                [("📊 Metrics", "/speakers/metrics"), ("🏠 Dashboard", "/speakers/dashboard")],
+            ),
+            status_code=200,
+        )
+
 """
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
