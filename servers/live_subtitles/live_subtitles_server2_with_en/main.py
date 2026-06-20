@@ -1,4 +1,3 @@
-# servers\live_subtitles\live_subtitles_server2_with_en\main.py
 """
 Live Japanese Subtitles Server 2 - Main Application Entry Point.
 Refactored with separate route files for better maintainability.
@@ -19,11 +18,13 @@ from core.state import (
 from services.live_subtitles_server_utils import load_segment_counter
 from routes.websocket import websocket_endpoint
 from routes.speakers import router as speakers_router
+from routes.segments import router as segments_router
 from routes.transcribe import router as transcribe_router
 from routes.translate import router as translate_router
 from routes.tagger import router as tagger_router
 from routes.global_reset import router as global_reset_router
 
+# Custom theme for rich console output
 console = Console(
     theme=Theme(
         {
@@ -40,28 +41,24 @@ console = Console(
     )
 )
 
-# Configure logging
+# Configure logging with Rich handler
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
+    datefmt="[%X]",
     handlers=[RichHandler(console=console, rich_tracebacks=True)]
 )
-logger = logging.getLogger("live_subtitles")
+logger = logging.getLogger("live_subtitles_server")
 
-# Create FastAPI app
 app = FastAPI(title="Live Japanese Subtitles Server 2")
 
-# ===== Configure Static File Serving =====
-# Get the directory where main.py is located
 BASE_DIR = Path(__file__).resolve().parent
-
-# Mount static files directory
 static_dir = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-# ===== WebSocket and API Routes =====
 app.add_api_websocket_route("/ws/live-subtitles", websocket_endpoint)
 app.include_router(speakers_router)
+app.include_router(segments_router)
 app.include_router(transcribe_router)
 app.include_router(translate_router)
 app.include_router(tagger_router)
@@ -227,6 +224,15 @@ if __name__ == "__main__":
     logger.info("   GET  /speakers/plots")
     logger.info("   GET  /speakers/plot/{plot_name}")
     logger.info("   GET  /speakers/data/export")
+    logger.info("")
+    logger.info("📁 Segment endpoints:")
+    logger.info("   GET  /segments [HTML]")
+    logger.info("   GET  /segments/audio/{segment_id}")
+    logger.info("   HEAD /segments/audio/{segment_id}")
+    logger.info("   GET  /segments/audio/{segment_id}/info")
+    logger.info("   GET  /segments/tracks")
+    logger.info("   GET  /segments/audio/{segment_id}/download")
+    logger.info("   GET  /segments/segment/{segment_id} [HTML]")
     logger.info("")
     logger.info("🎵 Audio Tagging endpoints:")
     logger.info("   GET  /tags [HTML]")

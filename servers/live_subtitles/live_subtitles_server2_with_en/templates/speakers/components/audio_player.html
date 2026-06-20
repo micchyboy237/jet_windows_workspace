@@ -1,1293 +1,390 @@
-<!-- templates/speakers/audio_player.html -->
+<!-- templates/speakers/components/audio_player.html -->
 <!--
-  Reusable Audio Player Component
-  ================================
-  Extracted from segment_detail.html for reuse across pages.
-  Uses Howler.js with html5:true for native range-request streaming.
+  Progressive Audio Player Component
+  ==================================
+  Strategy: Native <audio> element with 206 Partial Content backend
+  - Browser handles Range requests automatically during seek
+  - No Howler.js or Web Audio API needed
+  - Works with demo4's proven progressive streaming approach
   
-  DESIGN PRINCIPLE: Never block the user.
-  - Play button is always visible (subtle pulse when loading)
-  - Seek bar is always interactive
-  - Status bar replaces blocking spinner overlays
-  - Browser's native <audio> handles all buffering via Range requests
-  
-  Expected template variables:
-    segment_id       - Unique segment identifier
-    has_audio        - Boolean: whether audio data exists
-    audio_duration   - Duration in seconds (float)
-    audio_sample_rate - Sample rate in Hz
-    audio_source     - Source label (permanent_storage, context_buffer, disk)
-    audio_api_base   - Base URL for audio endpoint (e.g., "/speakers/segment")
+  Expected context variables:
+  - has_audio: bool
+  - segment_id: str
+  - audio_api_base: str (e.g., "/speakers/segment" or "/segments")
+  - audio_source: str (e.g., "permanent_storage", "context_buffer", "disk")
+  - audio_duration: float (seconds)
+  - audio_sample_rate: int (Hz)
+  - segment_duration: float (seconds, metadata duration)
 -->
-<style>
-  /* ═══════════════════════════════════════════════════════════
-     CSS Custom Properties (inherit from parent or define)
-     ═══════════════════════════════════════════════════════════ */
-  :root {
-    --ap-bg: #ffffff;
-    --ap-surface: #f5f6f8;
-    --ap-text: #0f1825;
-    --ap-text-secondary: #5a6270;
-    --ap-text-tertiary: #8b919d;
-    --ap-border: #e3e6ec;
-    --ap-accent: #3b82f6;
-    --ap-accent-hover: #2563eb;
-    --ap-success: #1d9e75;
-    --ap-success-hover: #168a63;
-    --ap-warning: #ef9f27;
-    --ap-error: #e24b4a;
-    --ap-radius-md: 10px;
-    --ap-radius-pill: 99px;
-    --ap-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  }
 
-  /* ═══════════════════════════════════════════════════════════
-     Audio Section Container
-     ═══════════════════════════════════════════════════════════ */
-  .audio-section {
-    margin-top: 0;
-    font-family: var(--ap-font);
-    color: var(--ap-text);
-  }
-
-  .audio-section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 0.75rem;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .audio-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--ap-text);
-  }
-
-  .audio-source-badge {
-    font-size: 10px;
-    font-weight: 500;
-    padding: 3px 10px;
-    border-radius: var(--ap-radius-pill);
-    background: var(--ap-surface);
-    color: var(--ap-text-secondary);
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    white-space: nowrap;
-    letter-spacing: 0.02em;
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Audio Info Row
-     ═══════════════════════════════════════════════════════════ */
-  .audio-info-row {
-    display: flex;
-    gap: 14px;
-    flex-wrap: wrap;
-    font-size: 11px;
-    color: var(--ap-text-secondary);
-    margin-bottom: 0.75rem;
-    padding: 8px 12px;
-    background: var(--ap-surface);
-    border-radius: var(--ap-radius-md);
-  }
-
-  .audio-info-item {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .audio-info-item .info-icon {
-    font-size: 13px;
-    flex-shrink: 0;
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Player Wrapper
-     ═══════════════════════════════════════════════════════════ */
-  .audio-player-wrapper {
-    background: var(--ap-surface);
-    border-radius: var(--ap-radius-md);
-    padding: 1rem 1rem 0.75rem;
-    margin-bottom: 0.5rem;
-    position: relative;
-    transition: box-shadow 0.2s ease;
-  }
-
-  .audio-player-wrapper:focus-within {
-    box-shadow: 0 0 0 2px var(--ap-accent);
-    outline: none;
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Visualizer Bars
-     ═══════════════════════════════════════════════════════════ */
-  .player-visualizer {
-    height: 44px;
-    display: flex;
-    align-items: flex-end;
-    gap: 2px;
-    margin-bottom: 0.75rem;
-    padding: 0 2px;
-  }
-
-  .vis-bar {
-    flex: 1;
-    border-radius: 2px;
-    background: var(--ap-border);
-    transition:
-      background 0.25s ease,
-      opacity 0.3s ease;
-    min-height: 4px;
-  }
-
-  .vis-bar.played {
-    background: var(--ap-accent);
-    box-shadow: 0 0 4px rgba(59, 130, 246, 0.3);
-  }
-
-  .vis-bar.buffered {
-    background: rgba(59, 130, 246, 0.25);
-  }
-
-  /* Subtle loading animation on bars */
-  .player-visualizer.loading .vis-bar {
-    animation: vis-load 1.4s ease-in-out infinite;
-    animation-delay: calc(var(--i, 0) * 0.04s);
-  }
-
-  @keyframes vis-load {
-    0%,
-    100% {
-      opacity: 0.15;
-      transform: scaleY(0.3);
-    }
-    50% {
-      opacity: 0.5;
-      transform: scaleY(1);
-    }
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Progress Bar
-     ═══════════════════════════════════════════════════════════ */
-  .progress-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 0.6rem;
-  }
-
-  .time-current,
-  .time-duration {
-    font-size: 11px;
-    color: var(--ap-text-secondary);
-    font-variant-numeric: tabular-nums;
-    min-width: 38px;
-    user-select: none;
-  }
-
-  .time-current {
-    text-align: right;
-  }
-
-  .time-duration {
-    text-align: left;
-  }
-
-  .prog-track {
-    flex: 1;
-    height: 22px;
-    position: relative;
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .prog-rail {
-    position: absolute;
-    left: 0;
-    right: 0;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--ap-border);
-    transition: height 0.15s ease;
-  }
-
-  .prog-track:hover .prog-rail,
-  .prog-track:active .prog-rail {
-    height: 6px;
-  }
-
-  .prog-buffer {
-    position: absolute;
-    left: 0;
-    top: 0;
-    height: 100%;
-    background: rgba(59, 130, 246, 0.22);
-    border-radius: 2px;
-    width: 0%;
-    transition: width 0.4s ease;
-  }
-
-  .prog-fill {
-    position: absolute;
-    left: 0;
-    top: 0;
-    height: 100%;
-    background: linear-gradient(
-      90deg,
-      var(--ap-accent),
-      var(--ap-accent-hover)
-    );
-    border-radius: 2px;
-    width: 0%;
-    transition: width 0.1s linear;
-  }
-
-  .prog-thumb {
-    position: absolute;
-    right: -6px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    background: var(--ap-accent-hover);
-    box-shadow: 0 0 8px rgba(37, 99, 235, 0.5);
-    pointer-events: none;
-    opacity: 0;
-    transition:
-      opacity 0.15s ease,
-      transform 0.1s ease;
-  }
-
-  .prog-track:hover .prog-thumb,
-  .prog-track:active .prog-thumb {
-    opacity: 1;
-    transform: translateY(-50%) scale(1.15);
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Controls
-     ═══════════════════════════════════════════════════════════ */
-  .player-controls {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-  }
-
-  .btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    padding: 7px 14px;
-    border-radius: var(--ap-radius-pill);
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    text-decoration: none;
-    border: 0.5px solid var(--ap-border);
-    background: var(--ap-bg);
-    color: var(--ap-text);
-    white-space: nowrap;
-    transition:
-      background 0.15s ease,
-      color 0.15s ease,
-      transform 0.1s ease,
-      opacity 0.2s ease,
-      box-shadow 0.2s ease;
-    user-select: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .btn:hover {
-    background: #eef0f4;
-  }
-
-  .btn:active {
-    transform: scale(0.96);
-  }
-
-  /* ── Play/Pause Button ── */
-  .btn-play {
-    width: 42px;
-    height: 42px;
-    border-radius: 50%;
-    background: var(--ap-success);
-    color: #fff;
-    border: none;
-    padding: 0;
-    font-size: 17px;
-    flex-shrink: 0;
-    box-shadow: 0 4px 14px rgba(29, 158, 117, 0.35);
-    transition:
-      background 0.2s ease,
-      transform 0.15s ease,
-      box-shadow 0.2s ease;
-  }
-
-  .btn-play:hover {
-    background: var(--ap-success-hover);
-    box-shadow: 0 6px 20px rgba(29, 158, 117, 0.45);
-    transform: scale(1.06);
-  }
-
-  .btn-play:active {
-    transform: scale(0.94);
-  }
-
-  /* Playing state */
-  .btn-play.playing {
-    background: var(--ap-warning);
-    box-shadow: 0 4px 14px rgba(239, 159, 39, 0.35);
-  }
-
-  .btn-play.playing:hover {
-    box-shadow: 0 6px 20px rgba(239, 159, 39, 0.45);
-  }
-
-  /* Disabled/Loading state - subtle pulse instead of blocking */
-  .btn-play:disabled {
-    opacity: 0.55;
-    cursor: default;
-    animation: btn-pulse-loading 1.6s ease-in-out infinite;
-  }
-
-  .btn-play:disabled:hover {
-    transform: none;
-    box-shadow: 0 4px 14px rgba(29, 158, 117, 0.35);
-  }
-
-  @keyframes btn-pulse-loading {
-    0%,
-    100% {
-      box-shadow: 0 4px 14px rgba(29, 158, 117, 0.35);
-    }
-    50% {
-      box-shadow: 0 4px 24px rgba(29, 158, 117, 0.6);
-    }
-  }
-
-  /* ── Transport Buttons ── */
-  .btn-transport {
-    padding: 7px 11px;
-    font-size: 14px;
-    letter-spacing: 0;
-  }
-
-  /* ── Download Button ── */
-  .btn-download {
-    color: var(--ap-accent);
-    border-color: var(--ap-accent);
-    background: var(--ap-bg);
-  }
-
-  .btn-download:hover {
-    background: #eff6ff;
-    border-color: var(--ap-accent-hover);
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Speed Controls
-     ═══════════════════════════════════════════════════════════ */
-  .speed-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-top: 0.6rem;
-  }
-
-  .speed-label {
-    font-size: 10px;
-    font-weight: 500;
-    color: var(--ap-text-tertiary);
-    margin-right: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .speed-btn {
-    padding: 3px 9px;
-    border-radius: var(--ap-radius-pill);
-    font-size: 10px;
-    font-weight: 500;
-    cursor: pointer;
-    background: var(--ap-bg);
-    border: 0.5px solid var(--ap-border);
-    color: var(--ap-text-secondary);
-    transition:
-      background 0.15s ease,
-      color 0.15s ease,
-      border-color 0.15s ease;
-    user-select: none;
-  }
-
-  .speed-btn:hover {
-    background: var(--ap-surface);
-    color: var(--ap-text);
-  }
-
-  .speed-btn.active {
-    background: var(--ap-accent);
-    color: #fff;
-    border-color: var(--ap-accent);
-    font-weight: 600;
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Status Bar (replaces blocking spinner)
-     ═══════════════════════════════════════════════════════════ */
-  .player-status {
-    font-size: 10px;
-    color: var(--ap-text-tertiary);
-    text-align: center;
-    margin-top: 0.6rem;
-    min-height: 16px;
-    transition: color 0.3s ease;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.02em;
-  }
-
-  /* Subtle loading dot animation */
-  .player-status.loading {
-    color: var(--ap-accent);
-  }
-
-  .player-status.loading::before {
-    content: "";
-    display: inline-block;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: var(--ap-accent);
-    margin-right: 6px;
-    vertical-align: middle;
-    animation: status-dot 1.2s ease-in-out infinite;
-  }
-
-  @keyframes status-dot {
-    0%,
-    100% {
-      opacity: 0.3;
-      transform: scale(0.8);
-    }
-    50% {
-      opacity: 1;
-      transform: scale(1.3);
-    }
-  }
-
-  /* Playing state */
-  .player-status.playing {
-    color: var(--ap-success);
-  }
-
-  /* Error state */
-  .player-status.error {
-    color: var(--ap-error);
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Error Display
-     ═══════════════════════════════════════════════════════════ */
-  .player-error {
-    background: #fef2f2;
-    border: 1px solid #fecaca;
-    border-radius: var(--ap-radius-md);
-    padding: 10px 14px;
-    margin-top: 0.5rem;
-    display: none;
-    font-size: 12px;
-    color: var(--ap-error);
-    animation: error-in 0.25s ease;
-  }
-
-  .player-error.show {
-    display: block;
-  }
-
-  @keyframes error-in {
-    from {
-      opacity: 0;
-      transform: translateY(-4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .player-error-title {
-    font-weight: 600;
-    margin-bottom: 4px;
-    font-size: 13px;
-  }
-
-  .player-error-message {
-    color: var(--ap-text-secondary);
-    font-size: 11px;
-    margin-bottom: 6px;
-    line-height: 1.5;
-  }
-
-  .player-error-retry {
-    color: var(--ap-accent);
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 500;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    transition: color 0.15s;
-  }
-
-  .player-error-retry:hover {
-    color: var(--ap-accent-hover);
-    text-decoration: underline;
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     No Audio Message
-     ═══════════════════════════════════════════════════════════ */
-  .no-audio-msg {
-    text-align: center;
-    padding: 2rem 1.5rem;
-    background: var(--ap-surface);
-    border-radius: var(--ap-radius-md);
-    color: var(--ap-text-secondary);
-    line-height: 1.6;
-  }
-
-  .no-audio-icon {
-    font-size: 42px;
-    margin-bottom: 0.75rem;
-    opacity: 0.6;
-  }
-
-  .no-audio-title {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--ap-text);
-    margin-bottom: 0.4rem;
-  }
-
-  .no-audio-desc {
-    font-size: 12px;
-    color: var(--ap-text-tertiary);
-    max-width: 320px;
-    margin: 0 auto;
-  }
-
-  .no-audio-reasons {
-    font-size: 11px;
-    color: var(--ap-text-tertiary);
-    text-align: left;
-    margin: 0.75rem auto 0;
-    max-width: 300px;
-    list-style-position: inside;
-    line-height: 1.8;
-  }
-
-  .no-audio-reasons li::marker {
-    color: var(--ap-border);
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Keyboard Hints
-     ═══════════════════════════════════════════════════════════ */
-  .kb-hint {
-    font-size: 10px;
-    color: var(--ap-text-tertiary);
-    text-align: center;
-    margin-top: 0.5rem;
-    letter-spacing: 0.03em;
-    opacity: 0.7;
-    transition: opacity 0.2s;
-  }
-
-  .audio-player-wrapper:hover ~ .kb-hint,
-  .audio-player-wrapper:focus-within ~ .kb-hint {
-    opacity: 1;
-  }
-
-  /* ═══════════════════════════════════════════════════════════
-     Responsive
-     ═══════════════════════════════════════════════════════════ */
-  @media (max-width: 500px) {
-    .audio-info-row {
-      gap: 8px;
-      font-size: 10px;
-      padding: 6px 10px;
-    }
-
-    .audio-player-wrapper {
-      padding: 0.75rem 0.75rem 0.6rem;
-    }
-
-    .player-controls {
-      flex-direction: row;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 5px;
-    }
-
-    .btn {
-      padding: 6px 11px;
-      font-size: 11px;
-    }
-
-    .btn-play {
-      width: 38px;
-      height: 38px;
-    }
-
-    .speed-row {
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-
-    .progress-row {
-      gap: 5px;
-    }
-
-    .time-current,
-    .time-duration {
-      font-size: 10px;
-      min-width: 32px;
-    }
-  }
-</style>
-
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- Audio Section HTML -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-<div class="audio-section" id="audioSection">
-  <!-- Header -->
-  <div class="audio-section-header">
-    <div class="audio-title">🔊 Audio Playback</div>
-    {% if has_audio %}
-    <span class="audio-source-badge" id="audioSourceBadge">
-      {% if audio_source == "permanent_storage" %} 💾 Permanent {% elif
-      audio_source == "context_buffer" %} 🧠 Buffer {% elif audio_source ==
-      "disk" %} 💿 Disk {% else %} 📁 {{ audio_source }} {% endif %}
-    </span>
-    {% endif %}
-  </div>
-
-  {% if has_audio %}
-
-  <!-- Audio Info -->
-  <div class="audio-info-row">
-    <div class="audio-info-item">
-      <span class="info-icon">⏱️</span>
-      <span>{{ "%.2f"|format(audio_duration) }}s</span>
-    </div>
-    <div class="audio-info-item">
-      <span class="info-icon">🎵</span>
-      <span>{{ audio_sample_rate }}Hz</span>
-    </div>
-    <div class="audio-info-item">
-      <span class="info-icon">📊</span>
-      <span>Mono</span>
-    </div>
-    <div class="audio-info-item">
-      <span class="info-icon">💾</span>
-      <span>WAV 16-bit</span>
-    </div>
-  </div>
-
-  <!-- 
-    Player Container
-    NOTE: No loading overlay! User sees everything immediately.
-    Browser handles buffering via Range requests automatically.
-  -->
+{% if has_audio %}
+<div class="audio-player" style="margin-top: 0">
+  <!-- Player Header -->
   <div
-    class="audio-player-wrapper"
-    id="playerWrapper"
-    tabindex="0"
-    role="region"
-    aria-label="Audio player"
+    style="
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    "
   >
-    <!-- Visualizer Bars -->
-    <div class="player-visualizer loading" id="visualizer" aria-hidden="true">
-      <!-- Generated by JS -->
-    </div>
-
-    <!-- Progress Bar -->
-    <div class="progress-row">
-      <span class="time-current" id="timeCurrent">0:00</span>
+    <div style="display: flex; align-items: center; gap: 8px">
       <div
-        class="prog-track"
-        id="progTrack"
-        role="slider"
-        aria-label="Seek"
-        aria-valuemin="0"
-        aria-valuemax="100"
-        aria-valuenow="0"
+        style="
+          width: 36px;
+          height: 36px;
+          border-radius: 8px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+        "
       >
-        <div class="prog-rail">
-          <div class="prog-buffer" id="progBuffer"></div>
-          <div class="prog-fill" id="progFill">
-            <div class="prog-thumb"></div>
-          </div>
+        🎵
+      </div>
+      <div>
+        <div style="font-size: 14px; font-weight: 600">Audio Playback</div>
+        <div style="font-size: 11px; color: var(--color-text-tertiary)">
+          Source: {{ audio_source | replace('_', ' ') | title }}
         </div>
       </div>
-      <span class="time-duration" id="timeDuration"
-        >{{ "%.2f"|format(audio_duration) if audio_duration else "0:00" }}</span
-      >
     </div>
-
-    <!-- Controls -->
-    <div class="player-controls">
-      <button
-        class="btn btn-transport"
-        id="btnBack10"
-        title="Rewind 10 seconds (←)"
-      >
-        ⏪
-      </button>
-      <button
-        class="btn btn-play"
-        id="btnPlayPause"
-        title="Play / Pause (Space)"
-        disabled
-        aria-label="Play"
-      >
-        ▶
-      </button>
-      <button
-        class="btn btn-transport"
-        id="btnFwd10"
-        title="Forward 10 seconds (→)"
-      >
-        ⏩
-      </button>
-      <button class="btn btn-transport" id="btnStop" title="Stop">⏹</button>
-      <a
-        href="{{ audio_api_base }}/{{ segment_id }}/audio"
-        class="btn btn-download"
-        download="{{ segment_id }}.wav"
-        title="Download audio file"
-      >
-        ⬇ Download
-      </a>
+    <div style="font-size: 11px; color: var(--color-text-tertiary)">
+      {{ "%.1f"|format(audio_duration) }}s · {{ audio_sample_rate }}Hz
     </div>
-
-    <!-- Speed Controls -->
-    <div class="speed-row">
-      <span class="speed-label">Speed</span>
-      <button class="speed-btn" data-speed="0.5" title="0.5x speed">
-        0.5x
-      </button>
-      <button class="speed-btn" data-speed="0.75" title="0.75x speed">
-        0.75x
-      </button>
-      <button class="speed-btn active" data-speed="1.0" title="Normal speed">
-        1x
-      </button>
-      <button class="speed-btn" data-speed="1.25" title="1.25x speed">
-        1.25x
-      </button>
-      <button class="speed-btn" data-speed="1.5" title="1.5x speed">
-        1.5x
-      </button>
-      <button class="speed-btn" data-speed="2.0" title="2x speed">2x</button>
-    </div>
-
-    <!-- Status Bar - subtle, non-blocking -->
-    <div class="player-status loading" id="playerStatus">Loading audio...</div>
   </div>
 
-  <!-- Error Display (hidden by default) -->
-  <div class="player-error" id="playerError" role="alert">
-    <div class="player-error-title">⚠️ Playback Error</div>
-    <div class="player-error-message" id="playerErrorMsg"></div>
-    <span class="player-error-retry" id="playerRetry">🔄 Retry</span>
+  <!-- Controls -->
+  <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap">
+    <button
+      id="playBtn"
+      style="
+        background: var(--color-accent);
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        transition: background 0.2s;
+      "
+      onmouseover="this.style.background = 'var(--color-accent-hover)'"
+      onmouseout="this.style.background = 'var(--color-accent)'"
+    >
+      ▶ Play
+    </button>
+    <button
+      id="pauseBtn"
+      disabled
+      style="
+        background: #6b7280;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        opacity: 0.5;
+      "
+      onmouseover="this.style.opacity = '0.8'"
+      onmouseout="this.style.opacity = '0.5'"
+    >
+      ⏸ Pause
+    </button>
+    <a
+      href="{{ audio_api_base }}/audio/{{ segment_id }}?download=1"
+      download
+      style="
+        background: #10b981;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        transition: background 0.2s;
+      "
+      onmouseover="this.style.background = '#059669'"
+      onmouseout="this.style.background = '#10b981'"
+    >
+      💾 Download
+    </a>
   </div>
 
-  <!-- Keyboard Shortcuts Hint -->
-  <div class="kb-hint">
-    ⌨️ <strong>Space</strong> Play/Pause · <strong>← →</strong> Seek ±5s ·
-    <strong>↑ ↓</strong> Volume · <strong>0-9</strong> Speed
-  </div>
+  <!-- Seek Bar -->
+  <input
+    type="range"
+    id="seekBar"
+    min="0"
+    max="100"
+    value="0"
+    disabled
+    style="
+      width: 100%;
+      height: 6px;
+      appearance: none;
+      background: var(--color-border-tertiary);
+      border-radius: 3px;
+      outline: none;
+      cursor: pointer;
+      margin-bottom: 12px;
+    "
+  />
 
-  {% else %}
-
-  <!-- No Audio Available -->
-  <div class="no-audio-msg">
-    <div class="no-audio-icon">🎵</div>
-    <div class="no-audio-title">Audio Not Available</div>
-    <div class="no-audio-desc">
-      Audio data for this segment could not be found.
+  <!-- Status Display -->
+  <div
+    style="
+      background: var(--color-surface-secondary);
+      border-radius: var(--border-radius-md);
+      padding: 10px 14px;
+      font-size: 12px;
+    "
+  >
+    <div
+      style="display: flex; justify-content: space-between; margin-bottom: 4px"
+    >
+      <span style="color: var(--color-text-tertiary)">State:</span>
+      <span id="stateText" style="font-weight: 500">idle</span>
     </div>
-    <ul class="no-audio-reasons">
-      <li>Audio may have been evicted from the memory buffer</li>
-      <li>Segment was processed before audio saving was enabled</li>
-      <li>Audio file was cleaned up (only last 500 kept)</li>
-      <li>This segment had no speech detected</li>
-    </ul>
+    <div
+      style="display: flex; justify-content: space-between; margin-bottom: 4px"
+    >
+      <span style="color: var(--color-text-tertiary)">Position:</span>
+      <span>
+        <span id="posText" style="font-weight: 500">0:00</span>
+        <span style="color: var(--color-text-tertiary)"> / </span>
+        <span id="durText" style="font-weight: 500">
+          {% if audio_duration > 0 %} {% set m = (audio_duration // 60)|int %}
+          {% set s = (audio_duration % 60)|int %} {{ m }}:{{ "%02d"|format(s) }}
+          {% else %} 0:00 {% endif %}
+        </span>
+      </span>
+    </div>
+    <div style="display: flex; justify-content: space-between">
+      <span style="color: var(--color-text-tertiary)">Mode:</span>
+      <span style="font-weight: 500; color: #059669"
+        >Progressive Streaming (Range requests)</span
+      >
+    </div>
   </div>
 
-  {% endif %}
+  <!-- Hidden Native Audio Element -->
+  <!-- This is the key: browser handles ALL Range requests automatically -->
+  <audio
+    id="audioElement"
+    preload="metadata"
+    style="display: none"
+    src="{{ audio_api_base }}/audio/{{ segment_id }}"
+  ></audio>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- Howler.js Audio Player Script -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-{% if has_audio %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
 <script>
   (function () {
-    // ═══════════════════════════════════════════════════════
-    // Configuration
-    // ═══════════════════════════════════════════════════════
-    const AUDIO_URL = "{{ audio_api_base }}/{{ segment_id }}/audio";
-    const SEGMENT_ID = "{{ segment_id }}";
-    const TOTAL_DURATION = "{{ audio_duration }}";
-    const BAR_COUNT = 40;
+    // ==========================================
+    // Progressive Audio Player Logic
+    // Based on demo4/demo_partial_range.html
+    // ==========================================
 
-    // ═══════════════════════════════════════════════════════
-    // State
-    // ═══════════════════════════════════════════════════════
-    let howl = null;
-    let rafId = null;
-    let dragging = false;
-    let bufferPercent = 0;
-    let isPlaying = false;
+    const audio = document.getElementById("audioElement");
+    const playBtn = document.getElementById("playBtn");
+    const pauseBtn = document.getElementById("pauseBtn");
+    const seekBar = document.getElementById("seekBar");
+    const stateText = document.getElementById("stateText");
+    const posText = document.getElementById("posText");
+    const durText = document.getElementById("durText");
 
-    // ═══════════════════════════════════════════════════════
-    // DOM References
-    // ═══════════════════════════════════════════════════════
-    const $ = (id) => document.getElementById(id);
-    const visualizer = $("visualizer");
-    const progFill = $("progFill");
-    const progBuffer = $("progBuffer");
-    const progTrack = $("progTrack");
-    const timeCurrent = $("timeCurrent");
-    const timeDuration = $("timeDuration");
-    const btnPlayPause = $("btnPlayPause");
-    const btnBack10 = $("btnBack10");
-    const btnFwd10 = $("btnFwd10");
-    const btnStop = $("btnStop");
-    const playerStatus = $("playerStatus");
-    const playerError = $("playerError");
-    const playerErrorMsg = $("playerErrorMsg");
-    const playerRetry = $("playerRetry");
-
-    // ═══════════════════════════════════════════════════════
-    // Utility Functions
-    // ═══════════════════════════════════════════════════════
-    function fmtTime(sec) {
+    // Format time helper
+    function formatTime(sec) {
       if (!isFinite(sec) || sec < 0) return "0:00";
       const m = Math.floor(sec / 60);
-      const s = Math.floor(sec % 60);
-      return m + ":" + String(s).padStart(2, "0");
+      const s = Math.floor(sec % 60)
+        .toString()
+        .padStart(2, "0");
+      return `${m}:${s}`;
     }
 
-    function showError(msg) {
-      playerErrorMsg.textContent = msg;
-      playerError.classList.add("show");
-      playerStatus.textContent = "Error";
-      playerStatus.className = "player-status error";
-    }
-
-    function hideError() {
-      playerError.classList.remove("show");
-    }
-
-    function setPlayIcon(playing) {
-      isPlaying = playing;
-      btnPlayPause.innerHTML = playing ? "⏸" : "▶";
-      btnPlayPause.classList.toggle("playing", playing);
-      btnPlayPause.setAttribute("aria-label", playing ? "Pause" : "Play");
-    }
-
-    function setStatus(text, className) {
-      playerStatus.textContent = text;
-      playerStatus.className = "player-status " + (className || "");
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // Build Visualizer Bars
-    // ═══════════════════════════════════════════════════════
-    function buildVisualizer() {
-      const frag = document.createDocumentFragment();
-      for (let i = 0; i < BAR_COUNT; i++) {
-        const bar = document.createElement("div");
-        bar.className = "vis-bar";
-        bar.style.setProperty("--i", i);
-        // Pseudo-random but consistent heights
-        const h = 8 + Math.abs(Math.sin(i * 0.6) * 20 + Math.cos(i * 1.3) * 14);
-        bar.style.height = h + "px";
-        frag.appendChild(bar);
-      }
-      visualizer.appendChild(frag);
-    }
-
-    function updateVisualizer(ratio) {
-      const bars = visualizer.querySelectorAll(".vis-bar");
-      bars.forEach((bar, i) => {
-        const p = i / BAR_COUNT;
-        if (p <= ratio) {
-          bar.classList.add("played");
-          bar.classList.remove("buffered");
-        } else if (p <= bufferPercent / 100) {
-          bar.classList.remove("played");
-          bar.classList.add("buffered");
-        } else {
-          bar.classList.remove("played", "buffered");
-        }
-      });
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // RAF Loop — syncs UI every frame
-    // ═══════════════════════════════════════════════════════
-    function startRaf() {
-      if (rafId) return;
-      function tick() {
-        if (!howl) {
-          rafId = null;
-          return;
-        }
-
-        const seek = +howl.seek() || 0;
-        const dur = howl.duration() || TOTAL_DURATION || 0;
-        const ratio = dur > 0 ? seek / dur : 0;
-
-        // Read browser buffer progress from native <audio> node
-        try {
-          const node = howl._sounds && howl._sounds[0] && howl._sounds[0]._node;
-          if (node && node.buffered.length && dur > 0) {
-            bufferPercent = Math.min(
-              100,
-              Math.round(
-                (node.buffered.end(node.buffered.length - 1) / dur) * 100,
-              ),
-            );
-          }
-        } catch (e) {}
-
-        if (!dragging) {
-          progFill.style.width = ratio * 100 + "%";
-          progBuffer.style.width = bufferPercent + "%";
-          timeCurrent.textContent = fmtTime(seek);
-          updateVisualizer(ratio);
-        }
-
-        timeDuration.textContent = fmtTime(dur);
-
-        // Update status
-        if (isPlaying) {
-          setStatus("▶ " + fmtTime(seek) + " / " + fmtTime(dur), "playing");
-        }
-
-        rafId = requestAnimationFrame(tick);
-      }
-      tick();
-    }
-
-    function stopRaf() {
-      if (rafId) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
+    // Update progress display during playback
+    function updateProgress() {
+      if (!audio.paused) {
+        const pos = audio.currentTime;
+        const dur = audio.duration || 1;
+        posText.textContent = formatTime(pos);
+        seekBar.value = (pos / dur) * 100;
+        requestAnimationFrame(updateProgress);
       }
     }
 
-    // ═══════════════════════════════════════════════════════
-    // Initialize Howler.js Player
-    // ═══════════════════════════════════════════════════════
-    function initPlayer() {
-      console.log("[AudioPlayer] Initializing for:", SEGMENT_ID);
-      console.log("[AudioPlayer] URL:", AUDIO_URL);
-
-      // ✅ NO BLOCKING SPINNER - just update status text
-      setStatus("Loading audio...", "loading");
-
-      /*
-        html5: true is CRITICAL:
-        - Forces Howler to use native <audio> element
-        - Browser handles ALL Range requests automatically
-        - First chunk arrives in ~50ms → canplay fires → user can play
-        - Subsequent chunks stream in via background Range requests
-        - Seeking triggers new Range: bytes=<offset>- instantly
-      */
-      howl = new Howl({
-        src: [AUDIO_URL],
-        html5: true, // ← Native <audio> with automatic Range requests
-        format: ["wav"],
-        volume: 0.8,
-        autoplay: false,
-        preload: true, // ← Start fetching immediately
-
-        onload: function () {
-          console.log("[AudioPlayer] ✅ Loaded (can play now)");
-          console.log(
-            "[AudioPlayer] Duration:",
-            howl.duration().toFixed(2),
-            "s",
-          );
-
-          hideError();
-          btnPlayPause.disabled = false;
-          timeDuration.textContent = fmtTime(howl.duration() || TOTAL_DURATION);
-
-          // Remove loading class from visualizer
-          visualizer.classList.remove("loading");
-
-          setStatus("Ready — press play", "");
-
-          // Start RAF for UI updates
-          startRaf();
-        },
-
-        onplay: function () {
-          console.log("[AudioPlayer] ▶ Playing");
-          setPlayIcon(true);
-          setStatus("Playing", "playing");
-          startRaf();
-        },
-
-        onpause: function () {
-          console.log("[AudioPlayer] ⏸ Paused");
-          setPlayIcon(false);
-          const seek = +howl.seek() || 0;
-          const dur = howl.duration() || TOTAL_DURATION;
-          setStatus("⏸ " + fmtTime(seek) + " / " + fmtTime(dur), "");
-        },
-
-        onstop: function () {
-          console.log("[AudioPlayer] ⏹ Stopped");
-          setPlayIcon(false);
-          stopRaf();
-          progFill.style.width = "0%";
-          progBuffer.style.width = "0%";
-          timeCurrent.textContent = "0:00";
-          updateVisualizer(0);
-          setStatus("Stopped", "");
-        },
-
-        onend: function () {
-          console.log("[AudioPlayer] Finished");
-          setPlayIcon(false);
-          stopRaf();
-          progFill.style.width = "100%";
-          updateVisualizer(1);
-          setStatus("Finished", "");
-        },
-
-        onseek: function () {
-          console.log("[AudioPlayer] Seeked to:", howl.seek().toFixed(2), "s");
-        },
-
-        onloaderror: function (id, err) {
-          console.error("[AudioPlayer] ❌ Load error:", err);
-          btnPlayPause.disabled = true;
-          visualizer.classList.remove("loading");
-          showError(
-            "Failed to load audio. The file may be unavailable or the server is not reachable.",
-          );
-        },
-
-        onplayerror: function () {
-          console.warn("[AudioPlayer] ⚠️ Play error - attempting unlock");
-          howl.once("unlock", function () {
-            howl.play();
-          });
-        },
-      });
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // Control Functions
-    // ═══════════════════════════════════════════════════════
-    function togglePlay() {
-      if (!howl) return;
-      if (howl.playing()) {
-        howl.pause();
-      } else {
-        howl.play();
-      }
-    }
-
-    function stop() {
-      if (!howl) return;
-      howl.stop();
-    }
-
-    function seekBy(seconds) {
-      if (!howl) return;
-      const dur = howl.duration() || TOTAL_DURATION;
-      const newPos = Math.max(0, Math.min(dur, (+howl.seek() || 0) + seconds));
-      howl.seek(newPos);
-    }
-
-    function setSpeed(speed) {
-      if (!howl) return;
-      howl.rate(speed);
-      console.log("[AudioPlayer] Speed:", speed + "x");
-
-      // Update active button
-      document.querySelectorAll(".speed-btn").forEach((b) => {
-        b.classList.toggle("active", parseFloat(b.dataset.speed) === speed);
-      });
-    }
-
-    function seekToPercent(percent) {
-      if (!howl) return;
-      const dur = howl.duration() || TOTAL_DURATION;
-      const time = (percent / 100) * dur;
-      howl.seek(time);
-    }
-
-    // ═══════════════════════════════════════════════════════
-    // Event Listeners
-    // ═══════════════════════════════════════════════════════
-    btnPlayPause.addEventListener("click", togglePlay);
-    btnStop.addEventListener("click", stop);
-    btnBack10.addEventListener("click", () => seekBy(-10));
-    btnFwd10.addEventListener("click", () => seekBy(10));
-    playerRetry.addEventListener("click", () => {
-      hideError();
-      if (howl) {
-        howl.unload();
-        howl = null;
-      }
-      visualizer.classList.add("loading");
-      initPlayer();
-    });
-
-    // Speed buttons
-    document.querySelectorAll(".speed-btn").forEach((btn) => {
-      btn.addEventListener("click", () =>
-        setSpeed(parseFloat(btn.dataset.speed)),
-      );
-    });
-
-    // Progress bar seeking
-    function seekFromEvent(e) {
-      const rect = progTrack.getBoundingClientRect();
-      const ratio = Math.max(
-        0,
-        Math.min(1, (e.clientX - rect.left) / rect.width),
-      );
-      progFill.style.width = ratio * 100 + "%";
-      timeCurrent.textContent = fmtTime(
-        ratio * (howl.duration() || TOTAL_DURATION),
-      );
-      updateVisualizer(ratio);
-      seekToPercent(ratio * 100);
-    }
-
-    progTrack.addEventListener("mousedown", (e) => {
-      dragging = true;
-      seekFromEvent(e);
-    });
-    window.addEventListener("mousemove", (e) => {
-      if (dragging) seekFromEvent(e);
-    });
-    window.addEventListener("mouseup", () => {
-      dragging = false;
-    });
-
-    // Touch support
-    progTrack.addEventListener(
-      "touchstart",
-      (e) => {
-        dragging = true;
-        seekFromEvent(e.touches[0]);
-      },
-      { passive: true },
-    );
-    window.addEventListener(
-      "touchmove",
-      (e) => {
-        if (dragging) seekFromEvent(e.touches[0]);
-      },
-      { passive: true },
-    );
-    window.addEventListener("touchend", () => {
-      dragging = false;
-    });
-
-    // ═══════════════════════════════════════════════════════
-    // Keyboard Shortcuts
-    // ═══════════════════════════════════════════════════════
-    document.addEventListener("keydown", function (e) {
-      // Don't intercept when typing in inputs
-      if (
-        e.target.tagName === "INPUT" ||
-        e.target.tagName === "TEXTAREA" ||
-        e.target.isContentEditable
-      )
+    // Seek to fraction of duration
+    // Browser will automatically issue Range request to fetch that portion
+    function seekTo(fraction) {
+      const dur = audio.duration;
+      if (!dur || !isFinite(dur)) {
+        console.log("[AudioPlayer] Seek before duration known");
         return;
-
-      switch (e.code) {
-        case "Space":
-          e.preventDefault();
-          togglePlay();
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          seekBy(-5);
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          seekBy(5);
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          if (howl) howl.volume(Math.min(1, howl.volume() + 0.1));
-          break;
-        case "ArrowDown":
-          e.preventDefault();
-          if (howl) howl.volume(Math.max(0, howl.volume() - 0.1));
-          break;
-        case "KeyM":
-          e.preventDefault();
-          if (howl) howl.mute(!howl._muted);
-          break;
-        case "Home":
-          e.preventDefault();
-          if (howl) howl.seek(0);
-          break;
-        case "End":
-          e.preventDefault();
-          if (howl) howl.seek(howl.duration() || TOTAL_DURATION);
-          break;
-        case "Digit0":
-        case "Numpad0":
-          e.preventDefault();
-          stop();
-          break;
       }
+      const target = dur * fraction;
+      console.log(
+        `[AudioPlayer] Seeking to ${formatTime(target)} — browser will issue Range request`,
+      );
+      audio.currentTime = target;
+    }
 
-      // Speed shortcuts: 1-9 keys
-      if (e.code >= "Digit1" && e.code <= "Digit9") {
-        e.preventDefault();
-        const speed = parseInt(e.code.replace("Digit", ""));
-        setSpeed(speed <= 2 ? speed : speed / 10);
+    // ---- Audio Element Event Handlers ----
+    audio.addEventListener("loadstart", () => {
+      console.log("[AudioPlayer] Load started — fetching metadata");
+      stateText.textContent = "loading";
+    });
+
+    audio.addEventListener("loadedmetadata", () => {
+      const dur = audio.duration;
+      console.log(
+        `[AudioPlayer] Metadata loaded — duration: ${formatTime(dur)}`,
+      );
+      if (isFinite(dur)) {
+        durText.textContent = formatTime(dur);
+      }
+      stateText.textContent = "ready";
+      seekBar.disabled = false;
+      playBtn.disabled = false;
+    });
+
+    audio.addEventListener("canplay", () => {
+      console.log("[AudioPlayer] Can start playing — enough data buffered");
+    });
+
+    audio.addEventListener("play", () => {
+      console.log("[AudioPlayer] Playback started");
+      stateText.textContent = "playing";
+      playBtn.disabled = true;
+      playBtn.style.opacity = "0.5";
+      pauseBtn.disabled = false;
+      pauseBtn.style.opacity = "1";
+      updateProgress();
+    });
+
+    audio.addEventListener("pause", () => {
+      console.log("[AudioPlayer] Playback paused");
+      stateText.textContent = "paused";
+      playBtn.disabled = false;
+      playBtn.style.opacity = "1";
+      pauseBtn.disabled = true;
+      pauseBtn.style.opacity = "0.5";
+    });
+
+    audio.addEventListener("ended", () => {
+      console.log("[AudioPlayer] Playback ended");
+      stateText.textContent = "ended";
+      playBtn.disabled = false;
+      playBtn.style.opacity = "1";
+      pauseBtn.disabled = true;
+      pauseBtn.style.opacity = "0.5";
+    });
+
+    audio.addEventListener("seeking", () => {
+      console.log("[AudioPlayer] Seeking — browser issuing Range request...");
+      stateText.textContent = "seeking";
+    });
+
+    audio.addEventListener("seeked", () => {
+      console.log(
+        `[AudioPlayer] Seek complete — at ${formatTime(audio.currentTime)}`,
+      );
+      stateText.textContent = audio.paused ? "paused" : "playing";
+    });
+
+    audio.addEventListener("timeupdate", () => {
+      const pos = audio.currentTime;
+      const dur = audio.duration || 1;
+      posText.textContent = formatTime(pos);
+      seekBar.value = (pos / dur) * 100;
+    });
+
+    audio.addEventListener("error", (e) => {
+      const error = audio.error;
+      const errorMsg = error
+        ? `code=${error.code}, message=${error.message}`
+        : "Unknown error";
+      console.error(`[AudioPlayer] Error: ${errorMsg}`);
+      stateText.textContent = "error";
+    });
+
+    audio.addEventListener("stalled", () => {
+      console.log("[AudioPlayer] Stalled — waiting for data...");
+    });
+
+    audio.addEventListener("waiting", () => {
+      console.log("[AudioPlayer] Buffering — waiting for more data...");
+    });
+
+    audio.addEventListener("progress", () => {
+      // Fires as browser loads progressively
+      if (audio.buffered.length > 0) {
+        const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+        const dur = audio.duration;
+        if (dur && isFinite(dur)) {
+          const pct = Math.round((bufferedEnd / dur) * 100);
+          console.log(
+            `[AudioPlayer] Buffered: ${formatTime(bufferedEnd)} / ${formatTime(dur)} (${pct}%)`,
+          );
+        }
       }
     });
 
-    // ═══════════════════════════════════════════════════════
-    // Initialize
-    // ═══════════════════════════════════════════════════════
-    buildVisualizer();
-    initPlayer();
+    // ---- Button Event Listeners ----
+    playBtn.addEventListener("click", () => {
+      console.log("[AudioPlayer] Play button clicked");
+      audio.play().catch((err) => {
+        console.error(`[AudioPlayer] Play failed: ${err.message}`);
+      });
+    });
 
-    console.log("[AudioPlayer] ✅ Ready — No blockers, instant interactivity");
+    pauseBtn.addEventListener("click", () => {
+      console.log("[AudioPlayer] Pause button clicked");
+      audio.pause();
+    });
+
+    seekBar.addEventListener("input", () => {
+      seekTo(seekBar.value / 100);
+    });
+
+    // Cleanup on page unload
+    window.addEventListener("beforeunload", () => {
+      audio.pause();
+      audio.src = "";
+      console.log("[AudioPlayer] Cleaned up");
+    });
+
     console.log(
-      "[AudioPlayer] Browser handles Range requests automatically via html5:true",
+      "[AudioPlayer] Initialized — progressive streaming ready (native <audio> element)",
     );
   })();
 </script>
+
+{% else %}
+<!-- No Audio Available -->
+<div
+  style="
+    background: var(--color-surface-secondary);
+    border-radius: var(--border-radius-md);
+    padding: 20px;
+    text-align: center;
+    color: var(--color-text-secondary);
+  "
+>
+  <div style="font-size: 24px; margin-bottom: 8px">🔇</div>
+  <div style="font-size: 14px; font-weight: 500">No Audio Available</div>
+  <div
+    style="font-size: 12px; color: var(--color-text-tertiary); margin-top: 4px"
+  >
+    Audio for segment <code style="font-size: 11px">{{ segment_id }}</code> is
+    not available in any storage location.
+  </div>
+</div>
 {% endif %}

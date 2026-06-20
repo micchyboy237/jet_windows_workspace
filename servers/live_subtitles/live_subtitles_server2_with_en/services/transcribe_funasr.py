@@ -63,8 +63,22 @@ else:
     print("⚠️  No GPU detected (neither CUDA nor MPS). Falling back to CPU")
 print(f"Final selected device: {device}\n")
 
+
+def resolve_local_model(repo_id: str, hub: str = "hf") -> str:
+    """Resolve the local cache path for a downloaded model, falling back to the repo ID."""
+    if hub == "hf":
+        cache_root = Path.home() / ".cache" / "huggingface" / "hub"
+        folder_name = "models--" + repo_id.replace("/", "--")
+        snapshots_dir = cache_root / folder_name / "snapshots"
+        if snapshots_dir.exists():
+            snapshots = sorted(snapshots_dir.iterdir())
+            if snapshots:
+                return str(snapshots[-1])  # latest snapshot
+    return repo_id  # fall back to hub download
+
 model = AutoModel(
-    model="FunAudioLLM/SenseVoiceSmall",
+    # model="FunAudioLLM/SenseVoiceSmall",
+    model=resolve_local_model("FunAudioLLM/SenseVoiceSmall"),
     disable_update=True,
     device=device,
     hub="hf",

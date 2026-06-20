@@ -1174,7 +1174,7 @@ async def get_segment_detail_page(request: Request, segment_id: str):
                 "found": False,
                 "timestamp": datetime.now().isoformat(),
                 "has_audio": False,
-                "audio_api_base": "/speakers/segment",
+                "audio_api_base": "/segments",
             })
             return HTMLResponse(content=html_content, status_code=404)
         except Exception:
@@ -1271,7 +1271,7 @@ async def get_segment_detail_page(request: Request, segment_id: str):
             "audio_sample_rate": audio_sample_rate,
             "audio_duration": audio_duration,  # Raw waveform duration for playback info
             # ✅ NEW: Pass API base URL so the reusable audio_player.html knows where to fetch audio
-            "audio_api_base": "/speakers/segment",
+            "audio_api_base": "/segments",
         })
         console.print(f"[success]Segment detail page rendered for {segment_id}[/]")
         return HTMLResponse(content=html_content)

@@ -93,16 +93,30 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp10.py",
    #  r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\config.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_config.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\segment_detail.html",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\state.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\config.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_config.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\segment_detail.html",
+    # # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\state.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_metrics_mixin.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo1\player.html",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo1\main.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\player.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\main.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\segments.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\audio_player.html",
+    # r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\server.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\demo_partial_range.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\demo_full_range.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\routers",
+    r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\routers\audio_router.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\demo_partial_range.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\demo_full_range.html",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\segments.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\audio_player.html",
     r"",
 ]
 
@@ -126,344 +140,48 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze carefully why demo1 works and audio player in segment detail does not.
+Analyze all available endpoints in routes\segments.py router
 
-Now refactor segment_detail.html to move out all audio player logic on a separate audio_player.html. Use include.
+Now log segment endpoints in main.py
 
-Then also implement with howler.
-
-
-# "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers.py
-
-@router.get("/segment/{segment_id}/audio")
-async def get_segment_audio(segment_id: str, request: Request):
-    \"\"\"
-    Get the audio data for a specific segment (for playback/download).
-    Supports HTTP Range requests for proper streaming/seeking.
-    \"\"\"
-    from fastapi.responses import Response, StreamingResponse
-    import os
     
-    labeler = get_speaker_labeler()
-    if not labeler:
-        raise HTTPException(status_code=400, detail="Speaker labeler not initialized")
+    logger.info("🚀 Starting [bold cyan]Live Japanese Subtitles Server 2[/]")
+    logger.info("")
+    logger.info("📡 WebSocket endpoint:")
+    logger.info("   [bold]ws://0.0.0.0:8000/ws/live-subtitles[/]")
+    logger.info("")
+    logger.info("📋 REST endpoints:")
+    logger.info("   POST /transcribe")
+    logger.info("   POST /translate")
+    logger.info("")
+    logger.info("📋 Speaker Labeling endpoints:")
+    logger.info("   GET  /speakers")
+    logger.info("   GET  /speakers/status")
+    logger.info("   GET  /speakers/similarities")
+    logger.info("   POST /speakers/consolidate")
+    logger.info("   POST /speakers/reset")
+    logger.info("   POST /speakers/merge")
+    logger.info("   GET  /speakers/dashboard")
+    logger.info("   GET  /speakers/plots")
+    logger.info("   GET  /speakers/plot/{plot_name}")
+    logger.info("   GET  /speakers/data/export")
+    logger.info("")
+    logger.info("🎵 Audio Tagging endpoints:")
+    logger.info("   GET  /tags [HTML]")
+    logger.info("   GET  /tags/config")
+    logger.info("   GET  /tags/chunks")
+    logger.info("   GET  /tags/dashboard [HTML]")
+    logger.info("   POST /tags/audio")
+    logger.info("   POST /tags/chunks")
+    logger.info("   POST /tags/speech-check")
+    logger.info("   POST /tags/config/update")
+    logger.info("")
+    logger.info("🔄 Global Reset endpoints:")
+    logger.info("   POST /global/reset")
+    logger.info("   GET  /global/status")
+    logger.info("")
+    logger.info("Press Ctrl+C to stop\n")
     
-    console.print(f"[info]Fetching audio for segment: {segment_id}[/]")
-    
-    audio_path = None
-    audio_source = "unknown"
-    
-    # === APPROACH 1: Check permanent segment audio directory ===
-    try:
-        from services.config import SEGMENT_AUDIO_DIR
-        if SEGMENT_AUDIO_DIR and SEGMENT_AUDIO_DIR.exists():
-            candidate = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
-            if candidate.exists():
-                audio_path = candidate
-                audio_source = "permanent_storage"
-                console.print(f"[success]Audio found in permanent storage: {audio_path}[/]")
-    except Exception as e:
-        console.print(f"[warning]Error checking permanent storage: {e}[/]")
-    
-    # === APPROACH 2: Check context buffer (fallback) ===
-    if not audio_path:
-        try:
-            context_buffer = get_context_buffer()
-            if context_buffer and hasattr(context_buffer, 'segments'):
-                for segment_audio, metadata in context_buffer.segments:
-                    meta_segment_id = metadata.get('segment_id', '')
-                    if meta_segment_id == segment_id:
-                        import io
-                        import wave
-                        import tempfile
-                        
-                        # Convert audio to numpy array
-                        if isinstance(segment_audio, torch.Tensor):
-                            audio_np = segment_audio.detach().cpu().numpy()
-                        elif isinstance(segment_audio, np.ndarray):
-                            audio_np = segment_audio
-                        else:
-                            audio_np = np.array(segment_audio, dtype=np.float32)
-                        
-                        # Ensure 1D array
-                        if audio_np.ndim > 1:
-                            audio_np = audio_np.flatten()
-                        
-                        # Convert float [-1,1] to int16 PCM
-                        audio_int16 = (np.clip(audio_np, -1.0, 1.0) * 32767).astype(np.int16)
-                        
-                        # Write to temp file for streaming
-                        import tempfile
-                        tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
-                        with wave.open(tmp.name, 'wb') as wf:
-                            wf.setnchannels(1)
-                            wf.setsampwidth(2)
-                            wf.setframerate(SAMPLE_RATE)
-                            wf.writeframes(audio_int16.tobytes())
-                        
-                        audio_path = Path(tmp.name)
-                        audio_source = "context_buffer"
-                        console.print(f"[success]Audio created from context buffer: {len(audio_int16)} samples[/]")
-                        break
-        except Exception as e:
-            console.print(f"[warning]Error creating audio from context buffer: {e}[/]")
-    
-    # === APPROACH 3: Check disk fallback ===
-    if not audio_path:
-        try:
-            last_n_dir = get_last_n_segments_dir()
-            if last_n_dir and last_n_dir.exists():
-                candidate = last_n_dir / f"{segment_id}.wav"
-                if candidate.exists():
-                    audio_path = candidate
-                    audio_source = "disk"
-                    console.print(f"[success]Audio found on disk: {audio_path}[/]")
-                else:
-                    # Try partial match
-                    for f in last_n_dir.glob("*.wav"):
-                        if segment_id in f.name:
-                            audio_path = f
-                            audio_source = "disk_partial_match"
-                            console.print(f"[success]Audio found on disk (partial): {audio_path}[/]")
-                            break
-        except Exception as e:
-            console.print(f"[warning]Error checking disk: {e}[/]")
-    
-    if not audio_path or not audio_path.exists():
-        console.print(f"[error]No audio found for segment: {segment_id}[/]")
-        raise HTTPException(status_code=404, detail="No audio data found")
-    
-    # === Serve with Range request support ===
-    file_size = audio_path.stat().st_size
-    duration_sec = get_audio_duration(str(audio_path))
-    
-    # Parse Range header
-    range_header = request.headers.get("range")
-    
-    if range_header:
-        # Handle partial content request
-        try:
-            range_value = range_header.replace("bytes=", "")
-            start_str, end_str = range_value.split("-")
-            start = int(start_str) if start_str else 0
-            end = int(end_str) if end_str else file_size - 1
-            
-            if start >= file_size:
-                raise HTTPException(
-                    status_code=416,
-                    detail="Range not satisfiable"
-                )
-            
-            end = min(end, file_size - 1)
-            chunk_size = end - start + 1
-            
-            console.print(
-                f"[info]Serving audio range: bytes {start}-{end}/{file_size} "
-                f"({chunk_size} bytes)[/]"
-            )
-            
-            # Read only the requested chunk
-            def file_iterator(file_path, start_byte, end_byte):
-                with open(file_path, "rb") as f:
-                    f.seek(start_byte)
-                    remaining = end_byte - start_byte + 1
-                    chunk_size = min(8192, remaining)
-                    while remaining > 0:
-                        data = f.read(min(chunk_size, remaining))
-                        if not data:
-                            break
-                        remaining -= len(data)
-                        yield data
-            
-            headers = {
-                "Content-Range": f"bytes {start}-{end}/{file_size}",
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(chunk_size),
-                "Content-Type": "audio/wav",
-                "Content-Disposition": f"inline; filename={segment_id}.wav",
-                "X-Segment-ID": segment_id,
-                "X-Audio-Source": audio_source,
-                "X-Audio-Duration": str(round(duration_sec, 3)),
-                "Cache-Control": "public, max-age=3600",
-            }
-            
-            return StreamingResponse(
-                file_iterator(audio_path, start, end),
-                status_code=206,  # Partial Content
-                headers=headers,
-                media_type="audio/wav",
-            )
-            
-        except (ValueError, IndexError) as e:
-            console.print(f"[warning]Invalid Range header: {range_header} - {e}[/]")
-            # Fall through to serve full file
-    
-    # Full file response with proper headers
-    console.print(f"[info]Serving full audio file: {file_size} bytes[/]")
-    
-    headers = {
-        "Content-Length": str(file_size),
-        "Accept-Ranges": "bytes",
-        "Content-Type": "audio/wav",
-        "Content-Disposition": f"inline; filename={segment_id}.wav",
-        "X-Segment-ID": segment_id,
-        "X-Audio-Source": audio_source,
-        "X-Audio-Duration": str(round(duration_sec, 3)),
-        "Cache-Control": "public, max-age=3600",
-    }
-    
-    # Use streaming for consistent behavior
-    def full_file_iterator(file_path):
-        with open(file_path, "rb") as f:
-            while chunk := f.read(8192):
-                yield chunk
-    
-    return StreamingResponse(
-        full_file_iterator(audio_path),
-        status_code=200,
-        headers=headers,
-        media_type="audio/wav",
-    )
-
-
-@router.get("/segment/{segment_id}", response_class=HTMLResponse)
-async def get_segment_detail_page(request: Request, segment_id: str):
-    \"\"\"
-    Serve a detailed page for a specific segment with play/download audio buttons.
-    \"\"\"
-    labeler = get_speaker_labeler()
-    if not labeler:
-        raise HTTPException(
-            status_code=400,
-            detail="Speaker labeler not initialized. Process some audio segments first."
-        )
-    
-    console.print(f"[info]Rendering segment detail page for: {segment_id}[/]")
-    
-    if not hasattr(labeler, 'get_segment_detail'):
-        raise HTTPException(
-            status_code=500,
-            detail="Segment detail not available. Update speaker_metrics_mixin."
-        )
-    
-    segment_info = labeler.get_segment_detail(segment_id)
-    if segment_info is None:
-        console.print(f"[warning]Segment not found: {segment_id}[/]")
-        try:
-            html_content = render_template("segment_detail.html", {
-                "title": f"Segment: {segment_id}",
-                "segment_id": segment_id,
-                "found": False,
-                "timestamp": datetime.now().isoformat(),
-            })
-            return HTMLResponse(content=html_content, status_code=404)
-        except Exception:
-            return HTMLResponse(
-                content=_fallback_html(
-                    f"Segment: {segment_id}",
-                    f"Segment '{segment_id}' not found in any speaker's data.",
-                    [("📊 Metrics", "/speakers/metrics"), ("🏠 Dashboard", "/speakers/dashboard")],
-                ),
-                status_code=404,
-            )
-    
-    # Check audio availability (permanent storage first, then context buffer, then disk)
-    has_audio = False
-    audio_source = ""
-    audio_duration = segment_info.get("segment_duration", 0.0)
-    audio_sample_rate = SAMPLE_RATE
-    
-    # === Check permanent storage ===
-    try:
-        from services.config import SEGMENT_AUDIO_DIR
-        if SEGMENT_AUDIO_DIR and SEGMENT_AUDIO_DIR.exists():
-            audio_path = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
-            if audio_path.exists():
-                has_audio = True
-                audio_source = "permanent_storage"
-                # ✅ Use utility for file duration
-                disk_duration = get_audio_duration(str(audio_path))
-                if audio_duration <= 0.0 or disk_duration > 0:
-                    audio_duration = disk_duration
-                console.print(f"[dim]Audio found in permanent storage: {audio_path} ({disk_duration:.3f}s)[/]")
-    except Exception as e:
-        console.print(f"[dim]Error checking permanent storage: {e}[/]")
-    
-    # === Check context buffer ===
-    if not has_audio:
-        try:
-            context_buffer = get_context_buffer()
-            if context_buffer and hasattr(context_buffer, 'segments'):
-                for segment_audio, metadata in context_buffer.segments:
-                    if metadata.get('segment_id') == segment_id:
-                        has_audio = True
-                        audio_source = "context_buffer"
-                        # ✅ Use utility for duration
-                        raw_duration = get_audio_duration(segment_audio, sr=SAMPLE_RATE) if segment_audio is not None else 0.0
-                        if audio_duration <= 0.0 and raw_duration > 0.0:
-                            audio_duration = raw_duration
-                        break
-        except Exception as e:
-            console.print(f"[dim]Could not check audio availability: {e}[/]")
-    
-    # === Check disk fallback ===
-    if not has_audio:
-        try:
-            last_n_dir = get_last_n_segments_dir()
-            if last_n_dir and last_n_dir.exists():
-                audio_path = last_n_dir / f"{segment_id}.wav"
-                if audio_path.exists():
-                    has_audio = True
-                    audio_source = "disk"
-                    # ✅ Use utility for file duration
-                    disk_duration = get_audio_duration(str(audio_path))
-                    if audio_duration <= 0.0:
-                        audio_duration = disk_duration
-        except Exception:
-            pass
-
-    console.print(
-        f"[info]Segment detail: speaker={segment_info['speaker_label']}, "
-        f"timestamp={segment_info['timestamp']:.2f}s, "
-        f"duration={segment_info['segment_duration']:.3f}s, "
-        f"audio={'yes' if has_audio else 'no'} ({audio_source}), "
-        f"audio_duration={audio_duration:.3f}s[/]"  # ✅ Log both
-    )
-    
-    try:
-        html_content = render_template("segment_detail.html", {
-            "title": f"Segment: {segment_id}",
-            "segment_id": segment_id,
-            "found": True,
-            "speaker_label": segment_info["speaker_label"],
-            "timestamp": datetime.now().isoformat(),
-            "segment_timestamp": segment_info["timestamp"],
-            "segment_duration": segment_info["segment_duration"],  # Metadata duration (speech-filtered)
-            "embedding_index": segment_info["embedding_index"],
-            "embedding_dim": segment_info["embedding_dim"],
-            "speaker_segment_count": segment_info["speaker_segment_count"],
-            "speaker_first_seen": segment_info["speaker_first_seen"],
-            "speaker_last_seen": segment_info["speaker_last_seen"],
-            "speaker_active_duration": segment_info["speaker_active_duration"],
-            "centroid_quality": segment_info["centroid_quality"],
-            "has_audio": has_audio,
-            "audio_source": audio_source,
-            "audio_sample_rate": audio_sample_rate,
-            "audio_duration": audio_duration,  # Raw waveform duration for playback info
-        })
-        console.print(f"[success]Segment detail page rendered for {segment_id}[/]")
-        return HTMLResponse(content=html_content)
-    except Exception as e:
-        console.print(f"[error]Failed to render segment detail: {e}[/]")
-        return HTMLResponse(
-            content=_fallback_html(
-                f"Segment: {segment_id}",
-                str(e),
-                [("📊 Metrics", "/speakers/metrics"), ("🏠 Dashboard", "/speakers/dashboard")],
-            ),
-            status_code=200,
-        )
-
 """
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

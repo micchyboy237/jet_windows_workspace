@@ -571,14 +571,13 @@
 
     <script>
       /* ═══════════════════════════════════════════════════════════════
-      Config — change API base to match your FastAPI server
-      ═══════════════════════════════════════════════════════════════ */
-      const API = "http://192.168.68.150:8001";
+     Config
+  ═══════════════════════════════════════════════════════════════ */
       const BAR_COUNT = 48;
 
       /* ═══════════════════════════════════════════════════════════════
-      Logging helper — structured console logs with flow markers
-      ═══════════════════════════════════════════════════════════════ */
+     Logging helper — structured console logs with flow markers
+  ═══════════════════════════════════════════════════════════════ */
       const LOG = {
         _ts: () => {
           const d = new Date();
@@ -595,8 +594,8 @@
       };
 
       /* ═══════════════════════════════════════════════════════════════
-      State
-      ═══════════════════════════════════════════════════════════════ */
+     State
+  ═══════════════════════════════════════════════════════════════ */
       let tracks = [];
       let currentIdx = -1;
       let howl = null;
@@ -607,8 +606,8 @@
       let bufPct = 0;
 
       /* ═══════════════════════════════════════════════════════════════
-      DOM
-      ═══════════════════════════════════════════════════════════════ */
+     DOM
+  ═══════════════════════════════════════════════════════════════ */
       const $ = (id) => document.getElementById(id);
       const npTitle = $("npTitle"),
         npSub = $("npSub");
@@ -637,8 +636,8 @@
         queueToggle = $("queueToggle");
 
       /* ═══════════════════════════════════════════════════════════════
-      Build waveform bars
-      ═══════════════════════════════════════════════════════════════ */
+     Build waveform bars
+  ═══════════════════════════════════════════════════════════════ */
       (function () {
         const frag = document.createDocumentFragment();
         for (let i = 0; i < BAR_COUNT; i++) {
@@ -652,7 +651,6 @@
         }
         vis.insertBefore(frag, spinner);
       })();
-
       function tintBars(ratio) {
         vis.querySelectorAll(".bar").forEach((b, i) => {
           const p = i / BAR_COUNT;
@@ -666,8 +664,8 @@
       }
 
       /* ═══════════════════════════════════════════════════════════════
-      Utilities
-      ═══════════════════════════════════════════════════════════════ */
+     Utilities
+  ═══════════════════════════════════════════════════════════════ */
       function fmt(s) {
         if (!isFinite(s) || s < 0) return "0:00";
         return (
@@ -691,14 +689,15 @@
       }
 
       /* ═══════════════════════════════════════════════════════════════
-      RAF loop — syncs UI to playback every frame
-      ═══════════════════════════════════════════════════════════════ */
+     RAF loop — syncs UI to playback every frame
+  ═══════════════════════════════════════════════════════════════ */
       function startRaf() {
         if (rafId) {
           LOG.debug("RAF", "RAF already running, skipping start");
           return;
         }
         LOG.debug("RAF", "Starting RAF loop");
+
         let lastLogTime = 0;
         (function tick() {
           if (!howl) {
@@ -710,6 +709,7 @@
           const dur = howl.duration() || 0;
           const ratio = dur > 0 ? seek / dur : 0;
           // Read browser's native buffer progress via Howler's internal <audio> node
+          // html5:true mode — Howler stores the node at howl._sounds[0]._node
           try {
             const node = howl._sounds[0]._node;
             if (node.buffered.length && dur > 0) {
@@ -743,6 +743,7 @@
             ? "▶ " + fmt(seek) + " / " + fmt(dur)
             : "⏸ " + fmt(seek) + " / " + fmt(dur);
           statusR.textContent = "Buffer " + bufPct + "%";
+
           // Log playback progress every 5 seconds
           const now = Date.now();
           if (now - lastLogTime > 5000) {
@@ -759,10 +760,10 @@
                 howl.playing(),
             );
           }
+
           rafId = requestAnimationFrame(tick);
         })();
       }
-
       function stopRaf() {
         if (rafId) {
           LOG.debug("RAF", "Stopping RAF loop");
@@ -772,8 +773,8 @@
       }
 
       /* ═══════════════════════════════════════════════════════════════
-      Load track
-      ═══════════════════════════════════════════════════════════════ */
+     Load track
+  ═══════════════════════════════════════════════════════════════ */
       function loadTrack(idx, autoplay = true) {
         LOG.info(
           "LOAD",
@@ -784,12 +785,14 @@
             " | tracks.length=" +
             tracks.length,
         );
+
         if (idx < 0 || idx >= tracks.length) {
           LOG.warn("LOAD", "Invalid index, aborting");
           return;
         }
         currentIdx = idx;
         const t = tracks[idx];
+
         LOG.debug(
           "LOAD",
           "Track info | name=" +
@@ -799,12 +802,14 @@
             " | type=" +
             t.mime_type,
         );
+
         stopRaf();
         if (howl) {
           LOG.debug("LOAD", "Unloading previous Howl instance");
           howl.unload();
           howl = null;
         }
+
         bufPct = 0;
         progPlay.style.width = progBuf.style.width = "0%";
         timeEl.textContent = "0:00";
@@ -812,13 +817,14 @@
         npTitle.textContent = t.filename.replace(/\.[^.]+$/, "");
         npSub.textContent =
           fmtB(t.size_bytes) + " · " + (t.mime_type || "audio");
+
         spinner.classList.add("on");
         setPlayIcon(false);
         btnPlay.disabled = true;
         tintBars(0);
         renderQueue();
 
-        const srcUrl = `${API}/audio/${encodeURIComponent(t.filename)}`;
+        const srcUrl = `/segments/audio/${encodeURIComponent(t.filename)}`;
         LOG.debug(
           "LOAD",
           "Creating Howl | src=" +
@@ -827,12 +833,25 @@
             (muted ? 0 : vol),
         );
 
+        /*
+      ── Why html5: true? ───────────────────────────────────────
+      Howler defaults to Web Audio API (decodes entire file into memory).
+      With html5: true it delegates to the browser's native <audio> element,
+      which automatically sends HTTP Range requests:
+        • Initial load  →  Range: bytes=0-   (browser picks its own chunk size)
+        • While playing →  browser pre-fetches ahead of playhead automatically
+        • On seek       →  new Range: bytes=<offset>-  request fires instantly
+      Our FastAPI /audio/{filename} endpoint replies 206 Partial Content with
+      Accept-Ranges: bytes, which is all the browser needs.
+      No MSE plumbing required — the browser's buffer management is optimal.
+    */
         howl = new Howl({
           src: [srcUrl],
           html5: true,
           volume: muted ? 0 : vol,
           autoplay: false,
           preload: true,
+
           onload() {
             LOG.info("HOWL", "onload fired | duration=" + fmt(howl.duration()));
             spinner.classList.remove("on");
@@ -848,6 +867,7 @@
             }
             startRaf();
           },
+
           onplay() {
             LOG.info(
               "PLAYBACK",
@@ -859,15 +879,18 @@
             setPlayIcon(true);
             startRaf();
           },
+
           onpause() {
             LOG.info("PLAYBACK", "onpause fired | seek=" + fmt(+howl.seek()));
             setPlayIcon(false);
           },
+
           onstop() {
             LOG.info("PLAYBACK", "onstop fired");
             setPlayIcon(false);
             stopRaf();
           },
+
           onend() {
             LOG.info(
               "PLAYBACK",
@@ -885,11 +908,13 @@
               stopRaf();
             }
           },
+
           onloaderror(_, err) {
             LOG.error("HOWL", "Load error | " + err);
             spinner.classList.remove("on");
             statusL.textContent = "⚠ Load error — check server & CORS";
           },
+
           onplayerror() {
             LOG.warn("HOWL", "Play error — attempting autoplay unlock");
             howl.once("unlock", () => {
@@ -898,12 +923,13 @@
             });
           },
         });
+
         LOG.debug("LOAD", "Howl instance created, waiting for onload...");
       }
 
       /* ═══════════════════════════════════════════════════════════════
-      Controls
-      ═══════════════════════════════════════════════════════════════ */
+     Controls
+  ═══════════════════════════════════════════════════════════════ */
       btnPlay.addEventListener("click", () => {
         if (!howl) {
           LOG.warn("CONTROLS", "Play clicked but no howl instance");
@@ -1005,6 +1031,7 @@
         );
         const dur = howl.duration() || 0;
         const newSeek = ratio * dur;
+
         LOG.debug(
           "SEEK",
           "seekAt | ratio=" + ratio.toFixed(3) + " | target=" + fmt(newSeek),
@@ -1061,6 +1088,7 @@
       document.addEventListener("keydown", (e) => {
         if (e.target.tagName === "INPUT") return;
         LOG.debug("KEYBOARD", "Key pressed | code=" + e.code);
+
         if (e.code === "Space") {
           e.preventDefault();
           btnPlay.click();
@@ -1083,8 +1111,8 @@
       });
 
       /* ═══════════════════════════════════════════════════════════════
-      Queue
-      ═══════════════════════════════════════════════════════════════ */
+     Queue
+  ═══════════════════════════════════════════════════════════════ */
       function renderQueue() {
         LOG.debug(
           "QUEUE",
@@ -1096,17 +1124,17 @@
         queueCount.textContent = tracks.length;
         if (!tracks.length) {
           queueList.innerHTML =
-            '<div class="empty-msg">No tracks found.<br>Add audio files to <code>audio_files/</code> and restart the server.</div>';
+            '<div class="empty-msg">No tracks found.<br>Add audio files to <code>audio_files/</code>.</div>';
           return;
         }
         queueList.innerHTML = tracks
           .map(
             (t, i) => `
-          <div class="track-item ${i === currentIdx ? "active" : ""}" data-idx="${i}">
-            <div class="track-icon">${i === currentIdx ? "▶" : "♪"}</div>
-            <div class="track-name">${escH(t.filename.replace(/\.[^.]+$/, ""))}</div>
-            <div class="track-size">${fmtB(t.size_bytes)}</div>
-          </div>`,
+      <div class="track-item ${i === currentIdx ? "active" : ""}" data-idx="${i}">
+        <div class="track-icon">${i === currentIdx ? "▶" : "♪"}</div>
+        <div class="track-name">${escH(t.filename.replace(/\.[^.]+$/, ""))}</div>
+        <div class="track-size">${fmtB(t.size_bytes)}</div>
+      </div>`,
           )
           .join("");
         queueList.querySelectorAll(".track-item").forEach((el) =>
@@ -1136,20 +1164,21 @@
       });
 
       /* ═══════════════════════════════════════════════════════════════
-      Init — fetch track list from FastAPI
-      ═══════════════════════════════════════════════════════════════ */
+     Init — fetch track list from FastAPI
+  ═══════════════════════════════════════════════════════════════ */
       LOG.info("INIT", "Application starting");
-      LOG.debug("INIT", "API endpoint: " + API);
       LOG.debug("INIT", "Bar count: " + BAR_COUNT);
 
       (async function init() {
-        LOG.info("INIT", "Fetching track list from " + API + "/tracks");
+        LOG.info("INIT", "Fetching track list from " + "/tracks");
+
         try {
-          const res = await fetch(`${API}/tracks`);
-          if (!res.ok)
-            throw new Error("HTTP " + res.status + ": " + res.statusText);
+          const res = await fetch("/segments/tracks");
+          if (!res.ok) throw new Error(res.statusText);
+
           const data = await res.json();
           tracks = data.tracks || [];
+
           LOG.info("INIT", "Tracks loaded | count=" + tracks.length);
           tracks.forEach((t, i) => {
             LOG.debug(
@@ -1164,25 +1193,39 @@
                 t.mime_type,
             );
           });
+
           renderQueue();
+
           if (tracks.length) {
             npTitle.textContent = tracks[0].filename.replace(/\.[^.]+$/, "");
             npSub.textContent = "Press play or click a track";
             LOG.debug("INIT", "Preloading first track (no autoplay)");
             loadTrack(0, false); // pre-load first track, no autoplay
           } else {
-            LOG.warn("INIT", "No supported audio files found in the directory");
-            statusL.textContent = "No audio files — check server directory";
+            LOG.warn("INIT", "No tracks found in audio_files/ directory");
           }
         } catch (err) {
-          LOG.error("INIT", "Failed to fetch tracks: " + err.message);
-          statusL.textContent = "⚠ Server unreachable";
-          statusR.textContent = "Check " + API + "/tracks";
-          // Clear any stale state — never inject placeholder data
-          tracks = [];
+          LOG.error("INIT", "Server unreachable: " + err.message);
+          statusL.textContent = "No server — demo mode";
+          // Placeholder queue for UI preview
+          tracks = [
+            {
+              filename: "demo-track.mp3",
+              size_bytes: 5_242_880,
+              mime_type: "audio/mpeg",
+            },
+            {
+              filename: "ambient-loop.ogg",
+              size_bytes: 3_145_728,
+              mime_type: "audio/ogg",
+            },
+            {
+              filename: "podcast-ep01.mp3",
+              size_bytes: 12_582_912,
+              mime_type: "audio/mpeg",
+            },
+          ];
           renderQueue();
-          npTitle.textContent = "No connection";
-          npSub.textContent = "Ensure the FastAPI server is running";
         }
       })();
     </script>
