@@ -1,33 +1,102 @@
-# config.py
-
 """
-These constants are exactly the same as in fireredvad.core.constants.
-Keep them synchronized with FireRedVAD for compatibility.
+Server configuration for live subtitles server.
+Contains directory paths, file paths, and server-level constants.
+
+For audio processing constants (SAMPLE_RATE, frame sizes, etc.),
+see services.audio_config.
 """
+import shutil
+from pathlib import Path
 
-SILENCE_MAX_THRESHOLD = 0.001
-SAMPLE_RATE = 16000
+# ──────────────────────────────────────────────
+# Server Configuration
+# ──────────────────────────────────────────────
 
-# Frame duration
-FRAME_LENGTH_MS = 25
-FRAME_LENGTH_S = 0.025
+# Base output directory
+OUTPUT_DIR = Path(__file__).resolve().parent.parent / "generated"
 
-# Hop length
-FRAME_SHIFT_MS = 10
-HOP_STEP_MS = FRAME_SHIFT_MS
-FRAME_SHIFT_S = 0.010
-HOP_STEP_S = FRAME_SHIFT_S
+# Number of recent segments to keep in rolling directory
+N_SEGMENT_RESULTS = 50
 
-# Samples per frame (16000 * 25 / 1000 = 400 samples)
-FRAME_LENGTH_SAMPLE = int(SAMPLE_RATE * FRAME_LENGTH_MS / 1000)
-# Hop size in samples (16000 * 10 / 1000 = 160 samples)
-FRAME_SHIFT_SAMPLE = int(SAMPLE_RATE * FRAME_SHIFT_MS / 1000)
-HOP_SIZE = FRAME_SHIFT_SAMPLE
-# Frames per second (1000 / 10 = 100)
-FRAME_PER_SECONDS = int(1000 / FRAME_SHIFT_MS)
+# ──────────────────────────────────────────────
+# Directory Paths (derived from OUTPUT_DIR)
+# ──────────────────────────────────────────────
 
+# Rolling segment directory (cleaned on startup, keeps last N segments)
+LAST_N_SEGMENTS_DIR = OUTPUT_DIR / f"last_{N_SEGMENT_RESULTS}_segments"
 
-# New loudness thresholds (RMS values for float audio)
-VERY_QUIET_MAX = 0.03  # upper bound for "very_quiet"
-NORMAL_MAX = 0.12  # upper bound for "normal" speech
-LOUD_MAX = 0.25  # upper bound for "loud"
+# Live audio buffer directory (cleaned on startup)
+LIVE_AUDIO_BUFFER_DIR = OUTPUT_DIR / "live_audio_buffer"
+
+# Permanent audio storage - PRESERVED across server restarts
+# Stores WAV files by segment_id for playback in segment detail pages
+SEGMENT_AUDIO_DIR = OUTPUT_DIR / "segment_audio"
+
+# ──────────────────────────────────────────────
+# File Paths
+# ──────────────────────────────────────────────
+
+# Segment index file (tracks next segment number)
+SEGMENT_INDEX_PATH = LAST_N_SEGMENTS_DIR / "_segment_index.json"
+
+# Speaker state persistence
+SPEAKER_STATE_PATH = OUTPUT_DIR / "speaker_state.json"
+
+# Audio index file that maps segment_id -> audio metadata
+SEGMENT_AUDIO_INDEX = SEGMENT_AUDIO_DIR / "_audio_index.json"
+
+# ──────────────────────────────────────────────
+# Static & Template Directories (read-only)
+# ──────────────────────────────────────────────
+
+_BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = _BASE_DIR / "static"
+TEMPLATES_DIR = _BASE_DIR / "templates"
+
+# ──────────────────────────────────────────────
+# Temporary Directories (cleaned on startup)
+# ──────────────────────────────────────────────
+
+TEMP_DIRS = [
+    LAST_N_SEGMENTS_DIR,
+    LIVE_AUDIO_BUFFER_DIR,
+]
+
+# Clean temporary directories on startup
+for temp_dir in TEMP_DIRS:
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+# Ensure output directory exists
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Create permanent directories (preserved across restarts)
+SEGMENT_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+
+# ──────────────────────────────────────────────
+# Exports
+# ──────────────────────────────────────────────
+
+__all__ = [
+    'OUTPUT_DIR',
+    'N_SEGMENT_RESULTS',
+    'LAST_N_SEGMENTS_DIR',
+    'LIVE_AUDIO_BUFFER_DIR',
+    'SEGMENT_AUDIO_DIR',
+    'SEGMENT_INDEX_PATH',
+    'SPEAKER_STATE_PATH',
+    'SEGMENT_AUDIO_INDEX',
+    'STATIC_DIR',
+    'TEMPLATES_DIR',
+]
+
+# ──────────────────────────────────────────────
+# Startup Summary (only in main process)
+# ──────────────────────────────────────────────
+if __name__ != "__main__":
+    import sys
+    if "pytest" not in sys.modules:
+        print(f"[config] OUTPUT_DIR={OUTPUT_DIR}")
+        print(f"[config] N_SEGMENT_RESULTS={N_SEGMENT_RESULTS}")
+        print(f"[config] SEGMENT_AUDIO_DIR={SEGMENT_AUDIO_DIR} (preserved)")

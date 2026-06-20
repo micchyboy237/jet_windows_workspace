@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Union
 
 from audio_utils import load_audio
-from config import SAMPLE_RATE
+from services.audio_config import SAMPLE_RATE
 from norm_speech_loudness import normalize_audio_for_vad
 from rich.console import Console
 from speech_waves import (

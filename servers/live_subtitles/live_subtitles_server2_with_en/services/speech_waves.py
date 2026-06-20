@@ -17,14 +17,14 @@ from rich.console import Console
 
 try:
     from services._types import AudioInput, SpeechWave
-    from services.config import HOP_SIZE, SAMPLE_RATE
+    from services.audio_config import HOP_SIZE, SAMPLE_RATE
     from services.energy import compute_rms_per_frame
     from services.audio_utils import load_audio
     from services.norm_speech_loudness import normalize_audio_for_vad
     from services.vad_firered import extract_speech_timestamps
 except ImportError:
     from _types import AudioInput, SpeechWave
-    from config import HOP_SIZE, SAMPLE_RATE
+    from audio_config import HOP_SIZE, SAMPLE_RATE
     from energy import compute_rms_per_frame
     from audio_utils import load_audio
     from norm_speech_loudness import normalize_audio_for_vad

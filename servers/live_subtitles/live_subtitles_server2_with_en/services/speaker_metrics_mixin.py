@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 from rich.console import Console
 
 try:
+    from services.audio_utils import get_audio_duration
     from services.helpers.speaker_metrics import (
         HealthStatus,
         InterSpeakerInput,
@@ -17,6 +18,7 @@ try:
         cosine_distance,
     )
 except ImportError:
+    from audio_utils import get_audio_duration
     from helpers.speaker_metrics import (
         HealthStatus,
         InterSpeakerInput,
@@ -433,21 +435,16 @@ class SpeakerMetricsMixin:
             "duration_seconds": 0.0,
         }
         
-        # Check context buffer first (most recent segments)
+        # Check context buffer
         try:
             from core.state import get_context_buffer
             context_buffer = get_context_buffer()
             if context_buffer and hasattr(context_buffer, 'segments'):
                 for segment_audio, metadata in context_buffer.segments:
                     if metadata.get('segment_id') == segment_id:
-                        sample_rate = 16000  # Default for this system
-                        if isinstance(segment_audio, torch.Tensor):
-                            duration = segment_audio.shape[-1] / sample_rate if segment_audio.dim() > 0 else 0.0
-                        elif isinstance(segment_audio, np.ndarray):
-                            duration = len(segment_audio) / sample_rate
-                        else:
-                            duration = 0.0
-                        
+                        sample_rate = 16000
+                        # ✅ Use utility for duration
+                        duration = get_audio_duration(segment_audio, sr=sample_rate)
                         result["has_audio"] = True
                         result["audio_source"] = "context_buffer"
                         result["sample_rate"] = sample_rate
@@ -459,16 +456,15 @@ class SpeakerMetricsMixin:
         except Exception as e:
             console.print(f"[warning]get_segment_audio_info: error checking context buffer: {e}[/]")
         
-        # Fallback: check disk for saved WAV files
+        # Check disk
         try:
-            from config import OUTPUT_DIR
-            last_n_dir = OUTPUT_DIR / f"last_50_segments"  # N_SEGMENT_RESULTS = 50
+            from services.audio_config import OUTPUT_DIR
+            last_n_dir = OUTPUT_DIR / "last_50_segments"
             if last_n_dir.exists():
                 audio_path = last_n_dir / f"{segment_id}.wav"
                 if audio_path.exists():
-                    file_size = audio_path.stat().st_size
-                    # WAV files: 44-byte header + 16-bit mono PCM
-                    duration = max(0, (file_size - 44) / (16000 * 2))
+                    # ✅ Use utility for file duration
+                    duration = get_audio_duration(str(audio_path))
                     result["has_audio"] = True
                     result["audio_source"] = "disk"
                     result["sample_rate"] = 16000

@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 try:
-    from services.config import (
+    from services.audio_config import (
         FRAME_LENGTH_MS,
         FRAME_LENGTH_SAMPLE,
         FRAME_SHIFT_MS,
@@ -18,7 +18,7 @@ try:
         VERY_QUIET_MAX,
     )
 except ImportError:
-    from config import (
+    from audio_config import (
         FRAME_LENGTH_MS,
         FRAME_LENGTH_SAMPLE,
         FRAME_SHIFT_MS,
@@ -30,25 +30,6 @@ except ImportError:
         # New loudness thresholds
         VERY_QUIET_MAX,
     )
-
-
-def get_audio_duration(samples: np.ndarray, sample_rate: int = SAMPLE_RATE) -> float:
-    """Return duration of audio in seconds.
-
-    Parameters
-    ----------
-    samples : np.ndarray
-        Input audio samples (1D array).
-
-    Returns
-    -------
-    float
-        Duration in seconds.
-    """
-    if len(samples) == 0:
-        return 0.0
-
-    return float(len(samples) / sample_rate)
 
 
 def compute_amplitude(samples: np.ndarray) -> float:

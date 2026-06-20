@@ -15,7 +15,7 @@ from audio_tagger import (
     CLASS_LABELS_INDICES_CSV,
     AudioTagger,
 )
-from config import SAMPLE_RATE
+from audio_config import SAMPLE_RATE
 from main._main_audio_tagger import get_args, _format_predictions_with_emphasis, _get_probability_bar
 
 install_rich_traceback(show_locals=True)

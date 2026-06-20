@@ -35,7 +35,7 @@ from services.live_subtitles_server_utils import (
     load_segment_counter,
     save_segment_counter,
 )
-from config import OUTPUT_DIR
+from services.config import OUTPUT_DIR
 
 console = Console()
 router = APIRouter(prefix="/global", tags=["global-reset"])

@@ -25,7 +25,7 @@ from services.save_utils import (
     save_tagging_results,
     save_chunked_results,
 )
-from config import OUTPUT_DIR, TEMPLATES_DIR, STATIC_DIR
+from services.config import OUTPUT_DIR, TEMPLATES_DIR, STATIC_DIR
 
 static_dir = STATIC_DIR / "tagger"
 templates_dir = TEMPLATES_DIR / "tagger"

@@ -15,7 +15,7 @@ from rich.traceback import install as install_rich_traceback
 
 try:
     from services.audio_utils import AudioInput, load_audio
-    from services.config import (
+    from services.audio_config import (
         FRAME_PER_SECONDS,
         FRAME_SHIFT_S,
         SAMPLE_RATE,
@@ -23,7 +23,7 @@ try:
     from services.custom_logging import linkify
 except ImportError:
     from audio_utils import AudioInput, load_audio
-    from config import (
+    from audio_config import (
         FRAME_PER_SECONDS,
         FRAME_SHIFT_S,
         SAMPLE_RATE,

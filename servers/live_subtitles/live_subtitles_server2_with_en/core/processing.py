@@ -45,6 +45,8 @@ from services.sentence_utils import split_sentences_ja
 from services.transcribe_funasr import transcribe_audio
 from services.translate_jp_en_llm_prefixed import translate_japanese_to_english
 from services.audio_tagger import AudioTagger
+from services.audio_utils import get_audio_duration
+from services.audio_config import SAMPLE_RATE
 
 console = Console()
 SPACELESS_LANGUAGES = {"ja", "jpn", "zh", "chi", "zho", "ko", "kor", "th", "tha"}
@@ -275,7 +277,7 @@ def blocking_process_audio(audio_bytes: bytes, header: dict) -> dict:
         console.print("[error]Missing segment ID in header[/error]")
         return {"message": "missing segment_id", "success": False}
 
-    sample_rate = header.get("sample_rate", 16000)
+    sample_rate = header.get("sample_rate", SAMPLE_RATE)
     language = header.get("language", "auto")
     audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
 
@@ -377,7 +379,7 @@ def blocking_process_audio(audio_bytes: bytes, header: dict) -> dict:
     if should_reset_context(header):
         context_buffer.reset()
 
-    new_audio_duration_sec = len(audio_np) / sample_rate
+    new_audio_duration_sec = get_audio_duration(audio_np, sr=sample_rate)
     context_duration_sec = context_buffer.get_total_duration()
     max_duration_sec = context_buffer.max_duration_sec
 
@@ -400,7 +402,7 @@ def blocking_process_audio(audio_bytes: bytes, header: dict) -> dict:
     else:
         full_audio_int16 = audio_np
 
-    actual_full_duration_sec = len(full_audio_int16) / sample_rate
+    actual_full_duration_sec = get_audio_duration(full_audio_int16, sr=sample_rate)
     if actual_full_duration_sec > max_duration_sec + 1e-3:
         raise RuntimeError(
             f"BUG: full_audio duration {actual_full_duration_sec:.3f}s "
@@ -508,7 +510,10 @@ def _perform_speaker_labeling(
 
     if text_has_sufficient_content:
         segment_timestamp = header.get("start_sec", time.time())
-        segment_duration = header.get("duration_sec", len(audio_np) / sample_rate)
+        segment_duration = header.get(
+            "duration_sec", 
+            get_audio_duration(audio_np, sr=sample_rate)
+        )
         use_multiple = segment_duration >= 3.0
         speaker_results, primary_label, primary_confidence, speaker_metadata = (
             label_speakers_for_segment(
@@ -566,9 +571,11 @@ def _process_non_japanese(
     last_n_segments_dir: Path,
     segment_index_path: Path,
     n_segment_results: int,
-    tagging_events: dict,  # New parameter: pre-computed tagging events
+    tagging_events: dict,
 ) -> dict:
     """Process non-Japanese audio segment."""
+    from services.audio_utils import get_audio_duration
+    
     en_text = full_word_segments_text.strip()
     console.print("[bold green]📝 Non-Japanese Transcribed Text:[/bold green]")
     console.print(f"[bright_white]{en_text}[/bright_white]")
@@ -576,7 +583,6 @@ def _process_non_japanese(
 
     segment_id = header.get("segment_id")
     segment_num = header.get("segment_number")
-    # segment_num = get_next_segment_number()
 
     segment_dir = prepare_segment_directory(
         segment_num,
@@ -604,7 +610,23 @@ def _process_non_japanese(
         segment_id=segment_id,
     )
 
-    # Save tagging events to segment directory now that we have it
+    # Save audio permanently for segment detail playback
+    # ✅ All variables (en_text, primary_label, segment_num) are now defined
+    if segment_id:
+        save_segment_audio_for_playback(
+            audio_np=audio_np,
+            segment_id=segment_id,
+            sample_rate=sample_rate,
+            metadata={
+                "segment_number": segment_num,
+                "speaker_label": primary_label,
+                "timestamp": header.get("start_sec", time.time()),
+                "language": language,
+                "text": en_text[:100] if en_text else "",
+            }
+        )
+
+    # Save tagging events to segment directory
     if segment_dir and tagging_events:
         try:
             save_tagging_to_segment(
@@ -682,7 +704,6 @@ def _process_non_japanese(
 
     console.print("[bold green]✅ Non-Japanese Response Summary:[/bold green]")
     console.print(f"  UUID: [uuid]{uuid_[-6:]}[/uuid]")
-    console.print(f"  UUID: [uuid]{uuid_[-6:]}[/uuid]")
     console.print(f"  Language: [value]{language}[/value]")
     console.print(f"  Text length: [number]{len(en_text)}[/number] chars")
     console.print(f"  Speaker: [speaker]{primary_label}[/speaker]")
@@ -749,9 +770,11 @@ def _process_japanese(
     last_n_segments_dir: Path,
     segment_index_path: Path,
     n_segment_results: int,
-    tagging_events: dict,  # New parameter: pre-computed tagging events
+    tagging_events: dict,
 ) -> dict:
     """Process Japanese audio segment with translation."""
+    from services.audio_utils import get_audio_duration
+    
     full_ja_text = full_word_segments_text
     full_ja_sents = split_sentences_ja(full_ja_text)
     console.print("[bold green]📝 Japanese Transcribed Text:[/bold green]")
@@ -760,7 +783,6 @@ def _process_japanese(
 
     segment_id = header.get("segment_id")
     segment_num = header.get("segment_number")
-    # segment_num = get_next_segment_number()
 
     segment_dir = prepare_segment_directory(
         segment_num,
@@ -788,7 +810,7 @@ def _process_japanese(
         segment_id=segment_id,
     )
 
-    # Save tagging events to segment directory now that we have it
+    # Save tagging events to segment directory
     if segment_dir and tagging_events:
         try:
             save_tagging_to_segment(
@@ -814,7 +836,8 @@ def _process_japanese(
     en_text = ""
     full_en_text = ""
 
-    new_audio_duration_sec = len(audio_np) / sample_rate
+    # ✅ Use utility function instead of manual calculation
+    new_audio_duration_sec = get_audio_duration(audio_np, sr=sample_rate)
 
     if context_buffer.segments:
         _, last_meta = context_buffer.get_last_segment()
@@ -845,6 +868,22 @@ def _process_japanese(
 
         new_clean = new_text.rstrip(".。！？、…・「」『』").rstrip()
         if not new_clean:
+            # ✅ Save audio even for empty returns (early exit with audio saved)
+            if segment_id:
+                save_segment_audio_for_playback(
+                    audio_np=audio_np,
+                    segment_id=segment_id,
+                    sample_rate=sample_rate,
+                    metadata={
+                        "segment_number": segment_num,
+                        "speaker_label": primary_label,
+                        "timestamp": header.get("start_sec", time.time()),
+                        "language": language,
+                        "text_ja": "",
+                        "text_en": "",
+                        "note": "Same text as previous segment",
+                    }
+                )
             return {
                 "uuid": uuid_,
                 "segment_id": segment_id,
@@ -900,6 +939,22 @@ def _process_japanese(
             )
             console.print(f"[bright_white]{en_text}[/bright_white]")
         else:
+            # ✅ Save audio even for empty returns (early exit with audio saved)
+            if segment_id:
+                save_segment_audio_for_playback(
+                    audio_np=audio_np,
+                    segment_id=segment_id,
+                    sample_rate=sample_rate,
+                    metadata={
+                        "segment_number": segment_num,
+                        "speaker_label": primary_label,
+                        "timestamp": header.get("start_sec", time.time()),
+                        "language": language,
+                        "text_ja": "",
+                        "text_en": "",
+                        "note": "Empty transcription after cleaning",
+                    }
+                )
             return {
                 "uuid": uuid_,
                 "segment_id": segment_id,
@@ -923,6 +978,23 @@ def _process_japanese(
     )
     ja_text = prefix_result["new_ja"]
     en_text = prefix_result["new_en"]
+
+    # ✅ Save audio permanently for segment detail playback
+    # All variables (ja_text, en_text, primary_label) are now properly defined
+    if segment_id:
+        save_segment_audio_for_playback(
+            audio_np=audio_np,
+            segment_id=segment_id,
+            sample_rate=sample_rate,
+            metadata={
+                "segment_number": segment_num,
+                "speaker_label": primary_label,
+                "timestamp": header.get("start_sec", time.time()),
+                "language": language,
+                "text_ja": ja_text[:100] if ja_text else "",
+                "text_en": en_text[:100] if en_text else "",
+            }
+        )
 
     save_segment_files(
         segment_dir=segment_dir,
@@ -1075,7 +1147,7 @@ def perform_audio_tagging(
     console.print(
         f"[info]Audio shape: {audio_np.shape}, Sample rate: {sample_rate}[/info]"
     )
-    audio_duration = len(audio_np) / sample_rate
+    audio_duration = get_audio_duration(audio_np, sr=sample_rate)
     console.print(f"[info]Audio duration: {audio_duration:.2f}s[/info]")
 
     try:
@@ -1193,3 +1265,124 @@ def perform_audio_tagging(
             "processing_mode": "failed",
             "top_predictions": [],
         }
+
+
+def save_segment_audio_for_playback(
+    audio_np: np.ndarray,
+    segment_id: str,
+    sample_rate: int = SAMPLE_RATE,
+    metadata: Optional[Dict] = None,
+) -> Optional[Path]:
+    """
+    Save segment audio as WAV file permanently for playback in segment detail page.
+    Organizes by segment_id so it can always be found.
+    
+    Args:
+        audio_np: Audio samples as int16 numpy array
+        segment_id: Unique segment identifier (UUID)
+        sample_rate: Sample rate in Hz (defaults to SAMPLE_RATE from services.audio_config)
+        metadata: Optional metadata to store alongside audio
+        
+    Returns:
+        Path to saved audio file, or None if failed
+    """
+    import wave
+    import json
+    from services.config import SEGMENT_AUDIO_DIR, SEGMENT_AUDIO_INDEX
+    
+    if audio_np.size == 0:
+        console.print(f"[warning]Cannot save empty audio for segment {segment_id}[/]")
+        return None
+    
+    try:
+        # ✅ Ensure directory exists (handles race conditions and deleted directories)
+        SEGMENT_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+        
+        # Create audio file path using segment_id
+        audio_path = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
+        
+        # Convert to int16 if needed
+        if audio_np.dtype != np.int16:
+            if audio_np.dtype == np.float64 or audio_np.dtype == np.float32:
+                # Convert from float to int16
+                audio_int16 = (np.clip(audio_np.astype(np.float64), -1.0, 1.0) * 32767).astype(np.int16)
+            else:
+                audio_int16 = audio_np.astype(np.int16)
+        else:
+            audio_int16 = audio_np
+        
+        # Write WAV file
+        with wave.open(str(audio_path), 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16-bit = 2 bytes
+            wf.setframerate(sample_rate)
+            wf.writeframes(audio_int16.tobytes())
+        
+        # Use utility for duration
+        duration_sec = get_audio_duration(audio_int16, sr=sample_rate)
+        console.print(
+            f"[success]Saved segment audio: {segment_id}.wav "
+            f"({len(audio_int16)} samples, {duration_sec:.2f}s) → {audio_path}[/]"
+        )
+        
+        # Update audio index
+        audio_index = {}
+        if SEGMENT_AUDIO_INDEX.exists():
+            try:
+                with open(SEGMENT_AUDIO_INDEX, 'r') as f:
+                    audio_index = json.load(f)
+            except Exception as e:
+                console.print(f"[warning]Could not read audio index: {e}, starting fresh[/]")
+        
+        audio_index[segment_id] = {
+            "file": f"{segment_id}.wav",
+            "duration_sec": round(duration_sec, 3),
+            "sample_rate": sample_rate,
+            "samples": len(audio_int16),
+            "saved_at": time.time(),
+            "metadata": metadata or {},
+        }
+        
+        # Keep only last 500 entries to prevent index from growing too large
+        if len(audio_index) > 500:
+            # Sort by saved_at and keep newest 500
+            sorted_items = sorted(
+                audio_index.items(), 
+                key=lambda x: x[1].get('saved_at', 0), 
+                reverse=True
+            )[:500]
+            old_count = len(audio_index) - len(sorted_items)
+            audio_index = dict(sorted_items)
+            
+            # Clean up old files not in index
+            console.print(f"[dim]Cleaning up {old_count} old audio files...[/]")
+            for audio_file in SEGMENT_AUDIO_DIR.glob("*.wav"):
+                if audio_file.stem not in audio_index:
+                    try:
+                        audio_file.unlink()
+                        console.print(f"[dim]Cleaned up old audio: {audio_file.name}[/]")
+                    except Exception as e:
+                        console.print(f"[warning]Could not delete old audio {audio_file.name}: {e}[/]")
+        
+        # Write index atomically using temp file
+        import tempfile
+        index_dir = SEGMENT_AUDIO_INDEX.parent
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            suffix='.json',
+            dir=index_dir,
+            delete=False
+        ) as tmp:
+            json.dump(audio_index, tmp, indent=2)
+            tmp_path = Path(tmp.name)
+        
+        # Atomic rename
+        tmp_path.replace(SEGMENT_AUDIO_INDEX)
+        
+        return audio_path
+        
+    except Exception as e:
+        console.print(f"[error]Failed to save segment audio for {segment_id}: {e}[/]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/]")
+        return None

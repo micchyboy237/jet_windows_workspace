@@ -10,6 +10,11 @@ import numpy.typing as npt
 import librosa
 import torch
 
+try:
+    from services.audio_config import SAMPLE_RATE
+except ImportError:
+    from audio_config import SAMPLE_RATE
+
 AudioInput = Union[
     str,
     bytes,
@@ -134,7 +139,7 @@ def resolve_audio_paths(
 
 def resolve_audio_paths_as_np_list(
     audio_inputs: AudioPathsInput,
-    sr: int = 16_000,
+    sr: int = SAMPLE_RATE,
     mono: bool = True,
     recursive: bool = False,
     includes: Optional[list[str]] = None,
@@ -191,7 +196,7 @@ def resolve_audio_paths_as_np_list(
 
 def resolve_audio_paths_as_tensor_list(
     audio_inputs: AudioPathsInput,
-    sr: int = 16_000,
+    sr: int = SAMPLE_RATE,
     mono: bool = True,
     recursive: bool = False,
     includes: Optional[list[str]] = None,
@@ -254,7 +259,7 @@ def resolve_audio_paths_as_tensor_list(
 
 def load_audio(
     audio: AudioInput,
-    sr: int = 16_000,
+    sr: int = SAMPLE_RATE,
     mono: bool = True,
 ) -> tuple[np.ndarray, int]:
     """
@@ -532,3 +537,73 @@ def convert_audio_to_tensor(
     assert sr == 16000, "Wrong sample rate for Silero VAD: must be 16000 Hz"
 
     return tensor  # shape: (N_samples,), float32, [-1, 1], 16kHz
+
+
+def get_audio_duration(
+    audio: AudioInput,
+    sr: Optional[int] = None,
+) -> float:
+    """
+    Get the duration of an audio input in seconds.
+    
+    Handles various input types efficiently:
+    - File paths: Uses librosa to get duration without loading full audio
+    - Bytes: Loads from buffer to determine duration
+    - NumPy arrays: Calculates from shape and sample rate
+    - Torch tensors: Calculates from shape and sample rate
+    
+    Args:
+        audio: Audio input (file path, bytes, numpy array, or torch tensor)
+        sr: Sample rate for array/tensor inputs. If None, defaults to SAMPLE_RATE (16000)
+           For file inputs, sr is ignored and detected automatically
+    
+    Returns:
+        Duration in seconds as a float
+    
+    Raises:
+        TypeError: If audio input type is not supported
+    
+    Examples:
+        # File duration
+        duration = get_audio_duration("audio.wav")
+        
+        # Numpy array duration (uses default SAMPLE_RATE)
+        duration = get_audio_duration(audio_array)
+        
+        # Numpy array with custom sample rate
+        duration = get_audio_duration(audio_array, sr=44100)
+        
+        # Bytes duration
+        duration = get_audio_duration(audio_bytes)
+    """
+    # Use default sample rate if not provided
+    if sr is None:
+        sr = SAMPLE_RATE
+    
+    if isinstance(audio, (str, os.PathLike)):
+        # Use librosa to get duration without loading the entire file
+        import librosa
+        return librosa.get_duration(path=audio)
+    
+    elif isinstance(audio, bytes):
+        import librosa
+        # Load from bytes to get duration
+        y, current_sr = librosa.load(io.BytesIO(audio), sr=None, mono=False)
+        if y.ndim == 1:
+            num_samples = len(y)
+        else:
+            num_samples = y.shape[-1]  # Take last dimension for multi-channel
+        return num_samples / current_sr
+    
+    elif isinstance(audio, np.ndarray):
+        # Use the last dimension as the time dimension
+        num_samples = audio.shape[-1] if audio.ndim > 1 else len(audio)
+        return num_samples / sr
+    
+    elif isinstance(audio, torch.Tensor):
+        # Use the last dimension as the time dimension
+        num_samples = audio.shape[-1] if audio.ndim > 1 else len(audio)
+        return num_samples / sr
+    
+    else:
+        raise TypeError(f"Unsupported audio input type: {type(audio)}")

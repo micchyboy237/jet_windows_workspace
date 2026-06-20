@@ -1,6 +1,6 @@
 import numpy as np
 from speech_waves import WaveShapeConfig, check_speech_waves
-from config import SAMPLE_RATE, HOP_SIZE
+from services.audio_config import SAMPLE_RATE, HOP_SIZE
 from audio_utils import load_audio
 from vad_firered import extract_speech_timestamps
 from quant import quantize_audio

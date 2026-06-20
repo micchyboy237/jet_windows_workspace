@@ -9,13 +9,13 @@ import uuid
 from rich.console import Console
 from scipy.spatial.distance import cdist
 try:
-    from services.config import SAMPLE_RATE
+    from services.audio_config import SAMPLE_RATE
     from services.embedding_model_factory import BaseEmbeddingModel
     from services.speaker_metrics_mixin import SpeakerMetricsMixin
     # from services.speech_waves import extract_pure_speech_audio
     from services.audio_tagger import AudioTagger
 except ImportError:
-    from config import SAMPLE_RATE
+    from audio_config import SAMPLE_RATE
     from embedding_model_factory import BaseEmbeddingModel
     from speaker_metrics_mixin import SpeakerMetricsMixin
     # from speech_waves import extract_pure_speech_audio

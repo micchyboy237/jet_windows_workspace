@@ -19,6 +19,8 @@
         --color-accent: #3b82f6;
         --color-accent-hover: #2563eb;
         --color-success: #1d9e75;
+        --color-warning: #ef9f27;
+        --color-error: #e24b4a;
         --border-radius-md: 10px;
         --border-radius-lg: 16px;
         --font-sans:
@@ -119,16 +121,59 @@
         color: var(--color-accent-hover);
         text-decoration: underline;
       }
-      .btn-row {
+
+      /* Enhanced Audio Player Styles */
+      .audio-section {
+        margin-top: 1rem;
+      }
+      .audio-section-header {
         display: flex;
-        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.75rem;
+      }
+      .audio-title {
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .audio-source-badge {
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 99px;
+        background: var(--color-surface-secondary);
+        color: var(--color-text-secondary);
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .audio-player-container {
+        background: var(--color-surface-secondary);
+        border-radius: var(--border-radius-md);
+        padding: 1rem;
+        margin-bottom: 0.75rem;
+      }
+      .audio-player {
+        width: 100%;
+        height: 40px;
+        border-radius: 8px;
+        outline: none;
+      }
+      .audio-player:focus {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+      }
+      .audio-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 0.75rem;
         flex-wrap: wrap;
       }
       .btn {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 10px 18px;
+        padding: 8px 16px;
         border-radius: 40px;
         font-size: 13px;
         font-weight: 500;
@@ -138,17 +183,13 @@
         border: 0.5px solid var(--color-border-tertiary);
         background: white;
         color: var(--color-text-primary);
+        white-space: nowrap;
       }
       .btn:hover {
         background: #f0f2f5;
       }
-      .btn-primary {
-        background: var(--color-accent);
-        color: white;
-        border-color: var(--color-accent);
-      }
-      .btn-primary:hover {
-        background: var(--color-accent-hover);
+      .btn:active {
+        transform: scale(0.97);
       }
       .btn-play {
         background: var(--color-success);
@@ -157,6 +198,22 @@
       }
       .btn-play:hover {
         background: #168a63;
+      }
+      .btn-pause {
+        background: var(--color-warning);
+        color: white;
+        border-color: var(--color-warning);
+      }
+      .btn-pause:hover {
+        background: #d48a1c;
+      }
+      .btn-stop {
+        background: var(--color-error);
+        color: white;
+        border-color: var(--color-error);
+      }
+      .btn-stop:hover {
+        background: #c53030;
       }
       .btn-download {
         background: white;
@@ -170,6 +227,115 @@
         opacity: 0.5;
         cursor: not-allowed;
         pointer-events: none;
+      }
+      .time-display {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        font-variant-numeric: tabular-nums;
+        min-width: 100px;
+        text-align: center;
+      }
+      .progress-container {
+        flex: 1;
+        min-width: 120px;
+      }
+      .seek-bar {
+        width: 100%;
+        height: 4px;
+        -webkit-appearance: none;
+        appearance: none;
+        background: var(--color-border-tertiary);
+        border-radius: 2px;
+        outline: none;
+        cursor: pointer;
+      }
+      .seek-bar::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--color-accent);
+        cursor: pointer;
+        transition: 0.2s;
+      }
+      .seek-bar::-webkit-slider-thumb:hover {
+        transform: scale(1.2);
+        background: var(--color-accent-hover);
+      }
+      .seek-bar::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--color-accent);
+        cursor: pointer;
+        border: none;
+      }
+      .speed-control {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 0.5rem;
+      }
+      .speed-label {
+        font-size: 11px;
+        color: var(--color-text-tertiary);
+      }
+      .speed-btn {
+        padding: 4px 10px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        background: white;
+        border: 0.5px solid var(--color-border-tertiary);
+        color: var(--color-text-primary);
+        transition: 0.2s;
+      }
+      .speed-btn:hover {
+        background: var(--color-surface-secondary);
+      }
+      .speed-btn.active {
+        background: var(--color-accent);
+        color: white;
+        border-color: var(--color-accent);
+      }
+      .audio-info {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        margin-bottom: 0.75rem;
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .audio-info-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .audio-error {
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        border-radius: var(--border-radius-md);
+        padding: 12px;
+        margin-top: 0.75rem;
+      }
+      .audio-error-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--color-error);
+        margin-bottom: 4px;
+      }
+      .audio-error-message {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+      .audio-error-retry {
+        margin-top: 8px;
+        font-size: 12px;
+        color: var(--color-accent);
+        cursor: pointer;
+        text-decoration: underline;
       }
       .not-found {
         text-align: center;
@@ -189,14 +355,6 @@
       .back-link:hover {
         text-decoration: underline;
       }
-      .audio-section {
-        margin-top: 1rem;
-      }
-      .audio-player {
-        width: 100%;
-        margin-top: 0.5rem;
-        border-radius: 8px;
-      }
       .timestamp-badge {
         font-size: 11px;
         background: var(--color-surface-secondary);
@@ -208,8 +366,16 @@
         .info-grid {
           grid-template-columns: 1fr;
         }
-        .btn-row {
+        .audio-controls {
           flex-direction: column;
+          align-items: stretch;
+        }
+        .btn {
+          justify-content: center;
+        }
+        .time-display {
+          text-align: center;
+          min-width: auto;
         }
         body {
           padding: 0.8rem;
@@ -239,7 +405,6 @@
             </div>
           </div>
         </div>
-
         <!-- Key Metrics -->
         <div class="info-grid">
           <div class="info-item">
@@ -268,7 +433,6 @@
             <div class="info-value">{{ speaker_segment_count }}</div>
           </div>
         </div>
-
         <!-- Speaker Context -->
         <div class="info-grid">
           <div class="info-item">
@@ -296,62 +460,183 @@
         </div>
       </div>
 
-      <!-- Audio Section -->
+      <!-- Enhanced Audio Section -->
       <div class="card audio-section">
-        <div style="font-size: 14px; font-weight: 500; margin-bottom: 0.5rem">
-          🔊 Audio
+        <div class="audio-section-header">
+          <div class="audio-title">🔊 Audio Playback</div>
+          {% if has_audio %}
+          <span class="audio-source-badge">
+            {% if audio_source == "permanent_storage" %} 💾 Permanent Storage {%
+            elif audio_source == "context_buffer" %} 🧠 Memory Buffer {% elif
+            audio_source == "disk" %} 💿 Disk {% else %} 📁 {{ audio_source }}
+            {% endif %}
+          </span>
+          {% endif %}
         </div>
 
         {% if has_audio %}
-        <p
-          style="
-            font-size: 12px;
-            color: var(--color-text-secondary);
-            margin-bottom: 0.75rem;
-          "
-        >
-          Source: {{ audio_source }} · {{ "%.2f"|format(audio_duration) }}s · {{
-          audio_sample_rate }}Hz
-        </p>
+        <!-- Audio metadata info -->
+        <div class="audio-info">
+          <div class="audio-info-item">
+            <span>⏱️</span>
+            <span>{{ "%.2f"|format(audio_duration) }}s</span>
+          </div>
+          <div class="audio-info-item">
+            <span>🎵</span>
+            <span>{{ audio_sample_rate }}Hz</span>
+          </div>
+          <div class="audio-info-item">
+            <span>📊</span>
+            <span>Mono</span>
+          </div>
+          <div class="audio-info-item">
+            <span>💾</span>
+            <span>WAV 16-bit</span>
+          </div>
+        </div>
 
-        <!-- Audio player -->
-        <audio controls class="audio-player" preload="auto">
-          <source
-            src="/speakers/segment/{{ segment_id }}/audio"
-            type="audio/wav"
-          />
-          Your browser does not support the audio element.
-        </audio>
-
-        <div class="btn-row" style="margin-top: 1rem">
-          <button
-            class="btn btn-play"
-            onclick="document.querySelector('.audio-player').play()"
+        <!-- Audio player container -->
+        <div class="audio-player-container">
+          <audio
+            id="audioPlayer"
+            class="audio-player"
+            controls
+            preload="auto"
+            crossorigin="anonymous"
           >
+            <source
+              src="/speakers/segment/{{ segment_id }}/audio"
+              type="audio/wav"
+            />
+            Your browser does not support the audio element.
+          </audio>
+        </div>
+
+        <!-- Custom controls -->
+        <div class="audio-controls">
+          <button class="btn btn-play" id="playBtn" onclick="playAudio()">
             ▶ Play
           </button>
+          <button class="btn btn-pause" id="pauseBtn" onclick="pauseAudio()">
+            ⏸ Pause
+          </button>
+          <button class="btn btn-stop" id="stopBtn" onclick="stopAudio()">
+            ⏹ Stop
+          </button>
+
+          <span class="time-display" id="timeDisplay">0:00 / 0:00</span>
+
+          <div class="progress-container">
+            <input
+              type="range"
+              class="seek-bar"
+              id="seekBar"
+              min="0"
+              max="100"
+              value="0"
+              step="0.1"
+              oninput="seekAudio(this.value)"
+            />
+          </div>
+
           <a
-            href="/speakers/segment/{{ segment_id }}/audio?download=true"
+            href="/speakers/segment/{{ segment_id }}/audio"
             class="btn btn-download"
             download="{{ segment_id }}.wav"
           >
-            ⬇ Download WAV
+            ⬇ Download
           </a>
         </div>
-        {% else %}
-        <p
+
+        <!-- Playback speed controls -->
+        <div class="speed-control">
+          <span class="speed-label">Speed:</span>
+          <button class="speed-btn" onclick="setSpeed(0.5)">0.5x</button>
+          <button class="speed-btn" onclick="setSpeed(0.75)">0.75x</button>
+          <button class="speed-btn active" id="speed1x" onclick="setSpeed(1.0)">
+            1x
+          </button>
+          <button class="speed-btn" onclick="setSpeed(1.25)">1.25x</button>
+          <button class="speed-btn" onclick="setSpeed(1.5)">1.5x</button>
+          <button class="speed-btn" onclick="setSpeed(2.0)">2x</button>
+        </div>
+
+        <!-- Keyboard shortcuts hint -->
+        <div
           style="
-            font-size: 13px;
-            color: var(--color-text-secondary);
-            margin-bottom: 0.75rem;
+            margin-top: 0.75rem;
+            font-size: 11px;
+            color: var(--color-text-tertiary);
           "
         >
-          ⚠️ Audio data not available for this segment.
-        </p>
-        <p style="font-size: 12px; color: var(--color-text-tertiary)">
-          Audio may have been evicted from the context buffer. Only recent
-          segments retain their audio data for playback.
-        </p>
+          ⌨️ Shortcuts: Space = Play/Pause · ←→ = Seek ±5s · ↑↓ = Volume
+        </div>
+
+        <!-- Error display (hidden by default) -->
+        <div class="audio-error" id="audioError" style="display: none">
+          <div class="audio-error-title">⚠️ Audio Playback Error</div>
+          <div class="audio-error-message" id="audioErrorMessage"></div>
+          <div class="audio-error-retry" onclick="retryAudio()">
+            🔄 Retry Loading Audio
+          </div>
+        </div>
+
+        {% else %}
+        <!-- No audio available message -->
+        <div
+          style="
+            text-align: center;
+            padding: 2rem 1rem;
+            background: var(--color-surface-secondary);
+            border-radius: var(--border-radius-md);
+          "
+        >
+          <div style="font-size: 36px; margin-bottom: 0.75rem">🎵</div>
+          <p
+            style="
+              font-size: 14px;
+              color: var(--color-text-primary);
+              margin-bottom: 0.5rem;
+            "
+          >
+            Audio data not available for this segment
+          </p>
+          <p
+            style="
+              font-size: 12px;
+              color: var(--color-text-secondary);
+              margin-bottom: 0.5rem;
+            "
+          >
+            Possible reasons:
+          </p>
+          <ul
+            style="
+              font-size: 11px;
+              color: var(--color-text-tertiary);
+              text-align: left;
+              margin: 0.5rem auto;
+              max-width: 300px;
+              list-style-position: inside;
+            "
+          >
+            <li>Audio has been evicted from the memory buffer</li>
+            <li>Segment was processed before audio saving was enabled</li>
+            <li>Audio file was cleaned up (only last 500 segments kept)</li>
+            <li>This segment had no speech detected</li>
+          </ul>
+          <p
+            style="
+              font-size: 11px;
+              color: var(--color-text-tertiary);
+              margin-top: 0.75rem;
+            "
+          >
+            💡 <strong>Tip:</strong> Audio is now permanently saved for the last
+            500 segments. Playback will be available for recently processed
+            segments.
+          </p>
+        </div>
         {% endif %}
       </div>
 
@@ -415,32 +700,327 @@
     </div>
 
     <script>
-      // Log page load
-      console.log("[SegmentDetail] Page loaded for: {{ segment_id }}");
-      console.log("[SegmentDetail] Found: {{ found }}");
-      {% if found %}
-      console.log("[SegmentDetail] Speaker: {{ speaker_label }}, Duration: {{ segment_duration }}s");
-      {% endif %}
+      // ───────────────────────────────────────
+      // Enhanced Audio Player with Seek, Speed Control & Keyboard Shortcuts
+      // ───────────────────────────────────────
 
-      // Handle audio player errors gracefully
+      let audioPlayer = null;
+      let seekBar = null;
+      let timeDisplay = null;
+      let playBtn = null;
+      let pauseBtn = null;
+      let stopBtn = null;
+      let audioError = null;
+
+      // Initialize on DOM load
       document.addEventListener('DOMContentLoaded', function() {
-        const audioEl = document.querySelector('.audio-player');
-        if (audioEl) {
-          audioEl.addEventListener('error', function(e) {
-            console.warn("[SegmentDetail] Audio playback error:", e);
-            const audioSection = document.querySelector('.audio-section');
-            if (audioSection) {
-              const errorMsg = document.createElement('p');
-              errorMsg.style.cssText = 'font-size: 12px; color: #E24B4A; margin-top: 8px;';
-              errorMsg.textContent = '⚠️ Audio playback failed. The file may be corrupted or unavailable.';
-              audioSection.appendChild(errorMsg);
-            }
-          });
-          audioEl.addEventListener('loadeddata', function() {
-            console.log("[SegmentDetail] Audio loaded successfully");
-          });
+        console.log("[SegmentDetail] Page loaded for: {{ segment_id }}");
+        console.log("[SegmentDetail] Found: {{ found }}");
+        {% if found %}
+        console.log("[SegmentDetail] Speaker: {{ speaker_label }}, Duration: {{ segment_duration }}s");
+        console.log("[SegmentDetail] Audio available: {{ has_audio }}, Source: {{ audio_source }}");
+        {% endif %}
+
+        // Get audio elements
+        audioPlayer = document.getElementById('audioPlayer');
+        seekBar = document.getElementById('seekBar');
+        timeDisplay = document.getElementById('timeDisplay');
+        playBtn = document.getElementById('playBtn');
+        pauseBtn = document.getElementById('pauseBtn');
+        stopBtn = document.getElementById('stopBtn');
+        audioError = document.getElementById('audioError');
+
+        if (audioPlayer) {
+          setupAudioPlayer();
         }
       });
+
+      function setupAudioPlayer() {
+        // ── Update seek bar and time display as audio plays ──
+        audioPlayer.addEventListener('timeupdate', function() {
+          if (audioPlayer.duration) {
+            const percent = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+            seekBar.value = percent;
+            updateTimeDisplay();
+          }
+        });
+
+        // ── Update when metadata is loaded ──
+        audioPlayer.addEventListener('loadedmetadata', function() {
+          console.log("[SegmentDetail] Audio loaded successfully");
+          console.log("[SegmentDetail] Duration:", audioPlayer.duration, "s");
+          seekBar.max = 100;
+          updateTimeDisplay();
+          updateButtonStates(false);
+        });
+
+        // ── Handle play event ──
+        audioPlayer.addEventListener('play', function() {
+          console.log("[SegmentDetail] Audio playback started");
+          updateButtonStates(true);
+        });
+
+        // ── Handle pause event ──
+        audioPlayer.addEventListener('pause', function() {
+          console.log("[SegmentDetail] Audio playback paused");
+          updateButtonStates(false);
+        });
+
+        // ── Handle ended event ──
+        audioPlayer.addEventListener('ended', function() {
+          console.log("[SegmentDetail] Audio playback ended");
+          seekBar.value = 0;
+          updateTimeDisplay();
+          updateButtonStates(false);
+        });
+
+        // ── Handle seeking event ──
+        audioPlayer.addEventListener('seeking', function() {
+          console.log("[SegmentDetail] Seeking to:", audioPlayer.currentTime);
+        });
+
+        // ── Handle errors ──
+        audioPlayer.addEventListener('error', function(e) {
+          console.error("[SegmentDetail] Audio playback error:", e);
+          handleAudioError(audioPlayer.error);
+        });
+
+        // ── Handle waiting/buffering ──
+        audioPlayer.addEventListener('waiting', function() {
+          console.log("[SegmentDetail] Audio buffering...");
+        });
+
+        // ── Handle can play ──
+        audioPlayer.addEventListener('canplay', function() {
+          console.log("[SegmentDetail] Audio can play");
+          if (audioError) {
+            audioError.style.display = 'none';
+          }
+        });
+
+        // ── Keyboard shortcuts ──
+        document.addEventListener('keydown', function(e) {
+          // Only handle if not typing in an input
+          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            return;
+          }
+
+          switch(e.code) {
+            case 'Space':
+              e.preventDefault();
+              togglePlayPause();
+              break;
+            case 'ArrowLeft':
+              e.preventDefault();
+              skipTime(-5);
+              break;
+            case 'ArrowRight':
+              e.preventDefault();
+              skipTime(5);
+              break;
+            case 'ArrowUp':
+              e.preventDefault();
+              changeVolume(0.1);
+              break;
+            case 'ArrowDown':
+              e.preventDefault();
+              changeVolume(-0.1);
+              break;
+            case 'KeyM':
+              e.preventDefault();
+              toggleMute();
+              break;
+          }
+        });
+
+        // Initial state
+        updateTimeDisplay();
+        updateButtonStates(false);
+      }
+
+      // ── Playback Controls ──
+      function playAudio() {
+        if (audioPlayer) {
+          audioPlayer.play().catch(e => {
+            console.error("[SegmentDetail] Play failed:", e);
+          });
+        }
+      }
+
+      function pauseAudio() {
+        if (audioPlayer) {
+          audioPlayer.pause();
+        }
+      }
+
+      function stopAudio() {
+        if (audioPlayer) {
+          audioPlayer.pause();
+          audioPlayer.currentTime = 0;
+          seekBar.value = 0;
+          updateTimeDisplay();
+          updateButtonStates(false);
+        }
+      }
+
+      function togglePlayPause() {
+        if (!audioPlayer) return;
+        if (audioPlayer.paused) {
+          playAudio();
+        } else {
+          pauseAudio();
+        }
+      }
+
+      // ── Seek Control ──
+      function seekAudio(percent) {
+        if (audioPlayer && audioPlayer.duration) {
+          const time = (percent / 100) * audioPlayer.duration;
+          audioPlayer.currentTime = time;
+          updateTimeDisplay();
+        }
+      }
+
+      function skipTime(seconds) {
+        if (audioPlayer) {
+          audioPlayer.currentTime = Math.max(0, Math.min(
+            audioPlayer.currentTime + seconds,
+            audioPlayer.duration || 0
+          ));
+          updateTimeDisplay();
+        }
+      }
+
+      // ── Volume Control ──
+      function changeVolume(delta) {
+        if (audioPlayer) {
+          audioPlayer.volume = Math.max(0, Math.min(1, audioPlayer.volume + delta));
+          console.log("[SegmentDetail] Volume:", Math.round(audioPlayer.volume * 100) + "%");
+        }
+      }
+
+      function toggleMute() {
+        if (audioPlayer) {
+          audioPlayer.muted = !audioPlayer.muted;
+          console.log("[SegmentDetail] Muted:", audioPlayer.muted);
+        }
+      }
+
+      // ── Speed Control ──
+      function setSpeed(speed) {
+        if (audioPlayer) {
+          audioPlayer.playbackRate = speed;
+          console.log("[SegmentDetail] Playback speed:", speed + "x");
+
+          // Update active button state
+          document.querySelectorAll('.speed-btn').forEach(btn => {
+            btn.classList.remove('active');
+          });
+          const speedBtn = document.getElementById('speed' + speed.toString().replace('.', '') + 'x');
+          if (!speedBtn) {
+            // Find by text content
+            document.querySelectorAll('.speed-btn').forEach(btn => {
+              if (btn.textContent.trim() === speed + 'x') {
+                btn.classList.add('active');
+              }
+            });
+          } else {
+            speedBtn.classList.add('active');
+          }
+        }
+      }
+
+      // ── Time Display ──
+      function updateTimeDisplay() {
+        if (timeDisplay && audioPlayer) {
+          const current = formatTime(audioPlayer.currentTime);
+          const total = formatTime(audioPlayer.duration || 0);
+          timeDisplay.textContent = current + ' / ' + total;
+        }
+      }
+
+      function formatTime(seconds) {
+        if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return mins + ':' + (secs < 10 ? '0' : '') + secs;
+      }
+
+      // ── Button States ──
+      function updateButtonStates(isPlaying) {
+        if (playBtn) {
+          playBtn.style.opacity = isPlaying ? '0.5' : '1';
+        }
+        if (pauseBtn) {
+          pauseBtn.style.opacity = isPlaying ? '1' : '0.5';
+        }
+      }
+
+      // ── Error Handling ──
+      function handleAudioError(error) {
+        if (!audioError || !error) return;
+
+        let message = 'An unknown error occurred.';
+        switch(error.code) {
+          case 1: // MEDIA_ERR_ABORTED
+            message = 'Audio loading was aborted.';
+            break;
+          case 2: // MEDIA_ERR_NETWORK
+            message = 'Network error while loading audio. The file may be unavailable.';
+            break;
+          case 3: // MEDIA_ERR_DECODE
+            message = 'Audio decoding failed. The file may be corrupted.';
+            break;
+          case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
+            message = 'Audio format not supported or file not found.';
+            break;
+        }
+
+        console.error("[SegmentDetail] Audio error:", error.code, message);
+
+        const errorMessage = document.getElementById('audioErrorMessage');
+        if (errorMessage) {
+          errorMessage.textContent = message + ' (Error code: ' + error.code + ')';
+        }
+
+        audioError.style.display = 'block';
+
+        // Try alternative source after 2 seconds
+        setTimeout(() => {
+          if (audioPlayer && audioPlayer.error) {
+            console.log("[SegmentDetail] Attempting to retry audio load...");
+            retryAudio();
+          }
+        }, 2000);
+      }
+
+      function retryAudio() {
+        if (!audioPlayer) return;
+
+        console.log("[SegmentDetail] Retrying audio load...");
+
+        // Hide error
+        if (audioError) {
+          audioError.style.display = 'none';
+        }
+
+        // Reload audio
+        const currentSrc = audioPlayer.querySelector('source').src;
+        audioPlayer.querySelector('source').src = '';
+        audioPlayer.load();
+
+        setTimeout(() => {
+          audioPlayer.querySelector('source').src = currentSrc;
+          audioPlayer.load();
+          audioPlayer.play().catch(e => {
+            console.error("[SegmentDetail] Retry failed:", e);
+          });
+        }, 100);
+      }
+
+      // ── Log initialization ──
+      console.log("[SegmentDetail] Enhanced audio player initialized");
+      console.log("[SegmentDetail] Features: Seek, Speed Control (0.5x-2x), Keyboard Shortcuts");
     </script>
   </body>
 </html>

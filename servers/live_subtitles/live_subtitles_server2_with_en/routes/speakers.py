@@ -23,7 +23,9 @@ from core.state import (
     get_last_n_segments_dir,
 )
 from core.processing import get_speaker_diarization
-from config import TEMPLATES_DIR
+from services.audio_utils import get_audio_duration
+from services.audio_config import SAMPLE_RATE
+from services.config import TEMPLATES_DIR
 
 console = Console()
 router = APIRouter(prefix="/speakers", tags=["speakers"])
@@ -828,13 +830,6 @@ async def export_speaker_data(
 async def get_segment_audio(segment_id: str, request: Request):
     """
     Get the audio data for a specific segment (for playback/download).
-    
-    Returns the raw WAV audio bytes with appropriate content-type header.
-    
-    Parameters
-    ----------
-    segment_id : str
-        The unique segment identifier
     """
     from fastapi.responses import Response
     
@@ -844,14 +839,35 @@ async def get_segment_audio(segment_id: str, request: Request):
     
     console.print(f"[info]Fetching audio for segment: {segment_id}[/]")
     
-    # Check context buffer for audio data
-    # context_buffer.segments is a list of (segment_audio, metadata) tuples
-    # where metadata is a dict that may contain 'segment_id'
+    # === APPROACH 1: Check permanent segment audio directory ===
+    try:
+        from services.config import SEGMENT_AUDIO_DIR
+        if SEGMENT_AUDIO_DIR and SEGMENT_AUDIO_DIR.exists():
+            audio_path = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
+            if audio_path.exists():
+                console.print(f"[success]Audio found in permanent storage: {audio_path}[/]")
+                
+                # ✅ Use utility for file duration
+                duration_sec = get_audio_duration(str(audio_path))
+                
+                return Response(
+                    content=audio_path.read_bytes(),
+                    media_type="audio/wav",
+                    headers={
+                        "Content-Disposition": f"inline; filename={segment_id}.wav",
+                        "X-Segment-ID": segment_id,
+                        "X-Audio-Source": "permanent_storage",
+                        "X-Audio-Duration": str(round(duration_sec, 3)),
+                    }
+                )
+    except Exception as e:
+        console.print(f"[warning]Error checking permanent storage for audio: {e}[/]")
+    
+    # === APPROACH 2: Check context buffer ===
     try:
         context_buffer = get_context_buffer()
         if context_buffer and hasattr(context_buffer, 'segments'):
             for segment_audio, metadata in context_buffer.segments:
-                # The metadata dict stores the segment_id from label_segments
                 meta_segment_id = metadata.get('segment_id', '')
                 if meta_segment_id == segment_id:
                     import io
@@ -875,15 +891,16 @@ async def get_segment_audio(segment_id: str, request: Request):
                     buf = io.BytesIO()
                     with wave.open(buf, 'wb') as wf:
                         wf.setnchannels(1)
-                        wf.setsampwidth(2)  # 16-bit = 2 bytes
-                        wf.setframerate(16000)
+                        wf.setsampwidth(2)
+                        wf.setframerate(SAMPLE_RATE)
                         wf.writeframes(audio_int16.tobytes())
                     
                     buf.seek(0)
                     
-                    duration_sec = len(audio_int16) / 16000.0
+                    # ✅ Use utility for duration
+                    duration_sec = get_audio_duration(audio_int16, sr=SAMPLE_RATE)
                     console.print(
-                        f"[success]Audio found for {segment_id}: "
+                        f"[success]Audio found in context buffer for {segment_id}: "
                         f"{len(audio_int16)} samples, {duration_sec:.2f}s[/]"
                     )
                     
@@ -900,17 +917,18 @@ async def get_segment_audio(segment_id: str, request: Request):
                     )
     except Exception as e:
         console.print(f"[warning]Error searching context buffer for audio: {e}[/]")
-        import traceback
-        console.print(f"[dim]{traceback.format_exc()}[/]")
     
-    # Also check LAST_N_SEGMENTS_DIR for saved audio files
+    # === APPROACH 3: Check disk ===
     try:
         last_n_dir = get_last_n_segments_dir()
         if last_n_dir and last_n_dir.exists():
-            # Look for files matching the segment_id pattern
             audio_path = last_n_dir / f"{segment_id}.wav"
             if audio_path.exists():
                 console.print(f"[success]Audio found on disk: {audio_path}[/]")
+                
+                # ✅ Use utility for file duration
+                duration_sec = get_audio_duration(str(audio_path))
+                
                 return Response(
                     content=audio_path.read_bytes(),
                     media_type="audio/wav",
@@ -918,13 +936,18 @@ async def get_segment_audio(segment_id: str, request: Request):
                         "Content-Disposition": f"inline; filename={segment_id}.wav",
                         "X-Segment-ID": segment_id,
                         "X-Audio-Source": "disk",
+                        "X-Audio-Duration": str(round(duration_sec, 3)),
                     }
                 )
             
-            # Try searching for files containing the segment_id
+            # Try partial match
             for audio_file in last_n_dir.glob("*.wav"):
                 if segment_id in audio_file.name:
                     console.print(f"[success]Audio found on disk (partial match): {audio_file}[/]")
+                    
+                    # ✅ Use utility for file duration
+                    duration_sec = get_audio_duration(str(audio_file))
+                    
                     return Response(
                         content=audio_file.read_bytes(),
                         media_type="audio/wav",
@@ -932,19 +955,14 @@ async def get_segment_audio(segment_id: str, request: Request):
                             "Content-Disposition": f"inline; filename={audio_file.name}",
                             "X-Segment-ID": segment_id,
                             "X-Audio-Source": "disk_partial_match",
+                            "X-Audio-Duration": str(round(duration_sec, 3)),
                         }
                     )
     except Exception as e:
         console.print(f"[warning]Error checking disk for audio: {e}[/]")
     
     console.print(f"[error]No audio found for segment: {segment_id}[/]")
-    raise HTTPException(
-        status_code=404,
-        detail=(
-            f"No audio data found for segment '{segment_id}'. "
-            f"Audio may have been evicted from the context buffer or not saved to disk."
-        )
-    )
+    raise HTTPException(status_code=404, detail="No audio data found")
 
 
 @router.get("/segment/{segment_id}", response_class=HTMLResponse)
@@ -988,34 +1006,46 @@ async def get_segment_detail_page(request: Request, segment_id: str):
                 status_code=404,
             )
     
-    # Check audio availability (context buffer first, then disk)
+    # Check audio availability (permanent storage first, then context buffer, then disk)
     has_audio = False
     audio_source = ""
-    audio_duration = segment_info.get("segment_duration", 0.0)  # ✅ Prefer metadata duration
-    audio_sample_rate = 16000
+    audio_duration = segment_info.get("segment_duration", 0.0)
+    audio_sample_rate = SAMPLE_RATE
     
+    # === Check permanent storage ===
     try:
-        context_buffer = get_context_buffer()
-        if context_buffer and hasattr(context_buffer, 'segments'):
-            for segment_audio, metadata in context_buffer.segments:
-                if metadata.get('segment_id') == segment_id:
-                    has_audio = True
-                    audio_source = "context_buffer"
-                    # ✅ Use actual waveform duration for accuracy (may differ from filtered speech)
-                    if isinstance(segment_audio, torch.Tensor):
-                        raw_duration = segment_audio.shape[-1] / 16000.0 if segment_audio.dim() > 0 else 0.0
-                    elif isinstance(segment_audio, np.ndarray):
-                        raw_duration = len(segment_audio) / 16000.0
-                    else:
-                        raw_duration = 0.0
-                    # Only override if metadata duration is 0 (fallback)
-                    if audio_duration <= 0.0 and raw_duration > 0.0:
-                        audio_duration = raw_duration
-                    break
+        from services.config import SEGMENT_AUDIO_DIR
+        if SEGMENT_AUDIO_DIR and SEGMENT_AUDIO_DIR.exists():
+            audio_path = SEGMENT_AUDIO_DIR / f"{segment_id}.wav"
+            if audio_path.exists():
+                has_audio = True
+                audio_source = "permanent_storage"
+                # ✅ Use utility for file duration
+                disk_duration = get_audio_duration(str(audio_path))
+                if audio_duration <= 0.0 or disk_duration > 0:
+                    audio_duration = disk_duration
+                console.print(f"[dim]Audio found in permanent storage: {audio_path} ({disk_duration:.3f}s)[/]")
     except Exception as e:
-        console.print(f"[dim]Could not check audio availability: {e}[/]")
+        console.print(f"[dim]Error checking permanent storage: {e}[/]")
     
-    # Check disk fallback
+    # === Check context buffer ===
+    if not has_audio:
+        try:
+            context_buffer = get_context_buffer()
+            if context_buffer and hasattr(context_buffer, 'segments'):
+                for segment_audio, metadata in context_buffer.segments:
+                    if metadata.get('segment_id') == segment_id:
+                        has_audio = True
+                        audio_source = "context_buffer"
+                        # ✅ Use utility for duration
+                        raw_duration = get_audio_duration(segment_audio, sr=SAMPLE_RATE) if segment_audio is not None else 0.0
+                        if audio_duration <= 0.0 and raw_duration > 0.0:
+                            audio_duration = raw_duration
+                        break
+        except Exception as e:
+            console.print(f"[dim]Could not check audio availability: {e}[/]")
+    
+    # === Check disk fallback ===
     if not has_audio:
         try:
             last_n_dir = get_last_n_segments_dir()
@@ -1024,14 +1054,13 @@ async def get_segment_detail_page(request: Request, segment_id: str):
                 if audio_path.exists():
                     has_audio = True
                     audio_source = "disk"
-                    # ✅ Accurate duration: (file_size - WAV_header) / bytes_per_second
-                    data_size = max(0, audio_path.stat().st_size - 44)
-                    disk_duration = data_size / (16000 * 2)
+                    # ✅ Use utility for file duration
+                    disk_duration = get_audio_duration(str(audio_path))
                     if audio_duration <= 0.0:
                         audio_duration = disk_duration
         except Exception:
             pass
-    
+
     console.print(
         f"[info]Segment detail: speaker={segment_info['speaker_label']}, "
         f"timestamp={segment_info['timestamp']:.2f}s, "

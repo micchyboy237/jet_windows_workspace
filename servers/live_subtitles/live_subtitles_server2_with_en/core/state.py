@@ -10,18 +10,19 @@ from typing import Optional, Dict
 import numpy as np
 import torch
 from pyannote.audio import Inference, Model
-from config import OUTPUT_DIR
+from services.config import (
+    OUTPUT_DIR,
+    SEGMENT_INDEX_PATH,
+    N_SEGMENT_RESULTS,
+    LAST_N_SEGMENTS_DIR,
+    LIVE_AUDIO_BUFFER_DIR,
+    SPEAKER_STATE_PATH,
+)
 from services.segment_speaker_labeler import SegmentSpeakerLabeler
 from services.audio_language_detector import AudioLanguageDetector
 from services.live_subtitles_server_utils import load_segment_counter
 
-N_SEGMENT_RESULTS = 50
-LAST_N_SEGMENTS_DIR = OUTPUT_DIR / f"last_{N_SEGMENT_RESULTS}_segments"
-LAST_N_SEGMENTS_DIR.mkdir(parents=True, exist_ok=True)
-LIVE_AUDIO_BUFFER_DIR = OUTPUT_DIR
-LIVE_AUDIO_BUFFER_DIR.mkdir(parents=True, exist_ok=True)
-SPEAKER_STATE_PATH = OUTPUT_DIR / "speaker_state.json"
-_SEGMENT_INDEX_PATH = LAST_N_SEGMENTS_DIR / "_segment_index.json"
+
 
 from concurrent.futures import ThreadPoolExecutor
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_worker")
@@ -51,12 +52,12 @@ def get_segment_counter() -> int:
     """Get or initialize the segment counter."""
     global _segment_counter
     if _segment_counter is None:
-        _segment_counter = load_segment_counter(_SEGMENT_INDEX_PATH)
+        _segment_counter = load_segment_counter(SEGMENT_INDEX_PATH)
     return _segment_counter
 
 def get_segment_index_path() -> Path:
     """Get the segment index file path."""
-    return _SEGMENT_INDEX_PATH
+    return SEGMENT_INDEX_PATH
 
 def get_n_segment_results() -> int:
     """Get the number of segment results to keep."""

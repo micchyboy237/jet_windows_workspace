@@ -21,7 +21,7 @@ from core.state import (
     get_speaker_state_path,
 )
 from core.processing import get_speaker_diarization
-from config import TEMPLATES_DIR
+from services.config import TEMPLATES_DIR
 
 console = Console()
 router = APIRouter(prefix="/speakers", tags=["speakers"])
