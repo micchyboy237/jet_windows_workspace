@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stream Player</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0d14;
+      --surface:  #14141f;
+      --border:   rgba(255,255,255,0.07);
+      --accent:   #7c6af7;
+      --accent2:  #a89cf7;
+      --text:     #e2e2f0;
+      --muted:    #6b6b8a;
+      --buf:      rgba(124,106,247,0.22);
+      --font:     'Inter', system-ui, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font);
+      color: var(--text);
+      padding: 1.5rem;
+    }
+
+    /* ── Shell ────────────────────────────────────────────── */
+    .player {
+      width: 100%;
+      max-width: 420px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      box-shadow: 0 40px 80px rgba(0,0,0,.65),
+                  0 0 0 1px rgba(124,106,247,.12);
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── Now-playing header ───────────────────────────────── */
+    .np { padding: 1.4rem 1.4rem 0; }
+    .np-label {
+      font-size: .65rem;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-weight: 700;
+      margin-bottom: .35rem;
+    }
+    .np-title {
+      font-size: 1rem;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .np-sub {
+      font-size: .72rem;
+      color: var(--muted);
+      margin-top: .2rem;
+    }
+
+    /* ── Waveform vis ─────────────────────────────────────── */
+    .vis-wrap { padding: 1rem 1.4rem .4rem; }
+    .vis {
+      height: 64px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(124,106,247,.12), rgba(168,156,247,.07));
+      border: 1px solid rgba(124,106,247,.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2.5px;
+      padding: 0 8px;
+      position: relative;
+      overflow: hidden;
+    }
+    .bar {
+      width: 3px;
+      border-radius: 2px;
+      background: rgba(255,255,255,.07);
+      transform-origin: center;
+    }
+    .bar.played   { background: var(--accent); }
+    .bar.buffered { background: var(--buf); }
+
+    .spinner {
+      position: absolute; inset: 0;
+      background: rgba(13,13,20,.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+    }
+    .spinner.on { display: flex; }
+    .spin-ring {
+      width: 26px; height: 26px;
+      border: 2.5px solid rgba(124,106,247,.25);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Progress ─────────────────────────────────────────── */
+    .prog-wrap { padding: 0 1.4rem; }
+    .prog-track {
+      position: relative;
+      height: 32px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+    }
+    .prog-rail {
+      position: absolute;
+      inset: 0; margin: auto;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255,255,255,.08);
+    }
+    .prog-buf {
+      position: absolute;
+      left: 0; top: 0; height: 100%;
+      background: var(--buf);
+      border-radius: 2px;
+      width: 0%;
+      transition: width .35s ease;
+    }
+    .prog-play {
+      position: absolute;
+      left: 0; top: 0; height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 2px;
+      width: 0%;
+      transition: width .1s linear;
+    }
+    .prog-thumb {
+      position: absolute;
+      right: -6px; top: 50%;
+      transform: translateY(-50%);
+      width: 13px; height: 13px;
+      border-radius: 50%;
+      background: var(--accent2);
+      box-shadow: 0 0 10px rgba(124,106,247,.9);
+      pointer-events: none;
+    }
+    .prog-times {
+      display: flex;
+      justify-content: space-between;
+      font-size: .68rem;
+      color: var(--muted);
+      margin-top: -2px;
+      padding-bottom: .4rem;
+    }
+
+    /* ── Controls ─────────────────────────────────────────── */
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .2rem 1.4rem .9rem;
+    }
+    .btn {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); padding: .5rem; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      transition: color .15s, background .15s;
+    }
+    .btn:hover { color: var(--text); background: rgba(255,255,255,.05); }
+    .btn:disabled { opacity: .3; cursor: default; }
+    .btn svg { display: block; pointer-events: none; }
+
+    .btn-play {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      box-shadow: 0 8px 24px rgba(124,106,247,.45);
+      transition: transform .1s, box-shadow .15s;
+    }
+    .btn-play:hover {
+      color: #fff;
+      transform: scale(1.06);
+      box-shadow: 0 12px 30px rgba(124,106,247,.55);
+    }
+    .btn-play:active { transform: scale(.95); }
+
+    /* ── Volume ───────────────────────────────────────────── */
+    .vol-row {
+      display: flex; align-items: center; gap: .5rem;
+      padding: 0 1.4rem .6rem; justify-content: flex-end;
+    }
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 64px; height: 3px;
+      border-radius: 2px;
+      background: rgba(255,255,255,.12);
+      outline: none; cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 11px; height: 11px;
+      border-radius: 50%;
+      background: var(--accent2);
+      box-shadow: 0 0 6px rgba(124,106,247,.7);
+    }
+
+    /* ── Status ───────────────────────────────────────────── */
+    .status {
+      display: flex; justify-content: space-between;
+      padding: 0 1.4rem .7rem;
+      font-size: .67rem; color: #3d3d5c;
+    }
+
+    /* ── Queue ────────────────────────────────────────────── */
+    .queue-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: .6rem 1.4rem .3rem;
+      border-top: 1px solid var(--border);
+    }
+    .queue-label {
+      font-size: .68rem; text-transform: uppercase;
+      letter-spacing: .1em; color: var(--muted); font-weight: 600;
+    }
+    .queue-toggle {
+      background: none; border: none; cursor: pointer;
+      color: var(--muted); font-size: .68rem;
+      font-family: var(--font); transition: color .15s;
+    }
+    .queue-toggle:hover { color: var(--text); }
+
+    .queue-list { max-height: 220px; overflow-y: auto; }
+    .queue-list::-webkit-scrollbar { width: 3px; }
+    .queue-list::-webkit-scrollbar-track { background: transparent; }
+    .queue-list::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,.08); border-radius: 2px;
+    }
+
+    .track-item {
+      display: flex; align-items: center; gap: .75rem;
+      padding: .55rem 1.4rem;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: background .12s;
+    }
+    .track-item:hover { background: rgba(255,255,255,.03); }
+    .track-item.active {
+      border-left-color: var(--accent);
+      background: rgba(124,106,247,.08);
+    }
+    .track-icon {
+      width: 30px; height: 30px; border-radius: 50%;
+      background: rgba(255,255,255,.07);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .7rem; flex-shrink: 0; transition: background .15s;
+    }
+    .track-item.active .track-icon { background: var(--accent); color: #fff; }
+    .track-name {
+      font-size: .82rem; font-weight: 500; color: var(--muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      flex: 1; min-width: 0;
+    }
+    .track-item.active .track-name { color: #d8d4ff; font-weight: 600; }
+    .track-size { font-size: .65rem; color: #3d3d5c; flex-shrink: 0; }
+    .empty-msg {
+      text-align: center; padding: 1.5rem;
+      color: var(--muted); font-size: .8rem; line-height: 1.6;
+    }
+    .empty-msg code {
+      font-size: .72rem; background: rgba(255,255,255,.05);
+      padding: .1rem .4rem; border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="player">
+
+  <!-- Now playing -->
+  <div class="np">
+    <div class="np-label">Now Playing</div>
+    <div class="np-title" id="npTitle">Select a track</div>
+    <div class="np-sub"   id="npSub">—</div>
+  </div>
+
+  <!-- Waveform vis -->
+  <div class="vis-wrap">
+    <div class="vis" id="vis">
+      <!-- bars injected by JS -->
+      <div class="spinner" id="spinner"><div class="spin-ring"></div></div>
+    </div>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="prog-wrap">
+    <div class="prog-track" id="progTrack">
+      <div class="prog-rail">
+        <div class="prog-buf"  id="progBuf"></div>
+        <div class="prog-play" id="progPlay">
+          <div class="prog-thumb"></div>
+        </div>
+      </div>
+    </div>
+    <div class="prog-times">
+      <span id="timeEl">0:00</span>
+      <span id="durEl">0:00</span>
+    </div>
+  </div>
+
+  <!-- Transport controls -->
+  <div class="controls">
+
+    <button class="btn" id="btnPrev" title="Previous (P)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/>
+      </svg>
+    </button>
+
+    <button class="btn" id="btnBack" title="−10s (←)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+        <text x="8.5" y="15.5" font-size="5.5" font-family="sans-serif" font-weight="700" fill="currentColor">10</text>
+      </svg>
+    </button>
+
+    <button class="btn btn-play" id="btnPlay" disabled title="Play / Pause (Space)">
+      <svg id="iconPlay" width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M8 5v14l11-7z"/>
+      </svg>
+      <svg id="iconPause" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+        <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+      </svg>
+    </button>
+
+    <button class="btn" id="btnFwd" title="+10s (→)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/>
+        <text x="8.5" y="15.5" font-size="5.5" font-family="sans-serif" font-weight="700" fill="currentColor">10</text>
+      </svg>
+    </button>
+
+    <button class="btn" id="btnNext" title="Next (N)">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+      </svg>
+    </button>
+
+  </div>
+
+  <!-- Volume -->
+  <div class="vol-row">
+    <button class="btn" id="btnMute" title="Mute (M)" style="padding:.3rem">
+      <svg id="iconVol" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+      </svg>
+      <svg id="iconMuted" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+        <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z"/>
+      </svg>
+    </button>
+    <input type="range" id="volSlider" min="0" max="1" step="0.02" value="0.8">
+  </div>
+
+  <!-- Status -->
+  <div class="status">
+    <span id="statusLeft">Ready</span>
+    <span id="statusRight"></span>
+  </div>
+
+  <!-- Queue -->
+  <div class="queue-header">
+    <span class="queue-label">Queue · <span id="queueCount">0</span> tracks</span>
+    <button class="queue-toggle" id="queueToggle">Hide</button>
+  </div>
+  <div class="queue-list" id="queueList">
+    <div class="empty-msg">
+      No tracks found.<br>
+      Add files to <code>audio_files/</code> and start FastAPI.
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   Config — change API base to match your FastAPI server
+═══════════════════════════════════════════════════════════════ */
+const API = 'http://localhost:8000';
+const BAR_COUNT = 48;
+
+/* ═══════════════════════════════════════════════════════════════
+   State
+═══════════════════════════════════════════════════════════════ */
+let tracks     = [];
+let currentIdx = -1;
+let howl       = null;
+let rafId      = null;
+let dragging   = false;
+let muted      = false;
+let vol        = 0.8;
+let bufPct     = 0;
+
+/* ═══════════════════════════════════════════════════════════════
+   DOM
+═══════════════════════════════════════════════════════════════ */
+const $        = id => document.getElementById(id);
+const npTitle  = $('npTitle'),  npSub    = $('npSub');
+const vis      = $('vis'),      spinner  = $('spinner');
+const progPlay = $('progPlay'), progBuf  = $('progBuf'), progTrack = $('progTrack');
+const timeEl   = $('timeEl'),   durEl    = $('durEl');
+const btnPlay  = $('btnPlay'),  btnPrev  = $('btnPrev'), btnNext   = $('btnNext');
+const btnBack  = $('btnBack'),  btnFwd   = $('btnFwd');
+const btnMute  = $('btnMute'),  volSlider= $('volSlider');
+const iconPlay = $('iconPlay'), iconPause= $('iconPause');
+const iconVol  = $('iconVol'),  iconMuted= $('iconMuted');
+const statusL  = $('statusLeft'), statusR= $('statusRight');
+const queueList= $('queueList'), queueCount= $('queueCount'), queueToggle= $('queueToggle');
+
+/* ═══════════════════════════════════════════════════════════════
+   Build waveform bars
+═══════════════════════════════════════════════════════════════ */
+(function () {
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < BAR_COUNT; i++) {
+    const b = document.createElement('div');
+    b.className = 'bar';
+    b.style.height = (14 + Math.abs(Math.sin(i * 0.55) * 16 + Math.cos(i * 1.1) * 10)) + 'px';
+    frag.appendChild(b);
+  }
+  vis.insertBefore(frag, spinner);
+})();
+
+function tintBars(ratio) {
+  vis.querySelectorAll('.bar').forEach((b, i) => {
+    const p = i / BAR_COUNT;
+    b.className = p <= ratio ? 'bar played' : p <= bufPct / 100 ? 'bar buffered' : 'bar';
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Utilities
+═══════════════════════════════════════════════════════════════ */
+function fmt(s) {
+  if (!isFinite(s) || s < 0) return '0:00';
+  return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+}
+function fmtB(b) {
+  return b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
+}
+function escH(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function setPlayIcon(playing) {
+  iconPlay.style.display  = playing ? 'none'  : 'block';
+  iconPause.style.display = playing ? 'block' : 'none';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RAF loop — syncs UI to playback every frame
+═══════════════════════════════════════════════════════════════ */
+function startRaf() {
+  if (rafId) return;
+  (function tick() {
+    if (!howl) { rafId = null; return; }
+    const seek  = +howl.seek() || 0;
+    const dur   = howl.duration() || 0;
+    const ratio = dur > 0 ? seek / dur : 0;
+
+    // Read browser's native buffer progress via Howler's internal <audio> node
+    // html5:true mode — Howler stores the node at howl._sounds[0]._node
+    try {
+      const node = howl._sounds[0]._node;
+      if (node.buffered.length && dur > 0) {
+        bufPct = Math.min(100, Math.round(node.buffered.end(node.buffered.length - 1) / dur * 100));
+      }
+    } catch (_) {}
+
+    if (!dragging) {
+      progPlay.style.width = (ratio * 100) + '%';
+      progBuf.style.width  = bufPct + '%';
+      timeEl.textContent   = fmt(seek);
+      tintBars(ratio);
+    }
+    durEl.textContent   = fmt(dur);
+    statusL.textContent = howl.playing() ? '▶ ' + fmt(seek) + ' / ' + fmt(dur)
+                                         : '⏸ ' + fmt(seek) + ' / ' + fmt(dur);
+    statusR.textContent = 'Buffer ' + bufPct + '%';
+    rafId = requestAnimationFrame(tick);
+  })();
+}
+function stopRaf() { if (rafId) { cancelAnimationFrame(rafId); rafId = null; } }
+
+/* ═══════════════════════════════════════════════════════════════
+   Load track
+═══════════════════════════════════════════════════════════════ */
+function loadTrack(idx, autoplay = true) {
+  if (idx < 0 || idx >= tracks.length) return;
+  currentIdx = idx;
+  const t = tracks[idx];
+
+  stopRaf();
+  if (howl) { howl.unload(); howl = null; }
+  bufPct = 0;
+
+  progPlay.style.width = progBuf.style.width = '0%';
+  timeEl.textContent = '0:00'; durEl.textContent = '0:00';
+  npTitle.textContent = t.filename.replace(/\.[^.]+$/, '');
+  npSub.textContent   = fmtB(t.size_bytes) + ' · ' + (t.mime_type || 'audio');
+  spinner.classList.add('on');
+  setPlayIcon(false);
+  btnPlay.disabled = true;
+  tintBars(0);
+  renderQueue();
+
+  /*
+    ── Why html5: true? ───────────────────────────────────────
+    Howler defaults to Web Audio API (decodes entire file into memory).
+    With html5: true it delegates to the browser's native <audio> element,
+    which automatically sends HTTP Range requests:
+      • Initial load  →  Range: bytes=0-   (browser picks its own chunk size)
+      • While playing →  browser pre-fetches ahead of playhead automatically
+      • On seek       →  new Range: bytes=<offset>-  request fires instantly
+    Our FastAPI /audio/{filename} endpoint replies 206 Partial Content with
+    Accept-Ranges: bytes, which is all the browser needs.
+    No MSE plumbing required — the browser's buffer management is optimal.
+  */
+  howl = new Howl({
+    src:      [`${API}/audio/${encodeURIComponent(t.filename)}`],
+    html5:    true,
+    volume:   muted ? 0 : vol,
+    autoplay: false,
+    preload:  true,
+
+    onload() {
+      spinner.classList.remove('on');
+      btnPlay.disabled = false;
+      if (autoplay) howl.play();
+      startRaf();
+    },
+    onplay()  { setPlayIcon(true);  startRaf(); },
+    onpause() { setPlayIcon(false); },
+    onstop()  { setPlayIcon(false); stopRaf(); },
+    onend()   {
+      setPlayIcon(false);
+      if (currentIdx < tracks.length - 1) loadTrack(currentIdx + 1);
+      else stopRaf();
+    },
+    onloaderror(_, err) {
+      spinner.classList.remove('on');
+      statusL.textContent = '⚠ Load error — check server & CORS';
+      console.error('Howler load error:', err);
+    },
+    onplayerror() {
+      // Mobile autoplay unlock pattern
+      howl.once('unlock', () => howl.play());
+    },
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Controls
+═══════════════════════════════════════════════════════════════ */
+btnPlay.addEventListener('click', () => {
+  if (!howl) return;
+  howl.playing() ? howl.pause() : howl.play();
+});
+btnPrev.addEventListener('click', () => {
+  if (!howl) return;
+  (+howl.seek() > 3) ? howl.seek(0) : loadTrack(Math.max(0, currentIdx - 1));
+});
+btnNext.addEventListener('click', () => loadTrack(Math.min(tracks.length - 1, currentIdx + 1)));
+btnBack.addEventListener('click', () => howl && howl.seek(Math.max(0, +howl.seek() - 10)));
+btnFwd.addEventListener('click',  () => howl && howl.seek(Math.min(howl.duration(), +howl.seek() + 10)));
+
+/* Volume */
+volSlider.addEventListener('input', e => {
+  vol = +e.target.value; muted = vol === 0;
+  Howler.volume(vol);
+  if (howl) howl.volume(vol);
+  iconVol.style.display   = muted ? 'none'  : 'block';
+  iconMuted.style.display = muted ? 'block' : 'none';
+});
+btnMute.addEventListener('click', () => {
+  muted = !muted;
+  Howler.mute(muted);
+  volSlider.value = muted ? 0 : vol;
+  iconVol.style.display   = muted ? 'none'  : 'block';
+  iconMuted.style.display = muted ? 'block' : 'none';
+});
+
+/* Seek via progress bar */
+function seekAt(clientX) {
+  if (!howl) return;
+  const rect  = progTrack.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  const s     = ratio * (howl.duration() || 0);
+  howl.seek(s);
+  progPlay.style.width = (ratio * 100) + '%';
+  timeEl.textContent   = fmt(s);
+  tintBars(ratio);
+}
+progTrack.addEventListener('mousedown',  e => { dragging = true;  seekAt(e.clientX); });
+window.addEventListener('mousemove',     e => { if (dragging) seekAt(e.clientX); });
+window.addEventListener('mouseup',       () => { dragging = false; });
+progTrack.addEventListener('touchstart', e => { dragging = true;  seekAt(e.touches[0].clientX); }, { passive: true });
+window.addEventListener('touchmove',     e => { if (dragging) seekAt(e.touches[0].clientX); }, { passive: true });
+window.addEventListener('touchend',      () => { dragging = false; });
+
+/* Keyboard shortcuts */
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space')      { e.preventDefault(); btnPlay.click(); }
+  if (e.code === 'ArrowLeft')  btnBack.click();
+  if (e.code === 'ArrowRight') btnFwd.click();
+  if (e.code === 'ArrowUp')    { vol = Math.min(1, vol + .05); volSlider.value = vol; Howler.volume(vol); }
+  if (e.code === 'ArrowDown')  { vol = Math.max(0, vol - .05); volSlider.value = vol; Howler.volume(vol); }
+  if (e.code === 'KeyM')       btnMute.click();
+  if (e.code === 'KeyN')       btnNext.click();
+  if (e.code === 'KeyP')       btnPrev.click();
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   Queue
+═══════════════════════════════════════════════════════════════ */
+function renderQueue() {
+  queueCount.textContent = tracks.length;
+  if (!tracks.length) {
+    queueList.innerHTML = '<div class="empty-msg">No tracks found.<br>Add audio files to <code>audio_files/</code>.</div>';
+    return;
+  }
+  queueList.innerHTML = tracks.map((t, i) => `
+    <div class="track-item ${i === currentIdx ? 'active' : ''}" data-idx="${i}">
+      <div class="track-icon">${i === currentIdx ? '▶' : '♪'}</div>
+      <div class="track-name">${escH(t.filename.replace(/\.[^.]+$/, ''))}</div>
+      <div class="track-size">${fmtB(t.size_bytes)}</div>
+    </div>`).join('');
+  queueList.querySelectorAll('.track-item').forEach(el =>
+    el.addEventListener('click', () => loadTrack(+el.dataset.idx))
+  );
+}
+
+let queueVisible = true;
+queueToggle.addEventListener('click', () => {
+  queueVisible = !queueVisible;
+  queueList.style.display = queueVisible ? '' : 'none';
+  queueToggle.textContent = queueVisible ? 'Hide' : 'Show';
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   Init — fetch track list from FastAPI
+═══════════════════════════════════════════════════════════════ */
+(async function init() {
+  try {
+    const res = await fetch(`${API}/tracks`);
+    if (!res.ok) throw new Error(res.statusText);
+    tracks = (await res.json()).tracks || [];
+    renderQueue();
+    if (tracks.length) {
+      npTitle.textContent = tracks[0].filename.replace(/\.[^.]+$/, '');
+      npSub.textContent   = 'Press play or click a track';
+      loadTrack(0, false);   // pre-load first track, no autoplay
+    }
+  } catch (err) {
+    statusL.textContent = 'No server — demo mode';
+    console.warn('FastAPI unreachable:', err.message);
+    // Placeholder queue for UI preview
+    tracks = [
+      { filename: 'demo-track.mp3',   size_bytes: 5_242_880,  mime_type: 'audio/mpeg' },
+      { filename: 'ambient-loop.ogg', size_bytes: 3_145_728,  mime_type: 'audio/ogg'  },
+      { filename: 'podcast-ep01.mp3', size_bytes: 12_582_912, mime_type: 'audio/mpeg' },
+    ];
+    renderQueue();
+  }
+})();
+</script>
+</body>
+</html>
