@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Howler.js — Full Range Download</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        padding: 2rem;
+        max-width: 600px;
+        margin: 0 auto;
+        background: #f9f9f9;
+      }
+      .player-container {
+        background: white;
+        padding: 2rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+      .badge {
+        display: inline-block;
+        background: #faece7;
+        color: #993c1d;
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.25rem 0.6rem;
+        border-radius: 999px;
+        margin-bottom: 0.75rem;
+      }
+      .info {
+        color: #555;
+        font-size: 0.9rem;
+      }
+      .controls {
+        display: flex;
+        gap: 0.5rem;
+        margin: 1rem 0;
+        flex-wrap: wrap;
+      }
+      button {
+        background: #d85a30;
+        color: white;
+        border: none;
+        padding: 0.6rem 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      button:hover {
+        background: #b8431f;
+      }
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      #seekBar {
+        width: 100%;
+        margin: 0.5rem 0;
+      }
+      #downloadBar {
+        width: 100%;
+        height: 6px;
+        background: #e0e0e0;
+        border-radius: 3px;
+        margin: 0.5rem 0;
+        overflow: hidden;
+      }
+      #downloadFill {
+        height: 100%;
+        width: 0%;
+        background: #d85a30;
+        transition: width 0.2s;
+      }
+      .status {
+        margin-top: 1rem;
+        color: #333;
+        background: #e9ecef;
+        padding: 0.75rem;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        line-height: 1.6;
+      }
+      .status strong {
+        color: #000;
+      }
+      #log {
+        margin-top: 1rem;
+        background: #1e1e1e;
+        color: #f0997b;
+        font-family: ui-monospace, monospace;
+        font-size: 0.75rem;
+        padding: 0.75rem;
+        border-radius: 6px;
+        max-height: 160px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="player-container">
+      <span class="badge">FULL RANGE · Web Audio API</span>
+      <h2>🎵 Full Download &amp; Decode Demo</h2>
+      <p class="info">
+        Uses Howler's default Web Audio API mode (<code>html5: false</code>).
+        The entire file is fetched in one request &mdash; no
+        <code>Range</code> header is sent &mdash; then decoded into an audio
+        buffer before playback can start. Seeking is sample-accurate, but
+        only available once the whole file has loaded.
+      </p>
+      <div class="controls">
+        <button id="loadBtn">⬇ Load full file</button>
+        <button id="playBtn" disabled>▶ Play</button>
+        <button id="pauseBtn" disabled>⏸ Pause</button>
+      </div>
+      <div id="downloadBar"><div id="downloadFill"></div></div>
+      <input type="range" id="seekBar" min="0" max="100" value="0" disabled />
+      <div class="status">
+        <div><strong>State:</strong> <span id="stateText">idle</span></div>
+        <div><strong>Position:</strong> <span id="posText">0:00</span> / <span id="durText">0:00</span></div>
+        <div><strong>Mode:</strong> <span id="modeText">Web Audio API (full fetch + decode, no Range)</span></div>
+      </div>
+      <div id="log"></div>
+    </div>
+
+    <script>
+      // ---- Logging helper: mirrors console + on-page log panel ----
+      const logPanel = document.getElementById("log");
+      function log(message) {
+        const time = new Date().toLocaleTimeString();
+        const line = `[${time}] ${message}`;
+        console.log(line);
+        logPanel.textContent += line + "\n";
+        logPanel.scrollTop = logPanel.scrollHeight;
+      }
+
+      const stateText = document.getElementById("stateText");
+      const posText = document.getElementById("posText");
+      const durText = document.getElementById("durText");
+      const seekBar = document.getElementById("seekBar");
+      const loadBtn = document.getElementById("loadBtn");
+      const playBtn = document.getElementById("playBtn");
+      const pauseBtn = document.getElementById("pauseBtn");
+      const downloadFill = document.getElementById("downloadFill");
+
+      function formatTime(sec) {
+        if (!isFinite(sec) || sec < 0) return "0:00";
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60).toString().padStart(2, "0");
+        return `${m}:${s}`;
+      }
+
+      let sound = null;
+
+      loadBtn.addEventListener("click", () => {
+        log("Load clicked — starting full-file fetch (no Range header, Web Audio mode)");
+        loadBtn.disabled = true;
+        simulateDownloadProgress();
+
+        // html5 is left at its default (false), so Howler uses Web Audio API.
+        // This fetches the ENTIRE file via XHR before decoding it into an
+        // AudioBuffer. No Range header is sent — the server's /audio route
+        // falls back to its 200 full-file branch.
+        sound = new Howl({
+          src: ["/audio"],
+          format: ["wav"],
+          html5: false, // <-- default; full download + decode via Web Audio
+          onload: () => {
+            log(`Fully downloaded and decoded. Duration: ${formatTime(sound.duration())}`);
+            durText.textContent = formatTime(sound.duration());
+            stateText.textContent = "ready";
+            playBtn.disabled = false;
+            seekBar.disabled = false;
+            downloadFill.style.width = "100%";
+          },
+          onplay: () => {
+            log("Playback started (sample-accurate seek now available)");
+            stateText.textContent = "playing";
+            playBtn.disabled = true;
+            pauseBtn.disabled = false;
+            requestAnimationFrame(updateProgress);
+          },
+          onpause: () => {
+            log("Playback paused");
+            stateText.textContent = "paused";
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+          },
+          onend: () => {
+            log("Playback ended");
+            stateText.textContent = "ended";
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+          },
+          onseek: () => {
+            log(`Seeked to ${formatTime(sound.seek())} (in-memory buffer, no network request)`);
+          },
+          onloaderror: (id, err) => {
+            log(`Load error: ${err}`);
+            stateText.textContent = "error";
+            loadBtn.disabled = false;
+          },
+          onplayerror: (id, err) => {
+            log(`Play error: ${err}`);
+          },
+        });
+      });
+
+      // Web Audio mode doesn't expose native download-progress events the
+      // way html5 mode does, so we show an indeterminate-then-complete bar
+      // to make the "fetch whole file first" behavior visible.
+      function simulateDownloadProgress() {
+        let pct = 0;
+        stateText.textContent = "downloading";
+        const interval = setInterval(() => {
+          if (!sound || sound.state() === "loaded") {
+            clearInterval(interval);
+            return;
+          }
+          pct = Math.min(pct + 7, 92);
+          downloadFill.style.width = pct + "%";
+        }, 150);
+      }
+
+      function updateProgress() {
+        if (sound && sound.playing()) {
+          const pos = sound.seek() || 0;
+          const dur = sound.duration() || 1;
+          posText.textContent = formatTime(pos);
+          seekBar.value = (pos / dur) * 100;
+          requestAnimationFrame(updateProgress);
+        }
+      }
+
+      playBtn.addEventListener("click", () => {
+        log("Play button clicked");
+        sound.play();
+      });
+
+      pauseBtn.addEventListener("click", () => {
+        log("Pause button clicked");
+        sound.pause();
+      });
+
+      seekBar.addEventListener("input", () => {
+        if (!sound) return;
+        const dur = sound.duration();
+        if (!dur) return;
+        const target = (seekBar.value / 100) * dur;
+        log(`Seeking to ${formatTime(target)} — instant, buffer is fully in memory`);
+        sound.seek(target);
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Howler.js — Partial Range Streaming</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        padding: 2rem;
+        max-width: 600px;
+        margin: 0 auto;
+        background: #f9f9f9;
+      }
+      .player-container {
+        background: white;
+        padding: 2rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+      .badge {
+        display: inline-block;
+        background: #e1f5ee;
+        color: #0f6e56;
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.25rem 0.6rem;
+        border-radius: 999px;
+        margin-bottom: 0.75rem;
+      }
+      .info {
+        color: #555;
+        font-size: 0.9rem;
+      }
+      .controls {
+        display: flex;
+        gap: 0.5rem;
+        margin: 1rem 0;
+        flex-wrap: wrap;
+      }
+      button {
+        background: #007bff;
+        color: white;
+        border: none;
+        padding: 0.6rem 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+      button:hover {
+        background: #0062cc;
+      }
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      #seekBar {
+        width: 100%;
+        margin: 0.5rem 0;
+      }
+      .status {
+        margin-top: 1rem;
+        color: #333;
+        background: #e9ecef;
+        padding: 0.75rem;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        line-height: 1.6;
+      }
+      .status strong {
+        color: #000;
+      }
+      #log {
+        margin-top: 1rem;
+        background: #1e1e1e;
+        color: #9fe1cb;
+        font-family: ui-monospace, monospace;
+        font-size: 0.75rem;
+        padding: 0.75rem;
+        border-radius: 6px;
+        max-height: 160px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="player-container">
+      <span class="badge">PARTIAL RANGE · html5: true</span>
+      <h2>🎵 Progressive Streaming Demo</h2>
+      <p class="info">
+        Uses Howler's <code>html5: true</code> mode, which delegates to the
+        browser's native &lt;audio&gt; element. This means the browser issues
+        real HTTP <code>Range</code> requests as you seek &mdash; you can jump
+        to any point in the track before the full file has downloaded.
+      </p>
+      <div class="controls">
+        <button id="playBtn">▶ Play</button>
+        <button id="pauseBtn" disabled>⏸ Pause</button>
+        <button id="seekStartBtn">⏮ Seek to 0%</button>
+        <button id="seekMidBtn">⏩ Seek to 50%</button>
+        <button id="seekEndBtn">⏭ Seek to 90%</button>
+      </div>
+      <input type="range" id="seekBar" min="0" max="100" value="0" />
+      <div class="status">
+        <div><strong>State:</strong> <span id="stateText">idle</span></div>
+        <div><strong>Position:</strong> <span id="posText">0:00</span> / <span id="durText">0:00</span></div>
+        <div><strong>Mode:</strong> <span id="modeText">html5 (native &lt;audio&gt;, Range-capable)</span></div>
+      </div>
+      <div id="log"></div>
+    </div>
+
+    <script>
+      // ---- Logging helper: mirrors console + on-page log panel ----
+      const logPanel = document.getElementById("log");
+      function log(message) {
+        const time = new Date().toLocaleTimeString();
+        const line = `[${time}] ${message}`;
+        console.log(line);
+        logPanel.textContent += line + "\n";
+        logPanel.scrollTop = logPanel.scrollHeight;
+      }
+
+      const stateText = document.getElementById("stateText");
+      const posText = document.getElementById("posText");
+      const durText = document.getElementById("durText");
+      const seekBar = document.getElementById("seekBar");
+      const playBtn = document.getElementById("playBtn");
+      const pauseBtn = document.getElementById("pauseBtn");
+
+      function formatTime(sec) {
+        if (!isFinite(sec) || sec < 0) return "0:00";
+        const m = Math.floor(sec / 60);
+        const s = Math.floor(sec % 60).toString().padStart(2, "0");
+        return `${m}:${s}`;
+      }
+
+      log("Initializing Howl with html5: true (forces native <audio>, enables Range requests)");
+
+      // html5: true is the key flag here. It tells Howler to use an
+      // HTML5 <audio> element instead of decoding via Web Audio API.
+      // The browser then natively issues Range requests as the user
+      // seeks, matching the server's /audio 206 Partial Content support.
+      const sound = new Howl({
+        src: ["/audio"],
+        format: ["wav"],
+        html5: true, // <-- enables progressive/Range-based streaming
+        preload: "metadata", // only fetch duration first, not the whole file
+        onload: () => {
+          log(`Loaded metadata. Duration: ${formatTime(sound.duration())}`);
+          durText.textContent = formatTime(sound.duration());
+        },
+        onplay: () => {
+          log("Playback started");
+          stateText.textContent = "playing";
+          playBtn.disabled = true;
+          pauseBtn.disabled = false;
+          requestAnimationFrame(updateProgress);
+        },
+        onpause: () => {
+          log("Playback paused");
+          stateText.textContent = "paused";
+          playBtn.disabled = false;
+          pauseBtn.disabled = true;
+        },
+        onend: () => {
+          log("Playback ended");
+          stateText.textContent = "ended";
+          playBtn.disabled = false;
+          pauseBtn.disabled = true;
+        },
+        onseek: () => {
+          log(`Seek triggered -> browser issues a new Range request near ${formatTime(sound.seek())}`);
+        },
+        onloaderror: (id, err) => {
+          log(`Load error: ${err}`);
+          stateText.textContent = "error";
+        },
+        onplayerror: (id, err) => {
+          log(`Play error: ${err}`);
+        },
+      });
+
+      function updateProgress() {
+        if (sound.playing()) {
+          const pos = sound.seek() || 0;
+          const dur = sound.duration() || 1;
+          posText.textContent = formatTime(pos);
+          seekBar.value = (pos / dur) * 100;
+          requestAnimationFrame(updateProgress);
+        }
+      }
+
+      playBtn.addEventListener("click", () => {
+        log("Play button clicked");
+        sound.play();
+      });
+
+      pauseBtn.addEventListener("click", () => {
+        log("Pause button clicked");
+        sound.pause();
+      });
+
+      document.getElementById("seekStartBtn").addEventListener("click", () => {
+        seekTo(0);
+      });
+      document.getElementById("seekMidBtn").addEventListener("click", () => {
+        seekTo(0.5);
+      });
+      document.getElementById("seekEndBtn").addEventListener("click", () => {
+        seekTo(0.9);
+      });
+
+      function seekTo(fraction) {
+        const dur = sound.duration();
+        if (!dur) {
+          log("Seek requested before duration known — ignoring");
+          return;
+        }
+        const target = dur * fraction;
+        log(`Seeking to ${formatTime(target)} (${Math.round(fraction * 100)}%) — this works even mid-download because the server supports byte ranges`);
+        sound.seek(target);
+      }
+
+      seekBar.addEventListener("input", () => {
+        const dur = sound.duration();
+        if (!dur) return;
+        seekTo(seekBar.value / 100);
+      });
+    </script>
+  </body>
+</html>
