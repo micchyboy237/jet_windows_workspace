@@ -8,7 +8,6 @@
     />
     <title>Speaker diarization · variance & separation</title>
     <style>
-      /* ── design tokens (light/dark friendly) ── */
       :root {
         --color-bg: #ffffff;
         --color-surface-primary: #ffffff;
@@ -46,7 +45,6 @@
         background: var(--color-bg);
         padding: 1.25rem 0.5rem;
       }
-      /* ── reused component styles ── */
       .section-label {
         font-size: 11px;
         font-weight: 500;
@@ -99,6 +97,40 @@
         background: #fcebeb;
         color: #a32d2d;
       }
+
+      /* core / outlier pills */
+      .seg-core-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 10px;
+        font-weight: 500;
+        padding: 2px 6px;
+        border-radius: 99px;
+        line-height: 1.4;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .seg-core-pill.core {
+        background: #e1f5ee;
+        color: #085041;
+      }
+      .seg-core-pill.outlier {
+        background: #faeeda;
+        color: #854f0b;
+      }
+      .seg-core-pill .dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+      }
+      .seg-core-pill.core .dot {
+        background: #0f6e56;
+      }
+      .seg-core-pill.outlier .dot {
+        background: #ef9f27;
+      }
+
       .dist-bar-bg {
         background: var(--color-surface-secondary);
         border-radius: 4px;
@@ -189,6 +221,48 @@
         font-size: 11px;
         color: var(--color-text-secondary);
       }
+
+      /* centroid purity bar */
+      .purity-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+      .purity-bar-bg {
+        flex: 1;
+        background: var(--color-surface-secondary);
+        border-radius: 4px;
+        height: 6px;
+        overflow: hidden;
+      }
+      .purity-bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        background: #1d9e75;
+      }
+      .purity-label {
+        min-width: 80px;
+      }
+      .purity-count {
+        min-width: 64px;
+        text-align: right;
+        color: var(--color-text-tertiary);
+        font-size: 11px;
+      }
+
+      /* segment list legend */
+      .seg-legend {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 6px;
+        font-size: 11px;
+        color: var(--color-text-tertiary);
+      }
+
       .flex-between {
         display: flex;
         align-items: center;
@@ -234,62 +308,40 @@
     </style>
   </head>
   <body>
-    <div class="dashboard" id="dashboard-root">
-      <!-- JS will inject everything here -->
-    </div>
+    <div class="dashboard" id="dashboard-root"></div>
     <script>
       (function () {
-        // ───────────────────────────────────
-        // API base URL (auto-detect or configure)
-        // ───────────────────────────────────
         const API_BASE = "/speakers/metrics";
         const DATA_URL = `${API_BASE}/data`;
-        const HEALTH_URL = `${API_BASE}/health`;
         const SEGMENT_BASE = "/speakers/segment";
 
-        console.log("[SpeakerMetrics] Initialized - auto-refresh disabled");
+        console.log("[SpeakerMetrics] Initialized");
 
-        // ───────────────────────────────────
-        // Fetch real data from server
-        // ───────────────────────────────────
         async function fetchMetricsData(speakerLabel = null) {
           const url = speakerLabel
             ? `${DATA_URL}?label=${encodeURIComponent(speakerLabel)}`
             : DATA_URL;
           try {
-            const response = await fetch(url);
-            if (!response.ok) {
-              throw new Error(
-                `HTTP ${response.status}: ${response.statusText}`,
-              );
-            }
-            const data = await response.json();
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+            const data = await r.json();
             console.log("[SpeakerMetrics] Data fetched:", data);
             return data;
-          } catch (error) {
-            console.error("[SpeakerMetrics] Fetch error:", error);
+          } catch (e) {
+            console.error("[SpeakerMetrics] Fetch error:", e);
             return null;
           }
         }
 
-        // ───────────────────────────────────
-        // Open segment detail in new tab
-        // ───────────────────────────────────
         function openSegmentDetail(segmentId) {
-          if (!segmentId || segmentId === "unknown") {
-            console.warn(
-              "[SpeakerMetrics] Cannot open detail for unknown segment",
-            );
-            return;
-          }
-          const url = `${SEGMENT_BASE}/${encodeURIComponent(segmentId)}`;
-          console.log(`[SpeakerMetrics] Opening segment detail: ${url}`);
-          window.open(url, "_blank");
+          if (!segmentId || segmentId === "unknown") return;
+          window.open(
+            `${SEGMENT_BASE}/${encodeURIComponent(segmentId)}`,
+            "_blank",
+          );
         }
 
-        // ───────────────────────────────────
-        // Transform API data to frontend format
-        // ───────────────────────────────────
+        // ── transform ──────────────────────────────────────────────────
         function transformSpeakerData(apiData) {
           if (!apiData)
             return {
@@ -300,7 +352,6 @@
             };
           const intra = apiData.intra_speaker || {};
           const inter = apiData.inter_speaker || {};
-          // Map colors for speakers
           const colorPalette = [
             { color: "#3C3489", bg: "#EEEDFE" },
             { color: "#085041", bg: "#E1F5EE" },
@@ -310,6 +361,13 @@
           ];
           const speakers = (intra.speakers || []).map((spk, idx) => {
             const palette = colorPalette[idx % colorPalette.length];
+            const segs = (spk.segments || []).map((seg) => ({
+              id: seg.id || "unknown",
+              d: seg.d || 0,
+              duration: seg.duration || 0,
+              isCore: seg.is_core !== undefined ? seg.is_core : true, // ← pass through
+            }));
+            const coreCount = segs.filter((s) => s.isCore).length;
             return {
               id: spk.label.replace("SPEAKER_", "S"),
               label: spk.label,
@@ -321,11 +379,8 @@
               stdDev: spk.stdDev || 0,
               minDist: spk.minDist || 0,
               maxDist: spk.maxDist || 0,
-              segments: (spk.segments || []).map((seg) => ({
-                id: seg.id || "unknown",
-                d: seg.d || 0,
-                duration: seg.duration || 0,
-              })),
+              coreCount,
+              segments: segs,
             };
           });
           const pairs = (inter.pairwise || []).map((p) => ({
@@ -339,138 +394,147 @@
             min: inter.minSeparation || 0,
             max: inter.maxSeparation || 0,
           };
-          const overallHealth = inter.health || "unhealthy";
-          return { speakers, pairs, stats, overallHealth };
+          return {
+            speakers,
+            pairs,
+            stats,
+            overallHealth: inter.health || "unhealthy",
+          };
         }
 
-        // ───────────────────────────────────
-        // helper: bar color based on distance
-        // ───────────────────────────────────
+        // ── helpers ────────────────────────────────────────────────────
         function barColor(d) {
           if (d <= 0.3) return "#1D9E75";
           if (d <= 0.5) return "#EF9F27";
           return "#E24B4A";
         }
 
-        // ───────────────────────────────────
-        // Format duration in seconds to readable string
-        // ───────────────────────────────────
-        function formatDuration(seconds) {
-          if (!seconds || seconds <= 0) return "—";
-          if (seconds < 1.0) return (seconds * 1000).toFixed(0) + "ms";
-          if (seconds < 60) return seconds.toFixed(1) + "s";
-          const mins = Math.floor(seconds / 60);
-          const secs = (seconds % 60).toFixed(0);
-          return `${mins}m ${secs}s`;
+        function formatDuration(s) {
+          if (!s || s <= 0) return "—";
+          if (s < 1.0) return (s * 1000).toFixed(0) + "ms";
+          if (s < 60) return s.toFixed(1) + "s";
+          return `${Math.floor(s / 60)}m ${(s % 60).toFixed(0)}s`;
         }
 
-        // ───────────────────────────────────
-        // rendering helpers (returns HTML strings)
-        // ───────────────────────────────────
+        function badgeClass(health) {
+          return health === "healthy"
+            ? "badge-healthy"
+            : health === "warning"
+              ? "badge-warning"
+              : "badge-unhealthy";
+        }
+
+        // ── separation card ────────────────────────────────────────────
         function renderSeparationCard(pairs, stats, health) {
-          const badgeClass =
-            health === "healthy"
-              ? "badge-healthy"
-              : health === "warning"
-                ? "badge-warning"
-                : "badge-unhealthy";
-          const meanFixed = stats.mean.toFixed(2);
-          const maxDistInData = Math.max(...pairs.map((p) => p.distance), 1.0);
+          const mean = stats.mean.toFixed(2);
+          const maxD = Math.max(...pairs.map((p) => p.distance), 1.0);
           return `
-        <div class="speaker-card" style="margin-bottom: 1.5rem;">
-          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 1rem;">
-            <span class="badge ${badgeClass}">${health}</span>
-            <span style="font-size: 13px; color: var(--color-text-secondary);">
-              Mean separation: <strong style="color: var(--color-text-primary);">${meanFixed}</strong>
-            </span>
-            <span style="font-size: 13px; color: var(--color-text-secondary); margin-left: auto;">
-              ${pairs.length} pairs
-            </span>
-          </div>
-          <div class="grid-4" style="margin-bottom: 1rem;">
-            <div class="metric-card"><div class="metric-lbl">Mean</div><div class="metric-val">${meanFixed}</div></div>
-            <div class="metric-card"><div class="metric-lbl">Std dev</div><div class="metric-val">${stats.stdDev.toFixed(2)}</div></div>
-            <div class="metric-card"><div class="metric-lbl">Min</div><div class="metric-val">${stats.min.toFixed(2)}</div></div>
-            <div class="metric-card"><div class="metric-lbl">Max</div><div class="metric-val">${stats.max.toFixed(2)}</div></div>
-          </div>
-          <p class="section-label" style="margin-bottom: 8px;">Pairwise distances</p>
-          <div>
-            ${pairs
-              .map((p) => {
-                const pct = (p.distance / maxDistInData) * 100;
-                return `
-                  <div class="pair-row">
-                    <span style="color: var(--color-text-secondary);">${p.from} → ${p.to}</span>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <div class="dist-bar-bg" style="width: 80px;">
-                        <div class="dist-bar-fill" style="width:${pct}%; background:#1D9E75;"></div>
+            <div class="speaker-card" style="margin-bottom: 1.5rem;">
+              <div style="display:flex; align-items:center; gap:10px; margin-bottom:1rem;">
+                <span class="badge ${badgeClass(health)}">${health}</span>
+                <span style="font-size:13px; color:var(--color-text-secondary);">
+                  Mean separation: <strong style="color:var(--color-text-primary);">${mean}</strong>
+                </span>
+                <span style="font-size:13px; color:var(--color-text-secondary); margin-left:auto;">${pairs.length} pairs</span>
+              </div>
+              <div class="grid-4" style="margin-bottom:1rem;">
+                <div class="metric-card"><div class="metric-lbl">Mean</div><div class="metric-val">${mean}</div></div>
+                <div class="metric-card"><div class="metric-lbl">Std dev</div><div class="metric-val">${stats.stdDev.toFixed(2)}</div></div>
+                <div class="metric-card"><div class="metric-lbl">Min</div><div class="metric-val">${stats.min.toFixed(2)}</div></div>
+                <div class="metric-card"><div class="metric-lbl">Max</div><div class="metric-val">${stats.max.toFixed(2)}</div></div>
+              </div>
+              <p class="section-label" style="margin-bottom:8px;">Pairwise distances</p>
+              <div>
+                ${pairs
+                  .map((p) => {
+                    const pct = (p.distance / maxD) * 100;
+                    return `
+                    <div class="pair-row">
+                      <span style="color:var(--color-text-secondary);">${p.from} → ${p.to}</span>
+                      <div style="display:flex; align-items:center; gap:8px;">
+                        <div class="dist-bar-bg" style="width:80px;">
+                          <div class="dist-bar-fill" style="width:${pct}%; background:#1D9E75;"></div>
+                        </div>
+                        <span style="font-size:12px; font-weight:500;">${p.distance.toFixed(2)}</span>
                       </div>
-                      <span style="font-size: 12px; font-weight: 500;">${p.distance.toFixed(2)}</span>
-                    </div>
-                  </div>
-                `;
-              })
-              .join("")}
-          </div>
-        </div>
-      `;
+                    </div>`;
+                  })
+                  .join("")}
+              </div>
+            </div>`;
         }
 
+        // ── speaker card ───────────────────────────────────────────────
         function renderSpeakerCard(speaker, isFullWidth = false) {
-          const badgeClass =
-            speaker.health === "healthy"
-              ? "badge-healthy"
-              : speaker.health === "warning"
-                ? "badge-warning"
-                : "badge-unhealthy";
-          const metricsHtml = `
-        <div class="grid-4" style="margin-bottom: 12px;">
-          <div class="metric-card"><div class="metric-lbl">Mean dist</div><div class="metric-val" style="font-size: 17px;">${speaker.meanDist.toFixed(2)}</div></div>
-          <div class="metric-card"><div class="metric-lbl">Std dev</div><div class="metric-val" style="font-size: 17px;">${speaker.stdDev.toFixed(2)}</div></div>
-          <div class="metric-card"><div class="metric-lbl">Min</div><div class="metric-val" style="font-size: 17px;">${speaker.minDist.toFixed(2)}</div></div>
-          <div class="metric-card"><div class="metric-lbl">Max</div><div class="metric-val" style="font-size: 17px;">${speaker.maxDist.toFixed(2)}</div></div>
-        </div>
-      `;
+          const total = speaker.segments.length;
+          const core = speaker.coreCount;
+          const outlier = total - core;
+          const purityPct = total > 0 ? Math.round((core / total) * 100) : 100;
+
+          // purity bar — only show when there's a meaningful mix
+          const purityHtml =
+            total > 0
+              ? `
+            <div class="purity-row">
+              <span class="purity-label">Centroid purity</span>
+              <div class="purity-bar-bg">
+                <div class="purity-bar-fill" style="width:${purityPct}%;"></div>
+              </div>
+              <span class="purity-count">${core} core · ${outlier} outlier</span>
+            </div>`
+              : "";
+
           const maxSegVal = Math.max(...speaker.segments.map((s) => s.d), 0.8);
           const segmentsHtml = speaker.segments
             .map((s) => {
-              const widthPercent = (s.d / maxSegVal) * 100;
-              const durationStr = formatDuration(s.duration);
+              const widthPct = (s.d / maxSegVal) * 100;
+              const pillClass = s.isCore ? "core" : "outlier";
+              const pillLabel = s.isCore ? "core" : "outlier";
               return `
-            <div class="seg-row">
-              <span class="seg-id" onclick="event.stopPropagation(); window._speakerMetrics.openSegmentDetail('${s.id}')" title="Open segment details in new tab">${s.id}</span>
-              <span class="seg-duration">${durationStr}</span>
-              <div class="dist-bar-bg" style="flex:1">
-                <div class="dist-bar-fill" style="width:${widthPercent.toFixed(1)}%; background:${barColor(s.d)};"></div>
-              </div>
-              <span class="seg-val">${s.d.toFixed(2)}</span>
-            </div>
-          `;
+              <div class="seg-row">
+                <span
+                  class="seg-id"
+                  onclick="event.stopPropagation(); window._speakerMetrics.openSegmentDetail('${s.id}')"
+                  title="Open segment details"
+                >${s.id}</span>
+                <span class="seg-duration">${formatDuration(s.duration)}</span>
+                <div class="dist-bar-bg" style="flex:1;">
+                  <div class="dist-bar-fill" style="width:${widthPct.toFixed(1)}%; background:${barColor(s.d)};"></div>
+                </div>
+                <span class="seg-val">${s.d.toFixed(2)}</span>
+                <span class="seg-core-pill ${pillClass}">
+                  <span class="dot"></span>${pillLabel}
+                </span>
+              </div>`;
             })
             .join("");
+
           return `
-        <div class="speaker-card" style="${isFullWidth ? "grid-column: 1 / -1;" : ""}">
-          <div class="speaker-header">
-            <div class="avatar" style="background: ${speaker.bg}; color: ${speaker.color};">${speaker.id}</div>
-            <div>
-              <div class="speaker-name">${speaker.label}</div>
-              <div class="speaker-meta">${speaker.segmentsCount} segments</div>
-            </div>
-            <span class="badge ${badgeClass}" style="margin-left: auto;">${speaker.health}</span>
-          </div>
-          ${metricsHtml}
-          <p class="section-label" style="margin-bottom: 6px;">Segment distances</p>
-          <div>
-            ${segmentsHtml}
-          </div>
-        </div>
-      `;
+            <div class="speaker-card" style="${isFullWidth ? "grid-column:1/-1;" : ""}">
+              <div class="speaker-header">
+                <div class="avatar" style="background:${speaker.bg}; color:${speaker.color};">${speaker.id}</div>
+                <div>
+                  <div class="speaker-name">${speaker.label}</div>
+                  <div class="speaker-meta">${speaker.segmentsCount} segments</div>
+                </div>
+                <span class="badge ${badgeClass(speaker.health)}" style="margin-left:auto;">${speaker.health}</span>
+              </div>
+              <div class="grid-4" style="margin-bottom:12px;">
+                <div class="metric-card"><div class="metric-lbl">Mean dist</div><div class="metric-val" style="font-size:17px;">${speaker.meanDist.toFixed(2)}</div></div>
+                <div class="metric-card"><div class="metric-lbl">Std dev</div><div class="metric-val" style="font-size:17px;">${speaker.stdDev.toFixed(2)}</div></div>
+                <div class="metric-card"><div class="metric-lbl">Min</div><div class="metric-val" style="font-size:17px;">${speaker.minDist.toFixed(2)}</div></div>
+                <div class="metric-card"><div class="metric-lbl">Max</div><div class="metric-val" style="font-size:17px;">${speaker.maxDist.toFixed(2)}</div></div>
+              </div>
+              ${purityHtml}
+              <p class="section-label" style="margin-bottom:6px;">Segment distances</p>
+              <div>${segmentsHtml}</div>
+            </div>`;
         }
 
         function renderSpeakersGrid(speakers) {
-          // First 2 speakers in a 2-column row, rest full-width
           if (speakers.length === 0) {
-            return '<div style="padding: 2rem; text-align: center; color: var(--color-text-secondary);">No speakers available yet. Process some audio segments first.</div>';
+            return `<div style="padding:2rem; text-align:center; color:var(--color-text-secondary);">
+              No speakers yet. Process some audio segments first.</div>`;
           }
           const firstTwo = speakers.slice(0, 2);
           const rest = speakers.slice(2);
@@ -485,82 +549,65 @@
           return html;
         }
 
-        // ───────────────────────────────────
-        // Main render: inject into DOM
-        // ───────────────────────────────────
+        // ── main render ────────────────────────────────────────────────
         async function renderDashboard() {
           const root = document.getElementById("dashboard-root");
-          // Show loading state
           root.innerHTML = `
-        <div style="padding: 3rem; text-align: center; color: var(--color-text-secondary);">
-          <div style="font-size: 18px; margin-bottom: 8px;">Loading speaker metrics...</div>
-          <div style="font-size: 13px;">Fetching data from server</div>
-        </div>
-      `;
+            <div style="padding:3rem; text-align:center; color:var(--color-text-secondary);">
+              <div style="font-size:18px; margin-bottom:8px;">Loading speaker metrics…</div>
+              <div style="font-size:13px;">Fetching data from server</div>
+            </div>`;
+
           const apiData = await fetchMetricsData();
-          const { speakers, pairs, stats, overallHealth } =
-            transformSpeakerData(apiData);
           if (!apiData) {
             root.innerHTML = `
-          <div style="padding: 3rem; text-align: center;">
-            <div style="font-size: 18px; margin-bottom: 8px; color: var(--color-text-primary);">
-              Unable to load metrics
-            </div>
-            <div style="font-size: 13px; color: var(--color-text-secondary);">
-              The speaker labeler may not be initialized. Process some audio segments first.
-            </div>
-            <button onclick="location.reload()" style="margin-top: 1rem;">Retry</button>
-          </div>
-        `;
+              <div style="padding:3rem; text-align:center;">
+                <div style="font-size:18px; margin-bottom:8px; color:var(--color-text-primary);">Unable to load metrics</div>
+                <div style="font-size:13px; color:var(--color-text-secondary);">
+                  The speaker labeler may not be initialized. Process some audio segments first.
+                </div>
+                <button onclick="location.reload()" style="margin-top:1rem;">Retry</button>
+              </div>`;
             return;
           }
-          const html = `
-        <h2 class="sr-only">Speaker diarization metrics dashboard showing intra-speaker variance and inter-speaker separation results</h2>
-        <div style="padding: 1rem 0;">
-          <div class="flex-between">
-            <div>
-              <div style="font-size: 18px; font-weight: 500; color: var(--color-text-primary);">Speaker metrics</div>
-              <div style="font-size: 13px; color: var(--color-text-secondary); margin-top: 2px;">
-                ${speakers.length} speakers · ${pairs.length} separation pairs
-                <span style="margin-left: 8px; font-size: 11px; color: var(--color-text-tertiary);">
-                  (updated: ${apiData.timestamp ? new Date(apiData.timestamp).toLocaleTimeString() : "unknown"})
-                </span>
+
+          const { speakers, pairs, stats, overallHealth } =
+            transformSpeakerData(apiData);
+
+          root.innerHTML = `
+            <h2 class="sr-only">Speaker diarization metrics dashboard</h2>
+            <div style="padding:1rem 0;">
+              <div class="flex-between">
+                <div>
+                  <div style="font-size:18px; font-weight:500; color:var(--color-text-primary);">Speaker metrics</div>
+                  <div style="font-size:13px; color:var(--color-text-secondary); margin-top:2px;">
+                    ${speakers.length} speakers · ${pairs.length} separation pairs
+                    <span style="margin-left:8px; font-size:11px; color:var(--color-text-tertiary);">
+                      (updated: ${apiData.timestamp ? new Date(apiData.timestamp).toLocaleTimeString() : "unknown"})
+                    </span>
+                  </div>
+                </div>
+                <button id="refreshBtn">Refresh ↻</button>
               </div>
-            </div>
-            <button id="refreshBtn">Refresh ↻</button>
-          </div>
-          <p class="section-label">Inter-speaker separation</p>
-          ${
-            pairs.length > 0
-              ? renderSeparationCard(pairs, stats, overallHealth)
-              : '<div class="metric-card" style="text-align: center; padding: 2rem; color: var(--color-text-secondary); margin-bottom: 1.5rem;">Need at least 2 speakers for separation metrics</div>'
-          }
-          <p class="section-label">Intra-speaker variance</p>
-          ${renderSpeakersGrid(speakers)}
-        </div>
-      `;
-          root.innerHTML = html;
-          // Attach refresh handler
+              <p class="section-label">Inter-speaker separation</p>
+              ${
+                pairs.length > 0
+                  ? renderSeparationCard(pairs, stats, overallHealth)
+                  : `<div class="metric-card" style="text-align:center; padding:2rem; color:var(--color-text-secondary); margin-bottom:1.5rem;">
+                    Need at least 2 speakers for separation metrics</div>`
+              }
+              <p class="section-label">Intra-speaker variance</p>
+              ${renderSpeakersGrid(speakers)}
+            </div>`;
+
           document
             .getElementById("refreshBtn")
             ?.addEventListener("click", renderDashboard);
-          console.log("[SpeakerMetrics] Dashboard rendered successfully");
+          console.log("[SpeakerMetrics] Dashboard rendered");
         }
 
-        // ───────────────────────────────────
-        // Expose openSegmentDetail globally for onclick handlers
-        // ───────────────────────────────────
-        window._speakerMetrics = {
-          openSegmentDetail: openSegmentDetail,
-        };
-
-        // ───────────────────────────────────
-        // Initial paint (NO auto-refresh - manual only)
-        // ───────────────────────────────────
+        window._speakerMetrics = { openSegmentDetail };
         renderDashboard();
-        console.log(
-          "[SpeakerMetrics] Dashboard loaded - auto-refresh disabled",
-        );
       })();
     </script>
   </body>

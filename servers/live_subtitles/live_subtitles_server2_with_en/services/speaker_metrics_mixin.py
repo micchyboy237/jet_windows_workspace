@@ -155,6 +155,11 @@ class SpeakerMetricsMixin:
                         if hasattr(ref, 'embedding_metadata') and i < len(ref.embedding_metadata)
                         else 0.0
                     ),
+                    "is_core": (                              # ← new field
+                        ref.embedding_metadata[i].get('is_core', True)
+                        if hasattr(ref, 'embedding_metadata') and i < len(ref.embedding_metadata)
+                        else True
+                    ),
                 })
 
             # Compute aggregate metrics

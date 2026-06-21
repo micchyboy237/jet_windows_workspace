@@ -62,61 +62,62 @@ class SpeakerSegmentInfo(TypedDict):
 class SpeakerReference:
     """Maintains reference data for a single speaker."""
     label: str
-    embeddings: List[np.ndarray] = field(default_factory=list)
+    all_embeddings: List[np.ndarray] = field(default_factory=list)   # full history
+    core_embeddings: List[np.ndarray] = field(default_factory=list)  # centroid-only
     embedding_metadata: List[Dict] = field(default_factory=list)
     centroid: Optional[np.ndarray] = None
     first_seen: Optional[float] = None
     last_seen: float = 0.0
     segment_count: int = 0
-    
+
     def add_embedding(
         self,
         embedding: np.ndarray,
         timestamp: float,
         segment_id: Optional[str] = None,
         audio_duration: float = 0.0,
+        is_core: bool = True,           # ← new param
     ) -> None:
-        """Add a new embedding and update centroid using median for robustness.
-        
-        Parameters
-        ----------
-        embedding : np.ndarray
-            The embedding vector to add.
-        timestamp : float
-            Timestamp when this segment was processed.
-        segment_id : str, optional
-            Unique identifier for the segment that produced this embedding.
-        """
         if embedding.ndim == 1:
             embedding = embedding.reshape(1, -1)
-        self.embeddings.append(embedding)
-        
-        # NEW: Store segment metadata
+
+        self.all_embeddings.append(embedding)
         self.embedding_metadata.append({
-            'segment_id': segment_id or f"unknown_{len(self.embeddings)}",
+            'segment_id': segment_id or f"unknown_{len(self.all_embeddings)}",
             'timestamp': timestamp,
-            'index': len(self.embeddings) - 1,
+            'index': len(self.all_embeddings) - 1,
             'added_at': timestamp,
-            'audio_duration': audio_duration,  # Store actual waveform duration
+            'audio_duration': audio_duration,
+            'is_core': is_core,          # ← stored in meta for metrics UI
         })
-        
         self.segment_count += 1
-        if len(self.embeddings) >= 3:
-            try:
-                stacked = np.vstack(self.embeddings)
-                self.centroid = np.median(stacked, axis=0, keepdims=True)
-            except Exception:
-                stacked = np.vstack(self.embeddings)
-                self.centroid = np.mean(stacked, axis=0, keepdims=True)
-        elif len(self.embeddings) == 2:
-            stacked = np.vstack(self.embeddings)
-            self.centroid = np.mean(stacked, axis=0, keepdims=True)
-        else:
-            self.centroid = embedding.copy()
+
+        if is_core:
+            self.core_embeddings.append(embedding)
+
+        # Centroid uses ONLY core embeddings
+        self._recompute_centroid()
+
         if self.first_seen is None:
             self.first_seen = timestamp
         if timestamp > self.last_seen:
             self.last_seen = timestamp
+
+    def _recompute_centroid(self) -> None:
+        """Recompute centroid from core_embeddings only."""
+        src = self.core_embeddings if self.core_embeddings else self.all_embeddings
+        if not src:
+            return
+        stacked = np.vstack(src)
+        if len(src) >= 3:
+            self.centroid = np.median(stacked, axis=0, keepdims=True)
+        else:
+            self.centroid = np.mean(stacked, axis=0, keepdims=True)
+
+    # Keep .embeddings as a backward-compat alias
+    @property
+    def embeddings(self) -> List[np.ndarray]:
+        return self.all_embeddings
 
     @property
     def active_duration(self) -> float:
@@ -622,6 +623,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         timestamp: float,
         segment_id: Optional[str] = None,
         audio_duration: float = 0.0,  # NEW parameter
+        match_type: str = "strong_match",      # ← new param
     ) -> None:
         """Update speaker reference with new embedding.
         
@@ -638,28 +640,33 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         """
         if label not in self._speakers:
             self._speakers[label] = SpeakerReference(label=label)
-        
-        # Generate segment_id if not provided
         if segment_id is None:
             segment_id = self._generate_segment_id()
-        
+
+        # Only strong/early matches shape the centroid
+        is_core = match_type in ("strong_match", "early_match", "new_speaker", "first_speaker")
+
         ref = self._speakers[label]
-        ref.add_embedding(embedding, timestamp, segment_id, audio_duration=audio_duration)
-        
-        # Trim embeddings if exceeding max
-        if len(ref.embeddings) > self.max_embeddings_per_speaker:
-            # Also trim metadata
-            ref.embeddings = ref.embeddings[-self.max_embeddings_per_speaker:]
+        ref.add_embedding(
+            embedding, timestamp, segment_id,
+            audio_duration=audio_duration,
+            is_core=is_core,
+        )
+
+        # Trim all_embeddings but preserve core_embeddings (they're the source of truth)
+        if len(ref.all_embeddings) > self.max_embeddings_per_speaker:
+            ref.all_embeddings = ref.all_embeddings[-self.max_embeddings_per_speaker:]
             ref.embedding_metadata = ref.embedding_metadata[-self.max_embeddings_per_speaker:]
-            
-            # Recalculate centroid after trimming
-            if ref.embeddings:
-                if len(ref.embeddings) >= 3:
-                    stacked = np.vstack(ref.embeddings)
-                    ref.centroid = np.median(stacked, axis=0, keepdims=True)
-                else:
-                    stacked = np.vstack(ref.embeddings)
-                    ref.centroid = np.mean(stacked, axis=0, keepdims=True)
+            # Re-sync core from metadata truth
+            ref.core_embeddings = [
+                emb for emb, meta in zip(ref.all_embeddings, ref.embedding_metadata)
+                if meta.get('is_core', True)
+            ]
+            ref._recompute_centroid()
+            console.print(
+                f"[dim]Trimmed {label}: {len(ref.all_embeddings)} total, "
+                f"{len(ref.core_embeddings)} core embeddings[/dim]"
+            )
 
     def _generate_segment_id(self, prefix: str = "segment") -> str:
         """Generate a unique segment identifier with UUID suffix.
@@ -1292,6 +1299,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                     timestamp=timestamp,
                     segment_id=segment_id,
                     audio_duration=audio_duration,
+                    match_type=primary_result["match_type"],   # ← add this
                 )
                 if self.debug:
                     console.print(
