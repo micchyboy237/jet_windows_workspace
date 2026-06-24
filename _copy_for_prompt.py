@@ -114,9 +114,13 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\routers\audio_router.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\demo_partial_range.html",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo4\demo_full_range.html",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\segments.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\segments.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\components\audio_player.html",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_evaluate_speaker_embeddings.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_embeddings.py",
     r"",
 ]
 
@@ -140,48 +144,46 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze all available endpoints in routes\segments.py router
+Evaluate results
 
-Now log segment endpoints in main.py
+                    INFO      Scored 14 trials                                        evaluate_speaker_embeddings.py:545
+                    INFO      EER=0.00% @ threshold=0.5184                            evaluate_speaker_embeddings.py:550
+                    INFO      minDCF=0.0000                                           evaluate_speaker_embeddings.py:551
+                    INFO      Intra=0.6926 | Inter=0.3470 | Sep=0.3456                evaluate_speaker_embeddings.py:558
+                    INFO      EER=0.00% | minDCF=0.0000 | Intra=0.6926 | Inter=0.3470 evaluate_speaker_embeddings.py:763
+                             | Sep=0.3456 | Latency=58.6ms
 
-    
-    logger.info("🚀 Starting [bold cyan]Live Japanese Subtitles Server 2[/]")
-    logger.info("")
-    logger.info("📡 WebSocket endpoint:")
-    logger.info("   [bold]ws://0.0.0.0:8000/ws/live-subtitles[/]")
-    logger.info("")
-    logger.info("📋 REST endpoints:")
-    logger.info("   POST /transcribe")
-    logger.info("   POST /translate")
-    logger.info("")
-    logger.info("📋 Speaker Labeling endpoints:")
-    logger.info("   GET  /speakers")
-    logger.info("   GET  /speakers/status")
-    logger.info("   GET  /speakers/similarities")
-    logger.info("   POST /speakers/consolidate")
-    logger.info("   POST /speakers/reset")
-    logger.info("   POST /speakers/merge")
-    logger.info("   GET  /speakers/dashboard")
-    logger.info("   GET  /speakers/plots")
-    logger.info("   GET  /speakers/plot/{plot_name}")
-    logger.info("   GET  /speakers/data/export")
-    logger.info("")
-    logger.info("🎵 Audio Tagging endpoints:")
-    logger.info("   GET  /tags [HTML]")
-    logger.info("   GET  /tags/config")
-    logger.info("   GET  /tags/chunks")
-    logger.info("   GET  /tags/dashboard [HTML]")
-    logger.info("   POST /tags/audio")
-    logger.info("   POST /tags/chunks")
-    logger.info("   POST /tags/speech-check")
-    logger.info("   POST /tags/config/update")
-    logger.info("")
-    logger.info("🔄 Global Reset endpoints:")
-    logger.info("   POST /global/reset")
-    logger.info("   GET  /global/status")
-    logger.info("")
-    logger.info("Press Ctrl+C to stop\n")
-    
+                               Speaker Embedding Model Comparison
+┏━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━┓
+┃ #   ┃ Model                ┃ Dim ┃  EER ↓ ┃ minDCF ↓ ┃ Intra ↑ ┃ Inter ↓ ┃  Sep ↑ ┃ ms/file ↓ ┃
+┡━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━┩
+│ 1   │ pyannote             │ 512 │  0.00% │   0.0000 │  0.5050 │  0.0855 │ 0.4196 │     354.6 │
+│ 2   │ speechbrain_ecapa    │ 192 │  0.00% │   0.0000 │  0.5803 │  0.1390 │ 0.4413 │     112.4 │
+│ 3   │ nemo_titanet         │ 192 │  0.00% │   0.0000 │  0.6926 │  0.3470 │ 0.3456 │      58.6 │
+│ 4   │ speechbrain_xvect    │ 512 │ 14.29% │   0.1429 │  0.9615 │  0.9228 │ 0.0387 │      27.3 │
+└─────┴──────────────────────┴─────┴────────┴──────────┴─────────┴─────────┴────────┴───────────┘
+
+↓ = lower is better   ↑ = higher is better   Sep = Intra − Inter (discrimination power)
+
+                    INFO     Results saved to                                         evaluate_speaker_embeddings.py:649
+                             C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\s
+                             ervers\live_subtitles\live_subtitles_server2_with_en\ser
+                             vices\main\generated\_main_evaluate_speaker_embeddings\e
+                             val_results\results.json
+Traceback (most recent call last):
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_embeddings.py", line 786, in <module>
+    run_evaluation(
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_embeddings.py", line 775, in run_evaluation
+    save_results(results, output_dir)
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_embeddings.py", line 674, in save_results
+    md_path.write_text("\n".join(lines))
+  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\pathlib.py", line 1048, in write_text
+    return f.write(data)
+           ^^^^^^^^^^^^^
+  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2193' in position 67: character maps to <undefined>
 """
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
