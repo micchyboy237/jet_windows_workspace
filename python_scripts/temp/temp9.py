@@ -30,12 +30,6 @@ print(result)
 assert result['text'] == 'no'
 assert result['score'] < 0.5
 
-# Custom threshold
-result = sv_pipeline([speaker_1_path1, speaker_2_path1], thr=0.30)
-print(result)
-assert result['text'] == 'yes'
-assert result['score'] > 0.30
-
 # Get embeddings + score
 result = sv_pipeline(
     [speaker_1_path1, speaker_2_path1],
@@ -48,3 +42,9 @@ print(result['embs'].shape) # (2, 192)
 print(result['embs'].dtype) # float32
 assert result['outputs']['text'] == 'no'
 assert result['outputs']['score'] < 0.5
+
+# Custom threshold
+result3 = sv_pipeline([speaker_1_path1, speaker_2_path1], thr=0.25)
+print(result3)
+assert result3['text'] == 'yes'
+assert result3['score'] > 0.25
