@@ -394,11 +394,9 @@ class ModelScopeEres2Netv2EmbeddingModel(BaseEmbeddingModel):
     def encode(self, waveform: torch.Tensor, sample_rate: int) -> np.ndarray:
         """Compute speaker embedding from raw audio waveform.
         
-        The ModelScope pipeline expects a list of two audio paths for
-        verification, but we can extract a single embedding by providing
-        the same audio twice or by using a dummy second path. A cleaner
-        approach is to save the waveform to a temporary file and use
-        the pipeline with output_emb=True.
+        The ModelScope pipeline expects a list of two audio paths for verification,
+        but we extract a single embedding by providing the same audio twice and
+        taking only the first embedding from the result.
         
         Parameters
         ----------
@@ -416,14 +414,14 @@ class ModelScopeEres2Netv2EmbeddingModel(BaseEmbeddingModel):
             self._lazy_init()
         
         import tempfile
+        import os
         import soundfile as sf
         
-        # Normalize waveform shape
         if waveform.dim() == 2:
             waveform = waveform.squeeze(0)
+        
         audio_np = waveform.cpu().numpy().astype(np.float32)
         
-        # Save to temporary WAV file (pipeline expects file paths)
         with tempfile.NamedTemporaryFile(
             suffix=".wav", delete=False
         ) as tmp:
@@ -431,15 +429,12 @@ class ModelScopeEres2Netv2EmbeddingModel(BaseEmbeddingModel):
             tmp_path = tmp.name
         
         try:
-            # Use the pipeline with output_emb=True to get embeddings
-            # We pass the same file twice to get a single embedding
             result = self._pipeline(
                 [tmp_path, tmp_path],
                 output_emb=True,
             )
             
-            # Extract the embedding from the result
-            # Based on temp9.py, result['embs'] contains the embeddings
+            # Extract embedding from result
             if 'embs' in result:
                 emb = np.asarray(result['embs'], dtype=np.float32)
             elif 'outputs' in result and 'embs' in result.get('outputs', {}):
@@ -450,22 +445,30 @@ class ModelScopeEres2Netv2EmbeddingModel(BaseEmbeddingModel):
                     f"{list(result.keys())}"
                 )
             
-            # NOTE: Shape/dtype log removed to avoid spam during batch processing
-            # Use debug logging if needed:
-            # log.debug(f"ERes2NetV2 embedding shape: {emb.shape}, dtype: {emb.dtype}")
-            
-            # Ensure shape is (1, dim)
-            if emb.ndim == 0:
-                emb = emb.reshape(1, -1)
+            # CRITICAL FIX: The pipeline returns embeddings for BOTH inputs
+            # (shape: 2, dim). We only need ONE embedding, so take the first.
+            if emb.ndim == 2 and emb.shape[0] == 2:
+                emb = emb[0:1]  # Take first embedding, keep 2D shape (1, dim)
+                console.log(
+                    f"{_LOGGER_PREFIX} Extracted first embedding from batch: "
+                    f"input shape (2, {emb.shape[1]}) -> output shape (1, {emb.shape[1]})"
+                )
             elif emb.ndim == 1:
                 emb = emb.reshape(1, -1)
             elif emb.ndim > 2:
-                # Take first embedding if multiple are returned
-                emb = emb[0:1].reshape(1, -1)
+                emb = emb.reshape(emb.shape[0], -1)
+                emb = emb[0:1]  # Take first embedding
             
-            # Update _EMBEDDING_DIM dynamically based on actual output
+            # Final safety check: ensure 2D shape (1, dim)
+            if emb.ndim != 2 or emb.shape[0] != 1:
+                console.log(
+                    f"{_LOGGER_PREFIX} WARNING: Unexpected embedding shape "
+                    f"{emb.shape}, forcing to (1, -1)"
+                )
+                emb = emb.reshape(1, -1)
+            
+            # Update expected dimension if needed
             if emb.shape[1] != self._EMBEDDING_DIM:
-                # This log is useful once, so keep it
                 console.log(
                     f"{_LOGGER_PREFIX} Updating embedding_dim from "
                     f"{self._EMBEDDING_DIM} to {emb.shape[1]}"
@@ -475,19 +478,13 @@ class ModelScopeEres2Netv2EmbeddingModel(BaseEmbeddingModel):
             return emb
             
         finally:
-            # Clean up temporary file
-            import os
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
 
     def __call__(self, audio: Union[str, Path, Dict[str, Any]]) -> np.ndarray:
-        """Override to use pipeline directly with file paths when possible.
-        
-        When given a file path, we can pass it directly to the pipeline
-        instead of loading and re-saving through encode().
-        """
+        """Override to use pipeline directly with file paths when possible."""
         if isinstance(audio, dict):
             waveform = audio["waveform"]
             sr = audio["sample_rate"]
@@ -497,16 +494,11 @@ class ModelScopeEres2Netv2EmbeddingModel(BaseEmbeddingModel):
             self._lazy_init()
         
         audio_path = str(audio)
-        # NOTE: Log removed to avoid spam during batch processing
-        # For debugging, set logging level to DEBUG
-        
-        # Pass the same file twice with output_emb=True
         result = self._pipeline(
             [audio_path, audio_path],
             output_emb=True,
         )
         
-        # Extract embedding
         if 'embs' in result:
             emb = np.asarray(result['embs'], dtype=np.float32)
         elif 'outputs' in result and 'embs' in result.get('outputs', {}):
@@ -517,11 +509,17 @@ class ModelScopeEres2Netv2EmbeddingModel(BaseEmbeddingModel):
                 f"{list(result.keys())}"
             )
         
-        # Ensure shape is (1, dim)
-        if emb.ndim == 1:
+        # CRITICAL FIX: Take only first embedding from batch
+        if emb.ndim == 2 and emb.shape[0] == 2:
+            emb = emb[0:1]  # Take first embedding, keep 2D shape (1, dim)
+        elif emb.ndim == 1:
             emb = emb.reshape(1, -1)
         elif emb.ndim > 2:
-            emb = emb[0:1].reshape(1, -1)
+            emb = emb.reshape(emb.shape[0], -1)
+            emb = emb[0:1]
+        
+        if emb.ndim != 2 or emb.shape[0] != 1:
+            emb = emb.reshape(1, -1)
         
         return emb
 

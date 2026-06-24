@@ -260,27 +260,28 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         waveform: torch.Tensor,
         sample_rate: int,
     ) -> np.ndarray:
-        """Compute speaker embedding from waveform segment.
-
-        Uses the ``BaseEmbeddingModel.encode()`` interface so that any
-        registered backend (pyannote, SpeechBrain, NeMo) works transparently.
-        """
+        """Compute speaker embedding from waveform segment."""
         try:
             if waveform.dim() == 1:
                 waveform = waveform.unsqueeze(0)
-
-            # ---- unified encode() call ----------------------------------------
+            
             embedding = self.embedding_model.encode(waveform, sample_rate)
-            # -------------------------------------------------------------------
-
+            
             if hasattr(embedding, "detach"):
                 embedding = embedding.detach().cpu().numpy()
-
+            
+            # Ensure 2D shape (1, dim)
             if embedding.ndim == 1:
                 embedding = embedding.reshape(1, -1)
-
+            elif embedding.ndim > 2:
+                embedding = embedding.reshape(1, -1)
+            
+            # Validate shape
+            if embedding.ndim != 2:
+                raise ValueError(f"Expected 2D embedding, got shape {embedding.shape}")
+            
             return embedding
-
+            
         except Exception as e:
             if self.debug:
                 console.print(f"[red]Error computing embedding: {e}[/]")
@@ -326,7 +327,6 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         """Find top-K matching speakers with ALL similarities included."""
         if k is None:
             k = self.top_k_speakers
-        
         if not self._speakers:
             return []
         
@@ -351,17 +351,41 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         distances = cdist(embedding, centroids_array, metric="cosine")
         similarities = 1.0 - distances.flatten()
         
-        sorted_indices = np.argsort(similarities)[::-1]
-        results = []
+        # FIX: Ensure similarities length matches speakers count
+        if len(similarities) != len(speaker_labels):
+            if self.debug:
+                console.print(
+                    f"[red]WARNING: Mismatch in find_top_k_matches - "
+                    f"similarities: {len(similarities)}, "
+                    f"speaker_labels: {len(speaker_labels)}. "
+                    f"embedding shape: {embedding.shape}, "
+                    f"centroids_array shape: {centroids_array.shape}[/]"
+                )
+            # Take only the first N similarities where N = number of speakers
+            similarities = similarities[:len(speaker_labels)]
         
+        sorted_indices = np.argsort(similarities)[::-1]
+        
+        # Limit k to actual number of speakers
+        k = min(k, len(speaker_labels))
+        
+        results = []
         for idx in sorted_indices[:k]:
+            # Safety check: ensure idx is within bounds
+            if idx >= len(speaker_labels):
+                if self.debug:
+                    console.print(
+                        f"[red]WARNING: Index {idx} out of bounds for "
+                        f"speaker_labels (len={len(speaker_labels)}). Skipping.[/]"
+                    )
+                continue
+                
             sim = float(similarities[idx])
             label = speaker_labels[idx]
             quality = centroid_qualities[idx]
             seg_count = segment_counts[idx]
             last_seen = last_seens[idx]
             
-            # Adaptive thresholds based on centroid quality
             adaptive_same = self.threshold_same - (1.0 - quality) * 0.15
             adaptive_possible = self.threshold_possible - (1.0 - quality) * 0.10
             
@@ -378,20 +402,18 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             else:
                 match_type = "weak_match"
             
-            results.append(
-                {
-                    "label": label,
-                    "confidence": sim,
-                    "match_type": match_type,
-                    "is_primary": (idx == sorted_indices[0]),
-                    "segment_count": seg_count,
-                    "last_seen": last_seen,
-                    "centroid_quality": quality,
-                }
-            )
+            results.append({
+                "label": label,
+                "confidence": sim,
+                "match_type": match_type,
+                "is_primary": (len(results) == 0),  # FIX: First result is primary
+                "segment_count": seg_count,
+                "last_seen": last_seen,
+                "centroid_quality": quality,
+            })
         
         return results
-    
+
     def apply_temporal_smoothing(
         self,
         candidate_label: str,

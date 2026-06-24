@@ -59,10 +59,10 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_embeddings.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_evaluate_speaker_embeddings.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp9.py",
-    # r"C:\_server2_with_en\services\main\generated\_main_evaluate_speaker_embeddings\eval_results",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_overlap_aware_diarization.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp9.py",
     r"",
 ]
 
@@ -86,67 +86,53 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze if my observations or concerns are valid before applying improvements or fixes.
-- Uncertain segments can be considered outliers and should have its own label
+Fix this issue for model modelscope_eres2netv2
 
-Also do the ff:
-- Create separate "outliers/segment_<num:.03f>" folder with own meta.json and sound.wav
-- Each suffix under should only be up to 3 digits
-- Each cell text under SEG# column should open the folder on ctrl+click
-- The play button should be able to play the segment sound.wav on ctrl+click
-- Check other issues if any
-
-
-Current logs
-2026-06-24 16:20:41,506 - diarization - INFO - Embedding model ready: ModelScopeEres2Netv2EmbeddingModel(type=modelscope_eres2netv2, dim=512)
-           EmbeddingFactory Updating embedding_dim from 512 to 192                        embedding_model_factory.py:469
-2026-06-24 16:20:44,959 - diarization - INFO - Extracted 76 embeddings (window=1.5s, hop=0.75s, dim=384)
-2026-06-24 16:20:44,959 - diarization - INFO - Eigengap auto-detected 2 speaker(s) (search range 2–8)
-2026-06-24 16:20:48,052 - diarization - INFO - Clustered into 2 speaker(s) (fixed)
-2026-06-24 16:20:48,052 - diarization - INFO - Built 9 initial speaker turns
-2026-06-24 16:20:48,052 - diarization - INFO - No HF token — using embedding-based OSD (no pyannote needed)
-2026-06-24 16:20:48,052 - diarization - INFO - Building per-speaker centroids from clean turns …
-2026-06-24 16:20:49,182 - diarization - INFO - Built centroids for 2 speaker(s): ['SPEAKER_00', 'SPEAKER_01']
-2026-06-24 16:20:59,147 - diarization - INFO - Building per-speaker centroids from clean turns …
-2026-06-24 16:21:00,037 - diarization - INFO - Built centroids for 2 speaker(s): ['SPEAKER_00', 'SPEAKER_01']
-2026-06-24 16:21:00,899 - diarization - INFO - No overlap regions found — returning standard diarization
-2026-06-24 16:21:00,899 - diarization - INFO - Saving results to: C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization
-2026-06-24 16:21:00,899 - diarization - INFO - Extracting 6 clean segments to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\segments
-2026-06-24 16:21:00,927 - diarization - INFO - ✓ Saved 6 segments to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\segments
-2026-06-24 16:21:00,927 - diarization - INFO - ✓ Summary saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\summary.txt
-2026-06-24 16:21:00,927 - diarization - INFO - ✓ All turns saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\turns.csv
-2026-06-24 16:21:00,927 - diarization - INFO - ✓ Overlap regions (0) saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\overlap_regions.csv
-2026-06-24 16:21:00,927 - diarization - INFO - ✓ Uncertain regions (3) saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\uncertain_regions.csv
-2026-06-24 16:21:00,933 - diarization - INFO - ✓ Statistics saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\statistics.json
-2026-06-24 16:21:00,933 - diarization - INFO - RTTM written → C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\turns.rttm
-2026-06-24 16:21:00,933 - diarization - INFO - ✓ RTTM saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\turns.rttm
-
-────────────────────────────────────────────────────────────────────────────────────────────────────
-  File            : C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav
-  Speakers        : 2
-  Strategy        : resegment
-  Condition       : noisy
-  Embedding Model : modelscope_eres2netv2
-  Thresholds      : same>0.8  ambiguous>0.7  osd_gate=0.85
-  Segments        : 6 saved
-────────────────────────────────────────────────────────────────────────────────────────────────────
-   SEG#     START        END      DUR    SCORE   LABEL         SPEAKER         PLAY
-────────────────────────────────────────────────────────────────────────────────────────────────────
-   0001     0.00s     8.25s   8.25s   0.873                SPEAKER_00        ▶️
-   0002     8.25s    12.75s   4.50s   0.928                SPEAKER_01        ▶️
-    12.75s    17.25s   4.50s   0.763  [uncertain]   SPEAKER_00
-   0003    17.25s    23.25s   6.00s   0.947                SPEAKER_01        ▶️
-   0004    23.25s    33.75s  10.50s   0.846                SPEAKER_00        ▶️
-   0005    33.75s    41.25s   7.50s   0.897                SPEAKER_01        ▶️
-    41.25s    44.25s   3.00s   0.754  [uncertain]   SPEAKER_00
-   0006    44.25s    51.75s   7.50s   0.907                SPEAKER_01        ▶️
-    51.75s    57.75s   6.00s   0.764  [uncertain]   SPEAKER_00
-────────────────────────────────────────────────────────────────────────────────────────────────────
-  Turns       : 9 total  |  6 clean  |  0 overlap  |  3 uncertain
-  Overlap dur : 0.00s
-  Uncertain   : 13.50s
-  Segments    : 6 saved to segments/
-────────────────────────────────────────────────────────────────────────────────────────────────────
+│ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_ser │
+│ ver2_with_en\services\segment_speaker_labeler.py:1163 in label_segments                          │
+│                                                                                                  │
+│   1160 │   │   │   │   f"segment_id: {segment_id}[/]"                                            │
+│   1161 │   │   │   )                                                                             │
+│   1162 │   │                                                                                     │
+│ ❱ 1163 │   │   top_matches = self.find_top_k_matches(embedding, k=top_k)                         │
+│   1164 │   │                                                                                     │
+│   1165 │   │   if self.debug:                                                                    │
+│   1166 │   │   │   console.print(                                                                │
+│                            
+│ │    sample_rate = 16000                                                                       │ │
+│ │     segment_id = 'segment_f53a2a06'                                                          │ │
+│ │           self = <segment_speaker_labeler.SegmentSpeakerLabeler object at                    │ │
+│ │                  0x00000237DA9501A0>                                                         │ │
+│ │      timestamp = 5.0                                                                         │ │
+│ │          top_k = 3                                                                           │ │
+│ │   was_filtered = True                                                                        │ │
+│ │       waveform = tensor([ 0.0092,  0.0192,  0.0037,  ..., -0.0185, -0.0304, -0.0269])        │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
+│    
+│ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_ser │
+│ ver2_with_en\services\segment_speaker_labeler.py:359 in find_top_k_matches                       │
+│                                                                                                  │
+│    356 │   │                                                                                     │
+│    357 │   │   for idx in sorted_indices[:k]:                                                    │
+│    358 │   │   │   sim = float(similarities[idx])                                                │
+│ ❱  359 │   │   │   label = speaker_labels[idx]                                                   │
+│    360 │   │   │   quality = centroid_qualities[idx]                                             │
+│    361 │   │   │   seg_count = segment_counts[idx]                                               │
+│    362 │   │   │   last_seen = last_seens[idx]                                                   │
+│                                                                                                  │
+│ ╭─────────────────────────────────────────── locals ───────────────────────────────────────────╮ │
+│ │ centroid_qualities = [0.3]       
+│ │            results = []                                                                      │ │
+│ │     segment_counts = [1]                                                                     │ │
+│ │               self = <segment_speaker_labeler.SegmentSpeakerLabeler object at                │ │
+│ │                      0x00000237DA9501A0>                                                     │ │
+│ │                sim = 0.41407813303564067                                                     │ │
+│ │       similarities = array([0.41407813, 0.41407813])                                         │ │
+│ │     sorted_indices = array([1, 0], dtype=int64)                                              │ │
+│ │     speaker_labels = ['SPEAKER_01']                                                          │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+IndexError: list index out of range
 """
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
