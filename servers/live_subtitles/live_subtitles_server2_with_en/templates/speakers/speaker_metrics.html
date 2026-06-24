@@ -10,12 +10,20 @@
         --warning: #ff9800;
         --unhealthy: #f44336;
         --bg: #1a1a2e;
+        --bg-secondary: #14142a;
         --card-bg: #16213e;
+        --card-hover: #1a2744;
         --text: #e0e0e0;
+        --text-bright: #ffffff;
         --text-dim: #888;
+        --text-muted: #666;
         --border: #2a2a4a;
+        --border-light: #3a3a5a;
         --accent: #2196f3;
-        --outlier: #9c27b0;
+        --accent-glow: rgba(33, 150, 243, 0.2);
+        --radius: 12px;
+        --radius-sm: 6px;
+        --transition: 0.2s ease;
       }
 
       * {
@@ -40,55 +48,200 @@
       .header {
         background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%);
         border-bottom: 1px solid var(--border);
-        padding: 1.5rem 2rem;
+        padding: 1.25rem 2rem;
         position: sticky;
         top: 0;
         z-index: 100;
-        backdrop-filter: blur(10px);
+        backdrop-filter: blur(12px);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
       }
-      .header h1 {
-        font-size: 1.8rem;
-        font-weight: 600;
+      .header-left h1 {
+        font-size: 1.6rem;
+        font-weight: 700;
         background: linear-gradient(90deg, var(--accent), #00bcd4);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
+        letter-spacing: -0.02em;
       }
-      .header .subtitle {
+      .header-left .subtitle {
         color: var(--text-dim);
-        font-size: 0.85rem;
-        margin-top: 0.25rem;
+        font-size: 0.8rem;
+        margin-top: 0.15rem;
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+
+      /* ── Controls (persistent settings) ─ */
+      .controls-group {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+      }
+      .control-item {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        color: var(--text-dim);
+        cursor: pointer;
+        user-select: none;
+        padding: 0.3rem 0.6rem;
+        border-radius: var(--radius-sm);
+        border: 1px solid transparent;
+        transition: all var(--transition);
+        white-space: nowrap;
+      }
+      .control-item:hover {
+        background: rgba(255, 255, 255, 0.04);
+        border-color: var(--border);
+      }
+      .control-item input[type="checkbox"] {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--border-light);
+        border-radius: 4px;
+        background: transparent;
+        cursor: pointer;
+        position: relative;
+        flex-shrink: 0;
+        transition: all var(--transition);
+      }
+      .control-item input[type="checkbox"]:checked {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .control-item input[type="checkbox"]:checked::after {
+        content: "✓";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 11px;
+        font-weight: 700;
+      }
+      .control-item input[type="checkbox"]:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .btn {
+        padding: 0.4rem 0.8rem;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--card-bg);
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.8rem;
+        transition: all var(--transition);
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+      }
+      .btn:hover {
+        background: var(--card-hover);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-glow);
+      }
+      .btn:active {
+        transform: scale(0.97);
+      }
+      .btn.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
+      .btn.primary:hover {
+        background: #1976d2;
+        border-color: #1976d2;
+      }
+      .btn-sm {
+        padding: 0.25rem 0.6rem;
+        font-size: 0.72rem;
+      }
+      .btn-icon {
+        padding: 0.35rem;
+        min-width: 32px;
+        justify-content: center;
+      }
+
+      /* ── Status indicators ───────────── */
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        animation: pulse 2s infinite;
+      }
+      .status-dot.live {
+        background: var(--healthy);
+        box-shadow: 0 0 8px var(--healthy);
+      }
+      .status-dot.error {
+        background: var(--unhealthy);
+        box-shadow: 0 0 8px var(--unhealthy);
+      }
+      .status-dot.paused {
+        background: var(--warning);
+        box-shadow: 0 0 8px var(--warning);
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .update-time {
+        color: var(--text-dim);
+        font-size: 0.75rem;
+        white-space: nowrap;
       }
 
       /* ── Summary Cards ──────────────── */
       .summary-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 1rem;
         padding: 1.5rem 2rem;
       }
       .summary-card {
         background: var(--card-bg);
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: var(--radius);
         padding: 1.25rem;
         text-align: center;
         transition:
-          transform 0.2s,
-          box-shadow 0.2s;
+          transform var(--transition),
+          box-shadow var(--transition);
       }
       .summary-card:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
       }
       .summary-card .value {
-        font-size: 2.2rem;
+        font-size: 2rem;
         font-weight: 700;
         margin: 0.5rem 0;
+        line-height: 1.2;
       }
       .summary-card .label {
         color: var(--text-dim);
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
       }
@@ -101,17 +254,21 @@
       .summary-card.unhealthy .value {
         color: var(--unhealthy);
       }
+      .summary-card.neutral .value {
+        color: var(--accent);
+      }
 
       /* ── Health Badge ───────────────── */
       .health-badge {
         display: inline-flex;
         align-items: center;
-        gap: 0.4rem;
-        padding: 0.3rem 0.8rem;
+        gap: 0.35rem;
+        padding: 0.25rem 0.7rem;
         border-radius: 20px;
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         font-weight: 600;
         text-transform: uppercase;
+        letter-spacing: 0.03em;
       }
       .health-badge.healthy {
         background: rgba(76, 175, 80, 0.15);
@@ -144,12 +301,46 @@
         box-shadow: 0 0 6px var(--unhealthy);
       }
 
+      /* ── Tab Navigation ─────────────── */
+      .tab-nav {
+        display: flex;
+        gap: 0;
+        border-bottom: 2px solid var(--border);
+        margin: 0 2rem;
+      }
+      .tab-btn {
+        padding: 0.75rem 1.5rem;
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 0.9rem;
+        font-weight: 500;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        transition: all var(--transition);
+        white-space: nowrap;
+      }
+      .tab-btn:hover {
+        color: var(--text-bright);
+      }
+      .tab-btn.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+      .tab-content {
+        display: none;
+      }
+      .tab-content.active {
+        display: block;
+      }
+
       /* ── Sections ───────────────────── */
       .section {
         margin: 0 2rem 2rem;
         background: var(--card-bg);
         border: 1px solid var(--border);
-        border-radius: 12px;
+        border-radius: var(--radius);
         overflow: hidden;
       }
       .section-header {
@@ -160,13 +351,22 @@
         align-items: center;
         cursor: pointer;
         user-select: none;
+        transition: background var(--transition);
+      }
+      .section-header:hover {
+        background: rgba(255, 255, 255, 0.02);
       }
       .section-header h2 {
-        font-size: 1.1rem;
+        font-size: 1.05rem;
         font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
       }
       .section-header .toggle-icon {
         transition: transform 0.3s;
+        font-size: 0.8rem;
+        color: var(--text-dim);
       }
       .section.collapsed .section-body {
         display: none;
@@ -179,48 +379,107 @@
       }
 
       /* ── Tables ─────────────────────── */
+      .table-wrapper {
+        overflow-x: auto;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+      }
       table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 0.9rem;
+        font-size: 0.88rem;
+      }
+      thead {
+        position: sticky;
+        top: 0;
+        z-index: 2;
       }
       th {
         text-align: left;
         padding: 0.75rem 1rem;
-        background: rgba(255, 255, 255, 0.03);
+        background: rgba(255, 255, 255, 0.04);
         color: var(--text-dim);
         font-weight: 600;
         text-transform: uppercase;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         letter-spacing: 0.05em;
         border-bottom: 2px solid var(--border);
+        white-space: nowrap;
       }
       td {
         padding: 0.6rem 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      }
+      tbody tr.speaker-row {
+        cursor: pointer;
+        transition: background var(--transition);
+        position: relative;
+      }
+      tbody tr.speaker-row:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      tbody tr.speaker-row.expanded {
+        background: rgba(33, 150, 243, 0.06);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+      tbody tr.segment-detail-row {
+        background: rgba(0, 0, 0, 0.2);
+      }
+      tbody tr.segment-detail-row td {
+        padding: 0;
+      }
+      .segment-detail-inner {
+        padding: 0.75rem 1.5rem;
+        font-size: 0.78rem;
+        max-height: 250px;
+        overflow-y: auto;
+        border-top: 1px solid var(--border);
         border-bottom: 1px solid var(--border);
       }
-      tr:hover {
-        background: rgba(255, 255, 255, 0.02);
+      .segment-detail-inner table {
+        font-size: 0.75rem;
+      }
+      .segment-detail-inner th {
+        font-size: 0.65rem;
+        padding: 0.4rem 0.75rem;
+      }
+      .segment-detail-inner td {
+        padding: 0.35rem 0.75rem;
+      }
+
+      /* ── Expand indicator ───────────── */
+      .expand-icon {
+        display: inline-block;
+        width: 20px;
+        text-align: center;
+        transition: transform 0.2s;
+        color: var(--text-dim);
+        font-size: 0.7rem;
+      }
+      tr.expanded .expand-icon {
+        transform: rotate(90deg);
+        color: var(--accent);
       }
 
       /* ── Similarity Bar ─────────────── */
+      .similarity-bar-wrapper {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
       .similarity-bar {
         display: inline-block;
         height: 8px;
         border-radius: 4px;
         background: var(--healthy);
-        min-width: 2px;
-        vertical-align: middle;
-        margin-right: 0.5rem;
+        min-width: 3px;
+        transition: width 0.4s ease;
       }
       .similarity-bar.warning-bg {
         background: var(--warning);
       }
       .similarity-bar.unhealthy-bg {
         background: var(--unhealthy);
-      }
-      .similarity-bar.outlier-bg {
-        background: var(--outlier);
       }
 
       /* ── Pairwise Grid ──────────────── */
@@ -232,11 +491,20 @@
       .pairwise-card {
         background: rgba(255, 255, 255, 0.03);
         border: 1px solid var(--border);
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         padding: 0.75rem 1rem;
         display: flex;
         justify-content: space-between;
         align-items: center;
+        transition: all var(--transition);
+      }
+      .pairwise-card:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: var(--border-light);
+      }
+      .pairwise-card.risk {
+        border-color: rgba(244, 67, 54, 0.4);
+        background: rgba(244, 67, 54, 0.06);
       }
       .pairwise-card .speakers {
         font-weight: 500;
@@ -252,14 +520,23 @@
       .timeline-container {
         max-height: 300px;
         overflow-y: auto;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
       }
       .timeline-item {
         display: flex;
         align-items: center;
-        padding: 0.4rem 0.5rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-        font-size: 0.8rem;
+        padding: 0.35rem 0.75rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+        font-size: 0.78rem;
         gap: 0.5rem;
+        transition: background var(--transition);
+      }
+      .timeline-item:hover {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .timeline-item:last-child {
+        border-bottom: none;
       }
       .timeline-dot {
         width: 10px;
@@ -269,31 +546,36 @@
       }
       .timeline-dot.strong_match {
         background: var(--healthy);
+        box-shadow: 0 0 4px var(--healthy);
       }
       .timeline-dot.early_match {
         background: #8bc34a;
+        box-shadow: 0 0 4px #8bc34a;
       }
       .timeline-dot.possible_match {
         background: var(--warning);
+        box-shadow: 0 0 4px var(--warning);
       }
       .timeline-dot.weak_match {
         background: var(--unhealthy);
+        box-shadow: 0 0 4px var(--unhealthy);
       }
       .timeline-dot.context_match {
         background: var(--accent);
-      }
-      .timeline-dot.outlier_match {
-        background: var(--outlier);
+        box-shadow: 0 0 4px var(--accent);
       }
       .timeline-dot.outlier_pending {
-        background: var(--outlier);
-        opacity: 0.5;
+        background: #9c27b0;
+        box-shadow: 0 0 4px #9c27b0;
+        opacity: 0.6;
+      }
+      .timeline-dot.outlier_match {
+        background: #9c27b0;
+        box-shadow: 0 0 4px #9c27b0;
       }
       .timeline-dot.new_speaker {
         background: #00bcd4;
-      }
-      .timeline-dot.first_speaker {
-        background: #00bcd4;
+        box-shadow: 0 0 4px #00bcd4;
       }
 
       /* ── Outlier Cards ──────────────── */
@@ -303,11 +585,16 @@
         gap: 0.75rem;
       }
       .outlier-card {
-        background: rgba(156, 39, 176, 0.08);
+        background: rgba(156, 39, 176, 0.06);
         border: 1px solid rgba(156, 39, 176, 0.2);
-        border-radius: 8px;
+        border-radius: var(--radius-sm);
         padding: 0.75rem 1rem;
-        font-size: 0.85rem;
+        font-size: 0.82rem;
+        transition: all var(--transition);
+      }
+      .outlier-card:hover {
+        background: rgba(156, 39, 176, 0.1);
+        border-color: rgba(156, 39, 176, 0.4);
       }
       .outlier-card .age {
         color: var(--warning);
@@ -315,40 +602,26 @@
       }
       .outlier-card.expiring {
         border-color: var(--unhealthy);
-        background: rgba(244, 67, 54, 0.08);
+        background: rgba(244, 67, 54, 0.06);
+        animation: expire-glow 2s infinite;
       }
-
-      /* ── Responsive ─────────────────── */
-      @media (max-width: 768px) {
-        .header {
-          padding: 1rem;
+      @keyframes expire-glow {
+        0%,
+        100% {
+          box-shadow: 0 0 0 rgba(244, 67, 54, 0);
         }
-        .summary-grid {
-          grid-template-columns: repeat(2, 1fr);
-          padding: 1rem;
-        }
-        .section {
-          margin: 0 1rem 1rem;
-        }
-        .section-body {
-          padding: 1rem;
-        }
-        table {
-          font-size: 0.8rem;
-        }
-        th,
-        td {
-          padding: 0.5rem;
+        50% {
+          box-shadow: 0 0 12px rgba(244, 67, 54, 0.2);
         }
       }
 
-      /* ── Loading / Error ────────────── */
+      /* ── Loading / Error / Empty ────── */
       .loading {
         text-align: center;
         padding: 3rem;
         color: var(--text-dim);
       }
-      .loading .spinner {
+      .spinner {
         width: 40px;
         height: 40px;
         border: 3px solid var(--border);
@@ -363,51 +636,102 @@
         }
       }
       .error-message {
-        background: rgba(244, 67, 54, 0.1);
-        border: 1px solid var(--unhealthy);
-        border-radius: 8px;
+        background: rgba(244, 67, 54, 0.08);
+        border: 1px solid rgba(244, 67, 54, 0.3);
+        border-radius: var(--radius-sm);
         padding: 1rem;
         color: var(--unhealthy);
         text-align: center;
+        margin: 1rem;
       }
       .empty-state {
         text-align: center;
         padding: 2rem;
         color: var(--text-dim);
         font-style: italic;
+        font-size: 0.85rem;
       }
 
-      /* ── Tab Navigation ─────────────── */
-      .tab-nav {
-        display: flex;
-        gap: 0;
-        border-bottom: 2px solid var(--border);
-        margin-bottom: 0;
+      /* ── Responsive ─────────────────── */
+      @media (max-width: 768px) {
+        .header {
+          padding: 1rem;
+        }
+        .header-right {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 0.5rem;
+        }
+        .controls-group {
+          flex-wrap: wrap;
+        }
+        .summary-grid {
+          grid-template-columns: repeat(2, 1fr);
+          padding: 1rem;
+          gap: 0.75rem;
+        }
+        .tab-nav {
+          margin: 0 1rem;
+          overflow-x: auto;
+        }
+        .tab-btn {
+          padding: 0.6rem 1rem;
+          font-size: 0.8rem;
+        }
+        .section {
+          margin: 0 1rem 1rem;
+        }
+        .section-body {
+          padding: 1rem;
+        }
+        .pairwise-grid {
+          grid-template-columns: 1fr;
+        }
+        table {
+          font-size: 0.78rem;
+        }
+        th,
+        td {
+          padding: 0.5rem;
+        }
       }
-      .tab-btn {
-        padding: 0.75rem 1.5rem;
-        background: none;
-        border: none;
-        color: var(--text-dim);
-        cursor: pointer;
-        font-size: 0.9rem;
-        font-weight: 500;
-        border-bottom: 2px solid transparent;
-        margin-bottom: -2px;
-        transition: all 0.2s;
+
+      /* ── Tooltip ────────────────────── */
+      [data-tooltip] {
+        position: relative;
+        cursor: help;
       }
-      .tab-btn:hover {
+      [data-tooltip]:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1a1a2e;
         color: var(--text);
+        padding: 0.3rem 0.6rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        white-space: nowrap;
+        pointer-events: none;
+        border: 1px solid var(--border);
+        z-index: 10;
       }
-      .tab-btn.active {
-        color: var(--accent);
-        border-bottom-color: var(--accent);
+
+      /* ── Scrollbar ──────────────────── */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
       }
-      .tab-content {
-        display: none;
+      ::-webkit-scrollbar-track {
+        background: transparent;
       }
-      .tab-content.active {
-        display: block;
+      ::-webkit-scrollbar-thumb {
+        background: var(--border-light);
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--text-muted);
       }
     </style>
   </head>
@@ -416,10 +740,59 @@
     <!-- HEADER                                -->
     <!-- ══════════════════════════════════════ -->
     <div class="header">
-      <h1>🎙️ Speaker Metrics Dashboard</h1>
-      <div class="subtitle">
-        Real-time speaker labeling health &bull;
-        <span id="update-time">Loading...</span>
+      <div class="header-left">
+        <h1>🎙️ Speaker Metrics Dashboard</h1>
+        <div class="subtitle">Real-time speaker labeling health</div>
+      </div>
+      <div class="header-right">
+        <!-- Persistent controls -->
+        <div class="controls-group">
+          <label
+            class="control-item"
+            data-tooltip="Automatically refresh data every few seconds"
+          >
+            <input
+              type="checkbox"
+              id="auto-refresh-toggle"
+              onchange="handleAutoRefreshToggle()"
+            />
+            <span>Auto-refresh</span>
+          </label>
+          <label
+            class="control-item"
+            data-tooltip="Show/hide segment details when clicking speaker rows"
+          >
+            <input
+              type="checkbox"
+              id="expand-details-toggle"
+              onchange="handleExpandToggle()"
+            />
+            <span>Expand details</span>
+          </label>
+          <label
+            class="control-item"
+            data-tooltip="Show raw similarity values instead of bars"
+          >
+            <input
+              type="checkbox"
+              id="show-values-toggle"
+              onchange="handleShowValuesToggle()"
+            />
+            <span>Values only</span>
+          </label>
+        </div>
+
+        <!-- Status & actions -->
+        <span class="status-dot live" id="status-dot" title="Connected"></span>
+        <span class="update-time" id="update-time">Loading...</span>
+        <button
+          class="btn btn-icon"
+          onclick="manualRefresh()"
+          data-tooltip="Refresh now (R key)"
+          title="Refresh now"
+        >
+          🔄
+        </button>
       </div>
     </div>
 
@@ -452,17 +825,19 @@
     <!-- ══════════════════════════════════════ -->
     <!-- TAB NAVIGATION                        -->
     <!-- ══════════════════════════════════════ -->
-    <div class="tab-nav" style="margin: 0 2rem">
+    <div class="tab-nav">
       <button class="tab-btn active" onclick="switchTab('intra')">
-        Intra-Speaker
+        🔬 Intra-Speaker
       </button>
       <button class="tab-btn" onclick="switchTab('inter')">
-        Inter-Speaker
+        🔗 Inter-Speaker
       </button>
       <button class="tab-btn" onclick="switchTab('segments')">
-        Segment Groups
+        📋 Segment Groups
       </button>
-      <button class="tab-btn" onclick="switchTab('outliers')">Outliers</button>
+      <button class="tab-btn" onclick="switchTab('outliers')">
+        📦 Outliers
+      </button>
     </div>
 
     <!-- ══════════════════════════════════════ -->
@@ -553,45 +928,271 @@
     <!-- SCRIPTS                               -->
     <!-- ══════════════════════════════════════ -->
     <script>
-      // ── State ──────────────────────────────
+      // ───────────────────────────────────────────────────
+      // PERSISTENT SETTINGS (localStorage)
+      // ───────────────────────────────────────────────────
+      const SETTINGS_KEY = "speaker_metrics_settings";
+
+      const DEFAULT_SETTINGS = {
+        autoRefresh: true,
+        expandDetails: false,
+        showValues: false,
+        activeTab: "intra",
+        collapsedSections: [], // section indices that are collapsed
+        expandedSpeakers: [], // speaker labels whose segment details are expanded
+        refreshIntervalMs: 5000,
+      };
+
+      function loadSettings() {
+        try {
+          const raw = localStorage.getItem(SETTINGS_KEY);
+          if (raw) {
+            return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+          }
+        } catch (e) {
+          console.warn("Failed to load settings, using defaults:", e);
+        }
+        return { ...DEFAULT_SETTINGS };
+      }
+
+      function saveSettings(settings) {
+        try {
+          localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        } catch (e) {
+          console.warn("Failed to save settings:", e);
+        }
+      }
+
+      // ───────────────────────────────────────────────────
+      // GLOBAL STATE
+      // ───────────────────────────────────────────────────
+      let settings = loadSettings();
       let metricsData = null;
       let autoRefreshInterval = null;
-      const REFRESH_INTERVAL_MS = 5000;
+      let isFirstLoad = true;
 
-      // ── Initialization ─────────────────────
+      // ───────────────────────────────────────────────────
+      // INITIALIZATION
+      // ───────────────────────────────────────────────────
       document.addEventListener("DOMContentLoaded", () => {
+        // Apply persistent settings to UI controls
+        applySettingsToUI();
+
+        // Restore active tab
+        switchTab(settings.activeTab, /* saveToSettings */ false);
+
+        // Initial data fetch
         fetchMetrics();
-        autoRefreshInterval = setInterval(fetchMetrics, REFRESH_INTERVAL_MS);
+
+        // Start auto-refresh if enabled
+        if (settings.autoRefresh) {
+          startAutoRefresh();
+        }
+
+        // Update status dot based on auto-refresh state
+        updateStatusDot(settings.autoRefresh);
       });
 
-      // ── Data Fetching ──────────────────────
+      window.addEventListener("beforeunload", () => {
+        stopAutoRefresh();
+      });
+
+      // ───────────────────────────────────────────────────
+      // SETTINGS → UI
+      // ───────────────────────────────────────────────────
+      function applySettingsToUI() {
+        document.getElementById("auto-refresh-toggle").checked =
+          settings.autoRefresh;
+        document.getElementById("expand-details-toggle").checked =
+          settings.expandDetails;
+        document.getElementById("show-values-toggle").checked =
+          settings.showValues;
+      }
+
+      // ───────────────────────────────────────────────────
+      // SETTINGS HANDLERS
+      // ───────────────────────────────────────────────────
+      function handleAutoRefreshToggle() {
+        settings.autoRefresh = document.getElementById(
+          "auto-refresh-toggle",
+        ).checked;
+        saveSettings(settings);
+
+        if (settings.autoRefresh) {
+          startAutoRefresh();
+          updateStatusDot(true);
+        } else {
+          stopAutoRefresh();
+          updateStatusDot(false);
+        }
+      }
+
+      function handleExpandToggle() {
+        settings.expandDetails = document.getElementById(
+          "expand-details-toggle",
+        ).checked;
+        saveSettings(settings);
+
+        // If turning on, expand all speakers that have segments
+        if (settings.expandDetails && metricsData?.intra_speaker?.speakers) {
+          settings.expandedSpeakers = metricsData.intra_speaker.speakers
+            .filter((s) => s.segments && s.segments.length > 0)
+            .map((s) => s.label);
+          saveSettings(settings);
+        } else if (!settings.expandDetails) {
+          settings.expandedSpeakers = [];
+          saveSettings(settings);
+        }
+
+        // Re-render to show changes
+        if (metricsData) {
+          renderIntraSpeaker(metricsData.intra_speaker);
+        }
+      }
+
+      function handleShowValuesToggle() {
+        settings.showValues =
+          document.getElementById("show-values-toggle").checked;
+        saveSettings(settings);
+
+        if (metricsData) {
+          renderIntraSpeaker(metricsData.intra_speaker);
+        }
+      }
+
+      function handleSpeakerRowClick(speakerLabel) {
+        // Toggle this speaker in expandedSpeakers
+        const idx = settings.expandedSpeakers.indexOf(speakerLabel);
+        if (idx >= 0) {
+          settings.expandedSpeakers.splice(idx, 1);
+        } else {
+          settings.expandedSpeakers.push(speakerLabel);
+        }
+        saveSettings(settings);
+
+        // Re-render just the intra-speaker table
+        if (metricsData) {
+          renderIntraSpeaker(metricsData.intra_speaker);
+        }
+      }
+
+      // ───────────────────────────────────────────────────
+      // AUTO-REFRESH
+      // ───────────────────────────────────────────────────
+      function startAutoRefresh() {
+        stopAutoRefresh();
+        if (settings.autoRefresh) {
+          autoRefreshInterval = setInterval(
+            fetchMetrics,
+            settings.refreshIntervalMs,
+          );
+          console.log(`Auto-refresh started (${settings.refreshIntervalMs}ms)`);
+        }
+      }
+
+      function stopAutoRefresh() {
+        if (autoRefreshInterval) {
+          clearInterval(autoRefreshInterval);
+          autoRefreshInterval = null;
+          console.log("Auto-refresh stopped");
+        }
+      }
+
+      function manualRefresh() {
+        fetchMetrics();
+      }
+
+      function updateStatusDot(isLive) {
+        const dot = document.getElementById("status-dot");
+        dot.className = "status-dot " + (isLive ? "live" : "paused");
+        dot.title = isLive
+          ? "Live - Auto-refreshing"
+          : "Paused - Manual refresh only";
+      }
+
+      // ───────────────────────────────────────────────────
+      // DATA FETCHING
+      // ───────────────────────────────────────────────────
       async function fetchMetrics() {
         try {
           const response = await fetch("/speakers/metrics/data");
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+          const previousData = metricsData;
           metricsData = await response.json();
-          renderAll();
+
+          // Only fully re-render if data structure changed or first load
+          if (isFirstLoad || didStructureChange(previousData, metricsData)) {
+            renderAll();
+            isFirstLoad = false;
+          } else {
+            // Update summary cards only (lighter refresh)
+            renderSummary(metricsData.summary);
+
+            // Re-render current tab with expansion states preserved
+            renderCurrentTab();
+          }
+
+          document.getElementById("update-time").textContent =
+            `Updated: ${new Date().toLocaleTimeString()}`;
         } catch (error) {
           console.error("Failed to fetch metrics:", error);
-          showError(error.message);
+          if (isFirstLoad) {
+            showError(error.message);
+          }
         }
       }
 
-      // ── Render All ─────────────────────────
+      function didStructureChange(prev, curr) {
+        if (!prev || !curr) return true;
+
+        // Check if number of speakers changed (structure change)
+        const prevCount = prev.intra_speaker?.speakers?.length || 0;
+        const currCount = curr.intra_speaker?.speakers?.length || 0;
+
+        // Check if speaker labels changed
+        if (prevCount !== currCount) return true;
+
+        const prevLabels = new Set(
+          (prev.intra_speaker?.speakers || []).map((s) => s.label),
+        );
+        const currLabels = new Set(
+          (curr.intra_speaker?.speakers || []).map((s) => s.label),
+        );
+
+        return ![...prevLabels].every((l) => currLabels.has(l));
+      }
+
+      // ───────────────────────────────────────────────────
+      // RENDER ALL
+      // ───────────────────────────────────────────────────
       function renderAll() {
         if (!metricsData) return;
 
         renderSummary(metricsData.summary);
-        renderIntraSpeaker(metricsData.intra_speaker);
-        renderInterSpeaker(metricsData.inter_speaker);
-        renderSegmentGroups(metricsData.segment_groups);
-        renderOutliers(metricsData.outliers);
-
-        document.getElementById("update-time").textContent =
-          `Last updated: ${new Date(metricsData.timestamp).toLocaleTimeString()}`;
+        renderCurrentTab();
       }
 
-      // ── Summary Cards ──────────────────────
+      function renderCurrentTab() {
+        switch (settings.activeTab) {
+          case "intra":
+            renderIntraSpeaker(metricsData.intra_speaker);
+            break;
+          case "inter":
+            renderInterSpeaker(metricsData.inter_speaker);
+            break;
+          case "segments":
+            renderSegmentGroups(metricsData.segment_groups);
+            break;
+          case "outliers":
+            renderOutliers(metricsData.outliers);
+            break;
+        }
+      }
+
+      // ───────────────────────────────────────────────────
+      // SUMMARY CARDS
+      // ───────────────────────────────────────────────────
       function renderSummary(summary) {
         if (!summary) return;
 
@@ -630,10 +1231,8 @@
         const card = document.getElementById(id);
         if (!card) return;
 
-        // Remove old status classes
-        card.classList.remove("healthy", "warning", "unhealthy");
+        card.classList.remove("healthy", "warning", "unhealthy", "neutral");
 
-        // Determine status class from value if not explicitly provided
         if (!statusClass && typeof value === "string") {
           if (value === "healthy") statusClass = "healthy";
           else if (value === "warning") statusClass = "warning";
@@ -644,17 +1243,24 @@
         card.querySelector(".value").textContent = value;
       }
 
-      // ── Intra-Speaker Table ────────────────
+      // ───────────────────────────────────────────────────
+      // INTRA-SPEAKER TABLE (with persistent expansion)
+      // ───────────────────────────────────────────────────
       function renderIntraSpeaker(intra) {
+        const container = document.getElementById("intra-table-container");
+
         if (!intra || !intra.speakers || intra.speakers.length === 0) {
-          document.getElementById("intra-table-container").innerHTML =
+          container.innerHTML =
             '<div class="empty-state">No intra-speaker data available. Process some audio segments first.</div>';
           return;
         }
 
-        let html = `<table>
+        const showValues = settings.showValues;
+
+        let html = `<div class="table-wrapper"><table>
         <thead>
             <tr>
+                <th style="width:30px;"></th>
                 <th>Speaker</th>
                 <th>Status</th>
                 <th>Segments</th>
@@ -670,6 +1276,10 @@
 
         for (const spk of intra.speakers) {
           const healthClass = spk.health || "healthy";
+          const isExpanded = settings.expandedSpeakers.includes(spk.label);
+          const hasSegments = spk.segments && spk.segments.length > 0;
+
+          // Cohesion bar
           const barWidth = Math.max(5, spk.meanSimilarity * 100);
           const barClass =
             spk.meanSimilarity >= 0.7
@@ -678,7 +1288,12 @@
                 ? "warning-bg"
                 : "unhealthy-bg";
 
-          html += `<tr>
+          html += `<tr class="speaker-row ${isExpanded ? "expanded" : ""}" 
+                        data-speaker-label="${escapeHtml(spk.label)}"
+                        onclick="handleSpeakerRowClick('${escapeHtml(spk.label)}')">
+            <td>
+                ${hasSegments ? `<span class="expand-icon">▶</span>` : ""}
+            </td>
             <td><strong>${escapeHtml(spk.label)}</strong></td>
             <td><span class="health-badge ${healthClass}">
                 <span class="health-dot ${healthClass}"></span>${spk.health}
@@ -690,20 +1305,36 @@
             <td>${(spk.silhouetteScore || 0).toFixed(4)}</td>
             <td>${spk.isMature ? "✅" : "🔸"}</td>
             <td>
-                <span class="similarity-bar ${barClass}" style="width:${barWidth}px"></span>
-                ${(spk.meanSimilarity * 100).toFixed(0)}%
+                ${
+                  showValues
+                    ? `${(spk.meanSimilarity * 100).toFixed(0)}%`
+                    : `<span class="similarity-bar-wrapper">
+                        <span class="similarity-bar ${barClass}" style="width:${barWidth}px"></span>
+                        ${(spk.meanSimilarity * 100).toFixed(0)}%
+                       </span>`
+                }
             </td>
         </tr>`;
 
-          // Segment detail rows (collapsible)
-          if (spk.segments && spk.segments.length > 0) {
-            html += `<tr class="segment-detail-row" style="display:none;" data-speaker="${escapeHtml(spk.label)}">
-                <td colspan="9" style="padding: 0;">
-                    <div style="padding: 0.5rem 1rem; font-size: 0.8rem; max-height: 200px; overflow-y: auto;">
-                        <strong>Segment Details:</strong>
-                        <table style="font-size: 0.75rem; margin-top: 0.25rem;">
+          // Segment detail row (controlled by expandedSpeakers set)
+          if (hasSegments && isExpanded) {
+            html += `<tr class="segment-detail-row">
+                <td colspan="10">
+                    <div class="segment-detail-inner">
+                        <strong>Segment Details for ${escapeHtml(spk.label)}</strong>
+                        <span style="color:var(--text-dim);font-size:0.7rem;margin-left:0.5rem;">
+                            (${spk.segments.length} segments, 
+                            first: ${(spk.firstSeen || 0).toFixed(1)}s, 
+                            last: ${(spk.lastSeen || 0).toFixed(1)}s)
+                        </span>
+                        <table style="margin-top:0.5rem;">
                             <thead><tr>
-                                <th>Segment ID</th><th>Similarity</th><th>Timestamp</th><th>Duration</th><th>Core</th>
+                                <th>Segment ID</th>
+                                <th>Similarity</th>
+                                <th>Distance</th>
+                                <th>Timestamp</th>
+                                <th>Duration</th>
+                                <th>Core</th>
                             </tr></thead>
                             <tbody>`;
             for (const seg of spk.segments) {
@@ -714,13 +1345,20 @@
                     ? "warning-bg"
                     : "unhealthy-bg";
               html += `<tr>
-                    <td><code style="font-size:0.7rem">${escapeHtml(seg.id).substring(0, 20)}</code></td>
+                    <td><code style="font-size:0.7rem;">${escapeHtml(seg.id).substring(0, 22)}</code></td>
                     <td>
-                        <span class="similarity-bar ${segBarClass}" style="width:${Math.max(3, seg.similarity * 80)}px"></span>
-                        ${seg.similarity.toFixed(3)}
+                        ${
+                          showValues
+                            ? seg.similarity.toFixed(3)
+                            : `<span class="similarity-bar-wrapper">
+                                <span class="similarity-bar ${segBarClass}" style="width:${Math.max(3, seg.similarity * 80)}px"></span>
+                                ${seg.similarity.toFixed(3)}
+                               </span>`
+                        }
                     </td>
-                    <td>${seg.timestamp.toFixed(1)}s</td>
-                    <td>${seg.duration.toFixed(2)}s</td>
+                    <td>${seg.distance.toFixed(3)}</td>
+                    <td>${(seg.timestamp || 0).toFixed(1)}s</td>
+                    <td>${(seg.duration || 0).toFixed(2)}s</td>
                     <td>${seg.is_core ? "✅" : "⬜"}</td>
                 </tr>`;
             }
@@ -728,38 +1366,24 @@
           }
         }
 
-        html += "</tbody></table>";
-        document.getElementById("intra-table-container").innerHTML = html;
-
-        // Add click handlers to toggle segment details
-        document
-          .querySelectorAll(
-            "#intra-table-container tbody tr:not(.segment-detail-row)",
-          )
-          .forEach((row) => {
-            row.style.cursor = "pointer";
-            row.addEventListener("click", function () {
-              const nextRow = this.nextElementSibling;
-              if (nextRow && nextRow.classList.contains("segment-detail-row")) {
-                nextRow.style.display =
-                  nextRow.style.display === "none" ? "" : "none";
-              }
-            });
-          });
+        html += "</tbody></table></div>";
+        container.innerHTML = html;
       }
 
-      // ── Inter-Speaker ──────────────────────
+      // ───────────────────────────────────────────────────
+      // INTER-SPEAKER
+      // ───────────────────────────────────────────────────
       function renderInterSpeaker(inter) {
         if (!inter) return;
 
         let html = "";
 
-        // Stats row
         html += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
         <div><strong>Mean Separation:</strong> ${inter.meanSeparation.toFixed(4)}</div>
         <div><strong>Std Deviation:</strong> ${inter.stdSeparation.toFixed(4)}</div>
         <div><strong>Min Separation:</strong> ${inter.minSeparation.toFixed(4)}</div>
         <div><strong>Max Separation:</strong> ${inter.maxSeparation.toFixed(4)}</div>
+        <div><strong>Speakers:</strong> ${inter.num_speakers}</div>
         <div><strong>Health:</strong> <span class="health-badge ${inter.health}">
             <span class="health-dot ${inter.health}"></span>${inter.health}
         </span></div>
@@ -768,33 +1392,33 @@
         // Closest pair warning
         if (inter.closest_pair) {
           const cp = inter.closest_pair;
-          const alertClass =
-            cp.distance < 0.3
-              ? "unhealthy"
-              : cp.distance < 0.5
-                ? "warning"
-                : "";
-          html += `<div style="margin-bottom: 1rem; padding: 0.75rem; background: rgba(255,152,0,0.1); border-radius: 8px; border-left: 3px solid var(--warning);">
-            <strong>⚠️ Closest Pair:</strong> ${escapeHtml(cp.speaker1)} ↔ ${escapeHtml(cp.speaker2)} 
+          const isRisky = cp.distance < 0.3;
+          html += `<div style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: ${isRisky ? "rgba(244,67,54,0.08)" : "rgba(255,152,0,0.06)"}; border-radius: var(--radius-sm); border-left: 3px solid ${isRisky ? "var(--unhealthy)" : "var(--warning)"};">
+            <strong>${isRisky ? "🚨" : "⚠️"} Closest Pair:</strong> 
+            ${escapeHtml(cp.speaker1)} ↔ ${escapeHtml(cp.speaker2)} 
             (distance: ${cp.distance.toFixed(4)}, similarity: ${cp.similarity.toFixed(4)})
-            ${alertClass ? `<span class="health-badge ${alertClass}">At Risk</span>` : ""}
+            ${isRisky ? '<span class="health-badge unhealthy" style="margin-left:0.5rem;">AT RISK</span>' : ""}
         </div>`;
         }
 
         // Pairwise grid
         if (inter.pairwise && inter.pairwise.length > 0) {
-          html += '<h3 style="margin-bottom:0.5rem">Pairwise Distances</h3>';
+          html += '<h3 style="margin-bottom:0.5rem;">Pairwise Distances</h3>';
           html += '<div class="pairwise-grid">';
           for (const pair of inter.pairwise) {
-            const distClass =
+            const isRisky = pair.distance < 0.3;
+            const distColor =
               pair.distance >= 0.5
                 ? "var(--healthy)"
                 : pair.distance >= 0.3
                   ? "var(--warning)"
                   : "var(--unhealthy)";
-            html += `<div class="pairwise-card">
+            html += `<div class="pairwise-card ${isRisky ? "risk" : ""}">
                 <span class="speakers">${escapeHtml(pair.speaker1)} ↔ ${escapeHtml(pair.speaker2)}</span>
-                <span class="distance" style="color:${distClass}">${pair.distance.toFixed(4)}</span>
+                <span class="distance" style="color:${distColor}">
+                    D:${pair.distance.toFixed(4)} 
+                    <span style="font-size:0.75rem;color:var(--text-dim);">S:${pair.similarity.toFixed(3)}</span>
+                </span>
             </div>`;
           }
           html += "</div>";
@@ -806,11 +1430,12 @@
         document.getElementById("inter-content").innerHTML = html;
       }
 
-      // ── Segment Groups ─────────────────────
+      // ───────────────────────────────────────────────────
+      // SEGMENT GROUPS
+      // ───────────────────────────────────────────────────
       function renderSegmentGroups(sg) {
         if (!sg) return;
 
-        // Stats
         document.getElementById("segment-stats").innerHTML = `
         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
             <div><strong>Total Segments:</strong> ${sg.totalSegments}</div>
@@ -824,48 +1449,49 @@
             </span></div>
         </div>`;
 
-        // Match type distribution
         if (
           sg.matchTypeDistribution &&
           Object.keys(sg.matchTypeDistribution).length > 0
         ) {
           let distHtml =
-            '<div style="margin-top:1rem"><strong>Match Type Distribution:</strong> ';
+            '<div style="margin-top:1rem; display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">';
+          distHtml +=
+            '<strong style="font-size:0.85rem;">Match Types:</strong> ';
           for (const [type, count] of Object.entries(
             sg.matchTypeDistribution,
           )) {
-            distHtml += `<span style="margin-left:0.5rem; padding:0.2rem 0.5rem; background:rgba(255,255,255,0.05); border-radius:4px; font-size:0.8rem;">
-                ${escapeHtml(type)}: ${count}
+            distHtml += `<span style="padding:0.2rem 0.5rem; background:rgba(255,255,255,0.05); border-radius:4px; font-size:0.78rem;">
+                ${escapeHtml(type)}: <strong>${count}</strong>
             </span>`;
           }
           distHtml += "</div>";
           document.getElementById("segment-stats").innerHTML += distHtml;
         }
 
-        // Timeline
         const timeline = document.getElementById("timeline");
         if (sg.timeline && sg.timeline.length > 0) {
           let tlHtml = "";
           for (const item of sg.timeline.slice(-100)) {
-            // Show last 100 items
             const dotClass = item.matchType || "unknown";
             tlHtml += `<div class="timeline-item">
                 <span class="timeline-dot ${dotClass}" title="${escapeHtml(item.matchType)}"></span>
-                <span style="color:var(--text-dim); min-width:50px;">${item.timestamp.toFixed(1)}s</span>
+                <span style="color:var(--text-dim);min-width:50px;font-size:0.75rem;">${(item.timestamp || 0).toFixed(1)}s</span>
                 <span style="flex:1;">${escapeHtml(item.primaryLabel)}</span>
-                <span style="font-size:0.7rem; color:var(--text-dim);">${escapeHtml(item.matchType)}</span>
+                <span style="font-size:0.7rem;color:var(--text-dim);">${escapeHtml(item.matchType)}</span>
                 ${item.isOutlier ? '<span class="health-badge unhealthy" style="font-size:0.6rem;">OUTLIER</span>' : ""}
             </div>`;
           }
           timeline.innerHTML = tlHtml;
-          timeline.scrollTop = timeline.scrollHeight; // Auto-scroll to latest
+          timeline.scrollTop = timeline.scrollHeight;
         } else {
           timeline.innerHTML =
             '<div class="empty-state">No timeline data available.</div>';
         }
       }
 
-      // ── Outliers ───────────────────────────
+      // ───────────────────────────────────────────────────
+      // OUTLIERS
+      // ───────────────────────────────────────────────────
       function renderOutliers(outliers) {
         if (!outliers) return;
 
@@ -877,30 +1503,28 @@
           return;
         }
 
-        // Stats
         html += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
         <div><strong>Active Outliers:</strong> ${outliers.activeCount}</div>
         <div><strong>Total Promotions:</strong> ${outliers.totalPromotions}</div>
-        <div><strong>Promotion Threshold:</strong> ${outliers.promotionThreshold?.toFixed(3) || "N/A"}</div>
+        <div><strong>Threshold:</strong> ${(outliers.promotionThreshold || 0).toFixed(3)}</div>
         <div><strong>TTL:</strong> ${outliers.ttl || "N/A"}s</div>
         <div><strong>Health:</strong> <span class="health-badge ${outliers.health}">
             <span class="health-dot ${outliers.health}"></span>${outliers.health}
         </span></div>
     </div>`;
 
-        // Active outlier cards
         if (outliers.outlierDetails && outliers.outlierDetails.length > 0) {
-          html += '<h3 style="margin-bottom:0.5rem">Active Outliers</h3>';
+          html += '<h3 style="margin-bottom:0.5rem;">Active Outliers</h3>';
           html += '<div class="outlier-list">';
           for (const o of outliers.outlierDetails) {
             const isExpiring = o.age > (outliers.ttl || 60) * 0.8;
             html += `<div class="outlier-card ${isExpiring ? "expiring" : ""}">
                 <div><strong>${escapeHtml(o.label)}</strong></div>
                 <div>Age: <span class="age">${o.age.toFixed(1)}s</span> ${isExpiring ? "⚠️ Expiring" : ""}</div>
-                <div style="font-size:0.75rem; color:var(--text-dim);">
+                <div style="font-size:0.73rem;color:var(--text-dim);margin-top:0.25rem;">
                     Segment: ${escapeHtml(o.segmentId).substring(0, 25)}<br>
                     Match attempts: ${o.matchAttempts}<br>
-                    Duration: ${o.audioDuration.toFixed(2)}s
+                    Duration: ${(o.audioDuration || 0).toFixed(2)}s
                 </div>
             </div>`;
           }
@@ -909,15 +1533,14 @@
           html += '<div class="empty-state">No active outliers.</div>';
         }
 
-        // Promotion history
         if (outliers.promotionHistory && outliers.promotionHistory.length > 0) {
           html +=
-            '<h3 style="margin-top:1.5rem; margin-bottom:0.5rem;">Recent Promotions</h3>';
+            '<h3 style="margin-top:1.5rem;margin-bottom:0.5rem;">Recent Promotions</h3>';
           html +=
             "<table><thead><tr><th>Type</th><th>Outliers</th><th>Target</th><th>Confidence</th></tr></thead><tbody>";
           for (const p of outliers.promotionHistory) {
             html += `<tr>
-                <td><span style="padding:0.15rem 0.4rem; border-radius:4px; font-size:0.75rem; background:rgba(156,39,176,0.2);">${escapeHtml(p.type)}</span></td>
+                <td><span style="padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;background:rgba(156,39,176,0.2);">${escapeHtml(p.type)}</span></td>
                 <td>${(p.outliers || []).map(escapeHtml).join(", ")}</td>
                 <td><strong>${escapeHtml(p.target)}</strong></td>
                 <td>${(p.confidence || 0).toFixed(3)}</td>
@@ -929,27 +1552,48 @@
         document.getElementById("outlier-content").innerHTML = html;
       }
 
-      // ── Utility Functions ──────────────────
-      function toggleSection(header) {
-        header.parentElement.classList.toggle("collapsed");
-      }
+      // ───────────────────────────────────────────────────
+      // TAB SWITCHING
+      // ───────────────────────────────────────────────────
+      function switchTab(tabName, saveToSettings = true) {
+        // Update activeTab in settings
+        if (saveToSettings) {
+          settings.activeTab = tabName;
+          saveSettings(settings);
+        }
 
-      function switchTab(tabName) {
         // Update tab buttons
         document
           .querySelectorAll(".tab-btn")
           .forEach((btn) => btn.classList.remove("active"));
-        document
-          .querySelector(`.tab-btn[onclick="switchTab('${tabName}')"]`)
-          ?.classList.add("active");
+        const targetBtn = document.querySelector(
+          `.tab-btn[onclick*="${tabName}"]`,
+        );
+        if (targetBtn) targetBtn.classList.add("active");
 
         // Update tab content
         document
           .querySelectorAll(".tab-content")
           .forEach((tab) => tab.classList.remove("active"));
-        document.getElementById(`tab-${tabName}`)?.classList.add("active");
+        const targetTab = document.getElementById(`tab-${tabName}`);
+        if (targetTab) targetTab.classList.add("active");
+
+        // Render the selected tab
+        if (metricsData) {
+          renderCurrentTab();
+        }
       }
 
+      // ───────────────────────────────────────────────────
+      // SECTION COLLAPSE
+      // ───────────────────────────────────────────────────
+      function toggleSection(header) {
+        header.parentElement.classList.toggle("collapsed");
+      }
+
+      // ───────────────────────────────────────────────────
+      // ERROR HANDLING
+      // ───────────────────────────────────────────────────
       function showError(message) {
         const errorHtml = `<div class="error-message">⚠️ Error loading metrics: ${escapeHtml(message)}</div>`;
         document.querySelectorAll(".section-body").forEach((el) => {
@@ -959,16 +1603,66 @@
         });
       }
 
+      // ───────────────────────────────────────────────────
+      // UTILITY
+      // ───────────────────────────────────────────────────
       function escapeHtml(str) {
         if (str == null) return "";
         const div = document.createElement("div");
-        div.textContent = str;
+        div.textContent = String(str);
         return div.innerHTML;
       }
 
-      // ── Cleanup on page unload ─────────────
-      window.addEventListener("beforeunload", () => {
-        if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+      // ───────────────────────────────────────────────────
+      // KEYBOARD SHORTCUTS
+      // ───────────────────────────────────────────────────
+      document.addEventListener("keydown", (e) => {
+        // Don't trigger shortcuts when typing in inputs
+        if (
+          e.target.tagName === "INPUT" ||
+          e.target.tagName === "TEXTAREA" ||
+          e.target.tagName === "SELECT"
+        ) {
+          return;
+        }
+
+        switch (e.key.toLowerCase()) {
+          case "r":
+            // Manual refresh
+            e.preventDefault();
+            manualRefresh();
+            break;
+          case " ":
+            // Toggle auto-refresh
+            e.preventDefault();
+            settings.autoRefresh = !settings.autoRefresh;
+            saveSettings(settings);
+            applySettingsToUI();
+            if (settings.autoRefresh) {
+              startAutoRefresh();
+              updateStatusDot(true);
+            } else {
+              stopAutoRefresh();
+              updateStatusDot(false);
+            }
+            break;
+          case "1":
+            e.preventDefault();
+            switchTab("intra");
+            break;
+          case "2":
+            e.preventDefault();
+            switchTab("inter");
+            break;
+          case "3":
+            e.preventDefault();
+            switchTab("segments");
+            break;
+          case "4":
+            e.preventDefault();
+            switchTab("outliers");
+            break;
+        }
       });
     </script>
   </body>
