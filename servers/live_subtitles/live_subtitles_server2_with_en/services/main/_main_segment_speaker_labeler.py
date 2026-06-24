@@ -158,12 +158,10 @@ def save_similarity_matrix(labeler, output_dir: Path) -> tuple:
     """
     matrix_data = labeler.get_speaker_similarity_matrix()
     
-    # Save as JSON
     json_file = output_dir / "similarity_matrix.json"
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(matrix_data, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
     
-    # Save as CSV for easy spreadsheet viewing
     csv_file = output_dir / "similarity_matrix.csv"
     labels = matrix_data.get("labels", [])
     similarities = matrix_data.get("similarities", [])
@@ -172,9 +170,7 @@ def save_similarity_matrix(labeler, output_dir: Path) -> tuple:
     if labels and similarities:
         with open(csv_file, "w", newline='', encoding="utf-8") as f:
             writer = csv.writer(f)
-            # Header row
             writer.writerow(["Speaker", "Segments"] + labels)
-            # Data rows
             for i, label in enumerate(labels):
                 row = [label, segment_counts[i]] + similarities[i]
                 writer.writerow(row)
@@ -256,7 +252,6 @@ def save_speaker_activity(labeler, segment_groups: List[Dict], output_dir: Path)
     """
     csv_file = output_dir / "speaker_activity.csv"
     
-    # Build activity timeline
     activity_data = []
     for group in segment_groups:
         timestamp = group.get("timestamp", 0.0)
@@ -270,7 +265,6 @@ def save_speaker_activity(labeler, segment_groups: List[Dict], output_dir: Path)
                 "duration": group["duration"],
             })
     
-    # Sort by timestamp
     activity_data.sort(key=lambda x: x["timestamp"])
     
     with open(csv_file, "w", newline='', encoding="utf-8") as f:
@@ -341,20 +335,7 @@ def save_maintenance_log(maintenance_history: List[Dict], output_dir: Path) -> P
 
 
 def save_configuration(args, output_dir: Path) -> Path:
-    """Save the configuration parameters used for this run.
-    
-    Parameters
-    ----------
-    args : argparse.Namespace
-        Command-line arguments.
-    output_dir : Path
-        Directory to save the configuration.
-    
-    Returns
-    -------
-    Path
-        Path to the JSON file.
-    """
+    """Save the configuration parameters used for this run."""
     config = {
         "timestamp": datetime.now().isoformat(),
         "parameters": {
@@ -366,14 +347,12 @@ def save_configuration(args, output_dir: Path) -> Path:
             "visualization_enabled": not args.no_viz,
         },
         "sample_rate": 16000,
-        "embedding_model": "pyannote/embedding",
+        "embedding_model": args.embedding_model,
         "embedding_window": "whole",
     }
-    
     config_file = output_dir / "configuration.json"
     with open(config_file, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
-    
     return config_file
 
 
@@ -383,35 +362,16 @@ def save_labeling_summary(
     results: List[Dict],
     output_dir: Path
 ) -> Path:
-    """Save comprehensive labeling run summary.
-    
-    Parameters
-    ----------
-    labeler : SegmentSpeakerLabeler
-        The speaker labeler instance.
-    segment_groups : List[Dict]
-        Processed segment groups with matches.
-    results : List[Dict]
-        All results including alternatives.
-    output_dir : Path
-        Directory to save the summary.
-    
-    Returns
-    -------
-    Path
-        Path to the JSON file.
-    """
+    """Save comprehensive labeling run summary."""
     primary_results = [r for r in results if r["is_primary"]]
-    unique_speakers = len({r["label"] for r in results})
+    unique_speakers = len({r["label"] for r in results if r["label"].startswith("SPEAKER_")})
     total_duration = sum(r["duration"] for r in primary_results)
     
-    # Calculate confidence statistics
     confidences = [r["confidence"] for r in results]
     avg_confidence = np.mean(confidences) if confidences else 0.0
     median_confidence = np.median(confidences) if confidences else 0.0
     std_confidence = np.std(confidences) if confidences else 0.0
     
-    # Match type distribution
     match_types = {}
     for r in results:
         mt = r["match_type"]
@@ -458,24 +418,7 @@ def save_enhanced_analysis(
     results: List[Dict],
     output_dir: Path
 ) -> Path:
-    """Save enhanced analysis with all available data.
-    
-    Parameters
-    ----------
-    labeler : SegmentSpeakerLabeler
-        The speaker labeler instance.
-    segment_groups : List[Dict]
-        Processed segment groups with matches.
-    results : List[Dict]
-        All results including alternatives.
-    output_dir : Path
-        Directory to save the analysis.
-    
-    Returns
-    -------
-    Path
-        Path to the JSON file.
-    """
+    """Save enhanced analysis with all available data."""
     analysis = {
         "metadata": {
             "timestamp": datetime.now().isoformat(),
@@ -497,21 +440,9 @@ def save_enhanced_analysis(
 
 
 def create_file_tree(output_dir: Path) -> Tree:
-    """Create a Rich tree visualization of output files with clickable links.
-    
-    Parameters
-    ----------
-    output_dir : Path
-        Directory containing output files.
-    
-    Returns
-    -------
-    Tree
-        Rich Tree object for display.
-    """
+    """Create a Rich tree visualization of output files with clickable links."""
     tree = Tree(f"[bold cyan]📁 {output_dir.name}[/bold cyan]")
     
-    # Group files by type
     json_files = sorted(output_dir.glob("*.json"))
     csv_files = sorted(output_dir.glob("*.csv"))
     
@@ -534,28 +465,16 @@ def create_file_tree(output_dir: Path) -> Tree:
         plots = sorted(plots_dir.glob("*.png"))
         if plots:
             plots_branch = tree.add("[magenta]📈 Plot Files[/magenta]")
-            
-            # Deduplicate by stripping timestamp prefix
-            # Keep only the latest version of each plot type
             latest_plots = {}
             for p in plots:
-                # Parse the filename to extract base name
-                # Pattern: YYYYMMDD_HHMMSS_basename.png or just basename.png
                 parts = p.name.split("_", 2)
                 if len(parts) >= 3 and parts[0].isdigit() and len(parts[0]) == 8:
-                    # Has timestamp prefix
                     base_name = parts[2]
                 elif len(parts) == 2 and parts[0].isdigit() and len(parts[0]) == 8:
-                    # Has date prefix only
                     base_name = parts[1]
                 else:
-                    # No timestamp prefix
                     base_name = p.name
-                
-                # Keep the latest (last alphabetically since timestamps sort chronologically)
                 latest_plots[base_name] = p
-            
-            # Display deduplicated plots with clean names
             for base_name, filepath in sorted(latest_plots.items()):
                 file_link = make_source_link(filepath, base_name)
                 size_kb = filepath.stat().st_size / 1024
@@ -575,20 +494,7 @@ def create_file_tree(output_dir: Path) -> Tree:
 
 
 def make_source_link(path, label=None):
-    """Create a terminal-compatible file link.
-    
-    Parameters
-    ----------
-    path : Path or str
-        File path to link to.
-    label : str, optional
-        Display label for the link.
-    
-    Returns
-    -------
-    str
-        Rich markup string with file link.
-    """
+    """Create a terminal-compatible file link."""
     path = Path(path)
     disp = label or path.name
     return f"[link=file://{escape(str(path))}][blue]{escape(str(disp))}[/blue][/link]"
@@ -596,7 +502,6 @@ def make_source_link(path, label=None):
 
 def main():
     from audio_utils import resolve_audio_paths, resolve_audio_paths_as_tensor_list
-    from pyannote.audio import Inference, Model
     from segment_speaker_labeler import (
         SegmentSpeakerLabeler,
         DEFAULT_THRESHOLD_SAME,
@@ -679,13 +584,6 @@ def main():
     )
     audio_data = list(zip(waveforms, audio_files))
     
-    # with console.status("[bold green]Loading pyannote embedding model...[/bold green]", spinner="dots"):
-    #     model = Model.from_pretrained("pyannote/embedding")
-    #     inference = Inference(model, window="whole")
-
-    # --- NEW: Select model type (configurable) ---------------------------------
-    # You can change this line or accept via command-line arg:
-    # MODEL_TYPE = EmbeddingModelType.PYANNOTE  # default, backward-compatible
     MODEL_TYPE = EmbeddingModelType(args.embedding_model)
 
     console.print(f"[bold]Available embedding models:[/bold]")
@@ -699,7 +597,6 @@ def main():
         embedding_model = create_embedding_model(MODEL_TYPE)
     
     labeler = SegmentSpeakerLabeler(
-        # embedding_model=inference,
         embedding_model=embedding_model,
         threshold_same=args.threshold_same,
         threshold_possible=args.threshold_possible,
@@ -709,11 +606,9 @@ def main():
     
     console.print(f"\n[bold]Processing {len(audio_data)} audio segments...[/bold]\n")
     
-    # Track maintenance history
     maintenance_history = []
     segment_groups = []
     
-    # Store reference to original method
     original_maintenance = labeler.run_smart_maintenance
     
     def maintenance_wrapper(timestamp, just_created_speaker=False):
@@ -725,56 +620,48 @@ def main():
             maintenance_history.append(result)
         return result
     
-    # Patch the method
     labeler.run_smart_maintenance = maintenance_wrapper
     
+    # ═══════════════════════════════════════════════════════════
+    # Process all segments — labeler handles resolution internally
+    # ═══════════════════════════════════════════════════════════
     with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
         task = progress.add_task("Analyzing speakers...", total=len(audio_data))
         
         for i, (waveform, filepath_str) in enumerate(audio_data):
-            filepath = Path(filepath_str)
-            filename = filepath.name
-            dir_path = str(filepath.parent)
-            timestamp = i * 5.0  # Simulated timestamp progression
+            timestamp = i * 5.0
             
-            if waveform.dim() == 1:
-                duration = waveform.shape[0] / sample_rate
-            else:
-                duration = waveform.shape[-1] / sample_rate
-            
-            segment_results = labeler.label_segments(
+            # label_segments() returns ALL segments with auto-resolved labels
+            segment_groups = labeler.label_segments(
                 waveform, sample_rate, timestamp
             )
             
-            matches = []
-            for j, match in enumerate(segment_results):
-                matches.append({
-                    "label": match["label"],
-                    "confidence": match["confidence"],
-                    "match_type": match.get("match_type", "unknown"),
-                    "is_primary": match.get("is_primary", False),
-                    "is_new_speaker": match.get("is_new_speaker", False),
-                    "rank": j + 1 if not match.get("is_primary") else 0,
-                })
-            
-            segment_groups.append({
-                "index": i + 1,
-                "file": str(filepath),
-                "filename": filename,
-                "dir": dir_path,
-                "duration": duration,
-                "timestamp": timestamp,
-                "matches": matches,
-            })
             progress.advance(task)
     
-    # Restore original method
     labeler.run_smart_maintenance = original_maintenance
+
+    # ═══════════════════════════════════════════════════════════
+    # Enrich with file metadata for display/saving
+    # ═══════════════════════════════════════════════════════════
+    for i, (waveform, filepath_str) in enumerate(audio_data):
+        filepath = Path(filepath_str)
+        group = segment_groups[i]
+        group["index"] = i + 1
+        group["file"] = str(filepath)
+        group["filename"] = filepath.name
+        group["dir"] = str(filepath.parent)
+        if waveform.dim() == 1:
+            group["duration"] = waveform.shape[0] / sample_rate
+        else:
+            group["duration"] = waveform.shape[-1] / sample_rate
     
-    # Prepare results for table display
+    # ═══════════════════════════════════════════════════════════
+    # Build flat results for table display
+    # ═══════════════════════════════════════════════════════════
     results = []
     for group in segment_groups:
-        for match in group["matches"]:
+        for j, match in enumerate(group["matches"]):
+            is_primary = match.get("is_primary", j == 0)
             results.append({
                 "index": group["index"],
                 "file": group["file"],
@@ -783,13 +670,16 @@ def main():
                 "duration": group["duration"],
                 "label": match["label"],
                 "confidence": match["confidence"],
-                "match_type": match["match_type"],
-                "is_primary": match["is_primary"],
-                "is_new_speaker": match["is_new_speaker"],
-                "rank": match["rank"],
+                "match_type": match.get("match_type", "unknown"),
+                "is_primary": is_primary,
+                "is_new_speaker": match.get("is_new_speaker", False),
+                "is_outlier": match.get("is_outlier", False),
+                "rank": 0 if is_primary else j + 1,
             })
     
+    # ═══════════════════════════════════════════════════════════
     # Display results table
+    # ═══════════════════════════════════════════════════════════
     table = Table(
         title="🎤 Speaker Analysis Results",
         show_lines=True,
@@ -816,78 +706,86 @@ def main():
             play_link = f"[link=file://{group['file']}]▶️ Play[/link]" if is_first else ""
             
             conf_color = "green" if match["confidence"] > 0.7 else "yellow" if match["confidence"] > 0.4 else "red"
-            primary_marker = "⭐" if match["is_primary"] else ""
-            rank_str = f"#{match['rank']}" if match["rank"] > 0 else "—"
+            primary_marker = "⭐" if match.get("is_primary") else ""
+            # Calculate rank from position — not from a missing key
+            if match.get("is_primary"):
+                rank_str = "—"
+            else:
+                rank_str = f"#{idx}"
+            
+            is_outlier = match.get("is_outlier", False)
+            label_style = "bold yellow" if is_outlier else "bold"
             
             table.add_row(
                 index_str,
                 dir_link,
                 duration_str,
                 rank_str,
-                f"[bold]{match['label']}[/bold]",
+                f"[{label_style}]{match['label']}[/{label_style}]",
                 f"[{conf_color}]{match['confidence']:.3f}[/{conf_color}]",
-                match["match_type"],
+                match.get("match_type", "unknown"),
                 primary_marker,
                 play_link
             )
     
     console.print(table)
     
-    # Display summary
+    # ═══════════════════════════════════════════════════════════
+    # Summary
+    # ═══════════════════════════════════════════════════════════
     primary_results = [r for r in results if r["is_primary"]]
-    unique_speakers = len({r["label"] for r in results})
+    unique_speakers = len({r["label"] for r in results if r["label"].startswith("SPEAKER_")})
     total_duration = sum(r["duration"] for r in primary_results)
+    
+    # Outlier stats
+    outlier_info = ""
+    if labeler.use_outlier_buffer:
+        outlier_stats = labeler.get_outlier_stats_for_display()
+        active = outlier_stats.get("active_outliers", 0)
+        resolved = outlier_stats.get("resolved_outliers", 0)
+        promoted = outlier_stats.get("total_promotions", 0)
+        if active > 0:
+            outlier_info += f"\nUnresolved outliers: [bold yellow]{active}[/bold yellow]"
+        if resolved > 0:
+            outlier_info += f"\nOutliers resolved: [bold green]{resolved}[/bold green]"
+        if promoted > 0:
+            outlier_info += f"\nTotal promotions: [bold cyan]{promoted}[/bold cyan]"
     
     console.print(Panel(
         f"Total segments: [bold]{len(segment_groups)}[/bold]\n"
         f"Total results (incl. alternatives): [bold]{len(results)}[/bold]\n"
         f"Total duration: [bold]{total_duration:.1f}s[/bold]\n"
-        f"Unique speakers: [bold cyan]{unique_speakers}[/bold cyan]\n"
+        f"Unique speakers: [bold cyan]{unique_speakers}[/bold cyan]"
+        f"{outlier_info}\n"
         f"Average matches per segment: [bold]{len(results) / max(len(segment_groups), 1):.1f}[/bold]",
         title="Summary",
         border_style="green",
         padding=(1, 2)
     ))
     
-    # Create output directory
+    # ═══════════════════════════════════════════════════════════
+    # Save output files
+    # ═══════════════════════════════════════════════════════════
     output_dir = args.output_dir
     shutil.rmtree(output_dir, ignore_errors=True)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Save all extractable data
     console.print("\n[bold cyan]Saving analysis results...[/bold cyan]")
     
-    # 1. Configuration
     config_file = save_configuration(args, output_dir)
-    
-    # 2. Enhanced speaker analysis
     analysis_file = save_enhanced_analysis(labeler, segment_groups, results, output_dir)
-    
-    # 3. Speaker profiles
     profiles_file = save_speaker_profiles(labeler, output_dir)
-    
-    # 4. Similarity matrix
     sim_json, sim_csv = save_similarity_matrix(labeler, output_dir)
-    
-    # 5. Segment timeline
     timeline_file = save_segment_timeline(segment_groups, output_dir)
-    
-    # 6. Speaker activity
     activity_file = save_speaker_activity(labeler, segment_groups, output_dir)
-    
-    # 7. Maintenance log
     maintenance_file = save_maintenance_log(maintenance_history, output_dir)
-    
-    # 8. Labeling summary
     summary_file = save_labeling_summary(labeler, segment_groups, results, output_dir)
     
-    # 9. Health status
     health_status = labeler.get_health_status()
     health_file = output_dir / "health_status.json"
     with open(health_file, "w", encoding="utf-8") as f:
         json.dump(health_status, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
     
-    # Generate visualizations if requested
     if not args.no_viz and labeler.known_speakers:
         viz_files = save_visualizations(labeler, output_dir, console)
     elif args.no_viz:
@@ -895,7 +793,6 @@ def main():
     else:
         console.print("\n[yellow]No speakers found - skipping visualization[/yellow]")
     
-    # Display file tree with clickable links
     console.print("\n[bold green]📂 Output Files (click to open):[/bold green]")
     file_tree = create_file_tree(output_dir)
     console.print(file_tree)

@@ -2,613 +2,974 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes"
-    />
-    <title>Speaker diarization · variance & separation</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }} - Speaker Metrics Dashboard</title>
     <style>
       :root {
-        --color-bg: #ffffff;
-        --color-surface-primary: #ffffff;
-        --color-surface-secondary: #f5f6f8;
-        --color-text-primary: #0f1825;
-        --color-text-secondary: #5a6270;
-        --color-text-tertiary: #8b919d;
-        --color-border-tertiary: #e3e6ec;
-        --border-radius-md: 10px;
-        --border-radius-lg: 16px;
-        --font-sans:
-          system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-          sans-serif;
-        --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.02);
+        --healthy: #4caf50;
+        --warning: #ff9800;
+        --unhealthy: #f44336;
+        --bg: #1a1a2e;
+        --card-bg: #16213e;
+        --text: #e0e0e0;
+        --text-dim: #888;
+        --border: #2a2a4a;
+        --accent: #2196f3;
+        --outlier: #9c27b0;
       }
+
       * {
         margin: 0;
         padding: 0;
         box-sizing: border-box;
       }
+
       body {
-        background: var(--color-bg);
-        font-family: var(--font-sans);
-        display: flex;
-        justify-content: center;
-        align-items: center;
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
         min-height: 100vh;
-        margin: 0;
-        padding: 1.5rem;
-        color: var(--color-text-primary);
-      }
-      .dashboard {
-        max-width: 720px;
-        width: 100%;
-        background: var(--color-bg);
-        padding: 1.25rem 0.5rem;
-      }
-      .section-label {
-        font-size: 11px;
-        font-weight: 500;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-        color: var(--color-text-tertiary);
-        margin: 0 0 10px;
-      }
-      .metric-card {
-        background: var(--color-surface-secondary);
-        border-radius: var(--border-radius-md);
-        padding: 12px 16px;
-      }
-      .metric-val {
-        font-size: 22px;
-        font-weight: 500;
-        color: var(--color-text-primary);
-        margin: 2px 0 0;
-        line-height: 1.2;
-      }
-      .metric-lbl {
-        font-size: 12px;
-        color: var(--color-text-secondary);
-      }
-      .speaker-card {
-        background: var(--color-surface-primary);
-        border: 0.5px solid var(--color-border-tertiary);
-        border-radius: var(--border-radius-lg);
-        padding: 1rem 1.25rem;
-        margin-bottom: 10px;
-        box-shadow: var(--shadow-sm);
-      }
-      .badge {
-        display: inline-block;
-        font-size: 11px;
-        font-weight: 500;
-        padding: 3px 9px;
-        border-radius: 99px;
-        line-height: 1.4;
-      }
-      .badge-healthy {
-        background: #eaf3de;
-        color: #3b6d11;
-      }
-      .badge-warning {
-        background: #faeeda;
-        color: #854f0b;
-      }
-      .badge-unhealthy {
-        background: #fcebeb;
-        color: #a32d2d;
       }
 
-      /* core / outlier pills */
-      .seg-core-pill {
+      /* ── Header ──────────────────────── */
+      .header {
+        background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%);
+        border-bottom: 1px solid var(--border);
+        padding: 1.5rem 2rem;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        backdrop-filter: blur(10px);
+      }
+      .header h1 {
+        font-size: 1.8rem;
+        font-weight: 600;
+        background: linear-gradient(90deg, var(--accent), #00bcd4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .header .subtitle {
+        color: var(--text-dim);
+        font-size: 0.85rem;
+        margin-top: 0.25rem;
+      }
+
+      /* ── Summary Cards ──────────────── */
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        padding: 1.5rem 2rem;
+      }
+      .summary-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.25rem;
+        text-align: center;
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s;
+      }
+      .summary-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      }
+      .summary-card .value {
+        font-size: 2.2rem;
+        font-weight: 700;
+        margin: 0.5rem 0;
+      }
+      .summary-card .label {
+        color: var(--text-dim);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .summary-card.healthy .value {
+        color: var(--healthy);
+      }
+      .summary-card.warning .value {
+        color: var(--warning);
+      }
+      .summary-card.unhealthy .value {
+        color: var(--unhealthy);
+      }
+
+      /* ── Health Badge ───────────────── */
+      .health-badge {
         display: inline-flex;
         align-items: center;
-        gap: 3px;
-        font-size: 10px;
+        gap: 0.4rem;
+        padding: 0.3rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .health-badge.healthy {
+        background: rgba(76, 175, 80, 0.15);
+        color: var(--healthy);
+      }
+      .health-badge.warning {
+        background: rgba(255, 152, 0, 0.15);
+        color: var(--warning);
+      }
+      .health-badge.unhealthy {
+        background: rgba(244, 67, 54, 0.15);
+        color: var(--unhealthy);
+      }
+      .health-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .health-dot.healthy {
+        background: var(--healthy);
+        box-shadow: 0 0 6px var(--healthy);
+      }
+      .health-dot.warning {
+        background: var(--warning);
+        box-shadow: 0 0 6px var(--warning);
+      }
+      .health-dot.unhealthy {
+        background: var(--unhealthy);
+        box-shadow: 0 0 6px var(--unhealthy);
+      }
+
+      /* ── Sections ───────────────────── */
+      .section {
+        margin: 0 2rem 2rem;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      .section-header {
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+      }
+      .section-header h2 {
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .section-header .toggle-icon {
+        transition: transform 0.3s;
+      }
+      .section.collapsed .section-body {
+        display: none;
+      }
+      .section.collapsed .toggle-icon {
+        transform: rotate(-90deg);
+      }
+      .section-body {
+        padding: 1.5rem;
+      }
+
+      /* ── Tables ─────────────────────── */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+      th {
+        text-align: left;
+        padding: 0.75rem 1rem;
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--text-dim);
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.75rem;
+        letter-spacing: 0.05em;
+        border-bottom: 2px solid var(--border);
+      }
+      td {
+        padding: 0.6rem 1rem;
+        border-bottom: 1px solid var(--border);
+      }
+      tr:hover {
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      /* ── Similarity Bar ─────────────── */
+      .similarity-bar {
+        display: inline-block;
+        height: 8px;
+        border-radius: 4px;
+        background: var(--healthy);
+        min-width: 2px;
+        vertical-align: middle;
+        margin-right: 0.5rem;
+      }
+      .similarity-bar.warning-bg {
+        background: var(--warning);
+      }
+      .similarity-bar.unhealthy-bg {
+        background: var(--unhealthy);
+      }
+      .similarity-bar.outlier-bg {
+        background: var(--outlier);
+      }
+
+      /* ── Pairwise Grid ──────────────── */
+      .pairwise-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 0.75rem;
+      }
+      .pairwise-card {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .pairwise-card .speakers {
         font-weight: 500;
-        padding: 2px 6px;
-        border-radius: 99px;
-        line-height: 1.4;
-        white-space: nowrap;
+        font-size: 0.85rem;
+      }
+      .pairwise-card .distance {
+        font-family: "Courier New", monospace;
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+
+      /* ── Timeline ───────────────────── */
+      .timeline-container {
+        max-height: 300px;
+        overflow-y: auto;
+      }
+      .timeline-item {
+        display: flex;
+        align-items: center;
+        padding: 0.4rem 0.5rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        font-size: 0.8rem;
+        gap: 0.5rem;
+      }
+      .timeline-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
         flex-shrink: 0;
       }
-      .seg-core-pill.core {
-        background: #e1f5ee;
-        color: #085041;
+      .timeline-dot.strong_match {
+        background: var(--healthy);
       }
-      .seg-core-pill.outlier {
-        background: #faeeda;
-        color: #854f0b;
+      .timeline-dot.early_match {
+        background: #8bc34a;
       }
-      .seg-core-pill .dot {
-        width: 5px;
-        height: 5px;
-        border-radius: 50%;
+      .timeline-dot.possible_match {
+        background: var(--warning);
       }
-      .seg-core-pill.core .dot {
-        background: #0f6e56;
+      .timeline-dot.weak_match {
+        background: var(--unhealthy);
       }
-      .seg-core-pill.outlier .dot {
-        background: #ef9f27;
+      .timeline-dot.context_match {
+        background: var(--accent);
+      }
+      .timeline-dot.outlier_match {
+        background: var(--outlier);
+      }
+      .timeline-dot.outlier_pending {
+        background: var(--outlier);
+        opacity: 0.5;
+      }
+      .timeline-dot.new_speaker {
+        background: #00bcd4;
+      }
+      .timeline-dot.first_speaker {
+        background: #00bcd4;
       }
 
-      .dist-bar-bg {
-        background: var(--color-surface-secondary);
-        border-radius: 4px;
-        height: 6px;
-        overflow: hidden;
-        width: 100%;
-      }
-      .dist-bar-fill {
-        height: 100%;
-        border-radius: 4px;
-        width: 0%;
-      }
-      .seg-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 6px;
-      }
-      .seg-id {
-        font-size: 12px;
-        color: #3b82f6;
-        min-width: 100px;
-        cursor: pointer;
-        text-decoration: underline;
-        text-underline-offset: 2px;
-        transition: color 0.15s;
-      }
-      .seg-id:hover {
-        color: #1d4ed8;
-      }
-      .seg-duration {
-        font-size: 11px;
-        color: var(--color-text-tertiary);
-        min-width: 48px;
-        text-align: right;
-      }
-      .seg-val {
-        font-size: 12px;
-        color: var(--color-text-primary);
-        min-width: 36px;
-        text-align: right;
-        font-weight: 500;
-      }
-      .pair-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 6px 0;
-        border-bottom: 0.5px solid var(--color-border-tertiary);
-        font-size: 13px;
-      }
-      .pair-row:last-child {
-        border-bottom: none;
-      }
-      .grid-4 {
+      /* ── Outlier Cards ──────────────── */
+      .outlier-list {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 10px;
-        margin-bottom: 1.5rem;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 0.75rem;
       }
-      .grid-2 {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px;
+      .outlier-card {
+        background: rgba(156, 39, 176, 0.08);
+        border: 1px solid rgba(156, 39, 176, 0.2);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        font-size: 0.85rem;
       }
-      .speaker-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 10px;
+      .outlier-card .age {
+        color: var(--warning);
+        font-weight: 600;
       }
-      .avatar {
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 11px;
-        font-weight: 500;
-      }
-      .speaker-name {
-        font-size: 14px;
-        font-weight: 500;
-        color: var(--color-text-primary);
-      }
-      .speaker-meta {
-        font-size: 11px;
-        color: var(--color-text-secondary);
+      .outlier-card.expiring {
+        border-color: var(--unhealthy);
+        background: rgba(244, 67, 54, 0.08);
       }
 
-      /* centroid purity bar */
-      .purity-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 12px;
-        font-size: 12px;
-        color: var(--color-text-secondary);
-      }
-      .purity-bar-bg {
-        flex: 1;
-        background: var(--color-surface-secondary);
-        border-radius: 4px;
-        height: 6px;
-        overflow: hidden;
-      }
-      .purity-bar-fill {
-        height: 100%;
-        border-radius: 4px;
-        background: #1d9e75;
-      }
-      .purity-label {
-        min-width: 80px;
-      }
-      .purity-count {
-        min-width: 64px;
-        text-align: right;
-        color: var(--color-text-tertiary);
-        font-size: 11px;
-      }
-
-      /* segment list legend */
-      .seg-legend {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 6px;
-        font-size: 11px;
-        color: var(--color-text-tertiary);
-      }
-
-      .flex-between {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin-bottom: 1.5rem;
-      }
-      button {
-        background: var(--color-surface-secondary);
-        border: 0.5px solid var(--color-border-tertiary);
-        border-radius: 40px;
-        padding: 0.4rem 1rem;
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--color-text-primary);
-        cursor: pointer;
-        background: white;
-        transition: 0.2s;
-      }
-      button:hover {
-        background: #f0f2f5;
-      }
-      .sr-only {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        padding: 0;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        border: 0;
-      }
-      @media (max-width: 500px) {
-        .grid-4 {
+      /* ── Responsive ─────────────────── */
+      @media (max-width: 768px) {
+        .header {
+          padding: 1rem;
+        }
+        .summary-grid {
           grid-template-columns: repeat(2, 1fr);
+          padding: 1rem;
         }
-        .grid-2 {
-          grid-template-columns: 1fr;
+        .section {
+          margin: 0 1rem 1rem;
         }
-        body {
-          padding: 0.8rem;
+        .section-body {
+          padding: 1rem;
         }
+        table {
+          font-size: 0.8rem;
+        }
+        th,
+        td {
+          padding: 0.5rem;
+        }
+      }
+
+      /* ── Loading / Error ────────────── */
+      .loading {
+        text-align: center;
+        padding: 3rem;
+        color: var(--text-dim);
+      }
+      .loading .spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin: 0 auto 1rem;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .error-message {
+        background: rgba(244, 67, 54, 0.1);
+        border: 1px solid var(--unhealthy);
+        border-radius: 8px;
+        padding: 1rem;
+        color: var(--unhealthy);
+        text-align: center;
+      }
+      .empty-state {
+        text-align: center;
+        padding: 2rem;
+        color: var(--text-dim);
+        font-style: italic;
+      }
+
+      /* ── Tab Navigation ─────────────── */
+      .tab-nav {
+        display: flex;
+        gap: 0;
+        border-bottom: 2px solid var(--border);
+        margin-bottom: 0;
+      }
+      .tab-btn {
+        padding: 0.75rem 1.5rem;
+        background: none;
+        border: none;
+        color: var(--text-dim);
+        cursor: pointer;
+        font-size: 0.9rem;
+        font-weight: 500;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        transition: all 0.2s;
+      }
+      .tab-btn:hover {
+        color: var(--text);
+      }
+      .tab-btn.active {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+      }
+      .tab-content {
+        display: none;
+      }
+      .tab-content.active {
+        display: block;
       }
     </style>
   </head>
   <body>
-    <div class="dashboard" id="dashboard-root"></div>
+    <!-- ══════════════════════════════════════ -->
+    <!-- HEADER                                -->
+    <!-- ══════════════════════════════════════ -->
+    <div class="header">
+      <h1>🎙️ Speaker Metrics Dashboard</h1>
+      <div class="subtitle">
+        Real-time speaker labeling health &bull;
+        <span id="update-time">Loading...</span>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- SUMMARY CARDS                         -->
+    <!-- ══════════════════════════════════════ -->
+    <div class="summary-grid" id="summary-grid">
+      <div class="summary-card" id="card-overall">
+        <div class="label">Overall Health</div>
+        <div class="value">--</div>
+      </div>
+      <div class="summary-card" id="card-speakers">
+        <div class="label">Speakers</div>
+        <div class="value">0</div>
+      </div>
+      <div class="summary-card" id="card-segments">
+        <div class="label">Segments</div>
+        <div class="value">0</div>
+      </div>
+      <div class="summary-card" id="card-outliers">
+        <div class="label">Active Outliers</div>
+        <div class="value">0</div>
+      </div>
+      <div class="summary-card" id="card-stability">
+        <div class="label">Label Stability</div>
+        <div class="value">--</div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- TAB NAVIGATION                        -->
+    <!-- ══════════════════════════════════════ -->
+    <div class="tab-nav" style="margin: 0 2rem">
+      <button class="tab-btn active" onclick="switchTab('intra')">
+        Intra-Speaker
+      </button>
+      <button class="tab-btn" onclick="switchTab('inter')">
+        Inter-Speaker
+      </button>
+      <button class="tab-btn" onclick="switchTab('segments')">
+        Segment Groups
+      </button>
+      <button class="tab-btn" onclick="switchTab('outliers')">Outliers</button>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- INTRA-SPEAKER TAB                     -->
+    <!-- ══════════════════════════════════════ -->
+    <div class="tab-content active" id="tab-intra">
+      <div class="section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <h2>🔬 Intra-Speaker Cohesion</h2>
+          <span class="toggle-icon">▼</span>
+        </div>
+        <div class="section-body">
+          <div id="intra-table-container">
+            <div class="loading">
+              <div class="spinner"></div>
+              Loading intra-speaker data...
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- INTER-SPEAKER TAB                     -->
+    <!-- ══════════════════════════════════════ -->
+    <div class="tab-content" id="tab-inter">
+      <div class="section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <h2>🔗 Inter-Speaker Separation</h2>
+          <span class="toggle-icon">▼</span>
+        </div>
+        <div class="section-body">
+          <div id="inter-content">
+            <div class="loading">
+              <div class="spinner"></div>
+              Loading inter-speaker data...
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- SEGMENT GROUPS TAB                    -->
+    <!-- ══════════════════════════════════════ -->
+    <div class="tab-content" id="tab-segments">
+      <div class="section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <h2>📋 Segment Group Health</h2>
+          <span class="toggle-icon">▼</span>
+        </div>
+        <div class="section-body">
+          <div id="segment-stats"></div>
+          <h3 style="margin-top: 1.5rem; margin-bottom: 0.5rem">
+            📈 Label Timeline
+          </h3>
+          <div class="timeline-container" id="timeline">
+            <div class="loading">
+              <div class="spinner"></div>
+              Loading timeline...
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- OUTLIERS TAB                          -->
+    <!-- ══════════════════════════════════════ -->
+    <div class="tab-content" id="tab-outliers">
+      <div class="section">
+        <div class="section-header" onclick="toggleSection(this)">
+          <h2>📦 Outlier Pool</h2>
+          <span class="toggle-icon">▼</span>
+        </div>
+        <div class="section-body">
+          <div id="outlier-content">
+            <div class="loading">
+              <div class="spinner"></div>
+              Loading outlier data...
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- SCRIPTS                               -->
+    <!-- ══════════════════════════════════════ -->
     <script>
-      (function () {
-        const API_BASE = "/speakers/metrics";
-        const DATA_URL = `${API_BASE}/data`;
-        const SEGMENT_BASE = "/speakers/segment";
+      // ── State ──────────────────────────────
+      let metricsData = null;
+      let autoRefreshInterval = null;
+      const REFRESH_INTERVAL_MS = 5000;
 
-        console.log("[SpeakerMetrics] Initialized");
+      // ── Initialization ─────────────────────
+      document.addEventListener("DOMContentLoaded", () => {
+        fetchMetrics();
+        autoRefreshInterval = setInterval(fetchMetrics, REFRESH_INTERVAL_MS);
+      });
 
-        async function fetchMetricsData(speakerLabel = null) {
-          const url = speakerLabel
-            ? `${DATA_URL}?label=${encodeURIComponent(speakerLabel)}`
-            : DATA_URL;
-          try {
-            const r = await fetch(url);
-            if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
-            const data = await r.json();
-            console.log("[SpeakerMetrics] Data fetched:", data);
-            return data;
-          } catch (e) {
-            console.error("[SpeakerMetrics] Fetch error:", e);
-            return null;
+      // ── Data Fetching ──────────────────────
+      async function fetchMetrics() {
+        try {
+          const response = await fetch("/speakers/metrics/data");
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          metricsData = await response.json();
+          renderAll();
+        } catch (error) {
+          console.error("Failed to fetch metrics:", error);
+          showError(error.message);
+        }
+      }
+
+      // ── Render All ─────────────────────────
+      function renderAll() {
+        if (!metricsData) return;
+
+        renderSummary(metricsData.summary);
+        renderIntraSpeaker(metricsData.intra_speaker);
+        renderInterSpeaker(metricsData.inter_speaker);
+        renderSegmentGroups(metricsData.segment_groups);
+        renderOutliers(metricsData.outliers);
+
+        document.getElementById("update-time").textContent =
+          `Last updated: ${new Date(metricsData.timestamp).toLocaleTimeString()}`;
+      }
+
+      // ── Summary Cards ──────────────────────
+      function renderSummary(summary) {
+        if (!summary) return;
+
+        updateCard("card-overall", summary.overall, "Overall");
+        updateCard(
+          "card-speakers",
+          summary.totalSpeakers,
+          "Speakers",
+          "neutral",
+        );
+        updateCard(
+          "card-segments",
+          summary.totalSegments,
+          "Segments",
+          "neutral",
+        );
+        updateCard(
+          "card-outliers",
+          summary.outlierCount,
+          "Outliers",
+          summary.outlierCount > 3 ? "unhealthy" : "neutral",
+        );
+        updateCard(
+          "card-stability",
+          metricsData.segment_groups?.labelStability != null
+            ? (metricsData.segment_groups.labelStability * 100).toFixed(1) + "%"
+            : "--",
+          "Stability",
+          metricsData.segment_groups?.labelStability < 0.7
+            ? "warning"
+            : "neutral",
+        );
+      }
+
+      function updateCard(id, value, label, statusClass = null) {
+        const card = document.getElementById(id);
+        if (!card) return;
+
+        // Remove old status classes
+        card.classList.remove("healthy", "warning", "unhealthy");
+
+        // Determine status class from value if not explicitly provided
+        if (!statusClass && typeof value === "string") {
+          if (value === "healthy") statusClass = "healthy";
+          else if (value === "warning") statusClass = "warning";
+          else if (value === "unhealthy") statusClass = "unhealthy";
+        }
+        if (statusClass) card.classList.add(statusClass);
+
+        card.querySelector(".value").textContent = value;
+      }
+
+      // ── Intra-Speaker Table ────────────────
+      function renderIntraSpeaker(intra) {
+        if (!intra || !intra.speakers || intra.speakers.length === 0) {
+          document.getElementById("intra-table-container").innerHTML =
+            '<div class="empty-state">No intra-speaker data available. Process some audio segments first.</div>';
+          return;
+        }
+
+        let html = `<table>
+        <thead>
+            <tr>
+                <th>Speaker</th>
+                <th>Status</th>
+                <th>Segments</th>
+                <th>Mean Similarity</th>
+                <th>Std Dev</th>
+                <th>Min Sim</th>
+                <th>Silhouette</th>
+                <th>Mature</th>
+                <th>Cohesion</th>
+            </tr>
+        </thead>
+        <tbody>`;
+
+        for (const spk of intra.speakers) {
+          const healthClass = spk.health || "healthy";
+          const barWidth = Math.max(5, spk.meanSimilarity * 100);
+          const barClass =
+            spk.meanSimilarity >= 0.7
+              ? ""
+              : spk.meanSimilarity >= 0.55
+                ? "warning-bg"
+                : "unhealthy-bg";
+
+          html += `<tr>
+            <td><strong>${escapeHtml(spk.label)}</strong></td>
+            <td><span class="health-badge ${healthClass}">
+                <span class="health-dot ${healthClass}"></span>${spk.health}
+            </span></td>
+            <td>${spk.segmentsCount}</td>
+            <td>${spk.meanSimilarity.toFixed(4)}</td>
+            <td>${spk.stdSimilarity.toFixed(4)}</td>
+            <td>${spk.minSimilarity.toFixed(4)}</td>
+            <td>${(spk.silhouetteScore || 0).toFixed(4)}</td>
+            <td>${spk.isMature ? "✅" : "🔸"}</td>
+            <td>
+                <span class="similarity-bar ${barClass}" style="width:${barWidth}px"></span>
+                ${(spk.meanSimilarity * 100).toFixed(0)}%
+            </td>
+        </tr>`;
+
+          // Segment detail rows (collapsible)
+          if (spk.segments && spk.segments.length > 0) {
+            html += `<tr class="segment-detail-row" style="display:none;" data-speaker="${escapeHtml(spk.label)}">
+                <td colspan="9" style="padding: 0;">
+                    <div style="padding: 0.5rem 1rem; font-size: 0.8rem; max-height: 200px; overflow-y: auto;">
+                        <strong>Segment Details:</strong>
+                        <table style="font-size: 0.75rem; margin-top: 0.25rem;">
+                            <thead><tr>
+                                <th>Segment ID</th><th>Similarity</th><th>Timestamp</th><th>Duration</th><th>Core</th>
+                            </tr></thead>
+                            <tbody>`;
+            for (const seg of spk.segments) {
+              const segBarClass =
+                seg.similarity >= 0.7
+                  ? ""
+                  : seg.similarity >= 0.55
+                    ? "warning-bg"
+                    : "unhealthy-bg";
+              html += `<tr>
+                    <td><code style="font-size:0.7rem">${escapeHtml(seg.id).substring(0, 20)}</code></td>
+                    <td>
+                        <span class="similarity-bar ${segBarClass}" style="width:${Math.max(3, seg.similarity * 80)}px"></span>
+                        ${seg.similarity.toFixed(3)}
+                    </td>
+                    <td>${seg.timestamp.toFixed(1)}s</td>
+                    <td>${seg.duration.toFixed(2)}s</td>
+                    <td>${seg.is_core ? "✅" : "⬜"}</td>
+                </tr>`;
+            }
+            html += `</tbody></table></div></td></tr>`;
           }
         }
 
-        function openSegmentDetail(segmentId) {
-          if (!segmentId || segmentId === "unknown") return;
-          window.open(
-            `${SEGMENT_BASE}/${encodeURIComponent(segmentId)}`,
-            "_blank",
-          );
-        }
+        html += "</tbody></table>";
+        document.getElementById("intra-table-container").innerHTML = html;
 
-        // ── transform ──────────────────────────────────────────────────
-        function transformSpeakerData(apiData) {
-          if (!apiData)
-            return {
-              speakers: [],
-              pairs: [],
-              stats: null,
-              overallHealth: "unhealthy",
-            };
-          const intra = apiData.intra_speaker || {};
-          const inter = apiData.inter_speaker || {};
-          const colorPalette = [
-            { color: "#3C3489", bg: "#EEEDFE" },
-            { color: "#085041", bg: "#E1F5EE" },
-            { color: "#712B13", bg: "#FAECE7" },
-            { color: "#1B4F72", bg: "#E8F4FD" },
-            { color: "#7B241C", bg: "#FDEDEC" },
-          ];
-          const speakers = (intra.speakers || []).map((spk, idx) => {
-            const palette = colorPalette[idx % colorPalette.length];
-            const segs = (spk.segments || []).map((seg) => ({
-              id: seg.id || "unknown",
-              d: seg.d || 0,
-              duration: seg.duration || 0,
-              isCore: seg.is_core !== undefined ? seg.is_core : true, // ← pass through
-            }));
-            const coreCount = segs.filter((s) => s.isCore).length;
-            return {
-              id: spk.label.replace("SPEAKER_", "S"),
-              label: spk.label,
-              segmentsCount: spk.segmentsCount || 0,
-              health: spk.health || "healthy",
-              color: palette.color,
-              bg: palette.bg,
-              meanDist: spk.meanDist || 0,
-              stdDev: spk.stdDev || 0,
-              minDist: spk.minDist || 0,
-              maxDist: spk.maxDist || 0,
-              coreCount,
-              segments: segs,
-            };
-          });
-          const pairs = (inter.pairwise || []).map((p) => ({
-            from: p.from,
-            to: p.to,
-            distance: p.distance || 0,
-          }));
-          const stats = {
-            mean: inter.meanSeparation || 0,
-            stdDev: inter.stdSeparation || 0,
-            min: inter.minSeparation || 0,
-            max: inter.maxSeparation || 0,
-          };
-          return {
-            speakers,
-            pairs,
-            stats,
-            overallHealth: inter.health || "unhealthy",
-          };
-        }
-
-        // ── helpers ────────────────────────────────────────────────────
-        function barColor(d) {
-          if (d <= 0.3) return "#1D9E75";
-          if (d <= 0.5) return "#EF9F27";
-          return "#E24B4A";
-        }
-
-        function formatDuration(s) {
-          if (!s || s <= 0) return "—";
-          if (s < 1.0) return (s * 1000).toFixed(0) + "ms";
-          if (s < 60) return s.toFixed(1) + "s";
-          return `${Math.floor(s / 60)}m ${(s % 60).toFixed(0)}s`;
-        }
-
-        function badgeClass(health) {
-          return health === "healthy"
-            ? "badge-healthy"
-            : health === "warning"
-              ? "badge-warning"
-              : "badge-unhealthy";
-        }
-
-        // ── separation card ────────────────────────────────────────────
-        function renderSeparationCard(pairs, stats, health) {
-          const mean = stats.mean.toFixed(2);
-          const maxD = Math.max(...pairs.map((p) => p.distance), 1.0);
-          return `
-            <div class="speaker-card" style="margin-bottom: 1.5rem;">
-              <div style="display:flex; align-items:center; gap:10px; margin-bottom:1rem;">
-                <span class="badge ${badgeClass(health)}">${health}</span>
-                <span style="font-size:13px; color:var(--color-text-secondary);">
-                  Mean separation: <strong style="color:var(--color-text-primary);">${mean}</strong>
-                </span>
-                <span style="font-size:13px; color:var(--color-text-secondary); margin-left:auto;">${pairs.length} pairs</span>
-              </div>
-              <div class="grid-4" style="margin-bottom:1rem;">
-                <div class="metric-card"><div class="metric-lbl">Mean</div><div class="metric-val">${mean}</div></div>
-                <div class="metric-card"><div class="metric-lbl">Std dev</div><div class="metric-val">${stats.stdDev.toFixed(2)}</div></div>
-                <div class="metric-card"><div class="metric-lbl">Min</div><div class="metric-val">${stats.min.toFixed(2)}</div></div>
-                <div class="metric-card"><div class="metric-lbl">Max</div><div class="metric-val">${stats.max.toFixed(2)}</div></div>
-              </div>
-              <p class="section-label" style="margin-bottom:8px;">Pairwise distances</p>
-              <div>
-                ${pairs
-                  .map((p) => {
-                    const pct = (p.distance / maxD) * 100;
-                    return `
-                    <div class="pair-row">
-                      <span style="color:var(--color-text-secondary);">${p.from} → ${p.to}</span>
-                      <div style="display:flex; align-items:center; gap:8px;">
-                        <div class="dist-bar-bg" style="width:80px;">
-                          <div class="dist-bar-fill" style="width:${pct}%; background:#1D9E75;"></div>
-                        </div>
-                        <span style="font-size:12px; font-weight:500;">${p.distance.toFixed(2)}</span>
-                      </div>
-                    </div>`;
-                  })
-                  .join("")}
-              </div>
-            </div>`;
-        }
-
-        // ── speaker card ───────────────────────────────────────────────
-        function renderSpeakerCard(speaker, isFullWidth = false) {
-          const total = speaker.segments.length;
-          const core = speaker.coreCount;
-          const outlier = total - core;
-          const purityPct = total > 0 ? Math.round((core / total) * 100) : 100;
-
-          // purity bar — only show when there's a meaningful mix
-          const purityHtml =
-            total > 0
-              ? `
-            <div class="purity-row">
-              <span class="purity-label">Centroid purity</span>
-              <div class="purity-bar-bg">
-                <div class="purity-bar-fill" style="width:${purityPct}%;"></div>
-              </div>
-              <span class="purity-count">${core} core · ${outlier} outlier</span>
-            </div>`
-              : "";
-
-          const maxSegVal = Math.max(...speaker.segments.map((s) => s.d), 0.8);
-          const segmentsHtml = speaker.segments
-            .map((s) => {
-              const widthPct = (s.d / maxSegVal) * 100;
-              const pillClass = s.isCore ? "core" : "outlier";
-              const pillLabel = s.isCore ? "core" : "outlier";
-              return `
-              <div class="seg-row">
-                <span
-                  class="seg-id"
-                  onclick="event.stopPropagation(); window._speakerMetrics.openSegmentDetail('${s.id}')"
-                  title="Open segment details"
-                >${s.id}</span>
-                <span class="seg-duration">${formatDuration(s.duration)}</span>
-                <div class="dist-bar-bg" style="flex:1;">
-                  <div class="dist-bar-fill" style="width:${widthPct.toFixed(1)}%; background:${barColor(s.d)};"></div>
-                </div>
-                <span class="seg-val">${s.d.toFixed(2)}</span>
-                <span class="seg-core-pill ${pillClass}">
-                  <span class="dot"></span>${pillLabel}
-                </span>
-              </div>`;
-            })
-            .join("");
-
-          return `
-            <div class="speaker-card" style="${isFullWidth ? "grid-column:1/-1;" : ""}">
-              <div class="speaker-header">
-                <div class="avatar" style="background:${speaker.bg}; color:${speaker.color};">${speaker.id}</div>
-                <div>
-                  <div class="speaker-name">${speaker.label}</div>
-                  <div class="speaker-meta">${speaker.segmentsCount} segments</div>
-                </div>
-                <span class="badge ${badgeClass(speaker.health)}" style="margin-left:auto;">${speaker.health}</span>
-              </div>
-              <div class="grid-4" style="margin-bottom:12px;">
-                <div class="metric-card"><div class="metric-lbl">Mean dist</div><div class="metric-val" style="font-size:17px;">${speaker.meanDist.toFixed(2)}</div></div>
-                <div class="metric-card"><div class="metric-lbl">Std dev</div><div class="metric-val" style="font-size:17px;">${speaker.stdDev.toFixed(2)}</div></div>
-                <div class="metric-card"><div class="metric-lbl">Min</div><div class="metric-val" style="font-size:17px;">${speaker.minDist.toFixed(2)}</div></div>
-                <div class="metric-card"><div class="metric-lbl">Max</div><div class="metric-val" style="font-size:17px;">${speaker.maxDist.toFixed(2)}</div></div>
-              </div>
-              ${purityHtml}
-              <p class="section-label" style="margin-bottom:6px;">Segment distances</p>
-              <div>${segmentsHtml}</div>
-            </div>`;
-        }
-
-        function renderSpeakersGrid(speakers) {
-          if (speakers.length === 0) {
-            return `<div style="padding:2rem; text-align:center; color:var(--color-text-secondary);">
-              No speakers yet. Process some audio segments first.</div>`;
-          }
-          const firstTwo = speakers.slice(0, 2);
-          const rest = speakers.slice(2);
-          let html = '<div class="grid-2">';
-          firstTwo.forEach((s) => {
-            html += renderSpeakerCard(s, false);
-          });
-          rest.forEach((s) => {
-            html += renderSpeakerCard(s, true);
-          });
-          html += "</div>";
-          return html;
-        }
-
-        // ── main render ────────────────────────────────────────────────
-        async function renderDashboard() {
-          const root = document.getElementById("dashboard-root");
-          root.innerHTML = `
-            <div style="padding:3rem; text-align:center; color:var(--color-text-secondary);">
-              <div style="font-size:18px; margin-bottom:8px;">Loading speaker metrics…</div>
-              <div style="font-size:13px;">Fetching data from server</div>
-            </div>`;
-
-          const apiData = await fetchMetricsData();
-          if (!apiData) {
-            root.innerHTML = `
-              <div style="padding:3rem; text-align:center;">
-                <div style="font-size:18px; margin-bottom:8px; color:var(--color-text-primary);">Unable to load metrics</div>
-                <div style="font-size:13px; color:var(--color-text-secondary);">
-                  The speaker labeler may not be initialized. Process some audio segments first.
-                </div>
-                <button onclick="location.reload()" style="margin-top:1rem;">Retry</button>
-              </div>`;
-            return;
-          }
-
-          const { speakers, pairs, stats, overallHealth } =
-            transformSpeakerData(apiData);
-
-          root.innerHTML = `
-            <h2 class="sr-only">Speaker diarization metrics dashboard</h2>
-            <div style="padding:1rem 0;">
-              <div class="flex-between">
-                <div>
-                  <div style="font-size:18px; font-weight:500; color:var(--color-text-primary);">Speaker metrics</div>
-                  <div style="font-size:13px; color:var(--color-text-secondary); margin-top:2px;">
-                    ${speakers.length} speakers · ${pairs.length} separation pairs
-                    <span style="margin-left:8px; font-size:11px; color:var(--color-text-tertiary);">
-                      (updated: ${apiData.timestamp ? new Date(apiData.timestamp).toLocaleTimeString() : "unknown"})
-                    </span>
-                  </div>
-                </div>
-                <button id="refreshBtn">Refresh ↻</button>
-              </div>
-              <p class="section-label">Inter-speaker separation</p>
-              ${
-                pairs.length > 0
-                  ? renderSeparationCard(pairs, stats, overallHealth)
-                  : `<div class="metric-card" style="text-align:center; padding:2rem; color:var(--color-text-secondary); margin-bottom:1.5rem;">
-                    Need at least 2 speakers for separation metrics</div>`
+        // Add click handlers to toggle segment details
+        document
+          .querySelectorAll(
+            "#intra-table-container tbody tr:not(.segment-detail-row)",
+          )
+          .forEach((row) => {
+            row.style.cursor = "pointer";
+            row.addEventListener("click", function () {
+              const nextRow = this.nextElementSibling;
+              if (nextRow && nextRow.classList.contains("segment-detail-row")) {
+                nextRow.style.display =
+                  nextRow.style.display === "none" ? "" : "none";
               }
-              <p class="section-label">Intra-speaker variance</p>
-              ${renderSpeakersGrid(speakers)}
-            </div>`;
+            });
+          });
+      }
 
-          document
-            .getElementById("refreshBtn")
-            ?.addEventListener("click", renderDashboard);
-          console.log("[SpeakerMetrics] Dashboard rendered");
+      // ── Inter-Speaker ──────────────────────
+      function renderInterSpeaker(inter) {
+        if (!inter) return;
+
+        let html = "";
+
+        // Stats row
+        html += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div><strong>Mean Separation:</strong> ${inter.meanSeparation.toFixed(4)}</div>
+        <div><strong>Std Deviation:</strong> ${inter.stdSeparation.toFixed(4)}</div>
+        <div><strong>Min Separation:</strong> ${inter.minSeparation.toFixed(4)}</div>
+        <div><strong>Max Separation:</strong> ${inter.maxSeparation.toFixed(4)}</div>
+        <div><strong>Health:</strong> <span class="health-badge ${inter.health}">
+            <span class="health-dot ${inter.health}"></span>${inter.health}
+        </span></div>
+    </div>`;
+
+        // Closest pair warning
+        if (inter.closest_pair) {
+          const cp = inter.closest_pair;
+          const alertClass =
+            cp.distance < 0.3
+              ? "unhealthy"
+              : cp.distance < 0.5
+                ? "warning"
+                : "";
+          html += `<div style="margin-bottom: 1rem; padding: 0.75rem; background: rgba(255,152,0,0.1); border-radius: 8px; border-left: 3px solid var(--warning);">
+            <strong>⚠️ Closest Pair:</strong> ${escapeHtml(cp.speaker1)} ↔ ${escapeHtml(cp.speaker2)} 
+            (distance: ${cp.distance.toFixed(4)}, similarity: ${cp.similarity.toFixed(4)})
+            ${alertClass ? `<span class="health-badge ${alertClass}">At Risk</span>` : ""}
+        </div>`;
         }
 
-        window._speakerMetrics = { openSegmentDetail };
-        renderDashboard();
-      })();
+        // Pairwise grid
+        if (inter.pairwise && inter.pairwise.length > 0) {
+          html += '<h3 style="margin-bottom:0.5rem">Pairwise Distances</h3>';
+          html += '<div class="pairwise-grid">';
+          for (const pair of inter.pairwise) {
+            const distClass =
+              pair.distance >= 0.5
+                ? "var(--healthy)"
+                : pair.distance >= 0.3
+                  ? "var(--warning)"
+                  : "var(--unhealthy)";
+            html += `<div class="pairwise-card">
+                <span class="speakers">${escapeHtml(pair.speaker1)} ↔ ${escapeHtml(pair.speaker2)}</span>
+                <span class="distance" style="color:${distClass}">${pair.distance.toFixed(4)}</span>
+            </div>`;
+          }
+          html += "</div>";
+        } else if (inter.num_speakers < 2) {
+          html +=
+            '<div class="empty-state">Need at least 2 speakers for inter-speaker analysis.</div>';
+        }
+
+        document.getElementById("inter-content").innerHTML = html;
+      }
+
+      // ── Segment Groups ─────────────────────
+      function renderSegmentGroups(sg) {
+        if (!sg) return;
+
+        // Stats
+        document.getElementById("segment-stats").innerHTML = `
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem;">
+            <div><strong>Total Segments:</strong> ${sg.totalSegments}</div>
+            <div><strong>Segment Groups:</strong> ${sg.segmentGroupsCount}</div>
+            <div><strong>Outlier Ratio:</strong> ${(sg.outlierRatio * 100).toFixed(1)}%</div>
+            <div><strong>Rejection Rate:</strong> ${(sg.rejectionRate * 100).toFixed(1)}%</div>
+            <div><strong>Label Switches:</strong> ${sg.labelSwitches}</div>
+            <div><strong>Stability:</strong> ${(sg.labelStability * 100).toFixed(1)}%</div>
+            <div><strong>Health:</strong> <span class="health-badge ${sg.health}">
+                <span class="health-dot ${sg.health}"></span>${sg.health}
+            </span></div>
+        </div>`;
+
+        // Match type distribution
+        if (
+          sg.matchTypeDistribution &&
+          Object.keys(sg.matchTypeDistribution).length > 0
+        ) {
+          let distHtml =
+            '<div style="margin-top:1rem"><strong>Match Type Distribution:</strong> ';
+          for (const [type, count] of Object.entries(
+            sg.matchTypeDistribution,
+          )) {
+            distHtml += `<span style="margin-left:0.5rem; padding:0.2rem 0.5rem; background:rgba(255,255,255,0.05); border-radius:4px; font-size:0.8rem;">
+                ${escapeHtml(type)}: ${count}
+            </span>`;
+          }
+          distHtml += "</div>";
+          document.getElementById("segment-stats").innerHTML += distHtml;
+        }
+
+        // Timeline
+        const timeline = document.getElementById("timeline");
+        if (sg.timeline && sg.timeline.length > 0) {
+          let tlHtml = "";
+          for (const item of sg.timeline.slice(-100)) {
+            // Show last 100 items
+            const dotClass = item.matchType || "unknown";
+            tlHtml += `<div class="timeline-item">
+                <span class="timeline-dot ${dotClass}" title="${escapeHtml(item.matchType)}"></span>
+                <span style="color:var(--text-dim); min-width:50px;">${item.timestamp.toFixed(1)}s</span>
+                <span style="flex:1;">${escapeHtml(item.primaryLabel)}</span>
+                <span style="font-size:0.7rem; color:var(--text-dim);">${escapeHtml(item.matchType)}</span>
+                ${item.isOutlier ? '<span class="health-badge unhealthy" style="font-size:0.6rem;">OUTLIER</span>' : ""}
+            </div>`;
+          }
+          timeline.innerHTML = tlHtml;
+          timeline.scrollTop = timeline.scrollHeight; // Auto-scroll to latest
+        } else {
+          timeline.innerHTML =
+            '<div class="empty-state">No timeline data available.</div>';
+        }
+      }
+
+      // ── Outliers ───────────────────────────
+      function renderOutliers(outliers) {
+        if (!outliers) return;
+
+        let html = "";
+
+        if (!outliers.enabled) {
+          html = '<div class="empty-state">Outlier buffer is disabled.</div>';
+          document.getElementById("outlier-content").innerHTML = html;
+          return;
+        }
+
+        // Stats
+        html += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div><strong>Active Outliers:</strong> ${outliers.activeCount}</div>
+        <div><strong>Total Promotions:</strong> ${outliers.totalPromotions}</div>
+        <div><strong>Promotion Threshold:</strong> ${outliers.promotionThreshold?.toFixed(3) || "N/A"}</div>
+        <div><strong>TTL:</strong> ${outliers.ttl || "N/A"}s</div>
+        <div><strong>Health:</strong> <span class="health-badge ${outliers.health}">
+            <span class="health-dot ${outliers.health}"></span>${outliers.health}
+        </span></div>
+    </div>`;
+
+        // Active outlier cards
+        if (outliers.outlierDetails && outliers.outlierDetails.length > 0) {
+          html += '<h3 style="margin-bottom:0.5rem">Active Outliers</h3>';
+          html += '<div class="outlier-list">';
+          for (const o of outliers.outlierDetails) {
+            const isExpiring = o.age > (outliers.ttl || 60) * 0.8;
+            html += `<div class="outlier-card ${isExpiring ? "expiring" : ""}">
+                <div><strong>${escapeHtml(o.label)}</strong></div>
+                <div>Age: <span class="age">${o.age.toFixed(1)}s</span> ${isExpiring ? "⚠️ Expiring" : ""}</div>
+                <div style="font-size:0.75rem; color:var(--text-dim);">
+                    Segment: ${escapeHtml(o.segmentId).substring(0, 25)}<br>
+                    Match attempts: ${o.matchAttempts}<br>
+                    Duration: ${o.audioDuration.toFixed(2)}s
+                </div>
+            </div>`;
+          }
+          html += "</div>";
+        } else {
+          html += '<div class="empty-state">No active outliers.</div>';
+        }
+
+        // Promotion history
+        if (outliers.promotionHistory && outliers.promotionHistory.length > 0) {
+          html +=
+            '<h3 style="margin-top:1.5rem; margin-bottom:0.5rem;">Recent Promotions</h3>';
+          html +=
+            "<table><thead><tr><th>Type</th><th>Outliers</th><th>Target</th><th>Confidence</th></tr></thead><tbody>";
+          for (const p of outliers.promotionHistory) {
+            html += `<tr>
+                <td><span style="padding:0.15rem 0.4rem; border-radius:4px; font-size:0.75rem; background:rgba(156,39,176,0.2);">${escapeHtml(p.type)}</span></td>
+                <td>${(p.outliers || []).map(escapeHtml).join(", ")}</td>
+                <td><strong>${escapeHtml(p.target)}</strong></td>
+                <td>${(p.confidence || 0).toFixed(3)}</td>
+            </tr>`;
+          }
+          html += "</tbody></table>";
+        }
+
+        document.getElementById("outlier-content").innerHTML = html;
+      }
+
+      // ── Utility Functions ──────────────────
+      function toggleSection(header) {
+        header.parentElement.classList.toggle("collapsed");
+      }
+
+      function switchTab(tabName) {
+        // Update tab buttons
+        document
+          .querySelectorAll(".tab-btn")
+          .forEach((btn) => btn.classList.remove("active"));
+        document
+          .querySelector(`.tab-btn[onclick="switchTab('${tabName}')"]`)
+          ?.classList.add("active");
+
+        // Update tab content
+        document
+          .querySelectorAll(".tab-content")
+          .forEach((tab) => tab.classList.remove("active"));
+        document.getElementById(`tab-${tabName}`)?.classList.add("active");
+      }
+
+      function showError(message) {
+        const errorHtml = `<div class="error-message">⚠️ Error loading metrics: ${escapeHtml(message)}</div>`;
+        document.querySelectorAll(".section-body").forEach((el) => {
+          if (el.querySelector(".loading")) {
+            el.innerHTML = errorHtml;
+          }
+        });
+      }
+
+      function escapeHtml(str) {
+        if (str == null) return "";
+        const div = document.createElement("div");
+        div.textContent = str;
+        return div.innerHTML;
+      }
+
+      // ── Cleanup on page unload ─────────────
+      window.addEventListener("beforeunload", () => {
+        if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+      });
     </script>
   </body>
 </html>

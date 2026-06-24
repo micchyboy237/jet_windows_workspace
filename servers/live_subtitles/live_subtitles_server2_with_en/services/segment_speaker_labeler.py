@@ -1,148 +1,92 @@
 # servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py
 
 """Progressive segment speaker labeling with dynamic reference maintenance."""
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, TypedDict, Union
+import uuid
+from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import torch
-import uuid
 from rich.console import Console
 from scipy.spatial.distance import cdist
 try:
     from services.audio_config import SAMPLE_RATE
-    from services.embedding_model_factory import BaseEmbeddingModel
+    from services.embedding_model_factory import BaseEmbeddingModel, EmbeddingThresholdProvider
     from services.speaker_metrics_mixin import SpeakerMetricsMixin
-    # from services.speech_waves import extract_pure_speech_audio
     from services.audio_tagger import AudioTagger
+    from services.speaker_labeler_utils.speaker_reference import SpeakerReference, SpeakerSegmentInfo
+    from services.speaker_labeler_utils.segment_types import SegmentMatch, SegmentGroup, SegmentGroupsResult
+    from services.speaker_labeler_utils.outlier_pool import (
+        OutlierPool,
+        OutlierEntry,
+        OutlierMatch,
+        DEFAULT_OUTLIER_PREFIX,
+        DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
+        DEFAULT_OUTLIER_TTL,
+    )
+    from services.speaker_labeler_utils.segment_speaker_labeler_defaults import (
+        DEFAULT_THRESHOLD_SAME,
+        DEFAULT_THRESHOLD_POSSIBLE,
+        DEFAULT_THRESHOLD_NEW_SPEAKER,
+        DEFAULT_MIN_SEGMENTS_FOR_REFERENCE,
+        DEFAULT_MAX_EMBEDDINGS_PER_SPEAKER,
+        DEFAULT_TEMPORAL_SMOOTHING_WINDOW,
+        DEFAULT_TOP_K_SPEAKERS,
+        DEFAULT_MIN_SIMILARITY_FOR_LIST,
+        DEFAULT_CONSOLIDATION_THRESHOLD,
+        DEFAULT_MATURE_SEGMENT_COUNT,
+        DEFAULT_YOUNG_SEGMENT_COUNT,
+        DEFAULT_USE_SPEECH_WAVE_FILTERING,
+        DEFAULT_MIN_PROMINENCE,
+        DEFAULT_MIN_EXCURSION,
+        DEFAULT_MIN_PEAK_PROB,
+        DEFAULT_MIN_FRAMES,
+        DEFAULT_MIN_DURATION_SEC,
+        DEFAULT_BASELINE_THRESHOLD,
+        DEFAULT_MIN_SIMILARITY_TO_UPDATE,
+    )
+    from services.speaker_labeler_utils.speaker_maintenance import SpeakerMaintenance
+    from services.speaker_labeler_utils.outlier_orchestrator import OutlierOrchestrator
+    from services.speaker_labeler_utils.speaker_labeler_serializer import SpeakerLabelerSerializer
 except ImportError:
     from audio_config import SAMPLE_RATE
-    from embedding_model_factory import BaseEmbeddingModel
+    from embedding_model_factory import BaseEmbeddingModel, EmbeddingThresholdProvider
     from speaker_metrics_mixin import SpeakerMetricsMixin
-    # from speech_waves import extract_pure_speech_audio
     from audio_tagger import AudioTagger
+    from speaker_labeler_utils.speaker_reference import SpeakerReference, SpeakerSegmentInfo
+    from speaker_labeler_utils.segment_types import SegmentMatch, SegmentGroup, SegmentGroupsResult
+    from speaker_labeler_utils.outlier_pool import (
+        OutlierPool,
+        OutlierEntry,
+        OutlierMatch,
+        DEFAULT_OUTLIER_PREFIX,
+        DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
+        DEFAULT_OUTLIER_TTL,
+    )
+    from speaker_labeler_utils.segment_speaker_labeler_defaults import (
+        DEFAULT_THRESHOLD_SAME,
+        DEFAULT_THRESHOLD_POSSIBLE,
+        DEFAULT_THRESHOLD_NEW_SPEAKER,
+        DEFAULT_MIN_SEGMENTS_FOR_REFERENCE,
+        DEFAULT_MAX_EMBEDDINGS_PER_SPEAKER,
+        DEFAULT_TEMPORAL_SMOOTHING_WINDOW,
+        DEFAULT_TOP_K_SPEAKERS,
+        DEFAULT_MIN_SIMILARITY_FOR_LIST,
+        DEFAULT_CONSOLIDATION_THRESHOLD,
+        DEFAULT_MATURE_SEGMENT_COUNT,
+        DEFAULT_YOUNG_SEGMENT_COUNT,
+        DEFAULT_USE_SPEECH_WAVE_FILTERING,
+        DEFAULT_MIN_PROMINENCE,
+        DEFAULT_MIN_EXCURSION,
+        DEFAULT_MIN_PEAK_PROB,
+        DEFAULT_MIN_FRAMES,
+        DEFAULT_MIN_DURATION_SEC,
+        DEFAULT_BASELINE_THRESHOLD,
+        DEFAULT_MIN_SIMILARITY_TO_UPDATE,
+    )
+    from speaker_labeler_utils.speaker_maintenance import SpeakerMaintenance
+    from speaker_labeler_utils.outlier_orchestrator import OutlierOrchestrator
+    from speaker_labeler_utils.speaker_labeler_serializer import SpeakerLabelerSerializer
 
 console = Console()
-
-# Threshold constants remain the same
-DEFAULT_THRESHOLD_SAME: float = 0.75
-DEFAULT_THRESHOLD_POSSIBLE: float = 0.5
-DEFAULT_THRESHOLD_NEW_SPEAKER: float = 0.3
-DEFAULT_MIN_SEGMENTS_FOR_REFERENCE: int = 2
-DEFAULT_MAX_EMBEDDINGS_PER_SPEAKER: int = 50
-DEFAULT_TEMPORAL_SMOOTHING_WINDOW: float = 3.0
-DEFAULT_TOP_K_SPEAKERS: int = 3
-DEFAULT_MIN_SIMILARITY_FOR_LIST: float = 0.15
-DEFAULT_CONSOLIDATION_THRESHOLD: float = 0.80
-DEFAULT_MATURE_SEGMENT_COUNT: int = 5
-DEFAULT_YOUNG_SEGMENT_COUNT: int = 2
-DEFAULT_USE_SPEECH_WAVE_FILTERING: bool = True
-DEFAULT_MIN_PROMINENCE: float = 0.05
-DEFAULT_MIN_EXCURSION: float = 0.04
-DEFAULT_MIN_PEAK_PROB: float = 0.9
-DEFAULT_MIN_FRAMES: int = 100
-DEFAULT_MIN_DURATION_SEC: float = 0.25
-DEFAULT_BASELINE_THRESHOLD: float = 0.1
-DEFAULT_MIN_SIMILARITY_TO_UPDATE: float = 0.25  # NEW: Minimum similarity to update centroid
-
-
-class SpeakerSegmentInfo(TypedDict):
-    label: str
-    segment_count: int
-    first_seen: float
-    last_seen: float
-    active_duration: float
-    has_valid_centroid: bool
-    centroid_quality: float
-    centroid_shape: Optional[List[int]]
-    embedding_count: int
-    embeddings: List[List[float]]  # each embedding as flat list
-
-
-@dataclass
-class SpeakerReference:
-    """Maintains reference data for a single speaker."""
-    label: str
-    all_embeddings: List[np.ndarray] = field(default_factory=list)   # full history
-    core_embeddings: List[np.ndarray] = field(default_factory=list)  # centroid-only
-    embedding_metadata: List[Dict] = field(default_factory=list)
-    centroid: Optional[np.ndarray] = None
-    first_seen: Optional[float] = None
-    last_seen: float = 0.0
-    segment_count: int = 0
-
-    def add_embedding(
-        self,
-        embedding: np.ndarray,
-        timestamp: float,
-        segment_id: Optional[str] = None,
-        audio_duration: float = 0.0,
-        is_core: bool = True,           # ← new param
-    ) -> None:
-        if embedding.ndim == 1:
-            embedding = embedding.reshape(1, -1)
-
-        self.all_embeddings.append(embedding)
-        self.embedding_metadata.append({
-            'segment_id': segment_id or f"unknown_{len(self.all_embeddings)}",
-            'timestamp': timestamp,
-            'index': len(self.all_embeddings) - 1,
-            'added_at': timestamp,
-            'audio_duration': audio_duration,
-            'is_core': is_core,          # ← stored in meta for metrics UI
-        })
-        self.segment_count += 1
-
-        if is_core:
-            self.core_embeddings.append(embedding)
-
-        # Centroid uses ONLY core embeddings
-        self._recompute_centroid()
-
-        if self.first_seen is None:
-            self.first_seen = timestamp
-        if timestamp > self.last_seen:
-            self.last_seen = timestamp
-
-    def _recompute_centroid(self) -> None:
-        """Recompute centroid from core_embeddings only."""
-        src = self.core_embeddings if self.core_embeddings else self.all_embeddings
-        if not src:
-            return
-        stacked = np.vstack(src)
-        if len(src) >= 3:
-            self.centroid = np.median(stacked, axis=0, keepdims=True)
-        else:
-            self.centroid = np.mean(stacked, axis=0, keepdims=True)
-
-    # Keep .embeddings as a backward-compat alias
-    @property
-    def embeddings(self) -> List[np.ndarray]:
-        return self.all_embeddings
-
-    @property
-    def active_duration(self) -> float:
-        """Total active duration of this speaker."""
-        if self.first_seen is None:
-            return 0.0
-        return self.last_seen - self.first_seen
-    
-    @property
-    def has_valid_centroid(self) -> bool:
-        """Check if centroid is valid."""
-        return self.centroid is not None and not np.any(np.isnan(self.centroid))
-    
-    @property
-    def centroid_quality(self) -> float:
-        """Estimate centroid quality based on segment count (0.0 to 1.0)."""
-        if self.segment_count >= 10:
-            return 1.0
-        elif self.segment_count >= 5:
-            return 0.8
-        elif self.segment_count >= 3:
-            return 0.6
-        else:
-            return 0.3
-
 
 class SegmentSpeakerLabeler(SpeakerMetricsMixin):
     """Dynamically labels speaker segments with progressive reference building.
@@ -182,9 +126,9 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
     def __init__(
         self,
         embedding_model: BaseEmbeddingModel,
-        threshold_same: float = DEFAULT_THRESHOLD_SAME,
-        threshold_possible: float = DEFAULT_THRESHOLD_POSSIBLE,
-        threshold_new_speaker: float = DEFAULT_THRESHOLD_NEW_SPEAKER,
+        threshold_same: Optional[float] = DEFAULT_THRESHOLD_SAME,
+        threshold_possible: Optional[float] = DEFAULT_THRESHOLD_POSSIBLE,
+        threshold_new_speaker: Optional[float] = DEFAULT_THRESHOLD_NEW_SPEAKER,
         min_segments_for_reference: int = DEFAULT_MIN_SEGMENTS_FOR_REFERENCE,
         mature_segment_count: int = DEFAULT_MATURE_SEGMENT_COUNT,
         young_segment_count: int = DEFAULT_YOUNG_SEGMENT_COUNT,
@@ -204,12 +148,28 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         young_merge_threshold: float = 0.65,  # Higher threshold for young merges
         min_speaker_age_for_merge: float = 15.0,  # Min seconds before merging
         audio_tagger: AudioTagger | None = None,  # NEW: Enable pure speech extraction
+
+        # NEW: Outlier management
+        use_outlier_buffer: bool = True,
+        outlier_pool: Optional[OutlierPool] = None,  # Can inject custom pool
+        outlier_promotion_threshold: float = DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
+        outlier_ttl: float = DEFAULT_OUTLIER_TTL,
+
         debug: bool = False,
     ):
         self.embedding_model = embedding_model
-        self.threshold_same = threshold_same
-        self.threshold_possible = threshold_possible
-        self.threshold_new_speaker = threshold_new_speaker
+        
+        # Resolve thresholds: use provided values or auto-select from model type
+        resolved = EmbeddingThresholdProvider.resolve_thresholds(
+            model_type=embedding_model.model_type,
+            threshold_same=threshold_same,
+            threshold_possible=threshold_possible,
+            threshold_new_speaker=threshold_new_speaker,
+        )
+        self.threshold_same = resolved.same
+        self.threshold_possible = resolved.possible
+        self.threshold_new_speaker = resolved.new_speaker
+
         self.min_segments_for_reference = min_segments_for_reference
         self.mature_segment_count = mature_segment_count
         self.young_segment_count = young_segment_count
@@ -244,6 +204,37 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         self._merge_history: List[Dict] = []  # NEW: Track all merges
 
         self.audio_tagger = audio_tagger
+
+        # NEW: Outlier pool integration
+        self.use_outlier_buffer = use_outlier_buffer
+        if outlier_pool is not None:
+            self.outlier_pool = outlier_pool
+        else:
+            self.outlier_pool = OutlierPool(
+                prefix=DEFAULT_OUTLIER_PREFIX,
+                promotion_threshold=outlier_promotion_threshold,
+                ttl=outlier_ttl,
+                debug=debug,
+            )
+
+        # NEW: Internal segment storage
+        self._segment_groups: List[Dict] = []
+        """Internal storage for all processed segments with their matches."""
+        
+        self._labels_finalized: bool = False
+        """Whether finalize_labels() has been called."""
+
+        self._maintenance = SpeakerMaintenance(
+            labeler=self,
+            young_merge_threshold=young_merge_threshold,
+            min_speaker_age_for_merge=min_speaker_age_for_merge,
+            debug=debug,
+        )
+        self._outlier_orchestrator = OutlierOrchestrator(
+            labeler=self,
+            debug=debug,
+        )
+        self._serializer = SpeakerLabelerSerializer(labeler=self)
 
     @property
     def known_speakers(self) -> List[str]:
@@ -714,328 +705,32 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         return f"{prefix}_{uuid_short}"
 
     def _get_speaker_categories(self) -> Dict[str, Dict]:
-        """Categorize speakers by reliability for maintenance decisions.
-        
-        Categories:
-        - mature: segment_count >= mature_segment_count (default: 5+)
-        - young: segment_count <= young_segment_count (default: 1-2)
-        - orphan: young speakers inactive > temporal_smoothing_window
-        - active_young: 3-4 segments OR young but recently active
-        - newborn: speakers created within min_speaker_age_for_merge
-        """
-        now = max((ref.last_seen for ref in self._speakers.values()), default=0.0)
-        mature = {}
-        young = {}
-        orphan = {}
-        active_young = {}
-        newborn = {}  # NEW category
-        
-        for label, ref in self._speakers.items():
-            if not ref.has_valid_centroid:
-                continue
-            
-            # NEW: Check if speaker is too new to merge
-            creation_time = self._speaker_creation_times.get(label, 0.0)
-            speaker_age = now - creation_time
-            
-            if speaker_age < self.min_speaker_age_for_merge:
-                newborn[label] = ref
-                continue  # Skip all other categorization for newborns
-            
-            if ref.segment_count >= self.mature_segment_count:
-                mature[label] = ref
-            elif ref.segment_count <= self.young_segment_count:
-                young[label] = ref
-                time_since_last_seen = now - ref.last_seen
-                if time_since_last_seen > self.temporal_smoothing_window:
-                    orphan[label] = ref
-                else:
-                    active_young[label] = ref
-            else:
-                active_young[label] = ref
-        
-        return {
-            "mature": mature,
-            "young": young,
-            "orphan": orphan,
-            "active_young": active_young,
-            "newborn": newborn,  # NEW
-        }
+        return self._maintenance.get_speaker_categories()
 
     def _should_run_maintenance(self, just_created_speaker: bool = False) -> bool:
-        """Determine if speaker maintenance should run based on actual need.
-        
-        FIXED: More conservative triggering to prevent premature merging.
-        """
-        categories = self._get_speaker_categories()
-        mature_count = len(categories["mature"])
-        young_count = len(categories["young"])
-        orphan_count = len(categories["orphan"])
-        newborn_count = len(categories["newborn"])  # NEW
-        total_count = len(self._speakers)
-        
-        if total_count < 2:
-            return False
-        
-        # FIXED: Don't run immediately when 3rd speaker created
-        # Only run if there are actual problems
-        if just_created_speaker and total_count >= 3:
-            # Only run if we have orphans or too many young speakers
-            if orphan_count >= 2 or young_count >= 4:
-                return True
-            return False  # FIXED: Don't run just because 3rd speaker was created
-        
-        if orphan_count >= 3:
-            return True
-        
-        # FIXED: More conservative ratio check
-        if mature_count > 0 and young_count > mature_count * 2:  # Changed from 1x to 2x
-            return True
-        
-        if young_count >= 5:
-            return True
-        
-        # FIXED: Don't count newborns in the check
-        if total_count >= 8 and young_count >= 3:
-            return True
-        
-        return False
+        return self._maintenance.should_run_maintenance(just_created_speaker)
 
     def run_smart_maintenance(
         self, timestamp: float, just_created_speaker: bool = False
     ) -> Dict:
-        """Run targeted speaker maintenance only when needed."""
-        if not self._should_run_maintenance(just_created_speaker):
-            return {
-                "run": False,
-                "reason": "no_need",
-            }
-
-        categories = self._get_speaker_categories()
-        if self.debug:
-            console.print(
-                f"[dim]🔧 Maintenance triggered: "
-                f"mature={len(categories['mature'])}, "
-                f"young={len(categories['young'])}, "
-                f"orphan={len(categories['orphan'])}[/dim]"
-            )
-
-        results = {
-            "run": True,
-            "orphans_removed": 0,
-            "young_merged": [],
-            "mature_merged": [],
-            "speakers_before": len(self._speakers),
-            "speakers_after": len(self._speakers),
-        }
-
-        # Clean up orphan speakers
-        if len(categories["orphan"]) > 0:
-            removed = self._cleanup_orphan_speakers(timestamp)
-            results["orphans_removed"] = removed
-
-        # Re-evaluate young speakers against mature ones
-        if len(categories["young"]) > 0 and len(categories["mature"]) > 0:
-            reeval = self.reevaluate_young_speakers(
-                min_segments_for_mature=self.mature_segment_count,
-                max_segments_for_young=self.young_segment_count,
-                merge_threshold=0.50,
-                dry_run=False,
-            )
-            results["young_merged"] = reeval.get("merges_performed", [])
-
-        # Consolidate mature speakers if too many
-        if len(self._speakers) > 5:
-            consol = self.consolidate_speakers(
-                threshold=self.consolidation_threshold,
-                dry_run=False,
-            )
-            results["mature_merged"] = consol.get("merges_performed", [])
-
-        results["speakers_after"] = len(self._speakers)
-
-        if self.debug and results["speakers_before"] != results["speakers_after"]:
-            console.print(
-                f"[green]🔧 Maintenance: "
-                f"{results['speakers_before']} → {results['speakers_after']} speakers "
-                f"(removed {results['orphans_removed']} orphans, "
-                f"merged {len(results['young_merged'])} young, "
-                f"merged {len(results['mature_merged'])} mature)[/green]"
-            )
-
-        return results
+        return self._maintenance.run_smart_maintenance(timestamp, just_created_speaker)
 
     def _cleanup_orphan_speakers(self, current_timestamp: float) -> int:
-        """Remove or merge orphan speakers.
-        
-        FIXED: More conservative cleanup with newborn protection.
-        """
-        removed = 0
-        categories = self._get_speaker_categories()
-        newborn_labels = set(categories.get("newborn", {}).keys())
-        
-        labels_to_check = list(self._speakers.keys())
-        for label in labels_to_check:
-            if label not in self._speakers:
-                continue
-            
-            # FIXED: Never remove newborns
-            if label in newborn_labels:
-                if self.debug:
-                    console.print(
-                        f"[dim]🔒 Protecting newborn {label} from cleanup[/dim]"
-                    )
-                continue
-            
-            ref = self._speakers[label]
-            time_since_last_seen = current_timestamp - ref.last_seen
-            
-            # FIXED: Only cleanup if truly orphaned (low segments AND long inactive)
-            if (
-                ref.segment_count <= self.young_segment_count
-                and time_since_last_seen > self.temporal_smoothing_window * 3  # FIXED: 3x instead of 2x
-            ):
-                if ref.has_valid_centroid and len(self._speakers) > 1:
-                    best_match, best_score, _ = self.find_best_match(ref.centroid)
-                    # FIXED: Higher threshold for orphan merges
-                    if best_match and best_match != label and best_score > 0.60:  # FIXED: 0.60 instead of 0.50
-                        if self.debug:
-                            console.print(
-                                f"[yellow]Orphan merge: {label} → {best_match} "
-                                f"(sim={best_score:.3f})[/]"
-                            )
-                        self.merge_speakers(best_match, label)
-                        self._merge_history.append({
-                            "type": "orphan_merge",
-                            "source": label,
-                            "target": best_match,
-                            "similarity": best_score,
-                            "timestamp": current_timestamp,
-                        })
-                        removed += 1
-                    elif ref.segment_count == 1 and time_since_last_seen > 30.0:  # FIXED: 30s instead of 10s
-                        if self.debug:
-                            console.print(f"[dim]Orphan remove: {label} (inactive {time_since_last_seen:.1f}s)[/]")
-                        del self._speakers[label]
-                        self._speaker_creation_times.pop(label, None)  # Clean up creation time
-                        removed += 1
-        return removed
+        return self._maintenance.cleanup_orphan_speakers(current_timestamp)
 
     def reevaluate_young_speakers(
         self,
         min_segments_for_mature: int = 5,
         max_segments_for_young: int = 2,
-        merge_threshold: float = None,  # FIXED: Use instance default if None
+        merge_threshold: float = None,
         dry_run: bool = False,
     ) -> Dict:
-        """Re-evaluate young speakers against mature speakers.
-        
-        FIXED: Higher merge threshold and newborn protection.
-        
-        Checks if young speakers (≤ max_segments_for_young) are actually
-        the same as existing mature speakers (≥ min_segments_for_mature).
-        """
-        # FIXED: Use instance threshold if not specified
-        if merge_threshold is None:
-            merge_threshold = self.young_merge_threshold
-        
-        categories = self._get_speaker_categories()
-        
-        mature_speakers = {}
-        young_speakers = {}
-        
-        for label, ref in self._speakers.items():
-            if not ref.has_valid_centroid:
-                continue
-            
-            # FIXED: Skip newborns
-            if label in categories.get("newborn", {}):
-                if self.debug:
-                    console.print(
-                        f"[dim]🔒 Skipping newborn {label} "
-                        f"(age={self._speaker_creation_times.get(label, 0):.1f}s)[/dim]"
-                    )
-                continue
-            
-            if ref.segment_count >= min_segments_for_mature:
-                mature_speakers[label] = ref
-            elif ref.segment_count <= max_segments_for_young:
-                young_speakers[label] = ref
-        
-        if not mature_speakers or not young_speakers:
-            return {
-                "merges_performed": [],
-                "speakers_checked": len(young_speakers),
-                "mature_speakers": len(mature_speakers),
-                "newborn_skipped": len(categories.get("newborn", {})),  # NEW
-                "dry_run": dry_run,
-            }
-        
-        mature_labels = list(mature_speakers.keys())
-        mature_centroids = np.vstack([ref.centroid for ref in mature_speakers.values()])
-        
-        merges_to_perform = []
-        for young_label, young_ref in young_speakers.items():
-            distances = cdist(young_ref.centroid, mature_centroids, metric="cosine")
-            similarities = 1.0 - distances.flatten()
-            best_idx = np.argmax(similarities)
-            best_similarity = float(similarities[best_idx])
-            best_mature_label = mature_labels[best_idx]
-            
-            # FIXED: Use the higher merge threshold
-            if best_similarity >= merge_threshold:
-                merges_to_perform.append(
-                    {
-                        "young_speaker": young_label,
-                        "mature_speaker": best_mature_label,
-                        "similarity": round(best_similarity, 4),
-                        "young_segments": young_ref.segment_count,
-                        "mature_segments": mature_speakers[
-                            best_mature_label
-                        ].segment_count,
-                    }
-                )
-                if self.debug:
-                    console.print(
-                        f"[yellow]🔍 Re-eval MERGE: {young_label} "
-                        f"({young_ref.segment_count} segs) → "
-                        f"{best_mature_label} "
-                        f"({mature_speakers[best_mature_label].segment_count} segs) "
-                        f"sim={best_similarity:.3f} (threshold={merge_threshold})[/yellow]"
-                    )
-            elif self.debug:
-                # NEW: Log why merge was rejected
-                console.print(
-                    f"[dim]🔍 Re-eval KEEP: {young_label} "
-                    f"({young_ref.segment_count} segs) vs "
-                    f"{best_mature_label} "
-                    f"sim={best_similarity:.3f} < {merge_threshold}[/dim]"
-                )
-        
-        if not dry_run:
-            for merge_info in merges_to_perform:
-                self.merge_speakers(
-                    merge_info["mature_speaker"], merge_info["young_speaker"]
-                )
-                # NEW: Log merge for debugging
-                self._merge_history.append({
-                    "type": "young_reeval",
-                    "source": merge_info["young_speaker"],
-                    "target": merge_info["mature_speaker"],
-                    "similarity": merge_info["similarity"],
-                    "timestamp": max(ref.last_seen for ref in self._speakers.values() if ref.label == merge_info["mature_speaker"]),
-                })
-        
-        return {
-            "merges_performed": [
-                (m["young_speaker"], m["mature_speaker"], m["similarity"])
-                for m in merges_to_perform
-            ],
-            "speakers_checked": len(young_speakers),
-            "mature_speakers": len(mature_speakers),
-            "newborn_skipped": len(categories.get("newborn", {})),  # NEW
-            "dry_run": dry_run,
-        }
+        return self._maintenance.reevaluate_young_speakers(
+            min_segments_for_mature=min_segments_for_mature,
+            max_segments_for_young=max_segments_for_young,
+            merge_threshold=merge_threshold,
+            dry_run=dry_run,
+        )
 
     def _should_create_new_speaker(
         self,
@@ -1044,39 +739,9 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         context: Optional[Dict],
         embedding: np.ndarray,
     ) -> bool:
-        """Determine if we should create a new speaker."""
-        if len(self._speakers) == 0:
-            return True
-
-        if not top_matches:
-            return True
-
-        best_match = top_matches[0]
-        match_type = best_match["match_type"]
-        confidence = best_match["confidence"]
-
-        if match_type in ("strong_match", "early_match"):
-            return False
-
-        if match_type == "possible_match":
-            return False
-
-        if confidence < self.threshold_new_speaker:
-            if context and "previous_speaker" in context:
-                prev_speaker = context["previous_speaker"]
-                if prev_speaker and prev_speaker in self._speakers:
-                    for match in top_matches:
-                        if (
-                            match["label"] == prev_speaker
-                            and match["confidence"] >= self.threshold_possible
-                        ):
-                            return False
-            return True
-
-        if best_score < self.threshold_new_speaker:
-            return True
-
-        return False
+        return self._outlier_orchestrator.should_create_new_speaker(
+            best_score, top_matches, context, embedding
+        )
 
     def _deduplicate_results(self, results: List[Dict]) -> List[Dict]:
         """Remove duplicate speaker labels, keeping the highest confidence entry.
@@ -1127,8 +792,11 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         context: Optional[Dict] = None,
         top_k: Optional[int] = None,
         segment_id: Optional[str] = None,
-    ) -> List[Dict]:
-        """Label a speech segment with multiple possible speaker identities.
+    ) -> List[SegmentGroup]:
+        """Label a speech segment and return ALL processed segments with resolved labels.
+        
+        Each call adds the new segment internally, resolves any OUTLIER_XX → SPEAKER_XX
+        retroactively, and returns the complete segment history.
         
         Parameters
         ----------
@@ -1143,239 +811,102 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         top_k : int, optional
             Number of top matches to return.
         segment_id : str, optional
-            External segment identifier. If not provided, one will be generated
-            automatically using UUID. This allows callers to maintain their own
-            segment tracking system.
-            
+            External segment identifier. Auto-generated if not provided.
+        
         Returns
         -------
-        list of dict
-            List of speaker matches with confidence scores and segment_id.
-            
-        Notes
-        -----
-        FIXED: When centroid contamination protection rejects an update and creates
-        a new speaker, it now passes the original segment_id to create_new_speaker()
-        instead of letting it auto-generate a new one. This preserves the external
-        segment ID throughout the pipeline.
+        List[Dict]
+            ALL processed segment groups with resolved labels. Each group has:
+            - timestamp: float
+            - audio_duration: float
+            - matches: List[Dict] with label, confidence, match_type, etc.
+            OUTLIER_XX labels are retroactively replaced with SPEAKER_XX when
+            promotions occur.
         """
         self.total_segments_processed += 1
+        
         if segment_id is None:
             segment_id = self._generate_segment_id()
         if top_k is None:
             top_k = self.top_k_speakers
-
+        
+        # Extract speech and compute embedding
         waveform, was_filtered = self._extract_speech_audio(waveform=waveform)
-
-        # Calculate actual audio duration
         if isinstance(waveform, torch.Tensor):
             audio_duration = waveform.shape[-1] / sample_rate if waveform.dim() > 0 else 0.0
         else:
             audio_duration = len(waveform) / sample_rate
-
+        
         embedding = self.compute_embedding(waveform, sample_rate)
         
         if self.debug:
             console.print(
-                f"[dim]Embedding shape: {embedding.shape}, "
-                f"ndim: {embedding.ndim}, "
-                f"segment_id: {segment_id}[/]"
+                f"[dim]Embedding: shape={embedding.shape}, "
+                f"segment_id={segment_id}, "
+                f"speakers={self.speaker_count}, "
+                f"outliers={self.outlier_pool.count}[/]"
             )
-
+        
+        # Find matches among existing speakers
         top_matches = self.find_top_k_matches(embedding, k=top_k)
         
-        if self.debug:
-            console.print(
-                f"[dim]Computed embedding for t={timestamp:.2f}s, "
-                f"segment_id={segment_id}, "
-                f"got {len(top_matches)} top matches[/]"
-            )
-
         actual_best_score = 0.0
         if len(self._speakers) > 0:
             _, actual_best_score, _ = self.find_best_match(embedding)
-
-        should_create = self._should_create_new_speaker(
-            actual_best_score, top_matches, context, embedding
-        )
         
-        if self.debug:
-            console.print(
-                f"[dim]Actual best score: {actual_best_score:.4f}, "
-                f"should_create_new_speaker: {should_create}[/]"
-            )
-
-        results = []
-        seen_labels = set()
         just_created_speaker = False
-
-        if should_create or not top_matches:
-            new_label = self.create_new_speaker(
+        
+        if self.use_outlier_buffer:
+            results, just_created_speaker = self._label_with_outlier_buffer(
                 embedding=embedding,
+                top_matches=top_matches,
+                actual_best_score=actual_best_score,
                 timestamp=timestamp,
+                context=context,
                 segment_id=segment_id,
                 audio_duration=audio_duration,
             )
-            just_created_speaker = True
-            if self.debug:
-                categories = self._get_speaker_categories()
-                new_ref = self._speakers[new_label]
-                console.print(
-                    f"[yellow]⚠️  New speaker: {new_label} "
-                    f"(segment_id: {segment_id}, "
-                    f"segments: {new_ref.segment_count}, "
-                    f"best sim: {actual_best_score:.3f}, "
-                    f"mature: {len(categories['mature'])}, "
-                    f"young: {len(categories['young'])}, "
-                    f"total: {len(self._speakers)})[/yellow]"
-                )
-            results.append({
-                "label": new_label,
-                "confidence": 1.0,
-                "match_type": "first_speaker" if not top_matches else "new_speaker",
-                "is_primary": True,
-                "is_new_speaker": True,
-                "segment_count": 1,
-                "last_seen": timestamp,
-                "segment_id": segment_id,
-            })
-            seen_labels.add(new_label)
-            for match in top_matches:
-                if match["label"] not in seen_labels and len(results) < top_k + 1:
-                    results.append({
-                        "label": match["label"],
-                        "confidence": round(match["confidence"], 4),
-                        "match_type": "weak_alternative",
-                        "is_primary": False,
-                        "is_new_speaker": False,
-                        "segment_count": match["segment_count"],
-                        "last_seen": match["last_seen"],
-                        "segment_id": segment_id,
-                    })
-                    seen_labels.add(match["label"])
         else:
-            all_scores = {m["label"]: m["confidence"] for m in top_matches}
-            for i, match in enumerate(top_matches):
-                if match["label"] in seen_labels:
-                    continue
-                label = match["label"]
-                confidence = match["confidence"]
-                match_type = match["match_type"]
-                is_primary = (i == 0)
-
-                if is_primary and match_type == "possible_match":
-                    smoothed_label = self.apply_temporal_smoothing(
-                        label, timestamp, confidence
-                    )
-                    if smoothed_label != label and smoothed_label in all_scores:
-                        smoothed_confidence = all_scores[smoothed_label]
-                        if smoothed_confidence >= self.threshold_possible:
-                            label = smoothed_label
-                            confidence = smoothed_confidence
-
-                if is_primary and context and "previous_speaker" in context:
-                    prev_speaker = context["previous_speaker"]
-                    if (prev_speaker and prev_speaker in all_scores
-                        and prev_speaker not in seen_labels):
-                        prev_sim = all_scores[prev_speaker]
-                        if prev_sim >= self.threshold_possible and prev_sim > confidence:
-                            label = prev_speaker
-                            confidence = prev_sim
-                            match_type = "context_match"
-                            if self.debug:
-                                console.print(
-                                    f"[blue]Context match: {prev_speaker} "
-                                    f"(segment_id: {segment_id}, "
-                                    f"sim={prev_sim:.3f})[/blue]"
-                                )
-
-                results.append({
-                    "label": label,
-                    "confidence": round(confidence, 4),
-                    "match_type": match_type,
-                    "is_primary": is_primary,
-                    "is_new_speaker": False,
-                    "segment_count": match["segment_count"],
-                    "last_seen": match["last_seen"],
-                    "segment_id": segment_id,
-                })
-                seen_labels.add(label)
-                if len(results) >= top_k:
-                    break
-
-            results = self._deduplicate_results(results)
-            
-            primary_result = results[0]
-            should_update, reason = self._should_update_reference(
-                label=primary_result["label"],
-                similarity=primary_result["confidence"],
-                match_type=primary_result["match_type"],
-                timestamp=timestamp,
+            results, just_created_speaker = self._label_without_outlier_buffer(
                 embedding=embedding,
+                top_matches=top_matches,
+                actual_best_score=actual_best_score,
+                timestamp=timestamp,
+                context=context,
+                segment_id=segment_id,
+                audio_duration=audio_duration,
             )
-            
-            if should_update:
-                self.update_reference(
-                    label=primary_result["label"],
-                    embedding=embedding,
-                    timestamp=timestamp,
-                    segment_id=segment_id,
-                    audio_duration=audio_duration,
-                    match_type=primary_result["match_type"],   # ← add this
-                )
-                if self.debug:
-                    console.print(
-                        f"[green]✓ Updated {primary_result['label']} "
-                        f"(segment_id: {segment_id}, "
-                        f"sim={primary_result['confidence']:.3f}, "
-                        f"reason={reason})[/]"
-                    )
-            else:
-                # ⚠️ FIXED: Pass the original segment_id when creating new speaker
-                # Previously this was create_new_speaker(embedding, timestamp) 
-                # which auto-generated a NEW segment_id, losing the caller's ID.
-                if self.debug:
-                    console.print(
-                        f"[red]✗ Rejected update to {primary_result['label']}: "
-                        f"segment_id: {segment_id}, "
-                        f"{reason}. Creating new speaker.[/]"
-                    )
-                new_label = self.create_new_speaker(
-                    embedding=embedding,
-                    timestamp=timestamp,
-                    segment_id=segment_id,
-                    audio_duration=audio_duration,  
-                )
-                just_created_speaker = True
-                primary_result["label"] = new_label
-                primary_result["confidence"] = 1.0
-                primary_result["match_type"] = "new_speaker"
-                primary_result["is_new_speaker"] = True
-                primary_result["segment_count"] = 1
-                primary_result["segment_id"] = segment_id  # ✅ Keep original segment_id in result
-                if self.debug:
-                    console.print(
-                        f"[yellow]⚠️  Created new speaker instead: {new_label} "
-                        f"(segment_id: {segment_id})[/]"
-                    )
-
+        
+        # Run maintenance
         self.run_smart_maintenance(timestamp, just_created_speaker=just_created_speaker)
+        
+        # Store new segment
+        self._segment_groups.append({
+            "timestamp": timestamp,
+            "audio_duration": audio_duration,
+            "matches": results,
+        })
+        
+        # Resolve all labels retroactively (catches promotions that just happened)
+        if self.use_outlier_buffer:
+            self._segment_groups = self.finalize_labels(self._segment_groups)
         
         if self.debug:
             speakers_str = ", ".join(
                 f"{r['label']}({r['confidence']:.3f})"
-                for r in results[:3]
+                for r in self._segment_groups[-1]["matches"][:3]
             )
             console.print(
                 f"[dim]Segment {self.total_segments_processed}: "
-                f"t={timestamp:.2f}s, "
-                f"segment_id={segment_id}, "
+                f"t={timestamp:.2f}s, segment_id={segment_id}, "
                 f"→ [{speakers_str}] "
-                f"(primary: {results[0]['label']}, "
-                f"speakers: {len(self._speakers)}, "
+                f"(speakers: {self.speaker_count}, "
+                f"outliers: {self.outlier_pool.count}, "
                 f"rejected: {self._rejected_updates})[/]"
             )
-        return results
+        
+        import copy
+        return copy.deepcopy(self._segment_groups)
 
     def label_segment(
         self,
@@ -1383,10 +914,10 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         sample_rate: int,
         timestamp: float,
         context: Optional[Dict] = None,
-        segment_id: Optional[str] = None,  # NEW: Optional external segment ID
+        segment_id: Optional[str] = None,
     ) -> Tuple[str, float, Dict]:
         """Label a speech segment with a single speaker identity.
-        
+
         Parameters
         ----------
         waveform : torch.Tensor
@@ -1400,104 +931,567 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         segment_id : str, optional
             External segment identifier. If not provided, one will be generated
             automatically. Passed through to label_segments().
-        
+
         Returns
         -------
         tuple
             (speaker_label, confidence_score, metadata_dict)
-            metadata includes: timestamp, is_new_speaker, match_type, 
+            metadata includes: timestamp, is_new_speaker, match_type,
             all_scores, and segment_id
         """
-        results = self.label_segments(
+        segment_groups = self.label_segments(
             waveform=waveform,
             sample_rate=sample_rate,
             timestamp=timestamp,
             context=context,
             top_k=1,
-            segment_id=segment_id,  # NEW: Pass segment_id through
+            segment_id=segment_id,
         )
-        primary = results[0]
+        # label_segments now returns List[SegmentGroup]
+        # Each SegmentGroup has: timestamp, audio_duration, matches (List[SegmentMatch])
+        # Get the latest (most recent) segment group
+        latest_group = segment_groups[-1] if segment_groups else None
+
+        if latest_group is None or not latest_group.get("matches"):
+            # Fallback if no results
+            console.print(
+                f"[yellow]⚠️  label_segment: No matches found for segment_id={segment_id}[/yellow]"
+            )
+            return "SPEAKER_UNKNOWN", 0.0, {
+                "timestamp": timestamp,
+                "is_new_speaker": False,
+                "match_type": "unknown",
+                "all_scores": {},
+                "segment_id": segment_id,
+            }
+
+        # Get the primary match from the matches list
+        matches = latest_group["matches"]
+        primary = matches[0]
+
         metadata = {
             "timestamp": timestamp,
             "is_new_speaker": primary.get("is_new_speaker", False),
-            "match_type": primary["match_type"],
+            "match_type": primary.get("match_type", "unknown"),
             "all_scores": {},
-            "segment_id": primary.get("segment_id"),  # NEW: Include segment_id in metadata
+            "segment_id": primary.get("segment_id", segment_id),
+            "audio_duration": latest_group.get("audio_duration", 0.0),
         }
         return primary["label"], primary["confidence"], metadata
+
+    def get_outlier_resolution_map(self) -> Dict[str, str]:
+        """Build a map from outlier labels to their final speaker labels.
+        
+        Combines two sources:
+        1. Promotion history: OUTLIER_03 → SPEAKER_01
+        2. Segment metadata: segment_id → speaker_label
+        
+        Returns
+        -------
+        Dict[str, str]
+            Mapping of OUTLIER_XX → SPEAKER_XX for all resolved outliers.
+        """
+        resolution_map: Dict[str, str] = {}
+        
+        if not self.use_outlier_buffer:
+            return resolution_map
+        
+        # Source 1: Promotion history from outlier pool
+        for promo in self.outlier_pool._promotions:
+            for outlier_label in promo.outlier_labels:
+                resolution_map[outlier_label] = promo.target_speaker
+        
+        # Source 2: Remaining outliers still in pool — check if any
+        # have been merged into speakers via segment_id matching
+        segment_speaker_map: Dict[str, str] = {}
+        for speaker_label, ref in self._speakers.items():
+            for meta in ref.embedding_metadata:
+                seg_id = meta.get("segment_id", "")
+                if seg_id:
+                    segment_speaker_map[seg_id] = speaker_label
+        
+        if self.debug and resolution_map:
+            console.print(
+                f"[dim]📋 Outlier resolution map: "
+                f"{len(resolution_map)} outliers → speakers[/]"
+            )
+        
+        return resolution_map
+
+    def resolve_segment_label(
+        self,
+        label: str,
+        segment_id: str = "",
+    ) -> Tuple[str, bool, str]:
+        """Resolve a segment label to its final speaker label.
+        
+        If the label is an OUTLIER_XX that was later promoted to a speaker,
+        returns the final SPEAKER_XX label. Otherwise returns the label as-is.
+        
+        Parameters
+        ----------
+        label : str
+            The label to resolve (e.g., 'OUTLIER_03' or 'SPEAKER_01').
+        segment_id : str
+            The segment's unique ID for fallback lookup.
+        
+        Returns
+        -------
+        Tuple[str, bool, str]
+            (resolved_label, was_resolved, resolution_method)
+            - resolved_label: Final speaker label
+            - was_resolved: True if the label changed
+            - resolution_method: How it was resolved ('promotion_map', 
+            'segment_lookup', 'already_speaker', 'unresolved_outlier')
+        """
+        # Already a speaker label
+        if label.startswith("SPEAKER_"):
+            return label, False, "already_speaker"
+        
+        # Not an outlier — return as-is
+        if not label.startswith("OUTLIER_"):
+            return label, False, "unknown_format"
+        
+        # Get resolution map
+        resolution_map = self.get_outlier_resolution_map()
+        
+        # Method 1: Direct promotion lookup
+        if label in resolution_map:
+            return resolution_map[label], True, "promotion_map"
+        
+        # Method 2: Check if segment_id is in a speaker's metadata
+        if segment_id:
+            for speaker_label, ref in self._speakers.items():
+                for meta in ref.embedding_metadata:
+                    if meta.get("segment_id") == segment_id:
+                        return speaker_label, True, "segment_lookup"
+        
+        # Method 3: Still in outlier pool — truly unresolved
+        if self.use_outlier_buffer and label in self.outlier_pool:
+            return label, False, "unresolved_outlier"
+        
+        # Outlier was removed (expired/merged) without promotion record
+        return label, False, "removed_outlier"
+
+    def resolve_segment_results(
+        self,
+        results: List[Dict],
+    ) -> List[Dict]:
+        """Resolve all outlier labels in a list of segment results.
+        
+        Walks through results and replaces OUTLIER_XX labels with their
+        final SPEAKER_XX labels. Also updates match_type for resolved entries.
+        
+        Parameters
+        ----------
+        results : List[Dict]
+            Results from label_segments() or label_segment().
+        
+        Returns
+        -------
+        List[Dict]
+            Results with resolved labels.
+        """
+        resolved_results = []
+        
+        for result in results:
+            label = result.get("label", "")
+            segment_id = result.get("segment_id", "")
+            
+            resolved_label, was_resolved, method = self.resolve_segment_label(
+                label=label,
+                segment_id=segment_id,
+            )
+            
+            # Create updated result
+            updated = {**result}
+            updated["label"] = resolved_label
+            
+            if was_resolved:
+                updated["is_outlier"] = False
+                updated["original_outlier_label"] = label  # Preserve history
+                updated["resolution_method"] = method
+                
+                # Update match type
+                if result.get("match_type") == "outlier_pending":
+                    updated["match_type"] = "resolved_from_outlier"
+                
+                if self.debug:
+                    console.print(
+                        f"[green]✅ Resolved: {label} → {resolved_label} "
+                        f"(via {method}, segment_id: {segment_id})[/]"
+                    )
+            
+            resolved_results.append(updated)
+        
+        return resolved_results
+
+    def get_outlier_stats_for_display(self) -> Dict:
+        """Get outlier statistics formatted for display/summary.
+        
+        Returns
+        -------
+        Dict
+            Stats including resolved/unresolved counts.
+        """
+        if not self.use_outlier_buffer:
+            return {"enabled": False}
+        
+        resolution_map = self.get_outlier_resolution_map()
+        
+        return {
+            "enabled": True,
+            "active_outliers": self.outlier_pool.count,
+            "total_promotions": self.outlier_pool.promotion_count,
+            "resolved_outliers": len(resolution_map),
+            "outlier_labels": self.outlier_pool.labels,
+            "promotion_history": [
+                {
+                    "type": p.type,
+                    "outliers": p.outlier_labels,
+                    "target": p.target_speaker,
+                    "confidence": p.confidence,
+                }
+                for p in self.outlier_pool._promotions
+            ],
+        }
+
+    def finalize_labels(
+        self,
+        segment_groups: List[Dict],
+    ) -> List[Dict]:
+        """Resolve OUTLIER_XX labels to final SPEAKER_XX labels retroactively.
+        
+        Call this ONCE after all segments have been processed via label_segments().
+        
+        Parameters
+        ----------
+        segment_groups : List[Dict]
+            List of segment groups collected by the caller. Each must have
+            a "matches" list where each match has "label" and "segment_id".
+        
+        Returns
+        -------
+        List[Dict]
+            Same structure with OUTLIER_XX replaced by SPEAKER_XX where resolved.
+        """
+        if not self.use_outlier_buffer:
+            return segment_groups
+        
+        if self.debug:
+            console.print(
+                f"\n[bold yellow]🔍 Finalizing labels: "
+                f"{len(segment_groups)} segments, "
+                f"{self.speaker_count} speakers, "
+                f"{self.outlier_pool.count} active outliers[/]"
+            )
+        
+        resolution_map = self.get_outlier_resolution_map()
+        
+        segment_speaker_map: Dict[str, str] = {}
+        for speaker_label, ref in self._speakers.items():
+            for meta in ref.embedding_metadata:
+                seg_id = meta.get("segment_id", "")
+                if seg_id:
+                    segment_speaker_map[seg_id] = speaker_label
+        
+        resolved_count = 0
+        unresolved_count = 0
+        
+        for group in segment_groups:
+            for match in group.get("matches", []):
+                label = match.get("label", "")
+                
+                if not label.startswith("OUTLIER_"):
+                    continue
+                
+                new_label = None
+                resolution_method = "unknown"
+                
+                if label in resolution_map:
+                    new_label = resolution_map[label]
+                    resolution_method = "promotion_map"
+                
+                if new_label is None:
+                    seg_id = match.get("segment_id", "")
+                    if seg_id and seg_id in segment_speaker_map:
+                        new_label = segment_speaker_map[seg_id]
+                        resolution_method = "segment_lookup"
+                
+                if new_label is None:
+                    if label in self.outlier_pool:
+                        unresolved_count += 1
+                        continue
+                    else:
+                        unresolved_count += 1
+                        continue
+                
+                original_label = match["label"]
+                match["label"] = new_label
+                match["is_outlier"] = False
+                match["original_outlier_label"] = original_label
+                match["resolution_method"] = resolution_method
+                
+                if match.get("match_type") == "outlier_pending":
+                    match["match_type"] = "resolved_from_outlier"
+                
+                resolved_count += 1
+        
+        if self.debug:
+            parts = [f"[green]{resolved_count} resolved[/green]"]
+            if unresolved_count > 0:
+                parts.append(f"[yellow]{unresolved_count} unresolved[/yellow]")
+            console.print(f"[bold]Label finalization: {', '.join(parts)}[/bold]")
+        
+        return segment_groups
+
+    def _label_with_outlier_buffer(
+        self,
+        embedding: np.ndarray,
+        top_matches: List[Dict],
+        actual_best_score: float,
+        timestamp: float,
+        context: Optional[Dict],
+        segment_id: str,
+        audio_duration: float,
+    ) -> Tuple[List[Dict], bool]:
+        return self._outlier_orchestrator.label_with_outlier_buffer(
+            embedding=embedding,
+            top_matches=top_matches,
+            actual_best_score=actual_best_score,
+            timestamp=timestamp,
+            context=context,
+            segment_id=segment_id,
+            audio_duration=audio_duration,
+        )
+
+    def _label_without_outlier_buffer(
+        self,
+        embedding: np.ndarray,
+        top_matches: List[Dict],
+        actual_best_score: float,
+        timestamp: float,
+        context: Optional[Dict],
+        segment_id: str,
+        audio_duration: float,
+    ) -> Tuple[List[Dict], bool]:
+        """Original labeling logic (outlier buffer disabled)."""
+        should_create = self._should_create_new_speaker(
+            actual_best_score, top_matches, context, embedding
+        )
+        
+        just_created_speaker = False
+        
+        if should_create or not top_matches:
+            new_label = self.create_new_speaker(
+                embedding=embedding,
+                timestamp=timestamp,
+                segment_id=segment_id,
+                audio_duration=audio_duration,
+            )
+            just_created_speaker = True
+            
+            results = [{
+                "label": new_label,
+                "confidence": 1.0,
+                "match_type": "first_speaker" if not top_matches else "new_speaker",
+                "is_primary": True,
+                "is_new_speaker": True,
+                "segment_count": 1,
+                "last_seen": timestamp,
+                "segment_id": segment_id,
+            }]
+            
+            # Add alternatives
+            seen_labels = {new_label}
+            for match in top_matches:
+                if match["label"] not in seen_labels:
+                    results.append({
+                        "label": match["label"],
+                        "confidence": round(match["confidence"], 4),
+                        "match_type": "weak_alternative",
+                        "is_primary": False,
+                        "is_new_speaker": False,
+                        "segment_count": match["segment_count"],
+                        "last_seen": match["last_seen"],
+                        "segment_id": segment_id,
+                    })
+                    seen_labels.add(match["label"])
+        else:
+            results = self._build_standard_results(
+                top_matches=top_matches,
+                embedding=embedding,
+                timestamp=timestamp,
+                context=context,
+                segment_id=segment_id,
+                audio_duration=audio_duration,
+            )
+        
+        return results, just_created_speaker
+
+    def _handle_outlier_promotion(
+        self,
+        outlier_matches: List[OutlierMatch],
+        embedding: np.ndarray,
+        timestamp: float,
+        segment_id: str,
+        audio_duration: float,
+    ) -> Tuple[List[Dict], bool]:
+        return self._outlier_orchestrator.handle_outlier_promotion(
+            outlier_matches=outlier_matches,
+            embedding=embedding,
+            timestamp=timestamp,
+            segment_id=segment_id,
+            audio_duration=audio_duration,
+        )
+
+    def _handle_new_outlier(
+        self,
+        embedding: np.ndarray,
+        timestamp: float,
+        segment_id: str,
+        audio_duration: float,
+    ) -> List[Dict]:
+        return self._outlier_orchestrator.handle_new_outlier(
+            embedding=embedding,
+            timestamp=timestamp,
+            segment_id=segment_id,
+            audio_duration=audio_duration,
+        )
+
+    def _merge_outlier_into_speaker(
+        self,
+        outlier_label: str,
+        speaker_label: str,
+        similarity: float,
+        timestamp: float,
+    ) -> bool:
+        return self._outlier_orchestrator.merge_outlier_into_speaker(
+            outlier_label=outlier_label,
+            speaker_label=speaker_label,
+            similarity=similarity,
+            timestamp=timestamp,
+        )
+
+    def _build_standard_results(
+        self,
+        top_matches: List[Dict],
+        embedding: np.ndarray,
+        timestamp: float,
+        context: Optional[Dict],
+        segment_id: str,
+        audio_duration: float,
+    ) -> List[Dict]:
+        """Build standard results list with update/rejection logic."""
+        all_scores = {m["label"]: m["confidence"] for m in top_matches}
+        results = []
+        seen_labels = set()
+        
+        for i, match in enumerate(top_matches):
+            if match["label"] in seen_labels:
+                continue
+            
+            label = match["label"]
+            confidence = match["confidence"]
+            match_type = match["match_type"]
+            is_primary = (i == 0)
+            
+            if is_primary and match_type == "possible_match":
+                smoothed_label = self.apply_temporal_smoothing(label, timestamp, confidence)
+                if smoothed_label != label and smoothed_label in all_scores:
+                    smoothed_confidence = all_scores[smoothed_label]
+                    if smoothed_confidence >= self.threshold_possible:
+                        label = smoothed_label
+                        confidence = smoothed_confidence
+            
+            if is_primary and context and "previous_speaker" in context:
+                prev_speaker = context["previous_speaker"]
+                if (prev_speaker and prev_speaker in all_scores
+                    and prev_speaker not in seen_labels):
+                    prev_sim = all_scores[prev_speaker]
+                    if prev_sim >= self.threshold_possible and prev_sim > confidence:
+                        label = prev_speaker
+                        confidence = prev_sim
+                        match_type = "context_match"
+            
+            results.append({
+                "label": label,
+                "confidence": round(confidence, 4),
+                "match_type": match_type,
+                "is_primary": is_primary,
+                "is_new_speaker": False,
+                "segment_count": match["segment_count"],
+                "last_seen": match["last_seen"],
+                "segment_id": segment_id,
+            })
+            seen_labels.add(label)
+            
+            if len(results) >= self.top_k_speakers:
+                break
+        
+        results = self._deduplicate_results(results)
+        
+        # Handle primary match update/rejection
+        primary_result = results[0]
+        should_update, reason = self._should_update_reference(
+            label=primary_result["label"],
+            similarity=primary_result["confidence"],
+            match_type=primary_result["match_type"],
+            timestamp=timestamp,
+            embedding=embedding,
+        )
+        
+        if should_update:
+            self.update_reference(
+                label=primary_result["label"],
+                embedding=embedding,
+                timestamp=timestamp,
+                segment_id=segment_id,
+                audio_duration=audio_duration,
+                match_type=primary_result["match_type"],
+            )
+        else:
+            # Rejected → use outlier pool instead of immediate speaker creation
+            if self.use_outlier_buffer:
+                outlier_label = self.outlier_pool.add(
+                    embedding=embedding,
+                    timestamp=timestamp,
+                    segment_id=segment_id,
+                    audio_duration=audio_duration,
+                )
+                primary_result["label"] = outlier_label
+                primary_result["confidence"] = 1.0
+                primary_result["match_type"] = "outlier_pending"
+                primary_result["is_new_speaker"] = False
+                primary_result["is_outlier"] = True
+                primary_result["segment_count"] = 1
+                
+                if self.debug:
+                    console.print(
+                        f"[yellow]📦 Rejected update → outlier: {outlier_label} "
+                        f"(reason: {reason})[/]"
+                    )
+            else:
+                new_label = self.create_new_speaker(
+                    embedding=embedding,
+                    timestamp=timestamp,
+                    segment_id=segment_id,
+                    audio_duration=audio_duration,
+                )
+                primary_result["label"] = new_label
+                primary_result["confidence"] = 1.0
+                primary_result["match_type"] = "new_speaker"
+                primary_result["is_new_speaker"] = True
+                primary_result["segment_count"] = 1
+        
+        return results
 
     def consolidate_speakers(
         self,
         threshold: Optional[float] = None,
         dry_run: bool = False,
     ) -> Dict:
-        """Consolidate similar speakers."""
-        if threshold is None:
-            threshold = self.consolidation_threshold
-
-        speakers_before = len(self._speakers)
-        if speakers_before < 2:
-            return {
-                "merges_performed": [],
-                "speakers_before": speakers_before,
-                "speakers_after": speakers_before,
-                "dry_run": dry_run,
-            }
-
-        speaker_labels = []
-        centroids = []
-        for label, ref in self._speakers.items():
-            if ref.has_valid_centroid:
-                speaker_labels.append(label)
-                centroids.append(ref.centroid)
-
-        if len(centroids) < 2:
-            return {
-                "merges_performed": [],
-                "speakers_before": speakers_before,
-                "speakers_after": speakers_before,
-                "dry_run": dry_run,
-            }
-
-        centroids_array = np.vstack(centroids)
-        distances = cdist(centroids_array, centroids_array, metric="cosine")
-        similarities = 1.0 - distances
-
-        merges_to_perform = []
-        already_merged = set()
-
-        for i in range(len(speaker_labels)):
-            if speaker_labels[i] in already_merged:
-                continue
-            for j in range(i + 1, len(speaker_labels)):
-                if speaker_labels[j] in already_merged:
-                    continue
-                sim = float(similarities[i, j])
-                if sim >= threshold:
-                    merges_to_perform.append(
-                        (
-                            speaker_labels[i],
-                            speaker_labels[j],
-                            round(sim, 4),
-                        )
-                    )
-                    already_merged.add(speaker_labels[j])
-
-        if not dry_run:
-            for label1, label2, sim in merges_to_perform:
-                self.merge_speakers(label1, label2)
-                if self.debug:
-                    console.print(
-                        f"[yellow]Consolidated: {label1} + {label2} (sim={sim:.3f})[/]"
-                    )
-
-        speakers_after = len(self._speakers)
-        return {
-            "merges_performed": merges_to_perform,
-            "speakers_before": speakers_before,
-            "speakers_after": speakers_after,
-            "dry_run": dry_run,
-        }
+        return self._maintenance.consolidate_speakers(threshold=threshold, dry_run=dry_run)
 
     def get_speaker_info(self, label: str) -> Optional[Dict]:
         """Get information about a specific speaker."""
@@ -1580,75 +1574,10 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         return results
 
     def get_health_status(self) -> Dict:
-        """Get current health status of the speaker labeler."""
-        categories = self._get_speaker_categories()
-
-        mature_count = len(categories["mature"])
-        young_count = len(categories["young"])
-        orphan_count = len(categories["orphan"])
-        total_count = len(self._speakers)
-
-        young_ratio = young_count / max(mature_count, 1)
-        orphan_ratio = orphan_count / max(total_count, 1)
-
-        alerts = []
-        if young_count >= 5:
-            alerts.append(f"⚠️  Too many young speakers: {young_count}")
-        if orphan_count >= 3:
-            alerts.append(f"⚠️  Too many orphans: {orphan_count}")
-        if mature_count > 0 and young_ratio > 2.0:
-            alerts.append(f"⚠️  Young/mature ratio: {young_ratio:.1f}")
-        if total_count > 10:
-            alerts.append(f"⚠️  Speaker count: {total_count}")
-
-        if not alerts:
-            alerts.append("✅ Healthy")
-
-        return {
-            "total_speakers": total_count,
-            "mature_speakers": mature_count,
-            "young_speakers": young_count,
-            "orphan_speakers": orphan_count,
-            "young_to_mature_ratio": round(young_ratio, 2),
-            "orphan_ratio": round(orphan_ratio, 2),
-            "alerts": alerts,
-            "categories": {
-                "mature": list(categories["mature"].keys()),
-                "young": list(categories["young"].keys()),
-                "orphan": list(categories["orphan"].keys()),
-                "active_young": list(categories["active_young"].keys()),
-            },
-            "centroids": self.get_centroid_health_stats(),
-        }
+        return self._serializer.get_health_status()
 
     def get_speaker_similarity_matrix(self) -> Dict:
-        """Get pairwise similarity matrix between all speakers."""
-        labels = []
-        centroids = []
-        segment_counts = []
-
-        for label, ref in self._speakers.items():
-            if ref.has_valid_centroid:
-                labels.append(label)
-                centroids.append(ref.centroid)
-                segment_counts.append(ref.segment_count)
-
-        if len(labels) < 2:
-            return {
-                "labels": labels,
-                "similarities": [],
-                "segment_counts": segment_counts,
-            }
-
-        centroids_array = np.vstack(centroids)
-        distances = cdist(centroids_array, centroids_array, metric="cosine")
-        similarities = (1.0 - distances).tolist()
-
-        return {
-            "labels": labels,
-            "similarities": [[round(s, 4) for s in row] for row in similarities],
-            "segment_counts": segment_counts,
-        }
+        return self._serializer.get_speaker_similarity_matrix()
 
     def find_potential_merges(
         self,
@@ -1704,63 +1633,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         label1: str,
         label2: str,
     ) -> Optional[str]:
-        """Merge two speaker references.
-        
-        NEW: Added debug logging to track merges.
-        """
-        if label1 not in self._speakers or label2 not in self._speakers:
-            return None
-        if label1 == label2:
-            return label1
-        
-        ref1 = self._speakers[label1]
-        ref2 = self._speakers[label2]
-        
-        # Determine primary (keep the one with more segments)
-        if ref1.segment_count >= ref2.segment_count:
-            primary, secondary = ref1, ref2
-            primary_label = label1
-            secondary_label = label2
-        else:
-            primary, secondary = ref2, ref1
-            primary_label = label2
-            secondary_label = label1
-        
-        # Merge embeddings
-        for emb in secondary.embeddings:
-            primary.embeddings.append(emb)
-        
-        primary.segment_count += secondary.segment_count
-        primary.last_seen = max(primary.last_seen, secondary.last_seen)
-        primary.first_seen = min(primary.first_seen, secondary.first_seen)
-        
-        # Recalculate centroid
-        if primary.embeddings:
-            if len(primary.embeddings) >= 3:
-                stacked = np.vstack(primary.embeddings)
-                primary.centroid = np.median(stacked, axis=0, keepdims=True)
-            else:
-                stacked = np.vstack(primary.embeddings)
-                primary.centroid = np.mean(stacked, axis=0, keepdims=True)
-        
-        # Remove secondary
-        del self._speakers[secondary_label]
-        self._speaker_creation_times.pop(secondary_label, None)  # Clean up
-        
-        # Update label history
-        self._label_history = [
-            (t, primary_label if l == secondary_label else l)
-            for t, l in self._label_history
-        ]
-        
-        if self.debug:
-            console.print(
-                f"[bold yellow]🔀 MERGED: {secondary_label} → {primary_label} "
-                f"(kept: {primary.segment_count} segs, "
-                f"removed: {secondary_label})[/bold yellow]"
-            )
-        
-        return primary_label
+        return self._maintenance.merge_speakers(label1, label2)
 
     def _extract_speech_audio(
         self,
@@ -1826,145 +1699,19 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         return self._merge_history.copy()
     
     def get_speaker_health_report(self) -> Dict:
-        """NEW: Comprehensive speaker health report with merge tracking."""
-        health = self.get_health_status()
-        health["merge_history"] = self._merge_history
-        health["speaker_creation_times"] = {
-            label: {"created_at": time, "age": max(
-                ref.last_seen for ref in self._speakers.values()
-            ) - time if self._speakers else 0}
-            for label, time in self._speaker_creation_times.items()
-            if label in self._speakers
-        }
-        health["missing_speaker_ids"] = self._find_missing_speaker_ids()
-        return health
-    
+        return self._serializer.get_speaker_health_report()
+
     def _find_missing_speaker_ids(self) -> List[str]:
-        """NEW: Find speaker IDs that were skipped/removed."""
-        existing_ids = set()
-        for label in self._speakers.keys():
-            # Extract number from SPEAKER_XX format
-            if label.startswith("SPEAKER_"):
-                try:
-                    num = int(label.split("_")[1])
-                    existing_ids.add(num)
-                except (IndexError, ValueError):
-                    pass
-        
-        missing = []
-        for i in range(1, self._next_speaker_id):
-            if i not in existing_ids:
-                missing.append(f"SPEAKER_{i:02d}")
-        
-        return missing
+        return self._serializer.find_missing_speaker_ids()
 
     def get_centroid_health_stats(self) -> Dict:
-        """NEW: Get statistics about centroid contamination prevention."""
-        return {
-            "total_updates_rejected": self._rejected_updates,
-            "centroid_update_log": self._centroid_update_log[-10:],  # Last 10 updates
-            "min_similarity_to_update": self.min_similarity_to_update,
-            "total_segments_processed": self.total_segments_processed,
-            "rejection_rate": (
-                self._rejected_updates / max(self.total_segments_processed, 1)
-            ),
-        }
+        return self._serializer.get_centroid_health_stats()
 
     def get_centroid_arrays(self) -> Dict[str, np.ndarray]:
-        """Get raw centroid arrays for all speakers.
-        
-        Returns:
-            Dict mapping speaker labels to their centroid numpy arrays
-        """
-        centroids = {}
-        for label, ref in self._speakers.items():
-            if ref.has_valid_centroid:
-                centroids[label] = ref.centroid.copy()
-        return centroids
+        return self._serializer.get_centroid_arrays()
 
     def get_centroid_stats(self) -> Dict:
-        """Get comprehensive centroid statistics for visualization.
-        
-        Returns data suitable for PCA/t-SNE plotting or direct visualization.
-        Includes per-dimension statistics and quality metrics.
-        """
-        centroids = self.get_centroid_arrays()
-        if not centroids:
-            return {"error": "No valid centroids available"}
-        
-        labels = list(centroids.keys())
-        centroid_matrix = np.vstack([centroids[label] for label in labels])
-        
-        # Basic stats
-        stats = {
-            "labels": labels,
-            "centroid_shape": list(centroid_matrix.shape),
-            "embedding_dimension": centroid_matrix.shape[1],
-            "total_speakers": len(labels),
-            "total_segments": sum(ref.segment_count for ref in self._speakers.values()),
-        }
-        
-        # Per-speaker details with centroid vectors flattened for frontend
-        speaker_details = {}
-        for i, label in enumerate(labels):
-            ref = self._speakers[label]
-            centroid = centroids[label]
-            
-            # Flatten centroid
-            flat = centroid.flatten()
-            
-            # Compute centroid norm (magnitude)
-            norm = float(np.linalg.norm(flat))
-            
-            # Get the strongest dimensions (for interpretability)
-            top_dims = np.argsort(np.abs(flat))[-5:][::-1]  # Top 5 dimensions
-            
-            # Full centroid vector for frontend (all dimensions)
-            centroid_vector = flat.tolist()
-            
-            speaker_details[label] = {
-                "centroid_vector": centroid_vector[:50],  # First 50 dims (enough for visualization)
-                "centroid_norm": round(norm, 4),
-                "top_dimensions": [
-                    {"dim": int(d), "value": round(float(flat[d]), 6)}
-                    for d in top_dims
-                ],
-                "segment_count": ref.segment_count,
-                "centroid_quality": ref.centroid_quality,
-                "first_seen": ref.first_seen if ref.first_seen else 0,
-                "last_seen": ref.last_seen,
-                "active_duration": ref.active_duration,
-                "embedding_count": len(ref.embeddings),
-            }
-        
-        stats["speakers"] = speaker_details
-        
-        # If we have enough centroids, compute inter-centroid distances
-        if len(labels) >= 2:
-            distances = cdist(centroid_matrix, centroid_matrix, metric="cosine")
-            similarities = 1.0 - distances
-            
-            # Full similarity matrix for heatmap
-            stats["similarity_matrix"] = similarities.tolist()
-            stats["distance_matrix"] = distances.tolist()
-            
-            # Average distance from each centroid to all others
-            for i, label in enumerate(labels):
-                other_distances = [distances[i, j] for j in range(len(labels)) if j != i]
-                other_similarities = [similarities[i, j] for j in range(len(labels)) if j != i]
-                
-                nearest_idx = min(
-                    (j for j in range(len(labels)) if j != i),
-                    key=lambda j: distances[i, j]
-                )
-                
-                speaker_details[label]["avg_distance_to_others"] = round(float(np.mean(other_distances)), 4)
-                speaker_details[label]["avg_similarity_to_others"] = round(float(np.mean(other_similarities)), 4)
-                speaker_details[label]["nearest_neighbor"] = labels[nearest_idx]
-                speaker_details[label]["nearest_distance"] = round(float(distances[i, nearest_idx]), 4)
-                speaker_details[label]["nearest_similarity"] = round(float(similarities[i, nearest_idx]), 4)
-        
-        return stats
+        return self._serializer.get_centroid_stats()
 
     def reset(self) -> None:
         """Reset the labeler to initial state."""
@@ -1973,70 +1720,31 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         self._next_speaker_id = 1
         self.total_segments_processed = 0
         self.total_speakers_created = 0
+        self._rejected_updates = 0
+        self._centroid_update_log.clear()
+        self._merge_history.clear()
+        self._speaker_creation_times.clear()
+        self.outlier_pool.reset()  # NEW
+        
         if self.debug:
             console.print("[yellow]SegmentSpeakerLabeler reset[/]")
 
     def to_dict(self) -> Dict:
-        """Serialize the labeler state."""
-        speakers_data = {}
-        for label, ref in self._speakers.items():
-            speakers_data[label] = {
-                "label": ref.label,
-                "embeddings": [emb.tolist() for emb in ref.embeddings],
-                "centroid": ref.centroid.tolist() if ref.centroid is not None else None,
-                "first_seen": ref.first_seen,
-                "last_seen": ref.last_seen,
-                "segment_count": ref.segment_count,
-            }
-
-        return {
-            "speakers": speakers_data,
-            "next_speaker_id": self._next_speaker_id,
-            "total_segments_processed": self.total_segments_processed,
-            "total_speakers_created": self.total_speakers_created,
-            "threshold_same": self.threshold_same,
-            "threshold_possible": self.threshold_possible,
-            "threshold_new_speaker": self.threshold_new_speaker,
-            "mature_segment_count": self.mature_segment_count,
-            "young_segment_count": self.young_segment_count,
-            "top_k_speakers": self.top_k_speakers,
-            "consolidation_threshold": self.consolidation_threshold,
-        }
+        return self._serializer.to_dict()
 
     @classmethod
-    def from_dict(cls, data: Dict, embedding_model, audio_tagger=None) -> "SegmentSpeakerLabeler":
-        """Create a labeler from serialized state."""
-        labeler = cls(
+    def from_dict(
+        cls,
+        data: Dict,
+        embedding_model,
+        audio_tagger=None,
+    ) -> "SegmentSpeakerLabeler":
+        return SpeakerLabelerSerializer.from_dict(
+            cls=cls,
+            data=data,
             embedding_model=embedding_model,
-            threshold_same=data.get("threshold_same", DEFAULT_THRESHOLD_SAME),
-            threshold_possible=data.get("threshold_possible", DEFAULT_THRESHOLD_POSSIBLE),
-            threshold_new_speaker=data.get("threshold_new_speaker", DEFAULT_THRESHOLD_NEW_SPEAKER),
-            mature_segment_count=data.get("mature_segment_count", DEFAULT_MATURE_SEGMENT_COUNT),
-            young_segment_count=data.get("young_segment_count", DEFAULT_YOUNG_SEGMENT_COUNT),
-            top_k_speakers=data.get("top_k_speakers", DEFAULT_TOP_K_SPEAKERS),
-            consolidation_threshold=data.get("consolidation_threshold", DEFAULT_CONSOLIDATION_THRESHOLD),
             audio_tagger=audio_tagger,
         )
-        labeler._next_speaker_id = data.get("next_speaker_id", 1)
-        labeler.total_segments_processed = data.get("total_segments_processed", 0)
-        labeler.total_speakers_created = data.get("total_speakers_created", 0)
-
-        for label, ref_data in data.get("speakers", {}).items():
-            raw_first_seen = ref_data.get("first_seen")
-            first_seen = None if raw_first_seen in (None, 0.0) else raw_first_seen
-            
-            ref = SpeakerReference(
-                label=ref_data["label"],
-                first_seen=first_seen,
-                last_seen=ref_data.get("last_seen", 0.0),
-                segment_count=ref_data["segment_count"],
-            )
-            ref.embeddings = [np.array(emb) for emb in ref_data.get("embeddings", [])]
-            if ref_data.get("centroid") is not None:
-                ref.centroid = np.array(ref_data["centroid"])
-            labeler._speakers[label] = ref
-
-        return labeler
 
 
 if __name__ == "__main__":

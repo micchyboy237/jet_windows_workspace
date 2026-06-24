@@ -1,3 +1,6 @@
 __pycache__/
+
 generated/
+_backup/
+
 *.log

@@ -32,6 +32,16 @@ except ImportError:
 
 DEFAULT_THRESHOLD = 0.3
 
+DEFAULT_MIN_PROMINENCE = 0.05
+DEFAULT_MIN_EXCURSION = 0.04
+DEFAULT_MIN_PEAK_PROB = 0.55
+DEFAULT_MIN_FRAMES = 3
+DEFAULT_MIN_DURATION_SEC = 0.25
+DEFAULT_BASELINE_THRESHOLD = 0.3
+
+DEFAULT_MIN_SPEECH_DURATION_MS = 250
+DEFAULT_MIN_SILENCE_DURATION_MS = 100
+
 WaveState = Literal["below", "above"]
 
 console = Console()
@@ -59,12 +69,12 @@ class WaveShapeConfig:
             detect wave boundaries and preroll adjustments.
     """
 
-    min_prominence: float = 0.05
-    min_excursion: float = 0.04
-    min_peak_prob: float = 0.55
-    min_frames: int = 3
-    min_duration_sec: float = 0.25  # matches default --min-speech-duration of 250 ms
-    baseline_threshold: float = 0.1  # threshold for silence/baseline detection
+    min_prominence: float = DEFAULT_MIN_PROMINENCE
+    min_excursion: float = DEFAULT_MIN_EXCURSION
+    min_peak_prob: float = DEFAULT_MIN_PEAK_PROB
+    min_frames: int = DEFAULT_MIN_FRAMES
+    min_duration_sec: float = DEFAULT_MIN_DURATION_SEC
+    baseline_threshold: float = DEFAULT_BASELINE_THRESHOLD
 
 
 def is_prominent_wave(
@@ -336,14 +346,14 @@ def get_valid_speech_waves(
     audio: np.ndarray,
     sampling_rate: int = SAMPLE_RATE,
     vad_threshold: float = DEFAULT_THRESHOLD,
-    min_prominence: float = 0.05,
-    min_excursion: float = 0.04,
-    min_peak_prob: float = 0.55,
-    min_frames: int = 3,
-    min_duration_sec: float = 0.25,
-    baseline_threshold: float = 0.1,
-    min_speech_duration_ms: int = 250,
-    min_silence_duration_ms: int = 100,
+    min_prominence: float = DEFAULT_MIN_PROMINENCE,
+    min_excursion: float = DEFAULT_MIN_EXCURSION,
+    min_peak_prob: float = DEFAULT_MIN_PEAK_PROB,
+    min_frames: int = DEFAULT_MIN_FRAMES,
+    min_duration_sec: float = DEFAULT_MIN_DURATION_SEC,
+    baseline_threshold: float = DEFAULT_BASELINE_THRESHOLD,
+    min_speech_duration_ms: int = DEFAULT_MIN_SPEECH_DURATION_MS,
+    min_silence_duration_ms: int = DEFAULT_MIN_SILENCE_DURATION_MS,
 ) -> List[SpeechWave]:
     """
     Identify valid speech waves from raw audio using VAD and shape analysis.
@@ -425,14 +435,14 @@ def extract_pure_speech_segments(
     sampling_rate: int = SAMPLE_RATE,
     hop_size: int = HOP_SIZE,
     vad_threshold: float = DEFAULT_THRESHOLD,
-    min_prominence: float = 0.05,
-    min_excursion: float = 0.04,
-    min_peak_prob: float = 0.55,
-    min_frames: int = 3,
-    min_duration_sec: float = 0.25,
-    baseline_threshold: float = 0.1,
-    min_speech_duration_ms: int = 250,
-    min_silence_duration_ms: int = 100,
+    min_prominence: float = DEFAULT_MIN_PROMINENCE,
+    min_excursion: float = DEFAULT_MIN_EXCURSION,
+    min_peak_prob: float = DEFAULT_MIN_PEAK_PROB,
+    min_frames: int = DEFAULT_MIN_FRAMES,
+    min_duration_sec: float = DEFAULT_MIN_DURATION_SEC,
+    baseline_threshold: float = DEFAULT_BASELINE_THRESHOLD,
+    min_speech_duration_ms: int = DEFAULT_MIN_SPEECH_DURATION_MS,
+    min_silence_duration_ms: int = DEFAULT_MIN_SILENCE_DURATION_MS,
 ) -> List[np.ndarray]:
     """
     Extract high-confidence speech audio segments from a raw waveform.
@@ -500,14 +510,14 @@ def extract_pure_speech_audio(
     sampling_rate: int = SAMPLE_RATE,
     hop_size: int = HOP_SIZE,
     vad_threshold: float = DEFAULT_THRESHOLD,
-    min_prominence: float = 0.05,
-    min_excursion: float = 0.04,
-    min_peak_prob: float = 0.55,
-    min_frames: int = 3,
-    min_duration_sec: float = 0.25,
-    baseline_threshold: float = 0.1,
-    min_speech_duration_ms: int = 250,
-    min_silence_duration_ms: int = 100,
+    min_prominence: float = DEFAULT_MIN_PROMINENCE,
+    min_excursion: float = DEFAULT_MIN_EXCURSION,
+    min_peak_prob: float = DEFAULT_MIN_PEAK_PROB,
+    min_frames: int = DEFAULT_MIN_FRAMES,
+    min_duration_sec: float = DEFAULT_MIN_DURATION_SEC,
+    baseline_threshold: float = DEFAULT_BASELINE_THRESHOLD,
+    min_speech_duration_ms: int = DEFAULT_MIN_SPEECH_DURATION_MS,
+    min_silence_duration_ms: int = DEFAULT_MIN_SILENCE_DURATION_MS,
 ) -> np.ndarray:
     """
     Extract high-confidence speech audio from a raw waveform and concatenate.

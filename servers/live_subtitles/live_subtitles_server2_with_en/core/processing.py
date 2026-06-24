@@ -194,13 +194,18 @@ def label_speakers_for_segment(
     }
 
     if return_multiple:
-        speaker_results = labeler.label_segments(
+        # label_segments now returns List[SegmentGroup]
+        segment_groups = labeler.label_segments(
             waveform=waveform_tensor,
             sample_rate=sample_rate,
             timestamp=timestamp,
             context=context,
             segment_id=segment_id,
         )
+        # Extract matches from the latest segment group
+        latest_group = segment_groups[-1] if segment_groups else None
+        speaker_results = latest_group["matches"] if latest_group else []
+        
         primary = (
             speaker_results[0]
             if speaker_results

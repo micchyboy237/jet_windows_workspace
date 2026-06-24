@@ -1,0 +1,1932 @@
+<!--
+    segments.html - Segment Groups & Outlier Tracking Dashboard
+    
+    Provides:
+    - Real-time segment label timeline with color-coded match types
+    - Outlier pool monitoring with expiry warnings
+    - Segment detail inspection with speaker resolution
+    - Label switching analysis and stability metrics
+    - Promotion history tracking
+    
+    Data sources:
+    - /speakers/metrics/segments (segment group health)
+    - /speakers/metrics/outliers (outlier pool health)
+    - /speakers/metrics/segment-detail/{id} (individual segment detail)
+-->
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }} - Segments & Outliers Dashboard</title>
+    <style>
+      :root {
+        /* Health colors */
+        --healthy: #4caf50;
+        --warning: #ff9800;
+        --unhealthy: #f44336;
+
+        /* Match type colors */
+        --strong-match: #4caf50;
+        --early-match: #8bc34a;
+        --possible-match: #ff9800;
+        --weak-match: #f44336;
+        --context-match: #2196f3;
+        --outlier-match: #9c27b0;
+        --outlier-pending: #ce93d8;
+        --new-speaker: #00bcd4;
+        --first-speaker: #00bcd4;
+        --resolved-from-outlier: #7b1fa2;
+
+        /* Theme */
+        --bg: #0f0f1a;
+        --bg-secondary: #1a1a2e;
+        --card-bg: #16213e;
+        --card-hover: #1a2744;
+        --text: #e0e0e0;
+        --text-bright: #ffffff;
+        --text-dim: #7a7a9e;
+        --text-muted: #555;
+        --border: #2a2a4a;
+        --border-light: #3a3a5a;
+        --accent: #2196f3;
+        --accent-glow: rgba(33, 150, 243, 0.3);
+        --outlier: #9c27b0;
+        --outlier-glow: rgba(156, 39, 176, 0.3);
+        --radius: 10px;
+        --radius-sm: 6px;
+        --transition: 0.2s ease;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          "Segoe UI",
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+        min-height: 100vh;
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* HEADER                                       */
+      /* ═══════════════════════════════════════════ */
+      .header {
+        background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1a 100%);
+        border-bottom: 1px solid var(--border);
+        padding: 1.25rem 2rem;
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        backdrop-filter: blur(12px);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+      .header-left h1 {
+        font-size: 1.6rem;
+        font-weight: 700;
+        background: linear-gradient(90deg, var(--accent), #00bcd4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        letter-spacing: -0.02em;
+      }
+      .header-left .subtitle {
+        color: var(--text-dim);
+        font-size: 0.8rem;
+        margin-top: 0.15rem;
+      }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+      }
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+      }
+      .status-dot.live {
+        background: var(--healthy);
+        box-shadow: 0 0 8px var(--healthy);
+      }
+      .status-dot.error {
+        background: var(--unhealthy);
+        box-shadow: 0 0 8px var(--unhealthy);
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      .update-time {
+        color: var(--text-dim);
+        font-size: 0.75rem;
+      }
+      .refresh-btn {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 0.4rem 0.8rem;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 0.8rem;
+        transition: all var(--transition);
+      }
+      .refresh-btn:hover {
+        background: var(--card-hover);
+        border-color: var(--accent);
+      }
+      .refresh-btn:active {
+        transform: scale(0.97);
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* STATS BAR                                    */
+      /* ═══════════════════════════════════════════ */
+      .stats-bar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.75rem;
+        padding: 1rem 2rem;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+      }
+      .stat-item {
+        text-align: center;
+        padding: 0.5rem;
+        border-radius: var(--radius-sm);
+        background: var(--card-bg);
+        transition: transform var(--transition);
+      }
+      .stat-item:hover {
+        transform: translateY(-1px);
+      }
+      .stat-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .stat-label {
+        font-size: 0.7rem;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.15rem;
+      }
+      .stat-value.healthy {
+        color: var(--healthy);
+      }
+      .stat-value.warning {
+        color: var(--warning);
+      }
+      .stat-value.unhealthy {
+        color: var(--unhealthy);
+      }
+      .stat-value.neutral {
+        color: var(--accent);
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* MAIN LAYOUT                                  */
+      /* ═══════════════════════════════════════════ */
+      .main-content {
+        display: grid;
+        grid-template-columns: 1fr 380px;
+        gap: 1rem;
+        padding: 1rem 2rem;
+        min-height: calc(100vh - 200px);
+      }
+      @media (max-width: 1024px) {
+        .main-content {
+          grid-template-columns: 1fr;
+        }
+        .stats-bar {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+      @media (max-width: 640px) {
+        .stats-bar {
+          grid-template-columns: repeat(2, 1fr);
+        }
+        .header {
+          padding: 1rem;
+        }
+        .main-content {
+          padding: 0.75rem;
+        }
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* PANELS                                       */
+      /* ═══════════════════════════════════════════ */
+      .panel {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+      }
+      .panel-header {
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .panel-header h2 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .panel-header .badge {
+        font-size: 0.7rem;
+        padding: 0.2rem 0.5rem;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .panel-body {
+        padding: 0;
+        max-height: 600px;
+        overflow-y: auto;
+      }
+      .panel-body.full-height {
+        max-height: none;
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* TIMELINE                                     */
+      /* ═══════════════════════════════════════════ */
+      .timeline {
+        position: relative;
+      }
+      .timeline-item {
+        display: flex;
+        align-items: center;
+        padding: 0.5rem 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        transition: background var(--transition);
+        cursor: pointer;
+        gap: 0.75rem;
+        font-size: 0.82rem;
+      }
+      .timeline-item:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .timeline-item.selected {
+        background: rgba(33, 150, 243, 0.08);
+        border-left: 3px solid var(--accent);
+        padding-left: calc(1rem - 3px);
+      }
+      .timeline-item:last-child {
+        border-bottom: none;
+      }
+
+      /* Timeline dot with match type color */
+      .tl-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        position: relative;
+        transition: transform var(--transition);
+      }
+      .timeline-item:hover .tl-dot {
+        transform: scale(1.3);
+      }
+      .tl-dot.strong_match {
+        background: var(--strong-match);
+        box-shadow: 0 0 6px var(--strong-match);
+      }
+      .tl-dot.early_match {
+        background: var(--early-match);
+        box-shadow: 0 0 6px var(--early-match);
+      }
+      .tl-dot.possible_match {
+        background: var(--possible-match);
+        box-shadow: 0 0 6px var(--possible-match);
+      }
+      .tl-dot.weak_match {
+        background: var(--weak-match);
+        box-shadow: 0 0 6px var(--weak-match);
+      }
+      .tl-dot.context_match {
+        background: var(--context-match);
+        box-shadow: 0 0 6px var(--context-match);
+      }
+      .tl-dot.outlier_match {
+        background: var(--outlier-match);
+        box-shadow: 0 0 6px var(--outlier-match);
+      }
+      .tl-dot.outlier_pending {
+        background: var(--outlier-pending);
+        box-shadow: 0 0 6px var(--outlier-pending);
+        animation: blink 1.5s infinite;
+      }
+      .tl-dot.new_speaker {
+        background: var(--new-speaker);
+        box-shadow: 0 0 8px var(--new-speaker);
+      }
+      .tl-dot.first_speaker {
+        background: var(--first-speaker);
+        box-shadow: 0 0 8px var(--first-speaker);
+      }
+      .tl-dot.resolved_from_outlier {
+        background: var(--resolved-from-outlier);
+        box-shadow: 0 0 6px var(--resolved-from-outlier);
+      }
+
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+
+      .tl-time {
+        color: var(--text-dim);
+        font-family: "Courier New", monospace;
+        font-size: 0.75rem;
+        min-width: 55px;
+        text-align: right;
+      }
+      .tl-label {
+        flex: 1;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tl-label.outlier-label {
+        color: var(--outlier);
+      }
+      .tl-type {
+        font-size: 0.68rem;
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.05);
+        white-space: nowrap;
+      }
+      .tl-type.outlier-tag {
+        background: rgba(156, 39, 176, 0.15);
+        color: var(--outlier);
+      }
+      .tl-type.new-tag {
+        background: rgba(0, 188, 212, 0.15);
+        color: var(--new-speaker);
+      }
+      .tl-duration {
+        color: var(--text-muted);
+        font-size: 0.7rem;
+        min-width: 40px;
+        text-align: right;
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* SEGMENT DETAIL POPUP                         */
+      /* ═══════════════════════════════════════════ */
+      .detail-panel {
+        position: sticky;
+        top: 80px;
+      }
+      .detail-placeholder {
+        padding: 2rem;
+        text-align: center;
+        color: var(--text-dim);
+      }
+      .detail-placeholder .icon {
+        font-size: 3rem;
+        margin-bottom: 0.5rem;
+        opacity: 0.3;
+      }
+      .detail-content {
+        padding: 1rem;
+      }
+      .detail-field {
+        margin-bottom: 0.75rem;
+      }
+      .detail-field .field-label {
+        font-size: 0.7rem;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.15rem;
+      }
+      .detail-field .field-value {
+        font-size: 0.9rem;
+        font-weight: 500;
+        word-break: break-all;
+      }
+      .detail-field .field-value code {
+        background: rgba(255, 255, 255, 0.05);
+        padding: 0.15rem 0.4rem;
+        border-radius: 3px;
+        font-size: 0.8rem;
+      }
+      .detail-actions {
+        margin-top: 1rem;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .btn {
+        padding: 0.4rem 0.8rem;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--card-bg);
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.8rem;
+        transition: all var(--transition);
+      }
+      .btn:hover {
+        background: var(--card-hover);
+        border-color: var(--accent);
+      }
+      .btn-sm {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.7rem;
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* OUTLIER CARDS                                */
+      /* ═══════════════════════════════════════════ */
+      .outlier-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 0.75rem;
+        padding: 1rem;
+      }
+      .outlier-card {
+        background: rgba(156, 39, 176, 0.06);
+        border: 1px solid rgba(156, 39, 176, 0.2);
+        border-radius: var(--radius-sm);
+        padding: 0.75rem 1rem;
+        font-size: 0.82rem;
+        transition: all var(--transition);
+        position: relative;
+        overflow: hidden;
+      }
+      .outlier-card:hover {
+        background: rgba(156, 39, 176, 0.1);
+        border-color: rgba(156, 39, 176, 0.4);
+        transform: translateY(-1px);
+      }
+      .outlier-card.expiring {
+        border-color: var(--unhealthy);
+        background: rgba(244, 67, 54, 0.08);
+        animation: expire-glow 2s infinite;
+      }
+      @keyframes expire-glow {
+        0%,
+        100% {
+          box-shadow: 0 0 0 rgba(244, 67, 54, 0);
+        }
+        50% {
+          box-shadow: 0 0 12px rgba(244, 67, 54, 0.2);
+        }
+      }
+      .outlier-card .oc-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+      }
+      .outlier-card .oc-label {
+        font-weight: 600;
+        color: var(--outlier);
+      }
+      .outlier-card .oc-age {
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+      .outlier-card .oc-age.urgent {
+        color: var(--unhealthy);
+      }
+      .outlier-card .oc-age.warn {
+        color: var(--warning);
+      }
+      .outlier-card .oc-details {
+        font-size: 0.73rem;
+        color: var(--text-dim);
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.25rem;
+      }
+      .outlier-card .progress-bar {
+        height: 3px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
+        margin-top: 0.5rem;
+        overflow: hidden;
+      }
+      .outlier-card .progress-fill {
+        height: 100%;
+        border-radius: 2px;
+        transition: width 0.5s ease;
+      }
+      .outlier-card .progress-fill.safe {
+        background: var(--healthy);
+      }
+      .outlier-card .progress-fill.warn {
+        background: var(--warning);
+      }
+      .outlier-card .progress-fill.danger {
+        background: var(--unhealthy);
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* PROMOTION HISTORY                            */
+      /* ═══════════════════════════════════════════ */
+      .promo-list {
+        padding: 0.5rem 1rem;
+      }
+      .promo-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        font-size: 0.8rem;
+      }
+      .promo-item:last-child {
+        border-bottom: none;
+      }
+      .promo-arrow {
+        color: var(--accent);
+        font-weight: 700;
+      }
+      .promo-type {
+        font-size: 0.65rem;
+        padding: 0.1rem 0.35rem;
+        border-radius: 3px;
+        text-transform: uppercase;
+        font-weight: 600;
+      }
+      .promo-type.single {
+        background: rgba(0, 188, 212, 0.15);
+        color: #00bcd4;
+      }
+      .promo-type.pair {
+        background: rgba(156, 39, 176, 0.15);
+        color: var(--outlier);
+      }
+      .promo-type.merge {
+        background: rgba(33, 150, 243, 0.15);
+        color: var(--accent);
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* SEARCH & FILTER                              */
+      /* ═══════════════════════════════════════════ */
+      .filter-bar {
+        display: flex;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .filter-input {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 0.35rem 0.6rem;
+        border-radius: var(--radius-sm);
+        font-size: 0.8rem;
+        flex: 1;
+        min-width: 150px;
+      }
+      .filter-input:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-glow);
+      }
+      .filter-input::placeholder {
+        color: var(--text-muted);
+      }
+      .filter-select {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 0.35rem 0.6rem;
+        border-radius: var(--radius-sm);
+        font-size: 0.8rem;
+        cursor: pointer;
+      }
+      .filter-select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      .filter-count {
+        font-size: 0.75rem;
+        color: var(--text-dim);
+        white-space: nowrap;
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* MATCH TYPE LEGEND                            */
+      /* ═══════════════════════════════════════════ */
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.7rem;
+        cursor: pointer;
+        padding: 0.15rem 0.4rem;
+        border-radius: 4px;
+        transition: background var(--transition);
+      }
+      .legend-item:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .legend-item.filtered {
+        opacity: 0.4;
+      }
+      .legend-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* LOADING & EMPTY STATES                       */
+      /* ═══════════════════════════════════════════ */
+      .loading-state {
+        text-align: center;
+        padding: 3rem;
+        color: var(--text-dim);
+      }
+      .spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin: 0 auto 1rem;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .empty-state {
+        text-align: center;
+        padding: 2rem;
+        color: var(--text-dim);
+        font-style: italic;
+        font-size: 0.85rem;
+      }
+      .error-state {
+        background: rgba(244, 67, 54, 0.08);
+        border: 1px solid rgba(244, 67, 54, 0.3);
+        border-radius: var(--radius-sm);
+        padding: 1rem;
+        color: var(--unhealthy);
+        text-align: center;
+        margin: 1rem;
+        font-size: 0.85rem;
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* SCROLLBAR                                    */
+      /* ═══════════════════════════════════════════ */
+      .panel-body::-webkit-scrollbar {
+        width: 6px;
+      }
+      .panel-body::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .panel-body::-webkit-scrollbar-thumb {
+        background: var(--border-light);
+        border-radius: 3px;
+      }
+      .panel-body::-webkit-scrollbar-thumb:hover {
+        background: var(--text-muted);
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* TOOLTIP                                      */
+      /* ═══════════════════════════════════════════ */
+      .tooltip {
+        position: relative;
+        cursor: help;
+        border-bottom: 1px dotted var(--text-dim);
+      }
+      .tooltip::after {
+        content: attr(data-tip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1a1a2e;
+        color: var(--text);
+        padding: 0.3rem 0.6rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.2s;
+        border: 1px solid var(--border);
+        z-index: 10;
+      }
+      .tooltip:hover::after {
+        opacity: 1;
+      }
+
+      /* ═══════════════════════════════════════════ */
+      /* TOAST NOTIFICATIONS                          */
+      /* ═══════════════════════════════════════════ */
+      .toast-container {
+        position: fixed;
+        top: 1rem;
+        right: 1rem;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .toast {
+        padding: 0.75rem 1rem;
+        border-radius: var(--radius-sm);
+        font-size: 0.8rem;
+        animation: slideIn 0.3s ease;
+        max-width: 350px;
+      }
+      .toast.success {
+        background: rgba(76, 175, 80, 0.2);
+        border: 1px solid var(--healthy);
+        color: var(--healthy);
+      }
+      .toast.error {
+        background: rgba(244, 67, 54, 0.2);
+        border: 1px solid var(--unhealthy);
+        color: var(--unhealthy);
+      }
+      .toast.info {
+        background: rgba(33, 150, 243, 0.2);
+        border: 1px solid var(--accent);
+        color: var(--accent);
+      }
+      @keyframes slideIn {
+        from {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- TOAST CONTAINER                                  -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- HEADER                                           -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div class="header">
+      <div class="header-left">
+        <h1>📋 Segments & Outliers Dashboard</h1>
+        <div class="subtitle">
+          Real-time segment labeling trace &bull; Outlier pool monitoring
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="status-dot live" id="status-dot" title="Live"></span>
+        <span class="update-time" id="update-time">Initializing...</span>
+        <button
+          class="refresh-btn"
+          onclick="manualRefresh()"
+          title="Refresh now"
+        >
+          🔄 Refresh
+        </button>
+        <button
+          class="refresh-btn"
+          onclick="toggleAutoRefresh()"
+          id="auto-refresh-btn"
+          title="Toggle auto-refresh"
+        >
+          ⏸️ Pause
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- STATS BAR                                        -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div class="stats-bar" id="stats-bar">
+      <div class="stat-item">
+        <div class="stat-value neutral" id="stat-total-segments">--</div>
+        <div class="stat-label">Total Segments</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value neutral" id="stat-segment-groups">--</div>
+        <div class="stat-label">Segment Groups</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="stat-outlier-ratio">--</div>
+        <div class="stat-label">Outlier Ratio</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="stat-rejection-rate">--</div>
+        <div class="stat-label">Rejection Rate</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="stat-label-switches">--</div>
+        <div class="stat-label">Label Switches</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value" id="stat-stability">--</div>
+        <div class="stat-label">Stability</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value neutral" id="stat-active-outliers">--</div>
+        <div class="stat-label">Active Outliers</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value neutral" id="stat-promotions">--</div>
+        <div class="stat-label">Promotions</div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- MAIN CONTENT: Timeline + Detail Panel            -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div class="main-content">
+      <!-- LEFT: Segment Timeline -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>📈 Segment Label Timeline</h2>
+          <span class="badge" id="timeline-count">0 items</span>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend" id="legend">
+          <div
+            class="legend-item"
+            data-type="strong_match"
+            onclick="toggleFilter('strong_match')"
+          >
+            <span
+              class="legend-dot"
+              style="background: var(--strong-match)"
+            ></span
+            >Strong
+          </div>
+          <div
+            class="legend-item"
+            data-type="early_match"
+            onclick="toggleFilter('early_match')"
+          >
+            <span
+              class="legend-dot"
+              style="background: var(--early-match)"
+            ></span
+            >Early
+          </div>
+          <div
+            class="legend-item"
+            data-type="possible_match"
+            onclick="toggleFilter('possible_match')"
+          >
+            <span
+              class="legend-dot"
+              style="background: var(--possible-match)"
+            ></span
+            >Possible
+          </div>
+          <div
+            class="legend-item"
+            data-type="weak_match"
+            onclick="toggleFilter('weak_match')"
+          >
+            <span
+              class="legend-dot"
+              style="background: var(--weak-match)"
+            ></span
+            >Weak
+          </div>
+          <div
+            class="legend-item"
+            data-type="context_match"
+            onclick="toggleFilter('context_match')"
+          >
+            <span
+              class="legend-dot"
+              style="background: var(--context-match)"
+            ></span
+            >Context
+          </div>
+          <div
+            class="legend-item"
+            data-type="outlier_pending"
+            onclick="toggleFilter('outlier_pending')"
+          >
+            <span
+              class="legend-dot"
+              style="background: var(--outlier-pending)"
+            ></span
+            >Outlier
+          </div>
+          <div
+            class="legend-item"
+            data-type="outlier_match"
+            onclick="toggleFilter('outlier_match')"
+          >
+            <span
+              class="legend-dot"
+              style="background: var(--outlier-match)"
+            ></span
+            >Promoted
+          </div>
+          <div
+            class="legend-item"
+            data-type="new_speaker"
+            onclick="toggleFilter('new_speaker')"
+          >
+            <span
+              class="legend-dot"
+              style="background: var(--new-speaker)"
+            ></span
+            >New
+          </div>
+        </div>
+
+        <!-- Search & Filter -->
+        <div class="filter-bar">
+          <input
+            type="text"
+            class="filter-input"
+            id="search-input"
+            placeholder="🔍 Search by label or segment ID..."
+            oninput="applyFilters()"
+          />
+          <select
+            class="filter-select"
+            id="filter-match-type"
+            onchange="applyFilters()"
+          >
+            <option value="all">All Match Types</option>
+            <option value="strong_match">Strong Match</option>
+            <option value="early_match">Early Match</option>
+            <option value="possible_match">Possible Match</option>
+            <option value="weak_match">Weak Match</option>
+            <option value="context_match">Context Match</option>
+            <option value="outlier_pending">Outlier Pending</option>
+            <option value="outlier_match">Outlier Match (Promoted)</option>
+            <option value="new_speaker">New Speaker</option>
+            <option value="first_speaker">First Speaker</option>
+            <option value="resolved_from_outlier">Resolved from Outlier</option>
+          </select>
+          <select
+            class="filter-select"
+            id="filter-label"
+            onchange="applyFilters()"
+          >
+            <option value="all">All Speakers</option>
+            <!-- Dynamically populated -->
+          </select>
+          <span class="filter-count" id="filter-count"></span>
+        </div>
+
+        <!-- Timeline Body -->
+        <div class="panel-body" id="timeline-panel">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            Loading segment timeline...
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Detail Panel + Outliers -->
+      <div style="display: flex; flex-direction: column; gap: 1rem">
+        <!-- Segment Detail Panel -->
+        <div class="panel detail-panel">
+          <div class="panel-header">
+            <h2>🔍 Segment Detail</h2>
+          </div>
+          <div class="panel-body full-height" id="detail-panel">
+            <div class="detail-placeholder">
+              <div class="icon">👆</div>
+              <p>Click a segment in the timeline<br />to view details</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Active Outliers Mini-List -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2>📦 Active Outliers</h2>
+            <span class="badge" id="outlier-count-badge">0</span>
+          </div>
+          <div
+            class="panel-body"
+            id="outlier-mini-list"
+            style="max-height: 300px"
+          >
+            <div class="empty-state">No active outliers</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- BOTTOM: Outliers & Promotions Full View          -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div style="padding: 0 2rem 2rem">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem">
+        <!-- All Outliers -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2>📦 Outlier Pool Details</h2>
+            <span class="badge" id="outlier-full-count">0 active</span>
+          </div>
+          <div
+            class="panel-body"
+            id="outlier-full-list"
+            style="max-height: 400px"
+          >
+            <div class="loading-state">
+              <div class="spinner"></div>
+              Loading...
+            </div>
+          </div>
+        </div>
+
+        <!-- Promotion History -->
+        <div class="panel">
+          <div class="panel-header">
+            <h2>🎉 Promotion History</h2>
+            <span class="badge" id="promo-count">0 total</span>
+          </div>
+          <div
+            class="panel-body promo-list"
+            id="promotion-list"
+            style="max-height: 400px"
+          >
+            <div class="empty-state">No promotions yet</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- SCRIPTS                                          -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <script>
+      // ─────────────────────────────────────────────
+      // STATE
+      // ─────────────────────────────────────────────
+      let segmentsData = null;
+      let outliersData = null;
+      let selectedSegmentId = null;
+      let autoRefreshEnabled = true;
+      let autoRefreshInterval = null;
+      let activeFilters = new Set();
+      let speakerLabels = new Set();
+
+      const REFRESH_INTERVAL_MS = 3000;
+      const MAX_TIMELINE_ITEMS = 200;
+
+      // ─────────────────────────────────────────────
+      // INITIALIZATION
+      // ─────────────────────────────────────────────
+      document.addEventListener("DOMContentLoaded", () => {
+        fetchAllData();
+        startAutoRefresh();
+      });
+
+      window.addEventListener("beforeunload", () => {
+        stopAutoRefresh();
+      });
+
+      // ─────────────────────────────────────────────
+      // DATA FETCHING
+      // ─────────────────────────────────────────────
+      async function fetchAllData() {
+        try {
+          const [segRes, outRes] = await Promise.all([
+            fetch("/speakers/metrics/segments"),
+            fetch("/speakers/metrics/outliers"),
+          ]);
+
+          if (!segRes.ok) throw new Error(`Segments HTTP ${segRes.status}`);
+          if (!outRes.ok) throw new Error(`Outliers HTTP ${outRes.status}`);
+
+          segmentsData = await segRes.json();
+          outliersData = await outRes.json();
+
+          updateStatusDot(true);
+          renderAll();
+        } catch (error) {
+          console.error("Failed to fetch data:", error);
+          updateStatusDot(false);
+          showToast("Error fetching data: " + error.message, "error");
+        }
+      }
+
+      async function fetchSegmentDetail(segmentId) {
+        try {
+          const response = await fetch(
+            `/speakers/metrics/segment-detail/${encodeURIComponent(segmentId)}`,
+          );
+          if (!response.ok) {
+            if (response.status === 404) {
+              renderDetailNotFound(segmentId);
+              return;
+            }
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const detail = await response.json();
+          renderDetail(detail);
+        } catch (error) {
+          console.error("Failed to fetch segment detail:", error);
+          renderDetailError(error.message);
+        }
+      }
+
+      // ─────────────────────────────────────────────
+      // AUTO-REFRESH
+      // ─────────────────────────────────────────────
+      function startAutoRefresh() {
+        stopAutoRefresh();
+        autoRefreshInterval = setInterval(fetchAllData, REFRESH_INTERVAL_MS);
+      }
+
+      function stopAutoRefresh() {
+        if (autoRefreshInterval) {
+          clearInterval(autoRefreshInterval);
+          autoRefreshInterval = null;
+        }
+      }
+
+      function toggleAutoRefresh() {
+        autoRefreshEnabled = !autoRefreshEnabled;
+        const btn = document.getElementById("auto-refresh-btn");
+
+        if (autoRefreshEnabled) {
+          startAutoRefresh();
+          btn.textContent = "⏸️ Pause";
+          btn.style.borderColor = "var(--border)";
+          showToast("Auto-refresh resumed", "info");
+        } else {
+          stopAutoRefresh();
+          btn.textContent = "▶️ Resume";
+          btn.style.borderColor = "var(--warning)";
+          showToast("Auto-refresh paused", "info");
+        }
+      }
+
+      function manualRefresh() {
+        fetchAllData();
+        showToast("Refreshed", "success");
+      }
+
+      // ─────────────────────────────────────────────
+      // STATUS DOT
+      // ─────────────────────────────────────────────
+      function updateStatusDot(isLive) {
+        const dot = document.getElementById("status-dot");
+        if (isLive) {
+          dot.className = "status-dot live";
+          dot.title = "Live - Connected";
+        } else {
+          dot.className = "status-dot error";
+          dot.title = "Error - Connection issue";
+        }
+      }
+
+      // ─────────────────────────────────────────────
+      // RENDER ALL
+      // ─────────────────────────────────────────────
+      function renderAll() {
+        updateStatsBar();
+        populateSpeakerFilter();
+        renderTimeline();
+        renderOutlierMiniList();
+        renderOutlierFullList();
+        renderPromotionHistory();
+
+        document.getElementById("update-time").textContent =
+          `Updated: ${new Date().toLocaleTimeString()}`;
+      }
+
+      // ─────────────────────────────────────────────
+      // STATS BAR
+      // ─────────────────────────────────────────────
+      function updateStatsBar() {
+        const sg = segmentsData || {};
+        const ol = outliersData || {};
+
+        // Total segments & groups
+        document.getElementById("stat-total-segments").textContent =
+          sg.totalSegments || 0;
+        document.getElementById("stat-segment-groups").textContent =
+          sg.segmentGroupsCount || 0;
+
+        // Outlier ratio
+        const outlierRatio = sg.outlierRatio || 0;
+        const ratioEl = document.getElementById("stat-outlier-ratio");
+        ratioEl.textContent = (outlierRatio * 100).toFixed(1) + "%";
+        ratioEl.className =
+          "stat-value " +
+          (outlierRatio <= 0.1
+            ? "healthy"
+            : outlierRatio <= 0.3
+              ? "warning"
+              : "unhealthy");
+
+        // Rejection rate
+        const rejectionRate = sg.rejectionRate || 0;
+        const rejEl = document.getElementById("stat-rejection-rate");
+        rejEl.textContent = (rejectionRate * 100).toFixed(1) + "%";
+        rejEl.className =
+          "stat-value " +
+          (rejectionRate <= 0.1
+            ? "healthy"
+            : rejectionRate <= 0.2
+              ? "warning"
+              : "unhealthy");
+
+        // Label switches
+        document.getElementById("stat-label-switches").textContent =
+          sg.labelSwitches || 0;
+
+        // Stability
+        const stability = sg.labelStability || 0;
+        const stabEl = document.getElementById("stat-stability");
+        stabEl.textContent = (stability * 100).toFixed(1) + "%";
+        stabEl.className =
+          "stat-value " +
+          (stability >= 0.9
+            ? "healthy"
+            : stability >= 0.7
+              ? "warning"
+              : "unhealthy");
+
+        // Active outliers
+        const activeOutliers = ol.activeCount || 0;
+        const aoEl = document.getElementById("stat-active-outliers");
+        aoEl.textContent = activeOutliers;
+        aoEl.className = "stat-value neutral";
+
+        // Promotions
+        document.getElementById("stat-promotions").textContent =
+          ol.totalPromotions || 0;
+      }
+
+      // ─────────────────────────────────────────────
+      // SPEAKER FILTER POPULATION
+      // ─────────────────────────────────────────────
+      function populateSpeakerFilter() {
+        const timeline = segmentsData?.timeline || [];
+        const select = document.getElementById("filter-label");
+        const currentValue = select.value;
+
+        // Collect unique speaker labels from timeline
+        speakerLabels.clear();
+        for (const item of timeline) {
+          const label = item.primaryLabel || "";
+          if (label && !label.startsWith("OUTLIER_")) {
+            speakerLabels.add(label);
+          }
+        }
+
+        // Add OUTLIER_XX option
+        const hasOutliers = timeline.some(
+          (item) =>
+            item.isOutlier ||
+            (item.primaryLabel && item.primaryLabel.startsWith("OUTLIER_")),
+        );
+
+        // Rebuild options
+        select.innerHTML = '<option value="all">All Speakers</option>';
+
+        const sortedLabels = Array.from(speakerLabels).sort();
+        for (const label of sortedLabels) {
+          select.innerHTML += `<option value="${escapeHtml(label)}">${escapeHtml(label)}</option>`;
+        }
+
+        if (hasOutliers) {
+          select.innerHTML +=
+            '<option value="OUTLIER">OUTLIER_* (Pending)</option>';
+        }
+
+        // Restore previous selection if still valid
+        if (
+          currentValue &&
+          (currentValue === "all" ||
+            currentValue === "OUTLIER" ||
+            speakerLabels.has(currentValue))
+        ) {
+          select.value = currentValue;
+        }
+      }
+
+      // ─────────────────────────────────────────────
+      // TIMELINE RENDERING
+      // ─────────────────────────────────────────────
+      function renderTimeline() {
+        const timeline = segmentsData?.timeline || [];
+        const panel = document.getElementById("timeline-panel");
+
+        if (timeline.length === 0) {
+          panel.innerHTML =
+            '<div class="empty-state">📭 No segment data yet. Process audio to populate the timeline.</div>';
+          document.getElementById("timeline-count").textContent = "0 items";
+          document.getElementById("filter-count").textContent = "";
+          return;
+        }
+
+        // Apply filters
+        const searchTerm = (
+          document.getElementById("search-input")?.value || ""
+        ).toLowerCase();
+        const matchTypeFilter =
+          document.getElementById("filter-match-type")?.value || "all";
+        const labelFilter =
+          document.getElementById("filter-label")?.value || "all";
+
+        let filteredTimeline = [...timeline];
+
+        // Match type filter
+        if (matchTypeFilter !== "all") {
+          filteredTimeline = filteredTimeline.filter(
+            (item) => item.matchType === matchTypeFilter,
+          );
+        }
+
+        // Active legend filters
+        if (activeFilters.size > 0) {
+          filteredTimeline = filteredTimeline.filter(
+            (item) => !activeFilters.has(item.matchType),
+          );
+        }
+
+        // Speaker label filter
+        if (labelFilter !== "all") {
+          if (labelFilter === "OUTLIER") {
+            filteredTimeline = filteredTimeline.filter(
+              (item) =>
+                item.isOutlier ||
+                (item.primaryLabel && item.primaryLabel.startsWith("OUTLIER_")),
+            );
+          } else {
+            filteredTimeline = filteredTimeline.filter(
+              (item) => item.primaryLabel === labelFilter,
+            );
+          }
+        }
+
+        // Search filter
+        if (searchTerm) {
+          filteredTimeline = filteredTimeline.filter(
+            (item) =>
+              (item.primaryLabel &&
+                item.primaryLabel.toLowerCase().includes(searchTerm)) ||
+              (item.matchType &&
+                item.matchType.toLowerCase().includes(searchTerm)),
+          );
+        }
+
+        // Limit display
+        const displayItems = filteredTimeline.slice(-MAX_TIMELINE_ITEMS);
+
+        // Update count
+        document.getElementById("timeline-count").textContent =
+          `${displayItems.length} / ${timeline.length} items`;
+        document.getElementById("filter-count").textContent =
+          filteredTimeline.length !== timeline.length
+            ? `(${filteredTimeline.length} filtered)`
+            : "";
+
+        // Build HTML
+        let html = '<div class="timeline">';
+
+        for (const item of displayItems) {
+          const isSelected =
+            item.primaryLabel === selectedSegmentId ||
+            (selectedSegmentId &&
+              item.primaryLabel &&
+              item.primaryLabel.includes(selectedSegmentId));
+          const isOutlier =
+            item.isOutlier ||
+            (item.primaryLabel && item.primaryLabel.startsWith("OUTLIER_"));
+          const matchType = item.matchType || "unknown";
+          const labelClass = isOutlier ? "outlier-label" : "";
+          const typeTagClass = isOutlier
+            ? "outlier-tag"
+            : matchType === "new_speaker" || matchType === "first_speaker"
+              ? "new-tag"
+              : "";
+          const displayLabel = item.primaryLabel || "UNKNOWN";
+
+          html += `
+            <div class="timeline-item ${isSelected ? "selected" : ""}" 
+                 data-segment-label="${escapeHtml(displayLabel)}"
+                 data-match-type="${escapeHtml(matchType)}"
+                 onclick="selectSegment('${escapeHtml(displayLabel)}', '${escapeHtml(matchType)}')">
+                <span class="tl-dot ${matchType}" 
+                      title="${escapeHtml(matchType)}"></span>
+                <span class="tl-time">${(item.timestamp || 0).toFixed(1)}s</span>
+                <span class="tl-label ${labelClass}">${escapeHtml(displayLabel)}</span>
+                <span class="tl-type ${typeTagClass}">${formatMatchType(matchType)}</span>
+                <span class="tl-duration">${isOutlier ? "⏳" : ""}</span>
+            </div>`;
+        }
+
+        html += "</div>";
+        panel.innerHTML = html;
+
+        // Auto-scroll to bottom (latest segments)
+        panel.scrollTop = panel.scrollHeight;
+      }
+
+      function selectSegment(label, matchType) {
+        selectedSegmentId = label;
+
+        // Update timeline selection
+        document.querySelectorAll(".timeline-item").forEach((item) => {
+          item.classList.remove("selected");
+          if (item.dataset.segmentLabel === label) {
+            item.classList.add("selected");
+          }
+        });
+
+        // Fetch detail for this segment
+        fetchSegmentDetail(label);
+      }
+
+      function formatMatchType(type) {
+        const map = {
+          strong_match: "Strong",
+          early_match: "Early",
+          possible_match: "Possible",
+          weak_match: "Weak",
+          context_match: "Context",
+          outlier_pending: "OUTLIER",
+          outlier_match: "Promoted",
+          new_speaker: "NEW",
+          first_speaker: "First",
+          resolved_from_outlier: "Resolved",
+        };
+        return map[type] || type;
+      }
+
+      // ─────────────────────────────────────────────
+      // FILTER FUNCTIONS
+      // ─────────────────────────────────────────────
+      function toggleFilter(matchType) {
+        if (activeFilters.has(matchType)) {
+          activeFilters.delete(matchType);
+        } else {
+          activeFilters.add(matchType);
+        }
+
+        // Update legend visuals
+        document.querySelectorAll(".legend-item").forEach((item) => {
+          const type = item.dataset.type;
+          if (activeFilters.has(type)) {
+            item.classList.add("filtered");
+          } else {
+            item.classList.remove("filtered");
+          }
+        });
+
+        applyFilters();
+      }
+
+      function applyFilters() {
+        renderTimeline();
+      }
+
+      // ─────────────────────────────────────────────
+      // SEGMENT DETAIL RENDERING
+      // ─────────────────────────────────────────────
+      function renderDetail(detail) {
+        const panel = document.getElementById("detail-panel");
+
+        if (!detail) {
+          panel.innerHTML =
+            '<div class="detail-placeholder"><p>No detail available</p></div>';
+          return;
+        }
+
+        const source = detail.source || "unknown";
+        const sourceBadge =
+          source === "speaker_reference"
+            ? "✅ Speaker Ref"
+            : source === "segment_groups"
+              ? "📋 Segment Group"
+              : "❓ Unknown";
+
+        let html = '<div class="detail-content">';
+
+        // Basic info
+        html += `
+        <div class="detail-field">
+            <div class="field-label">Segment ID</div>
+            <div class="field-value"><code>${escapeHtml(detail.segment_id || "N/A")}</code></div>
+        </div>
+        <div class="detail-field">
+            <div class="field-label">Speaker Label</div>
+            <div class="field-value" style="font-size:1.1rem;font-weight:700;">
+                ${escapeHtml(detail.speaker_label || "UNKNOWN")}
+            </div>
+        </div>`;
+
+        // Source-specific fields
+        if (source === "speaker_reference") {
+          html += `
+            <div class="detail-field">
+                <div class="field-label">Timestamp</div>
+                <div class="field-value">${(detail.timestamp || 0).toFixed(2)}s</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Segment Duration</div>
+                <div class="field-value">${(detail.segment_duration || 0).toFixed(2)}s</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Embedding Index</div>
+                <div class="field-value">#${detail.embedding_index} of ${detail.speaker_segment_count}</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Embedding Dimension</div>
+                <div class="field-value">${detail.embedding_dim || 0}d</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Core Embedding</div>
+                <div class="field-value">${detail.is_core ? "✅ Yes" : "⬜ No (excluded from centroid)"}</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Speaker First Seen</div>
+                <div class="field-value">${(detail.speaker_first_seen || 0).toFixed(1)}s</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Speaker Last Seen</div>
+                <div class="field-value">${(detail.speaker_last_seen || 0).toFixed(1)}s</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Speaker Active Duration</div>
+                <div class="field-value">${(detail.speaker_active_duration || 0).toFixed(1)}s</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Centroid Quality</div>
+                <div class="field-value">${(detail.centroid_quality || 0).toFixed(2)} / 1.0</div>
+            </div>`;
+        } else if (source === "segment_groups") {
+          html += `
+            <div class="detail-field">
+                <div class="field-label">Timestamp</div>
+                <div class="field-value">${(detail.timestamp || 0).toFixed(2)}s</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Match Type</div>
+                <div class="field-value">
+                    <span class="tl-type ${detail.is_outlier ? "outlier-tag" : ""}">${formatMatchType(detail.match_type || "unknown")}</span>
+                </div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Confidence</div>
+                <div class="field-value">${(detail.confidence || 0).toFixed(4)}</div>
+            </div>
+            <div class="detail-field">
+                <div class="field-label">Is Outlier</div>
+                <div class="field-value">${detail.is_outlier ? "⚠️ Yes" : "✅ No"}</div>
+            </div>`;
+        }
+
+        html += `
+        <div class="detail-field">
+            <div class="field-label">Data Source</div>
+            <div class="field-value">${sourceBadge}</div>
+        </div>`;
+
+        // Actions
+        html += `
+        <div class="detail-actions">
+            <button class="btn btn-sm" onclick="copyToClipboard('${escapeHtml(detail.segment_id || "")}')">
+                📋 Copy ID
+            </button>
+            <button class="btn btn-sm" onclick="checkAudio('${escapeHtml(detail.segment_id || "")}')">
+                🔊 Check Audio
+            </button>
+        </div>`;
+
+        html += "</div>";
+        panel.innerHTML = html;
+      }
+
+      function renderDetailNotFound(segmentId) {
+        document.getElementById("detail-panel").innerHTML = `
+        <div class="detail-placeholder">
+            <div class="icon">🔍</div>
+            <p>Segment not found in references</p>
+            <code style="font-size:0.7rem;">${escapeHtml(segmentId)}</code>
+            <p style="font-size:0.75rem;margin-top:0.5rem;color:var(--text-muted);">
+                It may be an active outlier or pending resolution.
+            </p>
+        </div>`;
+      }
+
+      function renderDetailError(message) {
+        document.getElementById("detail-panel").innerHTML = `
+        <div class="error-state">⚠️ Error loading detail: ${escapeHtml(message)}</div>`;
+      }
+
+      // ─────────────────────────────────────────────
+      // OUTLIER MINI LIST (sidebar)
+      // ─────────────────────────────────────────────
+      function renderOutlierMiniList() {
+        const details = outliersData?.outlierDetails || [];
+        const panel = document.getElementById("outlier-mini-list");
+        const badge = document.getElementById("outlier-count-badge");
+
+        badge.textContent = details.length;
+
+        if (details.length === 0) {
+          panel.innerHTML =
+            '<div class="empty-state">✅ No active outliers</div>';
+          return;
+        }
+
+        let html = "";
+        for (const o of details.slice(0, 5)) {
+          // Show only top 5
+          const ttl = outliersData.ttl || 60;
+          const pctRemaining = Math.max(0, ((ttl - o.age) / ttl) * 100);
+          const isExpiring = o.age > ttl * 0.8;
+          const ageClass = isExpiring
+            ? "urgent"
+            : o.age > ttl * 0.5
+              ? "warn"
+              : "";
+          const progressClass =
+            pctRemaining > 50 ? "safe" : pctRemaining > 20 ? "warn" : "danger";
+
+          html += `
+            <div class="outlier-card ${isExpiring ? "expiring" : ""}" 
+                 style="margin:0.5rem;" 
+                 onclick="selectSegment('${escapeHtml(o.label)}', 'outlier_pending')">
+                <div class="oc-header">
+                    <span class="oc-label">${escapeHtml(o.label)}</span>
+                    <span class="oc-age ${ageClass}">${o.age.toFixed(1)}s</span>
+                </div>
+                <div class="oc-details">
+                    <span>🆔 ${escapeHtml(o.segmentId).substring(0, 16)}</span>
+                    <span>🔄 ${o.matchAttempts} attempts</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill ${progressClass}" style="width:${pctRemaining}%"></div>
+                </div>
+            </div>`;
+        }
+
+        if (details.length > 5) {
+          html += `<div style="text-align:center;padding:0.5rem;font-size:0.75rem;color:var(--text-dim);">
+            + ${details.length - 5} more (see full list below)
+        </div>`;
+        }
+
+        panel.innerHTML =
+          html || '<div class="empty-state">No active outliers</div>';
+      }
+
+      // ─────────────────────────────────────────────
+      // OUTLIER FULL LIST
+      // ─────────────────────────────────────────────
+      function renderOutlierFullList() {
+        const details = outliersData?.outlierDetails || [];
+        const panel = document.getElementById("outlier-full-list");
+        const badge = document.getElementById("outlier-full-count");
+
+        badge.textContent = `${details.length} active`;
+
+        if (details.length === 0) {
+          panel.innerHTML =
+            '<div class="empty-state" style="padding:2rem;">✅ No active outliers in the pool</div>';
+          return;
+        }
+
+        let html = '<div class="outlier-list">';
+        const ttl = outliersData.ttl || 60;
+
+        for (const o of details) {
+          const pctRemaining = Math.max(0, ((ttl - o.age) / ttl) * 100);
+          const isExpiring = o.age > ttl * 0.8;
+          const ageClass = isExpiring
+            ? "urgent"
+            : o.age > ttl * 0.5
+              ? "warn"
+              : "";
+          const progressClass =
+            pctRemaining > 50 ? "safe" : pctRemaining > 20 ? "warn" : "danger";
+
+          html += `
+            <div class="outlier-card ${isExpiring ? "expiring" : ""}" 
+                 onclick="selectSegment('${escapeHtml(o.label)}', 'outlier_pending')">
+                <div class="oc-header">
+                    <span class="oc-label">${escapeHtml(o.label)}</span>
+                    <span class="oc-age ${ageClass}">${o.age.toFixed(1)}s / ${ttl}s</span>
+                </div>
+                <div class="oc-details">
+                    <span>🆔 ${escapeHtml(o.segmentId).substring(0, 20)}</span>
+                    <span>⏱️ ${(o.timestamp || 0).toFixed(1)}s</span>
+                    <span>🔄 ${o.matchAttempts} attempts</span>
+                    <span>🎵 ${(o.audioDuration || 0).toFixed(2)}s</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill ${progressClass}" style="width:${pctRemaining}%"></div>
+                </div>
+                ${isExpiring ? '<div style="font-size:0.65rem;color:var(--unhealthy);margin-top:0.25rem;">⚠️ Expiring soon</div>' : ""}
+            </div>`;
+        }
+
+        html += "</div>";
+        panel.innerHTML = html;
+      }
+
+      // ─────────────────────────────────────────────
+      // PROMOTION HISTORY
+      // ─────────────────────────────────────────────
+      function renderPromotionHistory() {
+        const history = outliersData?.promotionHistory || [];
+        const panel = document.getElementById("promotion-list");
+        const badge = document.getElementById("promo-count");
+
+        badge.textContent = `${outliersData?.totalPromotions || history.length} total`;
+
+        if (history.length === 0) {
+          panel.innerHTML =
+            '<div class="empty-state">🎈 No promotions yet. Outliers will be promoted when they match.</div>';
+          return;
+        }
+
+        let html = "";
+        for (const p of history) {
+          const typeClass = p.type || "single";
+          const typeLabel =
+            { single: "Single", pair: "Pair", merge: "Merge" }[typeClass] ||
+            typeClass;
+          const outlierLabels = (p.outliers || []).join(", ");
+          const target = p.target || "UNKNOWN";
+
+          html += `
+            <div class="promo-item">
+                <span class="promo-type ${typeClass}">${typeLabel}</span>
+                <span style="font-size:0.75rem;">${escapeHtml(outlierLabels)}</span>
+                <span class="promo-arrow">→</span>
+                <strong style="font-size:0.85rem;">${escapeHtml(target)}</strong>
+                <span style="margin-left:auto;font-size:0.7rem;color:var(--text-dim);">
+                    ${(p.confidence || 0).toFixed(3)}
+                </span>
+            </div>`;
+        }
+
+        panel.innerHTML = html;
+      }
+
+      // ─────────────────────────────────────────────
+      // UTILITY FUNCTIONS
+      // ─────────────────────────────────────────────
+      function copyToClipboard(text) {
+        navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            showToast("Copied: " + text, "success");
+          })
+          .catch(() => {
+            showToast("Failed to copy", "error");
+          });
+      }
+
+      async function checkAudio(segmentId) {
+        try {
+          const response = await fetch(
+            `/speakers/metrics/segment-detail/${encodeURIComponent(segmentId)}`,
+          );
+          if (!response.ok) throw new Error("Not found");
+          const detail = await response.json();
+
+          // Check audio info
+          const audioResponse = await fetch(
+            `/speakers/metrics/segment-detail/${encodeURIComponent(segmentId)}/audio`,
+          );
+          if (audioResponse.ok) {
+            const audioInfo = await audioResponse.json();
+            if (audioInfo.has_audio) {
+              showToast(
+                `🔊 Audio available: ${audioInfo.audio_source} (${audioInfo.duration_seconds}s)`,
+                "success",
+              );
+            } else {
+              showToast("🔇 No audio data available for this segment", "info");
+            }
+          }
+        } catch (error) {
+          showToast("Could not check audio: " + error.message, "error");
+        }
+      }
+
+      function escapeHtml(str) {
+        if (str == null) return "";
+        const div = document.createElement("div");
+        div.textContent = String(str);
+        return div.innerHTML;
+      }
+
+      // ─────────────────────────────────────────────
+      // TOAST NOTIFICATIONS
+      // ─────────────────────────────────────────────
+      function showToast(message, type = "info") {
+        const container = document.getElementById("toast-container");
+        const toast = document.createElement("div");
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+
+        setTimeout(() => {
+          toast.style.opacity = "0";
+          toast.style.transition = "opacity 0.3s";
+          setTimeout(() => toast.remove(), 300);
+        }, 2500);
+      }
+
+      // ─────────────────────────────────────────────
+      // KEYBOARD SHORTCUTS
+      // ─────────────────────────────────────────────
+      document.addEventListener("keydown", (e) => {
+        // 'r' to refresh
+        if (
+          e.key === "r" &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          document.activeElement === document.body
+        ) {
+          e.preventDefault();
+          manualRefresh();
+        }
+        // 'Space' to toggle auto-refresh
+        if (
+          e.key === " " &&
+          !e.ctrlKey &&
+          !e.metaKey &&
+          document.activeElement === document.body
+        ) {
+          e.preventDefault();
+          toggleAutoRefresh();
+        }
+        // Escape to clear selection
+        if (e.key === "Escape") {
+          selectedSegmentId = null;
+          document
+            .querySelectorAll(".timeline-item")
+            .forEach((item) => item.classList.remove("selected"));
+          document.getElementById("detail-panel").innerHTML = `
+            <div class="detail-placeholder">
+                <div class="icon">👆</div>
+                <p>Click a segment in the timeline<br>to view details</p>
+            </div>`;
+        }
+      });
+    </script>
+  </body>
+</html>

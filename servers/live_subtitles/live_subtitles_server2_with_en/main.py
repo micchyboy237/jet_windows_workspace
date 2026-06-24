@@ -18,6 +18,7 @@ from core.state import (
 from services.live_subtitles_server_utils import load_segment_counter
 from routes.websocket import websocket_endpoint
 from routes.speakers import router as speakers_router
+from routes.speakers_metrics import router as speakers_metrics_router
 from routes.segments import router as segments_router
 from routes.transcribe import router as transcribe_router
 from routes.translate import router as translate_router
@@ -58,6 +59,7 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 app.add_api_websocket_route("/ws/live-subtitles", websocket_endpoint)
 app.include_router(speakers_router)
+app.include_router(speakers_metrics_router)
 app.include_router(segments_router)
 app.include_router(transcribe_router)
 app.include_router(translate_router)

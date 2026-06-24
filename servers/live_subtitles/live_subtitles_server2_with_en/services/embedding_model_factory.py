@@ -20,18 +20,18 @@ from rich.console import Console
 console = Console()
 _LOGGER_PREFIX = "[dim cyan]EmbeddingFactory[/dim cyan]"
 
+
 class EmbeddingModelType(str, Enum):
     """Supported speaker embedding model backends."""
     PYANNOTE = "pyannote"
     """pyannote/embedding — current default."""
     SPEECHBRAIN_ECAPA = "speechbrain_ecapa"
     """SpeechBrain ECAPA-TDNN: speechbrain/spkrec-ecapa-voxceleb"""
-    SPEECHBRAIN_XVECT = "speechbrain_xvect"
-    """SpeechBrain x-vector: speechbrain/spkrec-xvect-voxceleb"""
     NEMO_TITANET = "nemo_titanet"
     """NeMo TitaNet Large: titanet_large"""
     MODELSCOPE_ERES2NETV2 = "modelscope_eres2netv2"
     """ModelScope ERes2NetV2: iic/speech_eres2netv2_sv_zh-cn_16k-common"""
+
 
 @dataclass
 class EmbeddingResult:
@@ -40,6 +40,133 @@ class EmbeddingResult:
     model_type: EmbeddingModelType
     embedding_dim: int
     compute_time_ms: Optional[float] = None
+
+
+@dataclass
+class EmbeddingThresholds:
+    """Optimal thresholds for a specific embedding model."""
+    same: float
+    possible: float
+    new_speaker: float
+
+
+class EmbeddingThresholdProvider:
+    """Provides model-specific thresholds for speaker matching.
+    
+    Each embedding model produces embeddings in a different similarity space.
+    This class centralizes the empirically-determined optimal thresholds
+    for each backend so callers don't need to guess.
+    
+    Usage:
+        provider = EmbeddingThresholdProvider()
+        thresholds = provider.get_thresholds(EmbeddingModelType.PYANNOTE)
+        # thresholds.same -> 0.75
+    """
+    
+    # Empirically tuned thresholds per model type
+    _THRESHOLDS: Dict[EmbeddingModelType, EmbeddingThresholds] = {
+        EmbeddingModelType.PYANNOTE: EmbeddingThresholds(
+            same=0.75,
+            possible=0.50,
+            new_speaker=0.30,
+        ),
+        EmbeddingModelType.SPEECHBRAIN_ECAPA: EmbeddingThresholds(
+            same=0.65,
+            possible=0.40,
+            new_speaker=0.25,
+        ),
+        EmbeddingModelType.NEMO_TITANET: EmbeddingThresholds(
+            same=0.70,
+            possible=0.45,
+            new_speaker=0.25,
+        ),
+        EmbeddingModelType.MODELSCOPE_ERES2NETV2: EmbeddingThresholds(
+            same=0.70,
+            possible=0.45,
+            new_speaker=0.28,
+        ),
+    }
+    
+    @classmethod
+    def get_thresholds(
+        cls,
+        model_type: Union[str, EmbeddingModelType],
+    ) -> EmbeddingThresholds:
+        """Get the recommended thresholds for a given embedding model.
+        
+        Parameters
+        ----------
+        model_type : str or EmbeddingModelType
+            The embedding model backend identifier.
+            
+        Returns
+        -------
+        EmbeddingThresholds
+            Dataclass with same, possible, and new_speaker thresholds.
+            
+        Raises
+        ------
+        ValueError
+            If the model_type is not recognized.
+        """
+        if isinstance(model_type, str):
+            try:
+                model_type = EmbeddingModelType(model_type)
+            except ValueError:
+                raise ValueError(
+                    f"Unknown model type '{model_type}'. "
+                    f"Choose from: {[e.value for e in EmbeddingModelType]}"
+                )
+        
+        if model_type not in cls._THRESHOLDS:
+            raise ValueError(
+                f"No thresholds defined for model type '{model_type}'. "
+                f"Available: {list(cls._THRESHOLDS.keys())}"
+            )
+        
+        thresholds = cls._THRESHOLDS[model_type]
+        console.log(
+            f"{_LOGGER_PREFIX} Thresholds for {model_type.value}: "
+            f"same={thresholds.same}, possible={thresholds.possible}, "
+            f"new_speaker={thresholds.new_speaker}"
+        )
+        return thresholds
+    
+    @classmethod
+    def resolve_thresholds(
+        cls,
+        model_type: Union[str, EmbeddingModelType],
+        threshold_same: Optional[float] = None,
+        threshold_possible: Optional[float] = None,
+        threshold_new_speaker: Optional[float] = None,
+    ) -> EmbeddingThresholds:
+        """Resolve thresholds, using provided values or falling back to defaults.
+        
+        If any threshold is None, the model-specific default is used.
+        
+        Parameters
+        ----------
+        model_type : str or EmbeddingModelType
+            The embedding model backend identifier.
+        threshold_same : float, optional
+            User-provided same-speaker threshold.
+        threshold_possible : float, optional
+            User-provided possible-match threshold.
+        threshold_new_speaker : float, optional
+            User-provided new-speaker threshold.
+            
+        Returns
+        -------
+        EmbeddingThresholds
+            Resolved thresholds with all values populated.
+        """
+        defaults = cls.get_thresholds(model_type)
+        return EmbeddingThresholds(
+            same=threshold_same if threshold_same is not None else defaults.same,
+            possible=threshold_possible if threshold_possible is not None else defaults.possible,
+            new_speaker=threshold_new_speaker if threshold_new_speaker is not None else defaults.new_speaker,
+        )
+
 
 class BaseEmbeddingModel(ABC):
     """Abstract interface for speaker embedding models.
@@ -205,55 +332,6 @@ class SpeechBrainECAPAEmbeddingModel(BaseEmbeddingModel):
             run_opts={"device": str(self._device)},
         )
         console.log(f"{_LOGGER_PREFIX} SpeechBrain ECAPA ready on {self._device}")
-
-    @property
-    def model_type(self) -> EmbeddingModelType:
-        return self._MODEL_TYPE
-
-    @property
-    def embedding_dim(self) -> int:
-        return self._EMBEDDING_DIM
-
-    def encode(self, waveform: torch.Tensor, sample_rate: int) -> np.ndarray:
-        if self._classifier is None:
-            self._lazy_init()
-        if waveform.dim() == 2:
-            waveform = waveform.squeeze(0)
-        waveform = waveform.unsqueeze(0).float().to(self._device)
-        emb = self._classifier.encode_batch(waveform)
-        emb = emb.squeeze(0).cpu().numpy()
-        return emb
-
-
-class SpeechBrainXVectEmbeddingModel(BaseEmbeddingModel):
-    """Wrapper around SpeechBrain x-vector."""
-    _MODEL_TYPE = EmbeddingModelType.SPEECHBRAIN_XVECT
-    _EMBEDDING_DIM = 512
-
-    def __init__(
-        self,
-        source: str = "speechbrain/spkrec-xvect-voxceleb",
-        device: Optional[torch.device] = None,
-    ) -> None:
-        super().__init__(device=device)
-        self._source = source
-        self._classifier = None
-        self._lazy_init()
-
-    def _lazy_init(self) -> None:
-        try:
-            from speechbrain.inference.speaker import EncoderClassifier
-        except ImportError as exc:
-            raise ImportError(
-                "speechbrain is required for SpeechBrainXVectEmbeddingModel. "
-                "Install with: pip install speechbrain"
-            ) from exc
-        console.log(f"{_LOGGER_PREFIX} Loading SpeechBrain x-vector from '{self._source}'...")
-        self._classifier = EncoderClassifier.from_hparams(
-            source=self._source,
-            run_opts={"device": str(self._device)},
-        )
-        console.log(f"{_LOGGER_PREFIX} SpeechBrain x-vector ready on {self._device}")
 
     @property
     def model_type(self) -> EmbeddingModelType:
@@ -527,7 +605,6 @@ class ModelScopeEres2Netv2EmbeddingModel(BaseEmbeddingModel):
 _MODEL_REGISTRY: Dict[EmbeddingModelType, type] = {
     EmbeddingModelType.PYANNOTE: PyannoteEmbeddingModel,
     EmbeddingModelType.SPEECHBRAIN_ECAPA: SpeechBrainECAPAEmbeddingModel,
-    EmbeddingModelType.SPEECHBRAIN_XVECT: SpeechBrainXVectEmbeddingModel,
     EmbeddingModelType.NEMO_TITANET: NeMoTitaNetEmbeddingModel,
     EmbeddingModelType.MODELSCOPE_ERES2NETV2: ModelScopeEres2Netv2EmbeddingModel,
 }
@@ -543,8 +620,7 @@ def create_embedding_model(
     Parameters
     ----------
     model_type : str or EmbeddingModelType
-        One of "pyannote", "speechbrain_ecapa", "speechbrain_xvect",
-        "nemo_titanet", "modelscope_eres2netv2".
+        One of "pyannote", "speechbrain_ecapa", "nemo_titanet", "modelscope_eres2netv2".
     device : torch.device, optional
         Target device.
     **kwargs

@@ -54,14 +54,12 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\helpers\speaker_metrics.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_metrics_mixin.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\combine_audio_segments.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\extract_audio_segment.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\audio_utils.py",
     r"",
 ]
 
@@ -85,125 +83,100 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Given the new segment_groups return type by label_segments, please update label_segment, and all usage in processing.py (if needed).
-
-# C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py
-
-def label_speakers_for_segment(
-    waveform: np.ndarray,
-    sample_rate: int,
-    timestamp: Optional[float] = None,
-    return_multiple: bool = True,
-    segment_id: Optional[str] = None,
-) -> tuple:
-    \"\"\"Label speakers for an audio segment using the progressive labeler.\"\"\"
-    if waveform.size == 0:
-        empty_result = [
-            {
-                "label": "SPEAKER_UNKNOWN",
-                "confidence": 0.0,
-                "match_type": "empty_waveform",
-                "is_primary": True,
-                "is_new_speaker": False,
-            }
-        ]
-        return empty_result, "SPEAKER_UNKNOWN", 0.0, {"error": "empty_waveform"}
-
-    if timestamp is None:
-        timestamp = time.time()
-
-    labeler = _get_speaker_labeler()
-    waveform_float = waveform.astype(np.float32) / 32768.0
-    waveform_tensor = torch.from_numpy(waveform_float)
-    if waveform_tensor.dim() == 1:
-        waveform_tensor = waveform_tensor.unsqueeze(0)
-
-    current_speaker = get_current_speaker()
-    last_change_time = get_last_speaker_change_time()
-    context = {
-        "previous_speaker": current_speaker,
-        "time_since_last_change": (
-            timestamp - last_change_time if last_change_time > 0 else float("inf")
-        ),
-        "segment_duration": len(waveform) / sample_rate,
-    }
-
-    if return_multiple:
-        speaker_results = labeler.label_segments(
-            waveform=waveform_tensor,
-            sample_rate=sample_rate,
-            timestamp=timestamp,
-            context=context,
-            segment_id=segment_id,
-        )
-        primary = (
-            speaker_results[0]
-            if speaker_results
-            else {
-                "label": "SPEAKER_UNKNOWN",
-                "confidence": 0.0,
-                "match_type": "unknown",
-                "is_primary": True,
-                "is_new_speaker": False,
-            }
-        )
-        primary_label = primary["label"]
-        primary_confidence = primary["confidence"]
-        metadata = {
-            "match_type": primary.get("match_type", "unknown"),
-            "speaker_list": speaker_results,
-            "total_speakers": len(speaker_results),
-        }
-    else:
-        label, confidence, metadata = labeler.label_segment(
-            waveform=waveform_tensor,
-            sample_rate=sample_rate,
-            timestamp=timestamp,
-            context=context,
-            segment_id=segment_id,
-        )
-        primary_label = label
-        primary_confidence = confidence
-        speaker_results = [
-            {
-                "label": label,
-                "confidence": confidence,
-                "match_type": metadata.get("match_type", "unknown"),
-                "is_primary": True,
-                "is_new_speaker": metadata.get("is_new_speaker", False),
-            }
-        ]
-        metadata["speaker_list"] = speaker_results
-
-    if primary_label and primary_label != current_speaker:
-        console.print(
-            f"[speaker]🔊 Speaker change: {current_speaker} → {primary_label} "
-            f"(confidence: {primary_confidence:.3f})[/speaker]"
-        )
-        set_current_speaker(primary_label)
-        set_last_speaker_change_time(timestamp)
-
-    if labeler.total_segments_processed % 10 == 0:
-        save_speaker_state()
-
-    return speaker_results, primary_label, primary_confidence, metadata
-
+Refactor the code below. Break it down where needed — large files into modules, large classes into smaller ones, and long methods/functions into focused helpers.
+Be surgical: show only diffs, moved blocks, and new files. Do NOT reproduce existing files in full under any circumstances.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
-General:
-- Browse when beneficial or requested.
-- Keep explanations simple and clear.
-When coding:
-- Provide step-by-step analysis and explain the flow.
-- Use visuals, diagrams, or tables when helpful.
-- Show full code for new files, then show full function code for new or updated functions.
-- Write smart, flexible, reusable, maintainable, optimal, robust, and minimal code.
-- Always add logs so we can trace and know if all features work correctly.
+Guiding principles (apply judgment, not dogma):
+- SRP: each file, class, and method should have one clear responsibility.
+- DRY: before extracting anything, check if similar logic already exists — consolidate rather than duplicate.
+- YAGNI: don't create new abstractions, base classes, or files speculatively. Only split what is concretely too large or mixed.
+- Cohesion over fragmentation: if two things always change together, they belong together. Prefer fewer, well-organized files over many small ones.
+- Preserve all existing behavior exactly — no logic changes, no renames that break imports, no signature changes.
+
+Refactoring targets (apply only where clearly needed):
+- Files: split when a file mixes unrelated responsibilities AND exceeds ~300 lines.
+- Classes: when a class exceeds ~150 lines, first produce an outline (see below) before writing any code.
+- Methods/functions: split when a method exceeds ~40 lines OR does more than one distinct thing.
+- Apply recursively: if a newly created file, class, or method still exceeds its threshold, split it again before finalizing.
+
+For large classes — mandatory outline step:
+Before writing any code for a class exceeding ~150 lines, output a plain-text outline in this format:
+
+  Class outline: <OriginalClassName>
+  - `<NewClassName>` (file: <filename>.py) — <one line: what it owns>
+  - `<NewClassName>` (file: <filename>.py) — <one line: what it owns>
+  - ...
+  Preserved public interface: <comma-separated list of method/attribute names that must stay accessible>
+  DRY conflicts: <any logic that appears in more than one proposed class — resolve before proceeding>
+
+Only proceed to code output after the outline is written. If the outline reveals that splitting would duplicate logic or break the public interface, consolidate instead and explain why in one line.
+
+Before outputting, verify:
+- Every public method, function, and class that existed before still exists with the same name and signature.
+- Every import that existed before still resolves — either in its original location or re-exported from there.
+- No behavior was moved without the original call site being updated.
+- DRY check: scan your output for any logic block that appears more than once — consolidate before finalizing.
+- Size check: confirm every file, class, and method in your output is within the thresholds above.
+
+Output rules — violating these makes your response useless:
+- NEVER output a complete existing file, class, or method. It wastes tokens and forces the user to diff everything.
+- Show only the changed lines/block + 3-5 lines of surrounding context so the user knows where to paste.
+- For moved code, write `# [Move to new_file.py]` above the block — do not copy it twice.
+- For extracted helpers, show only the new helper + the one-line call-site replacement in the original method.
+- Use `# ... rest of method unchanged` / `# ... rest of class unchanged` / `# ... rest of file unchanged` to skip unmodified code.
+- Only output a complete file or class if it is 100% new (did not exist before).
+- If you catch yourself writing an entire class or file that already exists, stop and summarize what changed instead.
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """
+You are an expert software engineer performing a targeted refactor.
+Your job covers three levels: files, classes, and methods/functions.
+Produce minimal, surgical output — only what changed.
+
+Example of correct output format:
+
+## Step 1 — Outline (mandatory for any class exceeding ~150 lines)
+
+  Class outline: SegmentSpeakerLabeler
+  - `SpeakerHealthReporter` (file: speaker_health.py) — health checks, similarity matrix, centroid stats
+  - `SpeakerMaintenance` (file: speaker_maintenance.py) — consolidation, merging, reevaluation
+  - `SegmentSpeakerLabeler` (file: segment_speaker_labeler.py) — core labeling logic, kept in place
+  Preserved public interface: label_segment, reset, get_speaker_info, speaker_count
+  DRY conflicts: none
+
+## Step 2 — Code changes (surgical diffs only)
+
+### segment_speaker_labeler.py (modified)
+```python
+# Line ~45 — update imports
+from .speaker_health import SpeakerHealthReporter     # added
+from .speaker_maintenance import SpeakerMaintenance   # added
+# ... rest of file unchanged
+```
+
+```python
+# Line ~310 — replace long _compute_health() body with extracted helpers
+def _compute_health(self):
+    scores = self._collect_health_scores()   # extracted
+    return self._aggregate_health(scores)    # extracted
+# ... rest of class unchanged
+```
+
+### speaker_health.py (NEW — show completely)
+```python
+# full content here because it is new
+```
+
+### speaker_maintenance.py (NEW — show completely)
+```python
+# full content here because it is new
+```
+
+Never reproduce an existing file or class in full. If you catch yourself doing so, stop and show only the diff.
 """.strip()
+
 
 # For existing projects
 # DEFAULT_INSTRUCTIONS_MESSAGE += (
