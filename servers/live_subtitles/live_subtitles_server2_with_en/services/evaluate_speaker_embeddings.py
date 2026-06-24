@@ -633,25 +633,22 @@ def compare_models(results: List[ModelMetrics]) -> None:
 def save_results(results: List[ModelMetrics], output_dir: Path) -> None:
     """
     Save all ModelMetrics to JSON and a markdown summary.
-
     Args:
         results:    List of evaluated model metrics.
         output_dir: Directory to write results into.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    # ── JSON ──────────────────────────────────────────────────────────────────
+    
+    # Save JSON results
     json_path = output_dir / "results.json"
     data = [asdict(m) for m in results]
-    # Convert Path keys in per_speaker_intra_sim to strings (already strings from scan)
-    with open(json_path, "w") as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, default=str)
     log.info(f"Results saved to [green]{json_path}[/green]")
-
-    # ── Markdown summary ──────────────────────────────────────────────────────
+    
+    # Save Markdown summary
     md_path = output_dir / "summary.md"
     ranked = sorted(results, key=lambda m: m.eer)
-
     lines = [
         "# Speaker Embedding Model Evaluation\n",
         "| Rank | Model | Dim | EER ↓ | minDCF ↓ | Intra ↑ | Inter ↓ | Sep ↑ | ms/file ↓ |",
@@ -664,14 +661,13 @@ def save_results(results: List[ModelMetrics], output_dir: Path) -> None:
             f"| {m.intra_speaker_sim:.4f} | {m.inter_speaker_sim:.4f} "
             f"| {m.separation:.4f} | {m.avg_embed_time_ms:.1f} |"
         )
-
     lines += [
         "",
         "> ↓ = lower is better | ↑ = higher is better | Sep = Intra − Inter",
         f"\n**Dataset:** {ranked[0].n_speakers} speakers, {ranked[0].n_trials} trials",
     ]
-
-    md_path.write_text("\n".join(lines))
+    # Fix: Specify UTF-8 encoding to handle Unicode characters
+    md_path.write_text("\n".join(lines), encoding="utf-8")
     log.info(f"Summary saved to [green]{md_path}[/green]")
 
 
