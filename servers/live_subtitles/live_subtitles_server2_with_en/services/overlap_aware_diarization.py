@@ -13,7 +13,7 @@ Full robust pipeline integrating:
   • Robust turn-building      — median-filter + min-duration merge
 
 Install:
-    pip install speechbrain pyannote.audio torchaudio torch scikit-learn scipy
+    pip install speechbrain pyannote.audio librosa torch scikit-learn scipy
 
 Usage:
     python overlap_aware_diarization.py meeting.wav --strategy resegment --condition noisy
@@ -22,7 +22,7 @@ Usage:
 """
 
 import torch
-import torchaudio
+import librosa
 import numpy as np
 import logging
 from dataclasses import dataclass, field
@@ -160,19 +160,25 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def load_audio(path: str, target_sr: int = 16000) -> Tuple[torch.Tensor, int]:
     """
-    Load any audio file, resample to 16 kHz mono.
+    Load any audio file with librosa, resample to 16 kHz mono.
     Handles multi-channel by averaging channels.
     """
     log.info(f"Loading audio: {path}")
-    waveform, sr = torchaudio.load(path)
-
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-
+    
+    # Load with librosa (returns numpy float32, sr)
+    y, sr = librosa.load(path, sr=None, mono=False)
+    
+    # Convert to mono if multi-channel
+    if y.ndim > 1:
+        y = np.mean(y, axis=0)
+    
+    # Resample if needed
     if sr != target_sr:
-        resampler = torchaudio.transforms.Resample(sr, target_sr)
-        waveform  = resampler(waveform)
-
+        y = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
+    
+    # Convert to torch tensor (1, time)
+    waveform = torch.from_numpy(y).unsqueeze(0).float()
+    
     duration = waveform.shape[1] / target_sr
     log.info(f"Audio: {duration:.1f}s  |  {target_sr} Hz  |  mono")
     return waveform, target_sr
@@ -191,15 +197,15 @@ def validate_audio(waveform: torch.Tensor, sr: int, min_duration: float = 1.0):
 # SECTION 4 — ECAPA-TDNN EMBEDDING EXTRACTION
 # ══════════════════════════════════════════════════════════════════════
 
-def load_ecapa(savedir: str = "pretrained_ecapa") -> EncoderClassifier:
+def load_ecapa() -> EncoderClassifier:
     """
-    Load SpeechBrain ECAPA-TDNN (192-dim embeddings, trained on VoxCeleb1+2).
-    EER on VoxCeleb1-clean: 0.69–0.87% depending on normalization.
+    Load ECAPA-TDNN from a local pre-downloaded directory.
+    Avoids HuggingFace Hub download and Windows symlink privilege errors.
     """
-    log.info("Loading ECAPA-TDNN from speechbrain/spkrec-ecapa-voxceleb …")
+    local_model_path = r"C:\Users\druiv\.cache\pretrained_models\spkrec-ecapa-voxceleb"
+    log.info(f"Loading ECAPA-TDNN from local path: {local_model_path}")
     encoder = EncoderClassifier.from_hparams(
-        source="speechbrain/spkrec-ecapa-voxceleb",
-        savedir=savedir,
+        source=local_model_path,
         run_opts={"device": str(DEVICE)},
     )
     log.info("ECAPA-TDNN ready")
