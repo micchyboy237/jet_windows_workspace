@@ -885,9 +885,10 @@ def export_rttm(result: DiarizationResult, path: str):
     log.info(f"RTTM written → {path}")
 
 
-def print_result(result: DiarizationResult):
-    """Pretty-print diarization result to stdout."""
-    bar = "─" * 68
+def print_result(result: DiarizationResult, segment_info: List[dict] = None):
+    """Pretty-print diarization result to stdout with optional segment info."""
+    bar = "─" * 100 if segment_info else "─" * 68
+    
     print(f"\n{bar}")
     print(f"  File       : {result.audio_path}")
     print(f"  Speakers   : {result.n_speakers}")
@@ -896,31 +897,60 @@ def print_result(result: DiarizationResult):
     print(f"  Thresholds : same>{result.thresholds.get('same', '?')}  "
           f"ambiguous>{result.thresholds.get('ambiguous_low', '?')}  "
           f"osd_gate={result.thresholds.get('osd_gate', '?')}")
+    
+    if segment_info:
+        print(f"  Segments   : {len(segment_info)} saved")
+    
     print(bar)
-    print(f"  {'START':>8}   {'END':>8}   {'DUR':>6}   {'SCORE':>6}   "
-          f"{'LABEL':<12}  SPEAKER")
+    
+    if segment_info:
+        print(f"  {'SEG#':>5}  {'START':>8}   {'END':>8}   {'DUR':>6}   {'SCORE':>6}   "
+              f"{'LABEL':<12}  {'SPEAKER':<12}  {'PLAY':>6}")
+    else:
+        print(f"  {'START':>8}   {'END':>8}   {'DUR':>6}   {'SCORE':>6}   "
+              f"{'LABEL':<12}  SPEAKER")
+    
     print(bar)
-
-    for t in result.turns:
+    
+    clean_turns = {t.start: t for t in result.turns if t.label == "speech"}
+    
+    for i, t in enumerate(result.turns, 1):
         score_str = f"{t.score:.3f}" if t.score > 0 else "  —  "
-        tag       = f"[{t.label}]" if t.label != "speech" else ""
-        print(f"  {t.start:>7.2f}s  {t.end:>7.2f}s  "
-              f"{t.duration:>5.2f}s  {score_str:>6}  "
-              f"{tag:<12}  {t.speaker}")
-
+        tag = f"[{t.label}]" if t.label != "speech" else ""
+        
+        if segment_info and t.label == "speech":
+            # Find matching segment
+            seg_num = ""
+            play_btn = ""
+            for seg in segment_info:
+                if abs(seg['start'] - t.start) < 0.01 and abs(seg['end'] - t.end) < 0.01:
+                    seg_num = f"{seg['segment_num']:04d}"
+                    play_btn = "▶️"
+                    break
+            
+            print(f"  {seg_num:>5}  {t.start:>7.2f}s  {t.end:>7.2f}s  "
+                  f"{t.duration:>5.2f}s  {score_str:>6}  "
+                  f"{tag:<12}  {t.speaker:<12}  {play_btn:>6}")
+        else:
+            print(f"  {t.start:>7.2f}s  {t.end:>7.2f}s  "
+                  f"{t.duration:>5.2f}s  {score_str:>6}  "
+                  f"{tag:<12}  {t.speaker}")
+    
     print(bar)
-    total_overlap = sum(
-        t.duration for t in result.turns if t.label == "overlap"
-    )
-    total_uncertain = sum(
-        t.duration for t in result.turns if t.label == "uncertain"
-    )
+    
+    total_overlap = sum(t.duration for t in result.turns if t.label == "overlap")
+    total_uncertain = sum(t.duration for t in result.turns if t.label == "uncertain")
+    
     print(f"  Turns       : {len(result.turns)} total  |  "
           f"{len(result.clean_turns())} clean  |  "
           f"{len(result.overlap_turns())} overlap  |  "
           f"{len(result.uncertain_turns())} uncertain")
     print(f"  Overlap dur : {total_overlap:.2f}s")
     print(f"  Uncertain   : {total_uncertain:.2f}s")
+    
+    if segment_info:
+        print(f"  Segments    : {len(segment_info)} saved to segments/")
+    
     print(f"{bar}\n")
 
 
@@ -940,7 +970,7 @@ def run_pipeline(
     seg_dur:     float          = 1.5,
     seg_step:    float          = 0.75,
     min_turn_dur: float         = 0.3,
-) -> DiarizationResult:
+) -> Tuple[DiarizationResult, torch.Tensor, int]:
     """
     Full robust overlap-aware speaker diarization pipeline.
 
@@ -1067,7 +1097,7 @@ def run_pipeline(
     if rttm_path:
         export_rttm(result, rttm_path)
 
-    return result
+    return result, waveform, sr
 
 
 if __name__ == "__main__":

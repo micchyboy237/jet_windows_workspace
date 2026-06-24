@@ -53,8 +53,16 @@ include_files = [
 
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_overlap_aware_diarization.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_overlap_aware_diarization.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
+    r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp5.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp6.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp7.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp8.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp9.py",
+    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\modelscope\pipelines\builder.py",
+    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\modelscope\pipelines\base.py",
     r"",
 ]
 
@@ -78,72 +86,27 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Browse how to resolve
+Analyze how to use pipeline correctly
 
-python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py
-13:17:22  INFO     Arguments parsed: strategy=resegment, condition=noisy, speakers=None, output=C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization
-13:17:22  INFO     Output directory set to: C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization
-13:17:22  INFO     ============================================================
-13:17:22  INFO       ECAPA-TDNN Diarization  |  strategy=resegment  |  condition=noisy
-13:17:22  INFO     ============================================================
-13:17:22  INFO     Loading audio: C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav
-C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.pretrained' was deprecated, redirecting to 'speechbrain.inference'. Please update your script. This is a change from SpeechBrain 1.0. See: https://github.com/speechbrain/speechbrain/releases/tag/v1.0.0
-  if ismodule(module) and hasattr(module, '__file__'):
-C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.k2_integration' was deprecated, redirecting to 'speechbrain.integrations.k2_fsa'. Please update your script.
-  if ismodule(module) and hasattr(module, '__file__'):
-C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.wordemb' was deprecated, redirecting to 'speechbrain.integrations.huggingface.wordemb'. Please update your script.
-  if ismodule(module) and hasattr(module, '__file__'):
-C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.lobes.models.huggingface_transformers' was deprecated, redirecting to 'speechbrain.integrations.huggingface'. Please update your script.
-  if ismodule(module) and hasattr(module, '__file__'):
-C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.lobes.models.spacy' was deprecated, redirecting to 'speechbrain.integrations.nlp'. Please update your script.
-  if ismodule(module) and hasattr(module, '__file__'):
-C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.lobes.models.flair' was deprecated, redirecting to 'speechbrain.integrations.nlp'. Please update your script.
-  if ismodule(module) and hasattr(module, '__file__'):
-13:17:28  INFO     Numba verbose is deactivated. To enable it, set NUMBA_VERBOSE to 1.
-C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.nnet.loss.transducer_loss' was deprecated, redirecting to 'speechbrain.integrations.numba.transducer_loss'. Please update your script. This module depends on the optional 'numba' package. If you encounter an ImportError here, please install numba, for example with: pip install numba
-  if ismodule(module) and hasattr(module, '__file__'):
-C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\inspect.py:1007: UserWarning: Module 'speechbrain.wordemb' was deprecated, redirecting to 'speechbrain.integrations.huggingface.wordemb'. Please update your script.
-  if ismodule(module) and hasattr(module, '__file__'):
-13:17:31  INFO     Audio: 58.0s  |  16000 Hz  |  mono
-13:17:31  INFO     Loading ECAPA-TDNN from speechbrain/spkrec-ecapa-voxceleb …
-13:17:31  INFO     Fetch hyperparams.yaml: Fetching from HuggingFace Hub 'speechbrain/spkrec-ecapa-voxceleb' if not cached
-13:17:32  INFO     HTTP Request: HEAD https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/hyperparams.yaml "HTTP/1.1 307 Temporary Redirect"
-Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-13:17:32  WARNING  Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-13:17:32  INFO     HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/speechbrain/spkrec-ecapa-voxceleb/0f99f2d0ebe89ac095bcc5903c4dd8f72b367286/hyperparams.yaml "HTTP/1.1 200 OK"
-C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py:153: UserWarning: Using SYMLINK strategy on Windows for fetching potentially requires elevated privileges and is not recommended. See `LocalStrategy` documentation.
-  warnings.warn(
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp9.py
+[INFO] Loading ERes2NetV2 model...
+Downloading Model from https://www.modelscope.cn to directory: C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common
+2026-06-24 15:06:32,269 - modelscope - INFO - initiate model from C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common
+2026-06-24 15:06:32,269 - modelscope - INFO - initiate model from location C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common.
+2026-06-24 15:06:32,275 - modelscope - INFO - initialize model from C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common
+2026-06-24 15:06:32,275 - modelscope - WARNING - Use allow_remote=True. Will invoke codes from C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common. Please make sure that you can trust the external codes.
+2026-06-24 15:06:32,639 - modelscope - WARNING - No preprocessor field found in cfg.
+2026-06-24 15:06:32,639 - modelscope - WARNING - No val key and type key found in preprocessor domain of configuration.json file.
+2026-06-24 15:06:32,639 - modelscope - WARNING - Cannot find available config to build preprocessor at mode inference, current config: {'model_dir': 'C:\\Users\\druiv\\.cache\\modelscope\\hub\\models\\iic\\speech_eres2netv2_sv_zh-cn_16k-common'}. trying to build by task and model information.
+2026-06-24 15:06:32,639 - modelscope - INFO - No preprocessor key ('eres2netv2-sv', 'speaker-verification') found in PREPROCESSOR_MAP, skip building preprocessor. If the pipeline runs normally, please ignore this log.
+[INFO] Model loaded ✅
+[INFO] Example - Same speakers
+[INFO] Extracting embeddings...
 Traceback (most recent call last):
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py", line 1076, in <module>
-    main()
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_overlap_aware_diarization.py", line 235, in main
-    result = run_pipeline(
-             ^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py", line 976, in run_pipeline
-    encoder = load_ecapa()
-              ^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py", line 206, in load_ecapa
-    encoder = EncoderClassifier.from_hparams(
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\interfaces.py", line 489, in from_hparams
-    return pretrained_from_hparams(
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\inference\interfaces.py", line 183, in pretrained_from_hparams
-    hparams_local_path = fetch(
-                         ^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py", line 429, in fetch
-    download_file_hf(hf_kwargs, destination, local_strategy)
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\distributed.py", line 318, in main_proc_wrapped_func
-    result = function(*args, **kwargs)
-             ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py", line 277, in download_file_hf
-    link_with_strategy(fetched_file, destination, local_strategy)
-  File "C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\speechbrain\speechbrain\utils\fetching.py", line 164, in link_with_strategy
-    dst.symlink_to(src)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\pathlib.py", line 1386, in symlink_to
-    os.symlink(target, self, target_is_directory)
-OSError: [WinError 1314] A required privilege is not held by the client: 'C:\\Users\\druiv\\.cache\\huggingface\\hub\\models--speechbrain--spkrec-ecapa-voxceleb\\snapshots\\0f99f2d0ebe89ac095bcc5903c4dd8f72b367286\\hyperparams.yaml' -> 'C:\\Users\\druiv\\Desktop\\Jet_Files\\Jet_Windows_Workspace\\pretrained_ecapa\\hyperparams.yaml'
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp9.py", line 19, in <module>
+    emb1 = torch.tensor(sv_pipeline([speaker_1_path1])["spk_embedding"])
+                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+KeyError: 'spk_embedding'
 """
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

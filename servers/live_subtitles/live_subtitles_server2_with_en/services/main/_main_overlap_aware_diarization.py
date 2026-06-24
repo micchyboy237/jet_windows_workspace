@@ -1,7 +1,9 @@
 import argparse
 import shutil
+import torch
+from typing import List
 from pathlib import Path
-from overlap_aware_diarization import logging, run_pipeline, print_result
+from overlap_aware_diarization import DiarizationResult, logging, log, run_pipeline, print_result
 
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
@@ -10,10 +12,90 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_AUDIO = Path(r"C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav")
 
 
-def save_results(result, output_dir: Path, audio_path: str, strategy: str, condition: str):
+def save_audio_segments(
+    result: DiarizationResult,
+    waveform: torch.Tensor,
+    sr: int,
+    output_dir: Path,
+) -> List[dict]:
+    """
+    Extract and save each speaker turn as individual WAV files with metadata.
+    
+    Creates: output_dir/segments/segment_0001/
+                ├── sound.wav
+                └── meta.json
+    
+    Returns list of segment info dicts for display.
+    """
+    import json
+    import soundfile as sf
+    
+    segments_dir = output_dir / "segments"
+    segments_dir.mkdir(parents=True, exist_ok=True)
+    
+    segment_info = []
+    clean_turns = [t for t in result.turns if t.label == "speech"]
+    
+    log.info(f"Extracting {len(clean_turns)} clean segments to {segments_dir}")
+    
+    for idx, turn in enumerate(clean_turns, 1):
+        # Create segment subdirectory
+        seg_name = f"segment_{idx:04d}"
+        seg_dir = segments_dir / seg_name
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Extract audio segment
+        start_sample = int(turn.start * sr)
+        end_sample = int(turn.end * sr)
+        segment_audio = waveform[:, start_sample:end_sample].squeeze().numpy()
+        
+        # Save WAV file
+        wav_path = seg_dir / "sound.wav"
+        sf.write(str(wav_path), segment_audio, sr)
+        
+        # Create metadata
+        meta = {
+            "segment_id": idx,
+            "segment_name": seg_name,
+            "speaker": turn.speaker,
+            "start_time": round(turn.start, 3),
+            "end_time": round(turn.end, 3),
+            "duration": round(turn.duration, 3),
+            "confidence_score": round(turn.score, 3) if turn.score > 0 else None,
+            "label": turn.label,
+            "audio_file": str(wav_path),
+            "sample_rate": sr,
+            "num_samples": len(segment_audio)
+        }
+        
+        meta_path = seg_dir / "meta.json"
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(meta, f, indent=2)
+        
+        segment_info.append({
+            "segment_num": idx,
+            "segment_name": seg_name,
+            "speaker": turn.speaker,
+            "start": turn.start,
+            "end": turn.end,
+            "duration": turn.duration,
+            "score": turn.score,
+            "label": turn.label,
+            "wav_path": str(wav_path),
+            "meta_path": str(meta_path),
+        })
+        
+        log.debug(f"  ✓ {seg_name}: {turn.speaker} {turn.start:.2f}s-{turn.end:.2f}s "
+                  f"({turn.duration:.2f}s, {len(segment_audio)} samples)")
+    
+    log.info(f"✓ Saved {len(segment_info)} segments to {segments_dir}")
+    return segment_info
+
+
+def save_results(result, output_dir: Path, audio_path: str, strategy: str, condition: str, 
+                 waveform=None, sr=None):
     """
     Save diarization results to separate files in the output directory.
-    
     Creates:
     - summary.txt: Overall diarization summary
     - turns.csv: All speaker turns in CSV format
@@ -21,16 +103,21 @@ def save_results(result, output_dir: Path, audio_path: str, strategy: str, condi
     - overlap_regions.csv: Only overlap regions
     - uncertain_regions.csv: Only uncertain regions
     - statistics.json: Diarization statistics
+    - segments/segment_XXXX/: Individual speaker segments with audio and metadata
     """
     import json
     import csv
     from datetime import datetime
     
-    log = logging.getLogger(__name__)
     log.info(f"Saving results to: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # 1. Save summary text file
+    # Save segment audio files if waveform is provided
+    segment_info = []
+    if waveform is not None and sr is not None:
+        segment_info = save_audio_segments(result, waveform, sr, output_dir)
+    
+    # Summary file
     summary_file = output_dir / "summary.txt"
     with open(summary_file, 'w', encoding='utf-8') as f:
         f.write("=" * 68 + "\n")
@@ -44,23 +131,34 @@ def save_results(result, output_dir: Path, audio_path: str, strategy: str, condi
         f.write(f"Clean Turns   : {len(result.clean_turns())}\n")
         f.write(f"Overlap Turns : {len(result.overlap_turns())}\n")
         f.write(f"Uncertain     : {len(result.uncertain_turns())}\n")
+        f.write(f"Segments      : {len(segment_info)}\n")  # Added
         f.write(f"Timestamp     : {datetime.now().isoformat()}\n")
         f.write("=" * 68 + "\n")
     log.info(f"✓ Summary saved to {summary_file}")
     
-    # 2. Save all turns as CSV
+    # Turns CSV with segment number
     turns_file = output_dir / "turns.csv"
     with open(turns_file, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(['start', 'end', 'duration', 'speaker', 'score', 'label'])
-        for turn in result.turns:
+        writer.writerow(['segment_num', 'start', 'end', 'duration', 'speaker', 'score', 'label', 'audio_file'])
+        for i, turn in enumerate(result.turns, 1):
+            # Find matching segment info for the audio path
+            audio_path_segment = ""
+            if turn.label == "speech":
+                for seg in segment_info:
+                    if abs(seg['start'] - turn.start) < 0.01 and abs(seg['end'] - turn.end) < 0.01:
+                        audio_path_segment = seg['wav_path']
+                        break
+            
             writer.writerow([
+                i,
                 f"{turn.start:.3f}",
                 f"{turn.end:.3f}",
                 f"{turn.duration:.3f}",
                 turn.speaker,
                 f"{turn.score:.3f}" if turn.score > 0 else "",
-                turn.label
+                turn.label,
+                audio_path_segment
             ])
     log.info(f"✓ All turns saved to {turns_file}")
     
@@ -149,6 +247,55 @@ def save_results(result, output_dir: Path, audio_path: str, strategy: str, condi
     export_rttm(result, str(rttm_file))
     log.info(f"✓ RTTM saved to {rttm_file}")
 
+    return segment_info
+
+
+def display_results_table(result, segment_info):
+    """
+    Display results table with segment numbers and play buttons.
+    """
+    bar = "─" * 100
+    print(f"\n{bar}")
+    print(f"  {'SEG#':>5}  {'START':>8}   {'END':>8}   {'DUR':>6}   {'SCORE':>6}   "
+          f"{'LABEL':<12}  {'SPEAKER':<12}  {'PLAY':>6}")
+    print(bar)
+    
+    clean_turns = [t for t in result.turns if t.label == "speech"]
+    
+    for i, turn in enumerate(result.turns):
+        score_str = f"{turn.score:.3f}" if turn.score > 0 else "  —  "
+        tag = f"[{turn.label}]" if turn.label != "speech" else ""
+        
+        # Determine segment number (only for clean speech)
+        seg_num = ""
+        play_btn = ""
+        if turn.label == "speech":
+            # Find matching segment
+            for seg in segment_info:
+                if abs(seg['start'] - turn.start) < 0.01 and abs(seg['end'] - turn.end) < 0.01:
+                    seg_num = f"{seg['segment_num']:04d}"
+                    play_btn = "▶️"
+                    break
+        
+        print(f"  {seg_num:>5}  {turn.start:>7.2f}s  {turn.end:>7.2f}s  "
+              f"{turn.duration:>5.2f}s  {score_str:>6}  "
+              f"{tag:<12}  {turn.speaker:<12}  {play_btn:>6}")
+    
+    print(bar)
+    
+    # Summary statistics
+    total_overlap = sum(t.duration for t in result.turns if t.label == "overlap")
+    total_uncertain = sum(t.duration for t in result.turns if t.label == "uncertain")
+    
+    print(f"  Turns       : {len(result.turns)} total  |  "
+          f"{len(result.clean_turns())} clean  |  "
+          f"{len(result.overlap_turns())} overlap  |  "
+          f"{len(result.uncertain_turns())} uncertain")
+    print(f"  Segments    : {len(segment_info)} saved to segments/")
+    print(f"  Overlap dur : {total_overlap:.2f}s")
+    print(f"  Uncertain   : {total_uncertain:.2f}s")
+    print(f"{bar}\n")
+
 
 def get_args():
     parser = argparse.ArgumentParser(
@@ -232,7 +379,7 @@ def main():
     log = logging.getLogger(__name__)
     log.info(f"Output directory set to: {output_dir}")
     
-    result = run_pipeline(
+    result, waveform, sr = run_pipeline(
         audio_path=args.audio,
         strategy=args.strategy,
         condition=args.condition,
@@ -246,11 +393,12 @@ def main():
         min_turn_dur=args.min_turn,
     )
     
-    # Print results to console
-    print_result(result)
+    # Save results and get segment info
+    segment_info = save_results(result, output_dir, args.audio, args.strategy, args.condition,
+                               waveform=waveform, sr=sr)
     
-    # Save results to separate files in output directory
-    save_results(result, output_dir, args.audio, args.strategy, args.condition)
+    # Display enhanced results table
+    print_result(result, segment_info)
 
 if __name__ == "__main__":
     main()
