@@ -53,16 +53,16 @@ include_files = [
 
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_overlap_aware_diarization.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_embeddings.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_evaluate_speaker_embeddings.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp5.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp6.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp7.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp8.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp9.py",
-    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\modelscope\pipelines\builder.py",
-    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\modelscope\pipelines\base.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp9.py",
+    # r"C:\_server2_with_en\services\main\generated\_main_evaluate_speaker_embeddings\eval_results",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_overlap_aware_diarization.py",
     r"",
 ]
 
@@ -86,27 +86,67 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze how to use pipeline correctly
+Analyze if my observations or concerns are valid before applying improvements or fixes.
+- Uncertain segments can be considered outliers and should have its own label
 
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp9.py
-[INFO] Loading ERes2NetV2 model...
-Downloading Model from https://www.modelscope.cn to directory: C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common
-2026-06-24 15:06:32,269 - modelscope - INFO - initiate model from C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common
-2026-06-24 15:06:32,269 - modelscope - INFO - initiate model from location C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common.
-2026-06-24 15:06:32,275 - modelscope - INFO - initialize model from C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common
-2026-06-24 15:06:32,275 - modelscope - WARNING - Use allow_remote=True. Will invoke codes from C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common. Please make sure that you can trust the external codes.
-2026-06-24 15:06:32,639 - modelscope - WARNING - No preprocessor field found in cfg.
-2026-06-24 15:06:32,639 - modelscope - WARNING - No val key and type key found in preprocessor domain of configuration.json file.
-2026-06-24 15:06:32,639 - modelscope - WARNING - Cannot find available config to build preprocessor at mode inference, current config: {'model_dir': 'C:\\Users\\druiv\\.cache\\modelscope\\hub\\models\\iic\\speech_eres2netv2_sv_zh-cn_16k-common'}. trying to build by task and model information.
-2026-06-24 15:06:32,639 - modelscope - INFO - No preprocessor key ('eres2netv2-sv', 'speaker-verification') found in PREPROCESSOR_MAP, skip building preprocessor. If the pipeline runs normally, please ignore this log.
-[INFO] Model loaded ✅
-[INFO] Example - Same speakers
-[INFO] Extracting embeddings...
-Traceback (most recent call last):
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp9.py", line 19, in <module>
-    emb1 = torch.tensor(sv_pipeline([speaker_1_path1])["spk_embedding"])
-                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
-KeyError: 'spk_embedding'
+Also do the ff:
+- Create separate "outliers/segment_<num:.03f>" folder with own meta.json and sound.wav
+- Each suffix under should only be up to 3 digits
+- Each cell text under SEG# column should open the folder on ctrl+click
+- The play button should be able to play the segment sound.wav on ctrl+click
+- Check other issues if any
+
+
+Current logs
+2026-06-24 16:20:41,506 - diarization - INFO - Embedding model ready: ModelScopeEres2Netv2EmbeddingModel(type=modelscope_eres2netv2, dim=512)
+           EmbeddingFactory Updating embedding_dim from 512 to 192                        embedding_model_factory.py:469
+2026-06-24 16:20:44,959 - diarization - INFO - Extracted 76 embeddings (window=1.5s, hop=0.75s, dim=384)
+2026-06-24 16:20:44,959 - diarization - INFO - Eigengap auto-detected 2 speaker(s) (search range 2–8)
+2026-06-24 16:20:48,052 - diarization - INFO - Clustered into 2 speaker(s) (fixed)
+2026-06-24 16:20:48,052 - diarization - INFO - Built 9 initial speaker turns
+2026-06-24 16:20:48,052 - diarization - INFO - No HF token — using embedding-based OSD (no pyannote needed)
+2026-06-24 16:20:48,052 - diarization - INFO - Building per-speaker centroids from clean turns …
+2026-06-24 16:20:49,182 - diarization - INFO - Built centroids for 2 speaker(s): ['SPEAKER_00', 'SPEAKER_01']
+2026-06-24 16:20:59,147 - diarization - INFO - Building per-speaker centroids from clean turns …
+2026-06-24 16:21:00,037 - diarization - INFO - Built centroids for 2 speaker(s): ['SPEAKER_00', 'SPEAKER_01']
+2026-06-24 16:21:00,899 - diarization - INFO - No overlap regions found — returning standard diarization
+2026-06-24 16:21:00,899 - diarization - INFO - Saving results to: C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization
+2026-06-24 16:21:00,899 - diarization - INFO - Extracting 6 clean segments to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\segments
+2026-06-24 16:21:00,927 - diarization - INFO - ✓ Saved 6 segments to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\segments
+2026-06-24 16:21:00,927 - diarization - INFO - ✓ Summary saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\summary.txt
+2026-06-24 16:21:00,927 - diarization - INFO - ✓ All turns saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\turns.csv
+2026-06-24 16:21:00,927 - diarization - INFO - ✓ Overlap regions (0) saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\overlap_regions.csv
+2026-06-24 16:21:00,927 - diarization - INFO - ✓ Uncertain regions (3) saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\uncertain_regions.csv
+2026-06-24 16:21:00,933 - diarization - INFO - ✓ Statistics saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\statistics.json
+2026-06-24 16:21:00,933 - diarization - INFO - RTTM written → C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\turns.rttm
+2026-06-24 16:21:00,933 - diarization - INFO - ✓ RTTM saved to C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_overlap_aware_diarization\turns.rttm
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  File            : C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav
+  Speakers        : 2
+  Strategy        : resegment
+  Condition       : noisy
+  Embedding Model : modelscope_eres2netv2
+  Thresholds      : same>0.8  ambiguous>0.7  osd_gate=0.85
+  Segments        : 6 saved
+────────────────────────────────────────────────────────────────────────────────────────────────────
+   SEG#     START        END      DUR    SCORE   LABEL         SPEAKER         PLAY
+────────────────────────────────────────────────────────────────────────────────────────────────────
+   0001     0.00s     8.25s   8.25s   0.873                SPEAKER_00        ▶️
+   0002     8.25s    12.75s   4.50s   0.928                SPEAKER_01        ▶️
+    12.75s    17.25s   4.50s   0.763  [uncertain]   SPEAKER_00
+   0003    17.25s    23.25s   6.00s   0.947                SPEAKER_01        ▶️
+   0004    23.25s    33.75s  10.50s   0.846                SPEAKER_00        ▶️
+   0005    33.75s    41.25s   7.50s   0.897                SPEAKER_01        ▶️
+    41.25s    44.25s   3.00s   0.754  [uncertain]   SPEAKER_00
+   0006    44.25s    51.75s   7.50s   0.907                SPEAKER_01        ▶️
+    51.75s    57.75s   6.00s   0.764  [uncertain]   SPEAKER_00
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  Turns       : 9 total  |  6 clean  |  0 overlap  |  3 uncertain
+  Overlap dur : 0.00s
+  Uncertain   : 13.50s
+  Segments    : 6 saved to segments/
+────────────────────────────────────────────────────────────────────────────────────────────────────
 """
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
