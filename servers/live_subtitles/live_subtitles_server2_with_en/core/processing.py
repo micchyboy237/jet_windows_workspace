@@ -505,7 +505,7 @@ def blocking_process_audio(audio_bytes: bytes, header: dict) -> dict:
         )
 
 
-def _perform_speaker_labeling_high_speech_segments(
+def _perform_speaker_labeling(
     audio_np: np.ndarray,
     sample_rate: int,
     header: dict,
@@ -661,68 +661,6 @@ def _perform_speaker_labeling_high_speech_segments(
         # Add extraction info to metadata for debugging
         speaker_metadata["speech_extraction"] = extraction_info
         
-        if len(speaker_results) > 1:
-            speakers_str = ", ".join(
-                f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
-            )
-            console.print(
-                f"[speaker]Speakers: [{speakers_str}] "
-                f"(primary: {primary_label}, type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
-            )
-        else:
-            console.print(
-                f"[speaker]Speaker: {primary_label} "
-                f"(confidence: {primary_confidence:.3f}, "
-                f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
-            )
-    else:
-        console.print(
-            f"[warning]Skipping speaker labeling - insufficient text content "
-            f"(text: '{full_word_segments_text[:50]}{'...' if len(full_word_segments_text) > 50 else ''}', "
-            f"length: {len(full_word_segments_text)} chars)[/warning]"
-        )
-
-    return (
-        text_has_sufficient_content,
-        speaker_results,
-        primary_label,
-        primary_confidence,
-        speaker_metadata,
-    )
-
-
-def _perform_speaker_labeling(
-    audio_np: np.ndarray,
-    sample_rate: int,
-    header: dict,
-    full_word_segments_text: str,
-    segment_id: Optional[str] = None,
-) -> tuple:
-    """Perform speaker labeling if text content is sufficient."""
-    text_has_sufficient_content = should_label_speaker(
-        full_word_segments_text, min_chars=2
-    )
-    speaker_results = []
-    primary_label = None
-    primary_confidence = 0.0
-    speaker_metadata = {"match_type": "skipped_no_text"}
-
-    if text_has_sufficient_content:
-        segment_timestamp = header.get("start_sec", time.time())
-        segment_duration = header.get(
-            "duration_sec", 
-            get_audio_duration(audio_np, sr=sample_rate)
-        )
-        use_multiple = segment_duration >= 3.0
-        speaker_results, primary_label, primary_confidence, speaker_metadata = (
-            label_speakers_for_segment(
-                waveform=audio_np,
-                sample_rate=sample_rate,
-                timestamp=segment_timestamp,
-                return_multiple=use_multiple,
-                segment_id=segment_id,
-            )
-        )
         if len(speaker_results) > 1:
             speakers_str = ", ".join(
                 f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
