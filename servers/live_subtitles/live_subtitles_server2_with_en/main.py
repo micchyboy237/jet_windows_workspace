@@ -108,7 +108,7 @@ def initialize_labeler():
     set_embedding_inference(embedding_inference)
 
     speaker_state_path = get_speaker_state_path()
-    tagger = get_audio_tagger()
+    # tagger = get_audio_tagger()
     if speaker_state_path.exists():
         try:
             with open(speaker_state_path, "r") as f:
@@ -116,7 +116,7 @@ def initialize_labeler():
             labeler = SegmentSpeakerLabeler.from_dict(
                 state,
                 embedding_model=embedding_inference,
-                audio_tagger=tagger,
+                # audio_tagger=tagger,
             )
             set_speaker_labeler(labeler)
             console.print(
@@ -132,6 +132,7 @@ def initialize_labeler():
 
     labeler = SegmentSpeakerLabeler(
         embedding_model=embedding_inference,
+        # audio_tagger=tagger,
         debug=True,
     )
     set_speaker_labeler(labeler)
@@ -151,9 +152,7 @@ def initialize_tagger():
     
     console.print("Initializing AudioTagger...")
     try:
-        tagger = AudioTagger(
-            debug=False,
-        )
+        tagger = AudioTagger()
         set_audio_tagger(tagger)
         console.print("AudioTagger initialized successfully!\n")
     except FileNotFoundError as e:

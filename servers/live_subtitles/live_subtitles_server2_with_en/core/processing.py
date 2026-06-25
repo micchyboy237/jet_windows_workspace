@@ -44,7 +44,12 @@ from services.sentence_matcher_ja import (
 from services.sentence_utils import split_sentences_ja
 from services.transcribe_funasr import transcribe_audio
 from services.translate_jp_en_llm_prefixed import translate_japanese_to_english
-from services.audio_tagger import AudioTagger
+from services.audio_tagger import (
+    AudioTagger,
+    DEFAULT_CHUNK_DURATION,
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_SPEECH_PROB_THRESHOLD,
+)
 from services.audio_utils import get_audio_duration
 from services.audio_config import SAMPLE_RATE
 
@@ -93,6 +98,7 @@ def _get_speaker_labeler():
         set_embedding_inference(embedding_inference)
 
         speaker_state_path = get_speaker_state_path()
+        # tagger = AudioTagger()
         if speaker_state_path.exists():
             try:
                 with open(speaker_state_path, "r") as f:
@@ -100,6 +106,7 @@ def _get_speaker_labeler():
                 labeler = SegmentSpeakerLabeler.from_dict(
                     state,
                     embedding_model=embedding_inference,
+                    # audio_tagger=tagger,
                 )
                 set_speaker_labeler(labeler)
                 console.print(
@@ -115,6 +122,7 @@ def _get_speaker_labeler():
 
         labeler = SegmentSpeakerLabeler(
             embedding_model=embedding_inference,
+            # audio_tagger=tagger,
             debug=True,
         )
         set_speaker_labeler(labeler)
@@ -504,7 +512,17 @@ def _perform_speaker_labeling(
     full_word_segments_text: str,
     segment_id: Optional[str] = None,
 ) -> tuple:
-    """Perform speaker labeling if text content is sufficient."""
+    """Perform speaker labeling if text content is sufficient.
+    
+    Uses extract_high_confidence_speech_segments to improve speaker embedding
+    quality by filtering out silence, noise, and brief utterances. This improves
+    both intra-speaker consistency (cleaner embeddings → same speaker matches better)
+    and inter-speaker separation (distinct embeddings → different speakers more separable).
+    
+    Returns:
+        tuple: (text_has_sufficient_content, speaker_results, primary_label,
+                primary_confidence, speaker_metadata)
+    """
     text_has_sufficient_content = should_label_speaker(
         full_word_segments_text, min_chars=2
     )
@@ -520,15 +538,129 @@ def _perform_speaker_labeling(
             get_audio_duration(audio_np, sr=sample_rate)
         )
         use_multiple = segment_duration >= 3.0
+        
+        # ── NEW: Extract high-confidence speech for better speaker embedding ──
+        # This improves intra-speaker consistency by ensuring embeddings are
+        # computed from clean, continuous speech (not silence/noise).
+        # It improves inter-speaker separation by removing ambiguous audio
+        # that could blur distinctions between speakers.
+        audio_for_labeler = audio_np  # Default: use full audio if extraction fails
+        extraction_info = {
+            "attempted": False,
+            "successful": False,
+            "segments_found": 0,
+            "used_segment_duration": segment_duration,
+            "original_duration": segment_duration,
+        }
+        
+        if segment_duration >= 2.0:  # Only attempt for segments ≥2s
+            extraction_info["attempted"] = True
+            try:
+                # Get the audio tagger singleton
+                tagger = get_audio_tagger()
+                
+                if tagger is not None:
+                    # Convert to float32 for the tagger
+                    audio_float = audio_np.astype(np.float32) / 32768.0
+                    
+                    console.print(
+                        f"[info]🎯 Attempting high-confidence speech extraction "
+                        f"(audio: {segment_duration:.2f}s)...[/info]"
+                    )
+                    
+                    # Extract only high-confidence speech segments
+                    # min_duration=1.5: Only use segments ≥1.5s (enough for good embedding)
+                    # min_speech_duration_sec=1.0: Minimum speech for segment detection
+                    # min_silence_duration_sec=0.5: Gap to split segments
+                    high_conf_segments, high_conf_audios = (
+                        tagger.extract_high_confidence_speech_segments(
+                            audio=audio_float,
+                            sample_rate=sample_rate,
+                        )
+                    )
+                    
+                    extraction_info["segments_found"] = len(high_conf_audios)
+                    
+                    if high_conf_audios and len(high_conf_audios) > 0:
+                        # Find the longest high-confidence segment
+                        segment_lengths = [len(a) for a in high_conf_audios]
+                        longest_idx = int(np.argmax(segment_lengths))
+                        longest_audio = high_conf_audios[longest_idx]
+                        
+                        if len(longest_audio) > 0:
+                            # Convert back to int16 for the labeler
+                            audio_for_labeler = (
+                                np.clip(longest_audio, -1.0, 1.0) * 32767.0
+                            ).astype(np.int16)
+                            longest_dur = len(longest_audio) / sample_rate
+                            extraction_info["successful"] = True
+                            extraction_info["used_segment_duration"] = longest_dur
+                            
+                            # Log details about all found segments
+                            segment_details = []
+                            for i, (seg, aud) in enumerate(zip(high_conf_segments, high_conf_audios)):
+                                dur = len(aud) / sample_rate if len(aud) > 0 else 0
+                                marker = " ★" if i == longest_idx else ""
+                                segment_details.append(
+                                    f"  [{i}] {seg.get('start_time', 0):.2f}s-{seg.get('end_time', 0):.2f}s "
+                                    f"({dur:.2f}s, prob={seg.get('avg_speech_probability', 0):.3f}){marker}"
+                                )
+                            
+                            console.print(
+                                f"[success]🎯 Extracted {len(high_conf_audios)} high-confidence "
+                                f"speech segment(s):[/success]"
+                            )
+                            for detail in segment_details:
+                                console.print(f"[dim]{detail}[/dim]")
+                            console.print(
+                                f"[success]   → Using longest segment ({longest_dur:.2f}s) "
+                                f"for speaker labeling (was {segment_duration:.2f}s, "
+                                f"saved {segment_duration - longest_dur:.2f}s of non-speech)[/success]"
+                            )
+                        else:
+                            console.print(
+                                f"[warning]⚠️ Longest high-confidence segment was empty "
+                                f"({len(longest_audio)} samples), using full audio[/warning]"
+                            )
+                    else:
+                        console.print(
+                            f"[dim]🔇 No high-confidence speech segments found "
+                            f"(tagger found {extraction_info['segments_found']} segments, "
+                            f"but none met the min_duration=1.5s threshold), "
+                            f"using full audio for labeling[/dim]"
+                        )
+                else:
+                    console.print(
+                        "[dim]🔇 Audio tagger not available (get_audio_tagger() returned None), "
+                        "skipping speech extraction[/dim]"
+                    )
+            except Exception as e:
+                console.print(
+                    f"[warning]⚠️ extract_high_confidence_speech_segments failed: {e}, "
+                    f"using full audio for labeling[/warning]"
+                )
+                import traceback
+                console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        else:
+            console.print(
+                f"[dim]🔇 Segment too short for speech extraction "
+                f"({segment_duration:.2f}s < 2.0s), using full audio[/dim]"
+            )
+        
+        # Perform speaker labeling with the (possibly filtered) audio
         speaker_results, primary_label, primary_confidence, speaker_metadata = (
             label_speakers_for_segment(
-                waveform=audio_np,
+                waveform=audio_for_labeler,
                 sample_rate=sample_rate,
                 timestamp=segment_timestamp,
                 return_multiple=use_multiple,
                 segment_id=segment_id,
             )
         )
+        
+        # Add extraction info to metadata for debugging
+        speaker_metadata["speech_extraction"] = extraction_info
+        
         if len(speaker_results) > 1:
             speakers_str = ", ".join(
                 f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
@@ -1125,9 +1257,9 @@ def perform_audio_tagging(
     audio_np: np.ndarray,
     sample_rate: int,
     segment_dir: Optional[Path] = None,
-    chunk_duration: float = AudioTagger.DEFAULT_CHUNK_DURATION,
-    overlap_duration: float = AudioTagger.DEFAULT_CHUNK_OVERLAP,
-    speech_prob_threshold: float = AudioTagger.DEFAULT_SPEECH_PROB_THRESHOLD,
+    chunk_duration: float = DEFAULT_CHUNK_DURATION,
+    overlap_duration: float = DEFAULT_CHUNK_OVERLAP,
+    speech_prob_threshold: float = DEFAULT_SPEECH_PROB_THRESHOLD,
     min_speech_duration: float = 2.0,  # NEW parameter
 ) -> Dict[str, Any]:
     """

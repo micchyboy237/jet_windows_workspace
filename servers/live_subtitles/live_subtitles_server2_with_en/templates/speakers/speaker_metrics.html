@@ -80,29 +80,133 @@
         flex-wrap: wrap;
       }
 
-      /* ── Controls (persistent settings) ─ */
-      .controls-group {
+      /* ── Button Toolbar ──────────────── */
+      .btn-toolbar {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
+        gap: 0.5rem;
         flex-wrap: wrap;
       }
+      .btn-toolbar .divider {
+        width: 1px;
+        height: 24px;
+        background: var(--border);
+        margin: 0 0.25rem;
+      }
+      .btn {
+        padding: 0.45rem 0.85rem;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--card-bg);
+        color: var(--text);
+        cursor: pointer;
+        font-size: 0.8rem;
+        font-family: inherit;
+        transition: all var(--transition);
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        user-select: none;
+      }
+      .btn:hover {
+        background: var(--card-hover);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px var(--accent-glow);
+      }
+      .btn:active {
+        transform: scale(0.97);
+      }
+      .btn:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .btn.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
+      .btn.active:hover {
+        background: #1976d2;
+        border-color: #1976d2;
+      }
+      .btn.danger {
+        border-color: rgba(244, 67, 54, 0.4);
+        color: var(--unhealthy);
+      }
+      .btn.danger:hover {
+        background: rgba(244, 67, 54, 0.1);
+        border-color: var(--unhealthy);
+      }
+      .btn .kbd {
+        display: inline-block;
+        padding: 0.1rem 0.35rem;
+        font-size: 0.65rem;
+        font-family: "Courier New", monospace;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        line-height: 1.4;
+      }
+      .btn.active .kbd {
+        background: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.3);
+      }
+
+      /* ── Status indicators ───────────── */
+      .status-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+        animation: pulse 2s infinite;
+        flex-shrink: 0;
+      }
+      .status-dot.live {
+        background: var(--healthy);
+        box-shadow: 0 0 8px var(--healthy);
+      }
+      .status-dot.error {
+        background: var(--unhealthy);
+        box-shadow: 0 0 8px var(--unhealthy);
+      }
+      .status-dot.paused {
+        background: var(--warning);
+        box-shadow: 0 0 8px var(--warning);
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .update-time {
+        color: var(--text-dim);
+        font-size: 0.75rem;
+        white-space: nowrap;
+      }
+
+      /* ── Checkbox controls ───────────── */
       .control-item {
         display: flex;
         align-items: center;
         gap: 0.4rem;
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         color: var(--text-dim);
         cursor: pointer;
         user-select: none;
-        padding: 0.3rem 0.6rem;
+        padding: 0.35rem 0.6rem;
         border-radius: var(--radius-sm);
         border: 1px solid transparent;
         transition: all var(--transition);
         white-space: nowrap;
+        background: rgba(255, 255, 255, 0.02);
       }
       .control-item:hover {
-        background: rgba(255, 255, 255, 0.04);
+        background: rgba(255, 255, 255, 0.05);
         border-color: var(--border);
       }
       .control-item input[type="checkbox"] {
@@ -136,665 +240,417 @@
         outline: 2px solid var(--accent);
         outline-offset: 2px;
       }
-      .btn {
-        padding: 0.4rem 0.8rem;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--card-bg);
-        color: var(--text);
-        cursor: pointer;
-        font-size: 0.8rem;
-        transition: all var(--transition);
-        white-space: nowrap;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-      }
-      .btn:hover {
-        background: var(--card-hover);
-        border-color: var(--accent);
-        box-shadow: 0 0 0 2px var(--accent-glow);
-      }
-      .btn:active {
-        transform: scale(0.97);
-      }
-      .btn.primary {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: white;
-      }
-      .btn.primary:hover {
-        background: #1976d2;
-        border-color: #1976d2;
-      }
-      .btn-sm {
-        padding: 0.25rem 0.6rem;
-        font-size: 0.72rem;
-      }
-      .btn-icon {
-        padding: 0.35rem;
-        min-width: 32px;
+
+      /* ── Keyboard Shortcuts Modal ───── */
+      .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 1000;
         justify-content: center;
+        align-items: center;
+        backdrop-filter: blur(2px);
       }
-
-      /* ── Status indicators ───────────── */
-      .status-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        display: inline-block;
-        animation: pulse 2s infinite;
+      .modal-overlay.show {
+        display: flex;
       }
-      .status-dot.live {
-        background: var(--healthy);
-        box-shadow: 0 0 8px var(--healthy);
-      }
-      .status-dot.error {
-        background: var(--unhealthy);
-        box-shadow: 0 0 8px var(--unhealthy);
-      }
-      .status-dot.paused {
-        background: var(--warning);
-        box-shadow: 0 0 8px var(--warning);
-      }
-      @keyframes pulse {
-        0%,
-        100% {
-          opacity: 1;
-        }
-        50% {
-          opacity: 0.4;
-        }
-      }
-      .update-time {
-        color: var(--text-dim);
-        font-size: 0.75rem;
-        white-space: nowrap;
-      }
-
-      /* ── Summary Cards ──────────────── */
-      .summary-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 1rem;
-        padding: 1.5rem 2rem;
-      }
-      .summary-card {
+      .modal {
         background: var(--card-bg);
         border: 1px solid var(--border);
         border-radius: var(--radius);
-        padding: 1.25rem;
-        text-align: center;
-        transition:
-          transform var(--transition),
-          box-shadow var(--transition);
+        padding: 1.5rem;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        animation: modalIn 0.2s ease;
       }
-      .summary-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      @keyframes modalIn {
+        from {
+          transform: scale(0.95);
+          opacity: 0;
+        }
+        to {
+          transform: scale(1);
+          opacity: 1;
+        }
       }
-      .summary-card .value {
-        font-size: 2rem;
-        font-weight: 700;
-        margin: 0.5rem 0;
-        line-height: 1.2;
-      }
-      .summary-card .label {
-        color: var(--text-dim);
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      .summary-card.healthy .value {
-        color: var(--healthy);
-      }
-      .summary-card.warning .value {
-        color: var(--warning);
-      }
-      .summary-card.unhealthy .value {
-        color: var(--unhealthy);
-      }
-      .summary-card.neutral .value {
-        color: var(--accent);
-      }
-
-      /* ── Health Badge ───────────────── */
-      .health-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-        padding: 0.25rem 0.7rem;
-        border-radius: 20px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-      }
-      .health-badge.healthy {
-        background: rgba(76, 175, 80, 0.15);
-        color: var(--healthy);
-      }
-      .health-badge.warning {
-        background: rgba(255, 152, 0, 0.15);
-        color: var(--warning);
-      }
-      .health-badge.unhealthy {
-        background: rgba(244, 67, 54, 0.15);
-        color: var(--unhealthy);
-      }
-      .health-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        display: inline-block;
-      }
-      .health-dot.healthy {
-        background: var(--healthy);
-        box-shadow: 0 0 6px var(--healthy);
-      }
-      .health-dot.warning {
-        background: var(--warning);
-        box-shadow: 0 0 6px var(--warning);
-      }
-      .health-dot.unhealthy {
-        background: var(--unhealthy);
-        box-shadow: 0 0 6px var(--unhealthy);
-      }
-
-      /* ── Tab Navigation ─────────────── */
-      .tab-nav {
+      .modal h2 {
+        font-size: 1.2rem;
+        margin-bottom: 1rem;
         display: flex;
-        gap: 0;
-        border-bottom: 2px solid var(--border);
-        margin: 0 2rem;
+        align-items: center;
+        gap: 0.5rem;
       }
-      .tab-btn {
-        padding: 0.75rem 1.5rem;
+      .modal .shortcuts-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+      }
+      .modal .shortcuts-table td {
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      }
+      .modal .shortcuts-table td:first-child {
+        width: 50%;
+      }
+      .modal .shortcuts-table .key-combo {
+        display: inline-flex;
+        gap: 0.25rem;
+        align-items: center;
+      }
+      .modal .shortcuts-table kbd {
+        display: inline-block;
+        padding: 0.15rem 0.4rem;
+        font-size: 0.75rem;
+        font-family: "Courier New", monospace;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 3px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        line-height: 1.4;
+        min-width: 24px;
+        text-align: center;
+      }
+      .modal .modal-close {
+        float: right;
         background: none;
         border: none;
         color: var(--text-dim);
+        font-size: 1.2rem;
         cursor: pointer;
-        font-size: 0.9rem;
-        font-weight: 500;
-        border-bottom: 2px solid transparent;
-        margin-bottom: -2px;
+        padding: 0.25rem 0.5rem;
+        border-radius: var(--radius-sm);
         transition: all var(--transition);
-        white-space: nowrap;
       }
-      .tab-btn:hover {
+      .modal .modal-close:hover {
+        background: rgba(255, 255, 255, 0.05);
         color: var(--text-bright);
       }
-      .tab-btn.active {
-        color: var(--accent);
-        border-bottom-color: var(--accent);
-      }
-      .tab-content {
-        display: none;
-      }
-      .tab-content.active {
-        display: block;
-      }
-
-      /* ── Sections ───────────────────── */
-      .section {
-        margin: 0 2rem 2rem;
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        overflow: hidden;
-      }
-      .section-header {
-        padding: 1rem 1.5rem;
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        cursor: pointer;
-        user-select: none;
-        transition: background var(--transition);
-      }
-      .section-header:hover {
-        background: rgba(255, 255, 255, 0.02);
-      }
-      .section-header h2 {
-        font-size: 1.05rem;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-      }
-      .section-header .toggle-icon {
-        transition: transform 0.3s;
-        font-size: 0.8rem;
-        color: var(--text-dim);
-      }
-      .section.collapsed .section-body {
-        display: none;
-      }
-      .section.collapsed .toggle-icon {
-        transform: rotate(-90deg);
-      }
-      .section-body {
-        padding: 1.5rem;
-      }
-
-      /* ── Tables ─────────────────────── */
-      .table-wrapper {
-        overflow-x: auto;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.88rem;
-      }
-      thead {
-        position: sticky;
-        top: 0;
-        z-index: 2;
-      }
-      th {
-        text-align: left;
-        padding: 0.75rem 1rem;
-        background: rgba(255, 255, 255, 0.04);
-        color: var(--text-dim);
-        font-weight: 600;
-        text-transform: uppercase;
-        font-size: 0.7rem;
-        letter-spacing: 0.05em;
-        border-bottom: 2px solid var(--border);
-        white-space: nowrap;
-      }
-      td {
-        padding: 0.6rem 1rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-      }
-      tbody tr.speaker-row {
-        cursor: pointer;
-        transition: background var(--transition);
-        position: relative;
-      }
-      tbody tr.speaker-row:hover {
-        background: rgba(255, 255, 255, 0.03);
-      }
-      tbody tr.speaker-row.expanded {
-        background: rgba(33, 150, 243, 0.06);
-        box-shadow: inset 3px 0 0 var(--accent);
-      }
-      tbody tr.segment-detail-row {
-        background: rgba(0, 0, 0, 0.2);
-      }
-      tbody tr.segment-detail-row td {
-        padding: 0;
-      }
-      .segment-detail-inner {
-        padding: 0.75rem 1.5rem;
-        font-size: 0.78rem;
-        max-height: 250px;
-        overflow-y: auto;
-        border-top: 1px solid var(--border);
-        border-bottom: 1px solid var(--border);
-      }
-      .segment-detail-inner table {
+      .modal .modal-footer {
+        margin-top: 1rem;
+        text-align: right;
         font-size: 0.75rem;
-      }
-      .segment-detail-inner th {
-        font-size: 0.65rem;
-        padding: 0.4rem 0.75rem;
-      }
-      .segment-detail-inner td {
-        padding: 0.35rem 0.75rem;
+        color: var(--text-dim);
       }
 
-      /* ── Expand indicator ───────────── */
-      .expand-icon {
-        display: inline-block;
-        width: 20px;
-        text-align: center;
-        transition: transform 0.2s;
-        color: var(--text-dim);
-        font-size: 0.7rem;
+      /* ── Toast notifications ────────── */
+      .toast-container {
+        position: fixed;
+        top: 1rem;
+        right: 1rem;
+        z-index: 2000;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
       }
-      tr.expanded .expand-icon {
-        transform: rotate(90deg);
+      .toast {
+        padding: 0.6rem 1rem;
+        border-radius: var(--radius-sm);
+        font-size: 0.8rem;
+        animation: slideIn 0.3s ease;
+        max-width: 350px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+      .toast.success {
+        background: rgba(76, 175, 80, 0.2);
+        border: 1px solid var(--healthy);
+        color: var(--healthy);
+      }
+      .toast.info {
+        background: rgba(33, 150, 243, 0.2);
+        border: 1px solid var(--accent);
         color: var(--accent);
       }
-
-      /* ── Similarity Bar ─────────────── */
-      .similarity-bar-wrapper {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-      }
-      .similarity-bar {
-        display: inline-block;
-        height: 8px;
-        border-radius: 4px;
-        background: var(--healthy);
-        min-width: 3px;
-        transition: width 0.4s ease;
-      }
-      .similarity-bar.warning-bg {
-        background: var(--warning);
-      }
-      .similarity-bar.unhealthy-bg {
-        background: var(--unhealthy);
-      }
-
-      /* ── Pairwise Grid ──────────────── */
-      .pairwise-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: 0.75rem;
-      }
-      .pairwise-card {
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: 0.75rem 1rem;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        transition: all var(--transition);
-      }
-      .pairwise-card:hover {
-        background: rgba(255, 255, 255, 0.05);
-        border-color: var(--border-light);
-      }
-      .pairwise-card.risk {
-        border-color: rgba(244, 67, 54, 0.4);
-        background: rgba(244, 67, 54, 0.06);
-      }
-      .pairwise-card .speakers {
-        font-weight: 500;
-        font-size: 0.85rem;
-      }
-      .pairwise-card .distance {
-        font-family: "Courier New", monospace;
-        font-size: 0.9rem;
-        font-weight: 600;
-      }
-
-      /* ── Timeline ───────────────────── */
-      .timeline-container {
-        max-height: 300px;
-        overflow-y: auto;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-      }
-      .timeline-item {
-        display: flex;
-        align-items: center;
-        padding: 0.35rem 0.75rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-        font-size: 0.78rem;
-        gap: 0.5rem;
-        transition: background var(--transition);
-      }
-      .timeline-item:hover {
-        background: rgba(255, 255, 255, 0.02);
-      }
-      .timeline-item:last-child {
-        border-bottom: none;
-      }
-      .timeline-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        flex-shrink: 0;
-      }
-      .timeline-dot.strong_match {
-        background: var(--healthy);
-        box-shadow: 0 0 4px var(--healthy);
-      }
-      .timeline-dot.early_match {
-        background: #8bc34a;
-        box-shadow: 0 0 4px #8bc34a;
-      }
-      .timeline-dot.possible_match {
-        background: var(--warning);
-        box-shadow: 0 0 4px var(--warning);
-      }
-      .timeline-dot.weak_match {
-        background: var(--unhealthy);
-        box-shadow: 0 0 4px var(--unhealthy);
-      }
-      .timeline-dot.context_match {
-        background: var(--accent);
-        box-shadow: 0 0 4px var(--accent);
-      }
-      .timeline-dot.outlier_pending {
-        background: #9c27b0;
-        box-shadow: 0 0 4px #9c27b0;
-        opacity: 0.6;
-      }
-      .timeline-dot.outlier_match {
-        background: #9c27b0;
-        box-shadow: 0 0 4px #9c27b0;
-      }
-      .timeline-dot.new_speaker {
-        background: #00bcd4;
-        box-shadow: 0 0 4px #00bcd4;
-      }
-
-      /* ── Outlier Cards ──────────────── */
-      .outlier-list {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-        gap: 0.75rem;
-      }
-      .outlier-card {
-        background: rgba(156, 39, 176, 0.06);
-        border: 1px solid rgba(156, 39, 176, 0.2);
-        border-radius: var(--radius-sm);
-        padding: 0.75rem 1rem;
-        font-size: 0.82rem;
-        transition: all var(--transition);
-      }
-      .outlier-card:hover {
-        background: rgba(156, 39, 176, 0.1);
-        border-color: rgba(156, 39, 176, 0.4);
-      }
-      .outlier-card .age {
+      .toast.warning {
+        background: rgba(255, 152, 0, 0.2);
+        border: 1px solid var(--warning);
         color: var(--warning);
-        font-weight: 600;
       }
-      .outlier-card.expiring {
-        border-color: var(--unhealthy);
-        background: rgba(244, 67, 54, 0.06);
-        animation: expire-glow 2s infinite;
-      }
-      @keyframes expire-glow {
-        0%,
-        100% {
-          box-shadow: 0 0 0 rgba(244, 67, 54, 0);
+      @keyframes slideIn {
+        from {
+          transform: translateX(100%);
+          opacity: 0;
         }
-        50% {
-          box-shadow: 0 0 12px rgba(244, 67, 54, 0.2);
-        }
-      }
-
-      /* ── Loading / Error / Empty ────── */
-      .loading {
-        text-align: center;
-        padding: 3rem;
-        color: var(--text-dim);
-      }
-      .spinner {
-        width: 40px;
-        height: 40px;
-        border: 3px solid var(--border);
-        border-top-color: var(--accent);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-        margin: 0 auto 1rem;
-      }
-      @keyframes spin {
         to {
-          transform: rotate(360deg);
+          transform: translateX(0);
+          opacity: 1;
         }
-      }
-      .error-message {
-        background: rgba(244, 67, 54, 0.08);
-        border: 1px solid rgba(244, 67, 54, 0.3);
-        border-radius: var(--radius-sm);
-        padding: 1rem;
-        color: var(--unhealthy);
-        text-align: center;
-        margin: 1rem;
-      }
-      .empty-state {
-        text-align: center;
-        padding: 2rem;
-        color: var(--text-dim);
-        font-style: italic;
-        font-size: 0.85rem;
       }
 
       /* ── Responsive ─────────────────── */
-      @media (max-width: 768px) {
+      @media (max-width: 900px) {
         .header {
           padding: 1rem;
-        }
-        .header-right {
           flex-direction: column;
           align-items: flex-start;
-          gap: 0.5rem;
         }
-        .controls-group {
-          flex-wrap: wrap;
+        .header-right {
+          width: 100%;
         }
-        .summary-grid {
-          grid-template-columns: repeat(2, 1fr);
-          padding: 1rem;
-          gap: 0.75rem;
+        .btn-toolbar {
+          width: 100%;
+          justify-content: flex-start;
         }
-        .tab-nav {
-          margin: 0 1rem;
-          overflow-x: auto;
+        .btn-toolbar .divider {
+          display: none;
         }
-        .tab-btn {
-          padding: 0.6rem 1rem;
-          font-size: 0.8rem;
+        .btn {
+          font-size: 0.75rem;
+          padding: 0.35rem 0.65rem;
         }
-        .section {
-          margin: 0 1rem 1rem;
+        .btn .btn-label {
+          display: none;
         }
-        .section-body {
-          padding: 1rem;
+        .btn .kbd {
+          display: none;
         }
-        .pairwise-grid {
-          grid-template-columns: 1fr;
+        .control-item {
+          font-size: 0.7rem;
+          padding: 0.25rem 0.4rem;
         }
-        table {
-          font-size: 0.78rem;
-        }
-        th,
-        td {
-          padding: 0.5rem;
-        }
-      }
-
-      /* ── Tooltip ────────────────────── */
-      [data-tooltip] {
-        position: relative;
-        cursor: help;
-      }
-      [data-tooltip]:hover::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        bottom: calc(100% + 6px);
-        left: 50%;
-        transform: translateX(-50%);
-        background: #1a1a2e;
-        color: var(--text);
-        padding: 0.3rem 0.6rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        white-space: nowrap;
-        pointer-events: none;
-        border: 1px solid var(--border);
-        z-index: 10;
-      }
-
-      /* ── Scrollbar ──────────────────── */
-      ::-webkit-scrollbar {
-        width: 6px;
-        height: 6px;
-      }
-      ::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: var(--border-light);
-        border-radius: 3px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: var(--text-muted);
       }
     </style>
   </head>
   <body>
-    <!-- ══════════════════════════════════════ -->
-    <!-- HEADER                                -->
-    <!-- ══════════════════════════════════════ -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- TOAST CONTAINER                                  -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- KEYBOARD SHORTCUTS MODAL                         -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div
+      class="modal-overlay"
+      id="shortcuts-modal"
+      onclick="closeShortcutsModal(event)"
+    >
+      <div class="modal" onclick="event.stopPropagation()">
+        <button
+          class="modal-close"
+          onclick="closeShortcutsModal()"
+          title="Close (Esc)"
+        >
+          ✕
+        </button>
+        <h2>⌨️ Keyboard Shortcuts</h2>
+        <table class="shortcuts-table">
+          <tbody>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>R</kbd></span>
+              </td>
+              <td>Manual refresh (fetch latest data)</td>
+            </tr>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>Space</kbd></span>
+              </td>
+              <td>Toggle auto-refresh on/off</td>
+            </tr>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>1</kbd></span>
+              </td>
+              <td>Switch to Intra-Speaker tab</td>
+            </tr>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>2</kbd></span>
+              </td>
+              <td>Switch to Inter-Speaker tab</td>
+            </tr>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>3</kbd></span>
+              </td>
+              <td>Switch to Segment Groups tab</td>
+            </tr>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>4</kbd></span>
+              </td>
+              <td>Switch to Outliers tab</td>
+            </tr>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>E</kbd></span>
+              </td>
+              <td>Expand/Collapse all speaker segment details</td>
+            </tr>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>V</kbd></span>
+              </td>
+              <td>Toggle values-only display mode</td>
+            </tr>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>?</kbd></span> or
+                <span class="key-combo"><kbd>Ctrl</kbd> + <kbd>/</kbd></span>
+              </td>
+              <td>Show this shortcuts panel</td>
+            </tr>
+            <tr>
+              <td>
+                <span class="key-combo"><kbd>Esc</kbd></span>
+              </td>
+              <td>Close modal / clear selection</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="modal-footer">
+          Press <kbd>?</kbd> anytime to reopen this panel
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- HEADER                                           -->
+    <!-- ═══════════════════════════════════════════════ -->
     <div class="header">
       <div class="header-left">
         <h1>🎙️ Speaker Metrics Dashboard</h1>
         <div class="subtitle">Real-time speaker labeling health</div>
       </div>
       <div class="header-right">
-        <!-- Persistent controls -->
-        <div class="controls-group">
-          <label
-            class="control-item"
-            data-tooltip="Automatically refresh data every few seconds"
+        <!-- ═══════════ BUTTON TOOLBAR ═══════════ -->
+        <div class="btn-toolbar">
+          <!-- Refresh -->
+          <button
+            class="btn"
+            onclick="manualRefresh()"
+            title="Fetch latest data"
           >
-            <input
-              type="checkbox"
-              id="auto-refresh-toggle"
-              onchange="handleAutoRefreshToggle()"
-            />
-            <span>Auto-refresh</span>
-          </label>
-          <label
-            class="control-item"
-            data-tooltip="Show/hide segment details when clicking speaker rows"
+            🔄 <span class="btn-label">Refresh</span>
+            <span class="kbd">R</span>
+          </button>
+
+          <!-- Auto-refresh toggle -->
+          <button
+            class="btn active"
+            id="auto-refresh-btn"
+            onclick="handleAutoRefreshToggle()"
+            title="Toggle automatic data refresh"
           >
-            <input
-              type="checkbox"
-              id="expand-details-toggle"
-              onchange="handleExpandToggle()"
-            />
-            <span>Expand details</span>
-          </label>
-          <label
-            class="control-item"
-            data-tooltip="Show raw similarity values instead of bars"
+            ⏱️ <span class="btn-label">Auto</span>
+            <span class="kbd">Space</span>
+          </button>
+
+          <span class="divider"></span>
+
+          <!-- Tab quick-switch buttons -->
+          <button
+            class="btn"
+            onclick="switchTab('intra')"
+            title="Intra-Speaker Cohesion"
           >
-            <input
-              type="checkbox"
-              id="show-values-toggle"
-              onchange="handleShowValuesToggle()"
-            />
-            <span>Values only</span>
-          </label>
+            🔬 <span class="btn-label">Intra</span>
+            <span class="kbd">1</span>
+          </button>
+          <button
+            class="btn"
+            onclick="switchTab('inter')"
+            title="Inter-Speaker Separation"
+          >
+            🔗 <span class="btn-label">Inter</span>
+            <span class="kbd">2</span>
+          </button>
+          <button
+            class="btn"
+            onclick="switchTab('segments')"
+            title="Segment Group Health"
+          >
+            📋 <span class="btn-label">Groups</span>
+            <span class="kbd">3</span>
+          </button>
+          <button
+            class="btn"
+            onclick="switchTab('outliers')"
+            title="Outlier Pool"
+          >
+            📦 <span class="btn-label">Outliers</span>
+            <span class="kbd">4</span>
+          </button>
+
+          <span class="divider"></span>
+
+          <!-- Keyboard shortcuts help -->
+          <button
+            class="btn"
+            onclick="showShortcutsModal()"
+            title="View all keyboard shortcuts"
+          >
+            ⌨️ <span class="btn-label">Shortcuts</span>
+            <span class="kbd">?</span>
+          </button>
         </div>
 
-        <!-- Status & actions -->
+        <!-- Status indicators -->
         <span class="status-dot live" id="status-dot" title="Connected"></span>
         <span class="update-time" id="update-time">Loading...</span>
-        <button
-          class="btn btn-icon"
-          onclick="manualRefresh()"
-          data-tooltip="Refresh now (R key)"
-          title="Refresh now"
-        >
-          🔄
-        </button>
       </div>
     </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- SETTINGS BAR (below header)                      -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div
+      style="
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.6rem 2rem;
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+      "
+    >
+      <span
+        style="
+          font-size: 0.75rem;
+          color: var(--text-dim);
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        "
+      >
+        Display:
+      </span>
+      <label
+        class="control-item"
+        title="Expand segment details for all speakers"
+      >
+        <input
+          type="checkbox"
+          id="expand-details-toggle"
+          onchange="handleExpandToggle()"
+        />
+        <span>Expand All Details</span>
+        <span class="kbd" style="font-size: 0.6rem; margin-left: 0.2rem"
+          >E</span
+        >
+      </label>
+      <label
+        class="control-item"
+        title="Show raw similarity values instead of colored bars"
+      >
+        <input
+          type="checkbox"
+          id="show-values-toggle"
+          onchange="handleShowValuesToggle()"
+        />
+        <span>Values Only</span>
+        <span class="kbd" style="font-size: 0.6rem; margin-left: 0.2rem"
+          >V</span
+        >
+      </label>
+    </div>
+
+    <!-- ── (rest of the body: summary cards, tabs, etc. stays the same as previous version) ── -->
 
     <!-- ══════════════════════════════════════ -->
     <!-- SUMMARY CARDS                         -->
@@ -841,7 +697,7 @@
     </div>
 
     <!-- ══════════════════════════════════════ -->
-    <!-- INTRA-SPEAKER TAB                     -->
+    <!-- TAB CONTENTS                          -->
     <!-- ══════════════════════════════════════ -->
     <div class="tab-content active" id="tab-intra">
       <div class="section">
@@ -860,9 +716,6 @@
       </div>
     </div>
 
-    <!-- ══════════════════════════════════════ -->
-    <!-- INTER-SPEAKER TAB                     -->
-    <!-- ══════════════════════════════════════ -->
     <div class="tab-content" id="tab-inter">
       <div class="section">
         <div class="section-header" onclick="toggleSection(this)">
@@ -880,9 +733,6 @@
       </div>
     </div>
 
-    <!-- ══════════════════════════════════════ -->
-    <!-- SEGMENT GROUPS TAB                    -->
-    <!-- ══════════════════════════════════════ -->
     <div class="tab-content" id="tab-segments">
       <div class="section">
         <div class="section-header" onclick="toggleSection(this)">
@@ -904,9 +754,6 @@
       </div>
     </div>
 
-    <!-- ══════════════════════════════════════ -->
-    <!-- OUTLIERS TAB                          -->
-    <!-- ══════════════════════════════════════ -->
     <div class="tab-content" id="tab-outliers">
       <div class="section">
         <div class="section-header" onclick="toggleSection(this)">
@@ -938,17 +785,14 @@
         expandDetails: false,
         showValues: false,
         activeTab: "intra",
-        collapsedSections: [], // section indices that are collapsed
-        expandedSpeakers: [], // speaker labels whose segment details are expanded
+        expandedSpeakers: [],
         refreshIntervalMs: 5000,
       };
 
       function loadSettings() {
         try {
           const raw = localStorage.getItem(SETTINGS_KEY);
-          if (raw) {
-            return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
-          }
+          if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
         } catch (e) {
           console.warn("Failed to load settings, using defaults:", e);
         }
@@ -975,21 +819,15 @@
       // INITIALIZATION
       // ───────────────────────────────────────────────────
       document.addEventListener("DOMContentLoaded", () => {
-        // Apply persistent settings to UI controls
         applySettingsToUI();
-
-        // Restore active tab
-        switchTab(settings.activeTab, /* saveToSettings */ false);
-
-        // Initial data fetch
+        switchTab(settings.activeTab, false);
+        updateAutoRefreshButton();
         fetchMetrics();
 
-        // Start auto-refresh if enabled
         if (settings.autoRefresh) {
           startAutoRefresh();
         }
 
-        // Update status dot based on auto-refresh state
         updateStatusDot(settings.autoRefresh);
       });
 
@@ -1001,29 +839,44 @@
       // SETTINGS → UI
       // ───────────────────────────────────────────────────
       function applySettingsToUI() {
-        document.getElementById("auto-refresh-toggle").checked =
-          settings.autoRefresh;
         document.getElementById("expand-details-toggle").checked =
           settings.expandDetails;
         document.getElementById("show-values-toggle").checked =
           settings.showValues;
       }
 
+      function updateAutoRefreshButton() {
+        const btn = document.getElementById("auto-refresh-btn");
+        if (settings.autoRefresh) {
+          btn.classList.add("active");
+          btn.innerHTML =
+            '⏱️ <span class="btn-label">Auto</span> <span class="kbd">Space</span>';
+        } else {
+          btn.classList.remove("active");
+          btn.innerHTML =
+            '⏸️ <span class="btn-label">Paused</span> <span class="kbd">Space</span>';
+        }
+      }
+
       // ───────────────────────────────────────────────────
-      // SETTINGS HANDLERS
+      // BUTTON HANDLERS
       // ───────────────────────────────────────────────────
       function handleAutoRefreshToggle() {
-        settings.autoRefresh = document.getElementById(
-          "auto-refresh-toggle",
-        ).checked;
+        settings.autoRefresh = !settings.autoRefresh;
         saveSettings(settings);
+        updateAutoRefreshButton();
 
         if (settings.autoRefresh) {
           startAutoRefresh();
           updateStatusDot(true);
+          showToast("Auto-refresh ON", "success");
         } else {
           stopAutoRefresh();
           updateStatusDot(false);
+          showToast(
+            "Auto-refresh PAUSED — click Refresh or press R to update",
+            "warning",
+          );
         }
       }
 
@@ -1033,18 +886,21 @@
         ).checked;
         saveSettings(settings);
 
-        // If turning on, expand all speakers that have segments
         if (settings.expandDetails && metricsData?.intra_speaker?.speakers) {
           settings.expandedSpeakers = metricsData.intra_speaker.speakers
             .filter((s) => s.segments && s.segments.length > 0)
             .map((s) => s.label);
           saveSettings(settings);
+          showToast(
+            `Expanded ${settings.expandedSpeakers.length} speakers`,
+            "info",
+          );
         } else if (!settings.expandDetails) {
           settings.expandedSpeakers = [];
           saveSettings(settings);
+          showToast("All details collapsed", "info");
         }
 
-        // Re-render to show changes
         if (metricsData) {
           renderIntraSpeaker(metricsData.intra_speaker);
         }
@@ -1060,20 +916,22 @@
         }
       }
 
-      function handleSpeakerRowClick(speakerLabel) {
-        // Toggle this speaker in expandedSpeakers
-        const idx = settings.expandedSpeakers.indexOf(speakerLabel);
-        if (idx >= 0) {
-          settings.expandedSpeakers.splice(idx, 1);
-        } else {
-          settings.expandedSpeakers.push(speakerLabel);
-        }
-        saveSettings(settings);
+      function manualRefresh() {
+        fetchMetrics();
+        showToast("Refreshed", "success");
+      }
 
-        // Re-render just the intra-speaker table
-        if (metricsData) {
-          renderIntraSpeaker(metricsData.intra_speaker);
-        }
+      // ───────────────────────────────────────────────────
+      // SHORTCUTS MODAL
+      // ───────────────────────────────────────────────────
+      function showShortcutsModal() {
+        document.getElementById("shortcuts-modal").classList.add("show");
+      }
+
+      function closeShortcutsModal(event) {
+        // If event exists and click was on overlay background, close
+        if (event && event.target !== event.currentTarget) return;
+        document.getElementById("shortcuts-modal").classList.remove("show");
       }
 
       // ───────────────────────────────────────────────────
@@ -1086,7 +944,6 @@
             fetchMetrics,
             settings.refreshIntervalMs,
           );
-          console.log(`Auto-refresh started (${settings.refreshIntervalMs}ms)`);
         }
       }
 
@@ -1094,20 +951,15 @@
         if (autoRefreshInterval) {
           clearInterval(autoRefreshInterval);
           autoRefreshInterval = null;
-          console.log("Auto-refresh stopped");
         }
-      }
-
-      function manualRefresh() {
-        fetchMetrics();
       }
 
       function updateStatusDot(isLive) {
         const dot = document.getElementById("status-dot");
         dot.className = "status-dot " + (isLive ? "live" : "paused");
         dot.title = isLive
-          ? "Live - Auto-refreshing"
-          : "Paused - Manual refresh only";
+          ? "Live — Auto-refreshing"
+          : "Paused — Manual refresh only";
       }
 
       // ───────────────────────────────────────────────────
@@ -1121,15 +973,11 @@
           const previousData = metricsData;
           metricsData = await response.json();
 
-          // Only fully re-render if data structure changed or first load
           if (isFirstLoad || didStructureChange(previousData, metricsData)) {
             renderAll();
             isFirstLoad = false;
           } else {
-            // Update summary cards only (lighter refresh)
             renderSummary(metricsData.summary);
-
-            // Re-render current tab with expansion states preserved
             renderCurrentTab();
           }
 
@@ -1145,21 +993,15 @@
 
       function didStructureChange(prev, curr) {
         if (!prev || !curr) return true;
-
-        // Check if number of speakers changed (structure change)
         const prevCount = prev.intra_speaker?.speakers?.length || 0;
         const currCount = curr.intra_speaker?.speakers?.length || 0;
-
-        // Check if speaker labels changed
         if (prevCount !== currCount) return true;
-
         const prevLabels = new Set(
           (prev.intra_speaker?.speakers || []).map((s) => s.label),
         );
         const currLabels = new Set(
           (curr.intra_speaker?.speakers || []).map((s) => s.label),
         );
-
         return ![...prevLabels].every((l) => currLabels.has(l));
       }
 
@@ -1168,7 +1010,6 @@
       // ───────────────────────────────────────────────────
       function renderAll() {
         if (!metricsData) return;
-
         renderSummary(metricsData.summary);
         renderCurrentTab();
       }
@@ -1195,7 +1036,6 @@
       // ───────────────────────────────────────────────────
       function renderSummary(summary) {
         if (!summary) return;
-
         updateCard("card-overall", summary.overall, "Overall");
         updateCard(
           "card-speakers",
@@ -1230,16 +1070,13 @@
       function updateCard(id, value, label, statusClass = null) {
         const card = document.getElementById(id);
         if (!card) return;
-
         card.classList.remove("healthy", "warning", "unhealthy", "neutral");
-
         if (!statusClass && typeof value === "string") {
           if (value === "healthy") statusClass = "healthy";
           else if (value === "warning") statusClass = "warning";
           else if (value === "unhealthy") statusClass = "unhealthy";
         }
         if (statusClass) card.classList.add(statusClass);
-
         card.querySelector(".value").textContent = value;
       }
 
@@ -1258,28 +1095,17 @@
         const showValues = settings.showValues;
 
         let html = `<div class="table-wrapper"><table>
-        <thead>
-            <tr>
-                <th style="width:30px;"></th>
-                <th>Speaker</th>
-                <th>Status</th>
-                <th>Segments</th>
-                <th>Mean Similarity</th>
-                <th>Std Dev</th>
-                <th>Min Sim</th>
-                <th>Silhouette</th>
-                <th>Mature</th>
-                <th>Cohesion</th>
-            </tr>
-        </thead>
-        <tbody>`;
+        <thead><tr>
+            <th style="width:30px;"></th>
+            <th>Speaker</th><th>Status</th><th>Segments</th>
+            <th>Mean Similarity</th><th>Std Dev</th><th>Min Sim</th>
+            <th>Silhouette</th><th>Mature</th><th>Cohesion</th>
+        </tr></thead><tbody>`;
 
         for (const spk of intra.speakers) {
           const healthClass = spk.health || "healthy";
           const isExpanded = settings.expandedSpeakers.includes(spk.label);
           const hasSegments = spk.segments && spk.segments.length > 0;
-
-          // Cohesion bar
           const barWidth = Math.max(5, spk.meanSimilarity * 100);
           const barClass =
             spk.meanSimilarity >= 0.7
@@ -1291,13 +1117,9 @@
           html += `<tr class="speaker-row ${isExpanded ? "expanded" : ""}" 
                         data-speaker-label="${escapeHtml(spk.label)}"
                         onclick="handleSpeakerRowClick('${escapeHtml(spk.label)}')">
-            <td>
-                ${hasSegments ? `<span class="expand-icon">▶</span>` : ""}
-            </td>
+            <td>${hasSegments ? '<span class="expand-icon">▶</span>' : ""}</td>
             <td><strong>${escapeHtml(spk.label)}</strong></td>
-            <td><span class="health-badge ${healthClass}">
-                <span class="health-dot ${healthClass}"></span>${spk.health}
-            </span></td>
+            <td><span class="health-badge ${healthClass}"><span class="health-dot ${healthClass}"></span>${spk.health}</span></td>
             <td>${spk.segmentsCount}</td>
             <td>${spk.meanSimilarity.toFixed(4)}</td>
             <td>${spk.stdSimilarity.toFixed(4)}</td>
@@ -1308,66 +1130,70 @@
                 ${
                   showValues
                     ? `${(spk.meanSimilarity * 100).toFixed(0)}%`
-                    : `<span class="similarity-bar-wrapper">
-                        <span class="similarity-bar ${barClass}" style="width:${barWidth}px"></span>
-                        ${(spk.meanSimilarity * 100).toFixed(0)}%
-                       </span>`
+                    : `<span class="similarity-bar-wrapper"><span class="similarity-bar ${barClass}" style="width:${barWidth}px"></span>${(spk.meanSimilarity * 100).toFixed(0)}%</span>`
                 }
             </td>
         </tr>`;
 
-          // Segment detail row (controlled by expandedSpeakers set)
           if (hasSegments && isExpanded) {
-            html += `<tr class="segment-detail-row">
-                <td colspan="10">
-                    <div class="segment-detail-inner">
-                        <strong>Segment Details for ${escapeHtml(spk.label)}</strong>
-                        <span style="color:var(--text-dim);font-size:0.7rem;margin-left:0.5rem;">
-                            (${spk.segments.length} segments, 
-                            first: ${(spk.firstSeen || 0).toFixed(1)}s, 
-                            last: ${(spk.lastSeen || 0).toFixed(1)}s)
-                        </span>
-                        <table style="margin-top:0.5rem;">
-                            <thead><tr>
-                                <th>Segment ID</th>
-                                <th>Similarity</th>
-                                <th>Distance</th>
-                                <th>Timestamp</th>
-                                <th>Duration</th>
-                                <th>Core</th>
-                            </tr></thead>
-                            <tbody>`;
-            for (const seg of spk.segments) {
-              const segBarClass =
-                seg.similarity >= 0.7
-                  ? ""
-                  : seg.similarity >= 0.55
-                    ? "warning-bg"
-                    : "unhealthy-bg";
-              html += `<tr>
-                    <td><code style="font-size:0.7rem;">${escapeHtml(seg.id).substring(0, 22)}</code></td>
-                    <td>
-                        ${
-                          showValues
-                            ? seg.similarity.toFixed(3)
-                            : `<span class="similarity-bar-wrapper">
-                                <span class="similarity-bar ${segBarClass}" style="width:${Math.max(3, seg.similarity * 80)}px"></span>
-                                ${seg.similarity.toFixed(3)}
-                               </span>`
-                        }
-                    </td>
-                    <td>${seg.distance.toFixed(3)}</td>
-                    <td>${(seg.timestamp || 0).toFixed(1)}s</td>
-                    <td>${(seg.duration || 0).toFixed(2)}s</td>
-                    <td>${seg.is_core ? "✅" : "⬜"}</td>
-                </tr>`;
-            }
-            html += `</tbody></table></div></td></tr>`;
+            html += buildSegmentDetailRow(spk, showValues);
           }
         }
 
         html += "</tbody></table></div>";
         container.innerHTML = html;
+      }
+
+      function buildSegmentDetailRow(spk, showValues) {
+        let html = `<tr class="segment-detail-row"><td colspan="10">
+        <div class="segment-detail-inner">
+            <strong>Segment Details for ${escapeHtml(spk.label)}</strong>
+            <span style="color:var(--text-dim);font-size:0.7rem;margin-left:0.5rem;">
+                (${spk.segments.length} segments)
+            </span>
+            <table style="margin-top:0.5rem;">
+                <thead><tr><th>Segment ID</th><th>Similarity</th><th>Distance</th><th>Timestamp</th><th>Duration</th><th>Core</th></tr></thead>
+                <tbody>`;
+
+        for (const seg of spk.segments) {
+          const segBarClass =
+            seg.similarity >= 0.7
+              ? ""
+              : seg.similarity >= 0.55
+                ? "warning-bg"
+                : "unhealthy-bg";
+          html += `<tr>
+            <td><code style="font-size:0.7rem;">${escapeHtml(seg.id).substring(0, 22)}</code></td>
+            <td>
+                ${
+                  showValues
+                    ? seg.similarity.toFixed(3)
+                    : `<span class="similarity-bar-wrapper"><span class="similarity-bar ${segBarClass}" style="width:${Math.max(3, seg.similarity * 80)}px"></span>${seg.similarity.toFixed(3)}</span>`
+                }
+            </td>
+            <td>${seg.distance.toFixed(3)}</td>
+            <td>${(seg.timestamp || 0).toFixed(1)}s</td>
+            <td>${(seg.duration || 0).toFixed(2)}s</td>
+            <td>${seg.is_core ? "✅" : "⬜"}</td>
+        </tr>`;
+        }
+
+        html += "</tbody></table></div></td></tr>";
+        return html;
+      }
+
+      function handleSpeakerRowClick(speakerLabel) {
+        const idx = settings.expandedSpeakers.indexOf(speakerLabel);
+        if (idx >= 0) {
+          settings.expandedSpeakers.splice(idx, 1);
+        } else {
+          settings.expandedSpeakers.push(speakerLabel);
+        }
+        saveSettings(settings);
+
+        if (metricsData) {
+          renderIntraSpeaker(metricsData.intra_speaker);
+        }
       }
 
       // ───────────────────────────────────────────────────
@@ -1377,34 +1203,28 @@
         if (!inter) return;
 
         let html = "";
-
         html += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
         <div><strong>Mean Separation:</strong> ${inter.meanSeparation.toFixed(4)}</div>
         <div><strong>Std Deviation:</strong> ${inter.stdSeparation.toFixed(4)}</div>
         <div><strong>Min Separation:</strong> ${inter.minSeparation.toFixed(4)}</div>
         <div><strong>Max Separation:</strong> ${inter.maxSeparation.toFixed(4)}</div>
         <div><strong>Speakers:</strong> ${inter.num_speakers}</div>
-        <div><strong>Health:</strong> <span class="health-badge ${inter.health}">
-            <span class="health-dot ${inter.health}"></span>${inter.health}
-        </span></div>
+        <div><strong>Health:</strong> <span class="health-badge ${inter.health}"><span class="health-dot ${inter.health}"></span>${inter.health}</span></div>
     </div>`;
 
-        // Closest pair warning
         if (inter.closest_pair) {
           const cp = inter.closest_pair;
           const isRisky = cp.distance < 0.3;
-          html += `<div style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: ${isRisky ? "rgba(244,67,54,0.08)" : "rgba(255,152,0,0.06)"}; border-radius: var(--radius-sm); border-left: 3px solid ${isRisky ? "var(--unhealthy)" : "var(--warning)"};">
-            <strong>${isRisky ? "🚨" : "⚠️"} Closest Pair:</strong> 
-            ${escapeHtml(cp.speaker1)} ↔ ${escapeHtml(cp.speaker2)} 
-            (distance: ${cp.distance.toFixed(4)}, similarity: ${cp.similarity.toFixed(4)})
-            ${isRisky ? '<span class="health-badge unhealthy" style="margin-left:0.5rem;">AT RISK</span>' : ""}
+          html += `<div style="margin-bottom:1rem;padding:0.75rem 1rem;background:${isRisky ? "rgba(244,67,54,0.08)" : "rgba(255,152,0,0.06)"};border-radius:var(--radius-sm);border-left:3px solid ${isRisky ? "var(--unhealthy)" : "var(--warning)"};">
+            <strong>${isRisky ? "🚨" : "⚠️"} Closest Pair:</strong> ${escapeHtml(cp.speaker1)} ↔ ${escapeHtml(cp.speaker2)} 
+            (D:${cp.distance.toFixed(4)}, S:${cp.similarity.toFixed(4)})
+            ${isRisky ? '<span class="health-badge unhealthy" style="margin-left:0.5rem;">MERGE RISK</span>' : ""}
         </div>`;
         }
 
-        // Pairwise grid
         if (inter.pairwise && inter.pairwise.length > 0) {
-          html += '<h3 style="margin-bottom:0.5rem;">Pairwise Distances</h3>';
-          html += '<div class="pairwise-grid">';
+          html +=
+            '<h3 style="margin-bottom:0.5rem;">Pairwise Distances</h3><div class="pairwise-grid">';
           for (const pair of inter.pairwise) {
             const isRisky = pair.distance < 0.3;
             const distColor =
@@ -1415,10 +1235,7 @@
                   : "var(--unhealthy)";
             html += `<div class="pairwise-card ${isRisky ? "risk" : ""}">
                 <span class="speakers">${escapeHtml(pair.speaker1)} ↔ ${escapeHtml(pair.speaker2)}</span>
-                <span class="distance" style="color:${distColor}">
-                    D:${pair.distance.toFixed(4)} 
-                    <span style="font-size:0.75rem;color:var(--text-dim);">S:${pair.similarity.toFixed(3)}</span>
-                </span>
+                <span class="distance" style="color:${distColor}">D:${pair.distance.toFixed(4)} <span style="font-size:0.75rem;color:var(--text-dim);">S:${pair.similarity.toFixed(3)}</span></span>
             </div>`;
           }
           html += "</div>";
@@ -1444,9 +1261,7 @@
             <div><strong>Rejection Rate:</strong> ${(sg.rejectionRate * 100).toFixed(1)}%</div>
             <div><strong>Label Switches:</strong> ${sg.labelSwitches}</div>
             <div><strong>Stability:</strong> ${(sg.labelStability * 100).toFixed(1)}%</div>
-            <div><strong>Health:</strong> <span class="health-badge ${sg.health}">
-                <span class="health-dot ${sg.health}"></span>${sg.health}
-            </span></div>
+            <div><strong>Health:</strong> <span class="health-badge ${sg.health}"><span class="health-dot ${sg.health}"></span>${sg.health}</span></div>
         </div>`;
 
         if (
@@ -1454,15 +1269,13 @@
           Object.keys(sg.matchTypeDistribution).length > 0
         ) {
           let distHtml =
-            '<div style="margin-top:1rem; display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">';
+            '<div style="margin-top:1rem;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;">';
           distHtml +=
             '<strong style="font-size:0.85rem;">Match Types:</strong> ';
           for (const [type, count] of Object.entries(
             sg.matchTypeDistribution,
           )) {
-            distHtml += `<span style="padding:0.2rem 0.5rem; background:rgba(255,255,255,0.05); border-radius:4px; font-size:0.78rem;">
-                ${escapeHtml(type)}: <strong>${count}</strong>
-            </span>`;
+            distHtml += `<span style="padding:0.2rem 0.5rem;background:rgba(255,255,255,0.05);border-radius:4px;font-size:0.78rem;">${escapeHtml(type)}: <strong>${count}</strong></span>`;
           }
           distHtml += "</div>";
           document.getElementById("segment-stats").innerHTML += distHtml;
@@ -1472,9 +1285,8 @@
         if (sg.timeline && sg.timeline.length > 0) {
           let tlHtml = "";
           for (const item of sg.timeline.slice(-100)) {
-            const dotClass = item.matchType || "unknown";
             tlHtml += `<div class="timeline-item">
-                <span class="timeline-dot ${dotClass}" title="${escapeHtml(item.matchType)}"></span>
+                <span class="timeline-dot ${item.matchType || "unknown"}" title="${escapeHtml(item.matchType)}"></span>
                 <span style="color:var(--text-dim);min-width:50px;font-size:0.75rem;">${(item.timestamp || 0).toFixed(1)}s</span>
                 <span style="flex:1;">${escapeHtml(item.primaryLabel)}</span>
                 <span style="font-size:0.7rem;color:var(--text-dim);">${escapeHtml(item.matchType)}</span>
@@ -1498,8 +1310,8 @@
         let html = "";
 
         if (!outliers.enabled) {
-          html = '<div class="empty-state">Outlier buffer is disabled.</div>';
-          document.getElementById("outlier-content").innerHTML = html;
+          document.getElementById("outlier-content").innerHTML =
+            '<div class="empty-state">Outlier buffer is disabled.</div>';
           return;
         }
 
@@ -1508,14 +1320,12 @@
         <div><strong>Total Promotions:</strong> ${outliers.totalPromotions}</div>
         <div><strong>Threshold:</strong> ${(outliers.promotionThreshold || 0).toFixed(3)}</div>
         <div><strong>TTL:</strong> ${outliers.ttl || "N/A"}s</div>
-        <div><strong>Health:</strong> <span class="health-badge ${outliers.health}">
-            <span class="health-dot ${outliers.health}"></span>${outliers.health}
-        </span></div>
+        <div><strong>Health:</strong> <span class="health-badge ${outliers.health}"><span class="health-dot ${outliers.health}"></span>${outliers.health}</span></div>
     </div>`;
 
         if (outliers.outlierDetails && outliers.outlierDetails.length > 0) {
-          html += '<h3 style="margin-bottom:0.5rem;">Active Outliers</h3>';
-          html += '<div class="outlier-list">';
+          html +=
+            '<h3 style="margin-bottom:0.5rem;">Active Outliers</h3><div class="outlier-list">';
           for (const o of outliers.outlierDetails) {
             const isExpiring = o.age > (outliers.ttl || 60) * 0.8;
             html += `<div class="outlier-card ${isExpiring ? "expiring" : ""}">
@@ -1537,7 +1347,7 @@
           html +=
             '<h3 style="margin-top:1.5rem;margin-bottom:0.5rem;">Recent Promotions</h3>';
           html +=
-            "<table><thead><tr><th>Type</th><th>Outliers</th><th>Target</th><th>Confidence</th></tr></thead><tbody>";
+            '<div class="table-wrapper"><table><thead><tr><th>Type</th><th>Outliers</th><th>Target</th><th>Confidence</th></tr></thead><tbody>';
           for (const p of outliers.promotionHistory) {
             html += `<tr>
                 <td><span style="padding:0.15rem 0.4rem;border-radius:4px;font-size:0.75rem;background:rgba(156,39,176,0.2);">${escapeHtml(p.type)}</span></td>
@@ -1546,7 +1356,7 @@
                 <td>${(p.confidence || 0).toFixed(3)}</td>
             </tr>`;
           }
-          html += "</tbody></table>";
+          html += "</tbody></table></div>";
         }
 
         document.getElementById("outlier-content").innerHTML = html;
@@ -1556,13 +1366,11 @@
       // TAB SWITCHING
       // ───────────────────────────────────────────────────
       function switchTab(tabName, saveToSettings = true) {
-        // Update activeTab in settings
         if (saveToSettings) {
           settings.activeTab = tabName;
           saveSettings(settings);
         }
 
-        // Update tab buttons
         document
           .querySelectorAll(".tab-btn")
           .forEach((btn) => btn.classList.remove("active"));
@@ -1571,17 +1379,13 @@
         );
         if (targetBtn) targetBtn.classList.add("active");
 
-        // Update tab content
         document
           .querySelectorAll(".tab-content")
           .forEach((tab) => tab.classList.remove("active"));
         const targetTab = document.getElementById(`tab-${tabName}`);
         if (targetTab) targetTab.classList.add("active");
 
-        // Render the selected tab
-        if (metricsData) {
-          renderCurrentTab();
-        }
+        if (metricsData) renderCurrentTab();
       }
 
       // ───────────────────────────────────────────────────
@@ -1592,14 +1396,28 @@
       }
 
       // ───────────────────────────────────────────────────
-      // ERROR HANDLING
+      // TOAST
+      // ───────────────────────────────────────────────────
+      function showToast(message, type = "info") {
+        const container = document.getElementById("toast-container");
+        const toast = document.createElement("div");
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => {
+          toast.style.opacity = "0";
+          toast.style.transition = "opacity 0.3s";
+          setTimeout(() => toast.remove(), 300);
+        }, 2500);
+      }
+
+      // ───────────────────────────────────────────────────
+      // ERROR
       // ───────────────────────────────────────────────────
       function showError(message) {
         const errorHtml = `<div class="error-message">⚠️ Error loading metrics: ${escapeHtml(message)}</div>`;
         document.querySelectorAll(".section-body").forEach((el) => {
-          if (el.querySelector(".loading")) {
-            el.innerHTML = errorHtml;
-          }
+          if (el.querySelector(".loading")) el.innerHTML = errorHtml;
         });
       }
 
@@ -1614,10 +1432,10 @@
       }
 
       // ───────────────────────────────────────────────────
-      // KEYBOARD SHORTCUTS
+      // KEYBOARD SHORTCUTS (global)
       // ───────────────────────────────────────────────────
       document.addEventListener("keydown", (e) => {
-        // Don't trigger shortcuts when typing in inputs
+        // Don't trigger when typing in inputs
         if (
           e.target.tagName === "INPUT" ||
           e.target.tagName === "TEXTAREA" ||
@@ -1628,23 +1446,12 @@
 
         switch (e.key.toLowerCase()) {
           case "r":
-            // Manual refresh
             e.preventDefault();
             manualRefresh();
             break;
           case " ":
-            // Toggle auto-refresh
             e.preventDefault();
-            settings.autoRefresh = !settings.autoRefresh;
-            saveSettings(settings);
-            applySettingsToUI();
-            if (settings.autoRefresh) {
-              startAutoRefresh();
-              updateStatusDot(true);
-            } else {
-              stopAutoRefresh();
-              updateStatusDot(false);
-            }
+            handleAutoRefreshToggle();
             break;
           case "1":
             e.preventDefault();
@@ -1661,6 +1468,35 @@
           case "4":
             e.preventDefault();
             switchTab("outliers");
+            break;
+          case "e":
+            e.preventDefault();
+            settings.expandDetails = !settings.expandDetails;
+            saveSettings(settings);
+            document.getElementById("expand-details-toggle").checked =
+              settings.expandDetails;
+            handleExpandToggle();
+            break;
+          case "v":
+            e.preventDefault();
+            settings.showValues = !settings.showValues;
+            saveSettings(settings);
+            document.getElementById("show-values-toggle").checked =
+              settings.showValues;
+            handleShowValuesToggle();
+            break;
+          case "?":
+            e.preventDefault();
+            showShortcutsModal();
+            break;
+          case "/":
+            if (e.ctrlKey || e.metaKey) {
+              e.preventDefault();
+              showShortcutsModal();
+            }
+            break;
+          case "escape":
+            closeShortcutsModal();
             break;
         }
       });

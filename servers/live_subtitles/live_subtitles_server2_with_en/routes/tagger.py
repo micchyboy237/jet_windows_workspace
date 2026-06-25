@@ -15,7 +15,15 @@ from rich.console import Console
 from rich.table import Table
 from jinja2 import Template
 
-from services.audio_tagger import AudioTagger, TaggingResult, AudioChunksTaggingSummary
+from services.audio_tagger import (
+    AudioTagger,
+    TaggingResult,
+    AudioChunksTaggingSummary,
+    DEFAULT_CHUNK_DURATION,
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_SPEECH_PROB_THRESHOLD,
+    SPEECH_CLASS_NAMES,
+)
 from core.state import (
     get_audio_tagger,
     set_audio_tagger,
@@ -251,9 +259,9 @@ def get_tagger() -> AudioTagger:
         console.print("[info]Initializing AudioTagger...[/info]")
         tagger = AudioTagger(
             top_k=5,
-            chunk_duration=AudioTagger.DEFAULT_CHUNK_DURATION,
-            overlap_duration=AudioTagger.DEFAULT_CHUNK_OVERLAP,
-            speech_prob_threshold=AudioTagger.DEFAULT_SPEECH_PROB_THRESHOLD,
+            chunk_duration=DEFAULT_CHUNK_DURATION,
+            overlap_duration=DEFAULT_CHUNK_OVERLAP,
+            speech_prob_threshold=DEFAULT_SPEECH_PROB_THRESHOLD,
             debug=False,
         )
         set_audio_tagger(tagger)
@@ -294,7 +302,7 @@ async def get_tagger_config():
         "chunk_duration": tagger.chunk_duration,
         "chunk_overlap": tagger.chunk_overlap,
         "min_chunk_duration": tagger.min_chunk_duration,
-        "speech_classes": tagger.SPEECH_CLASS_NAMES,
+        "speech_classes": SPEECH_CLASS_NAMES,
     }
 
 
@@ -600,7 +608,7 @@ async def tag_audio_chunks_endpoint(
                 "predictions": chunk["predictions"][:top_k],
                 "processing_time": chunk["processing_time"],
                 "has_speech": any(
-                    pred["name"] in tagger.SPEECH_CLASS_NAMES and pred["prob"] >= 0.5
+                    pred["name"] in SPEECH_CLASS_NAMES and pred["prob"] >= 0.5
                     for pred in chunk["predictions"]
                 ),
             })

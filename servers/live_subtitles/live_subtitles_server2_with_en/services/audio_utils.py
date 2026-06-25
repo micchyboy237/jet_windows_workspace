@@ -259,22 +259,25 @@ def resolve_audio_paths_as_tensor_list(
 
 def load_audio(
     audio: AudioInput,
-    sr: int = SAMPLE_RATE,
+    sr: Optional[int] = SAMPLE_RATE,
     mono: bool = True,
 ) -> tuple[np.ndarray, int]:
     """
     Robust audio loader for ASR pipelines.
-
     Handles:
       - File paths
       - In-memory audio bytes (container OR raw PCM)
       - NumPy arrays
       - Torch tensors
 
+    Args:
+        sr: Target sample rate after loading. Pass None to keep the file's
+            native sample rate (file/bytes inputs only). Arrays and tensors
+            have no embedded rate and will use SAMPLE_RATE as fallback.
+
     Returns:
         (audio: np.ndarray [samples], sr: int)
     """
-
     def _decode_raw_pcm(
         data: bytes,
         expected_sr: int,
@@ -283,62 +286,48 @@ def load_audio(
     ) -> tuple[np.ndarray, int]:
         """Decode raw PCM bytes into numpy array."""
         itemsize = np.dtype(dtype).itemsize
-
         if len(data) % (channels * itemsize) != 0:
             raise ValueError(
                 f"Invalid raw PCM buffer: {len(data)} bytes not divisible by "
                 f"(channels={channels} × itemsize={itemsize})"
             )
-
         arr = np.frombuffer(data, dtype=dtype)
-
         if channels > 1:
             arr = arr.reshape(-1, channels).mean(axis=1)
-
-        # Normalize if integer
         if np.issubdtype(arr.dtype, np.integer):
             arr = arr.astype(np.float32) / np.iinfo(arr.dtype).max
         else:
             arr = arr.astype(np.float32)
-
         return arr, expected_sr
 
-    current_sr: int | None = None
+    current_sr: Optional[int] = None
 
     # ─────── Input handling ───────
     if isinstance(audio, (str, os.PathLike)):
         y, current_sr = librosa.load(audio, sr=None, mono=False)
-
     elif isinstance(audio, bytes):
-        y = None
-
-        # Attempt container decode (wav, flac, etc.)
         try:
             y, current_sr = librosa.load(io.BytesIO(audio), sr=None, mono=False)
         except Exception:
-            # Fallback → raw PCM
+            fallback = sr if sr is not None else SAMPLE_RATE
             y, current_sr = _decode_raw_pcm(
                 data=audio,
-                expected_sr=sr,
+                expected_sr=fallback,
                 channels=1,
-                dtype=np.int16,  # safest default for most streaming sources
+                dtype=np.int16,
             )
-
     elif isinstance(audio, np.ndarray):
         y = audio.astype(np.float32, copy=False)
-        current_sr = None
-
+        current_sr = None   # no embedded rate; resolved below
     elif isinstance(audio, torch.Tensor):
         y = audio.detach().float().cpu().numpy()
-        current_sr = None
-
+        current_sr = None   # no embedded rate; resolved below
     else:
         raise TypeError(f"Unsupported audio input type: {type(audio)}")
 
     # ─────── Normalize (safety) ───────
     if np.issubdtype(y.dtype, np.integer):
         y = y.astype(np.float32) / np.iinfo(y.dtype).max
-
     if y.size > 0:
         max_val = np.abs(y).max()
         if max_val > 1.0 + 1e-6:
@@ -357,13 +346,24 @@ def load_audio(
     if mono and y.shape[0] > 1:
         y = np.mean(y, axis=0, keepdims=True)
 
-    # ─────── Sample rate handling ───────
-    effective_sr = current_sr or sr
+    # ─────── Sample rate resolution ───────
+    # current_sr: rate detected from file/bytes (None for arrays/tensors)
+    # sr:         caller's requested target (None = "keep native")
+    # fallback:   SAMPLE_RATE for array/tensor inputs with no embedded rate
+    fallback_sr = sr if sr is not None else SAMPLE_RATE
+    effective_sr = current_sr if current_sr is not None else fallback_sr
+
+    # Determine target: if caller passed None, keep effective_sr (no resample)
+    target_sr = sr if sr is not None else effective_sr
 
     # ─────── Resample if needed ───────
-    if effective_sr != sr:
-        y = librosa.resample(y, orig_sr=effective_sr, target_sr=sr)
-        effective_sr = sr
+    if effective_sr != target_sr:
+        import logging
+        logging.getLogger(__name__).debug(
+            "load_audio: resampling %dHz → %dHz", effective_sr, target_sr
+        )
+        y = librosa.resample(y, orig_sr=effective_sr, target_sr=target_sr)
+        effective_sr = target_sr
 
     return y.squeeze().astype(np.float32), effective_sr
 

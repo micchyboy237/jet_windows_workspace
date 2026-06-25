@@ -1,4 +1,4 @@
-# config.py
+# audio_config.py
 
 """
 These constants are exactly the same as in fireredvad.core.constants.

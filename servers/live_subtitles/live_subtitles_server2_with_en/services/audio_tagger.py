@@ -17,102 +17,200 @@ try:
     from services.audio_utils import AudioInput, load_audio
     from services.audio_config import (
         FRAME_PER_SECONDS,
-        FRAME_SHIFT_S,
+        HOP_STEP_MS,
         SAMPLE_RATE,
     )
     from services.custom_logging import linkify
+    from services.audio_tagger_defaults import (
+        BASE_DIR,
+        AUDIO_TAGGING_MODEL,
+        CLASS_LABELS_INDICES_CSV,
+        DEFAULT_BASE_DIR,
+        DEFAULT_MODEL_PATH,
+        DEFAULT_LABELS_PATH,
+        DEFAULT_TOP_K,
+        DEFAULT_NUM_THREADS,
+        DEFAULT_PROVIDER,
+        DEFAULT_MIN_SPEECH_PROB_THRESHOLD,
+        DEFAULT_SPEECH_PROB_THRESHOLD,
+        DEFAULT_SPEECH_TOP_N,
+        DEFAULT_CHUNK_DURATION,
+        DEFAULT_CHUNK_OVERLAP,
+        DEFAULT_MIN_CHUNK_DURATION,
+        DEFAULT_MIN_SILENCE_DURATION_SEC,
+        DEFAULT_MIN_SPEECH_DURATION_SEC,
+        DEFAULT_RESOLUTION_MS,
+        DEFAULT_CONFIDENCE_VERY_SHORT_MAX,
+        DEFAULT_CONFIDENCE_SHORT_MAX,
+        DEFAULT_CONFIDENCE_NORMAL_MAX,
+        DEFAULT_HIGH_CONFIDENCE_VERY_SHORT,
+        DEFAULT_HIGH_CONFIDENCE_SHORT,
+        DEFAULT_HIGH_CONFIDENCE_NORMAL,
+        DEFAULT_HIGH_CONFIDENCE_LONG,
+        DEFAULT_MEDIUM_CONFIDENCE_VERY_SHORT,
+        DEFAULT_MEDIUM_CONFIDENCE_SHORT,
+        DEFAULT_MEDIUM_CONFIDENCE_NORMAL,
+        DEFAULT_MEDIUM_CONFIDENCE_LONG,
+        SPEECH_CLASS_NAMES,
+    )
+    from services.audio_tagger_types import (
+        TaggingResult,
+        ChunkTaggingResult,
+        AudioChunksTaggingSummary,
+        AudioTaggerConfig,
+        AudioTaggingSummary,
+        SpeechSegmentTimeline,
+        SpeechSegmentResult,
+        AudioSegmentsResult,
+    )
 except ImportError:
     from audio_utils import AudioInput, load_audio
     from audio_config import (
         FRAME_PER_SECONDS,
-        FRAME_SHIFT_S,
+        HOP_STEP_MS,
         SAMPLE_RATE,
     )
     from custom_logging import linkify
+    from audio_tagger_defaults import (
+        BASE_DIR,
+        AUDIO_TAGGING_MODEL,
+        CLASS_LABELS_INDICES_CSV,
+        DEFAULT_BASE_DIR,
+        DEFAULT_MODEL_PATH,
+        DEFAULT_LABELS_PATH,
+        DEFAULT_TOP_K,
+        DEFAULT_NUM_THREADS,
+        DEFAULT_PROVIDER,
+        DEFAULT_MIN_SPEECH_PROB_THRESHOLD,
+        DEFAULT_SPEECH_PROB_THRESHOLD,
+        DEFAULT_SPEECH_TOP_N,
+        DEFAULT_CHUNK_DURATION,
+        DEFAULT_CHUNK_OVERLAP,
+        DEFAULT_MIN_CHUNK_DURATION,
+        DEFAULT_MIN_SILENCE_DURATION_SEC,
+        DEFAULT_MIN_SPEECH_DURATION_SEC,
+        DEFAULT_RESOLUTION_MS,
+        DEFAULT_CONFIDENCE_VERY_SHORT_MAX,
+        DEFAULT_CONFIDENCE_SHORT_MAX,
+        DEFAULT_CONFIDENCE_NORMAL_MAX,
+        DEFAULT_HIGH_CONFIDENCE_VERY_SHORT,
+        DEFAULT_HIGH_CONFIDENCE_SHORT,
+        DEFAULT_HIGH_CONFIDENCE_NORMAL,
+        DEFAULT_HIGH_CONFIDENCE_LONG,
+        DEFAULT_MEDIUM_CONFIDENCE_VERY_SHORT,
+        DEFAULT_MEDIUM_CONFIDENCE_SHORT,
+        DEFAULT_MEDIUM_CONFIDENCE_NORMAL,
+        DEFAULT_MEDIUM_CONFIDENCE_LONG,
+        SPEECH_CLASS_NAMES,
+    )
+    from audio_tagger_types import (
+        TaggingResult,
+        ChunkTaggingResult,
+        AudioChunksTaggingSummary,
+        AudioTaggerConfig,
+        AudioTaggingSummary,
+        SpeechSegmentTimeline,
+        SpeechSegmentResult,
+        AudioSegmentsResult,
+    )
 
 install_rich_traceback(show_locals=True)
 
 console = Console()
 
-BASE_DIR = Path("~/.cache/pretrained_models/sherpa-onnx").expanduser().resolve()
-AUDIO_TAGGING_MODEL = (
-    BASE_DIR / "sherpa-onnx-zipformer-audio-tagging-2024-04-09/model.onnx"
-)
-CLASS_LABELS_INDICES_CSV = (
-    BASE_DIR / "sherpa-onnx-zipformer-audio-tagging-2024-04-09/class_labels_indices.csv"
-)
 
 
-class TaggingResult(TypedDict):
-    """Typed dictionary for audio tagging results."""
-
-    index: int
-    name: str
-    class_index: int
-    prob: float
-
-
-class ChunkTaggingResult(TypedDict):
-    """Per-chunk tagging result with timing metadata."""
-    chunk_index: int
-    start_time: float
-    end_time: float
-    duration: float
-    predictions: List[TaggingResult]
-    processing_time: float
-    speech_detected: bool
-    # REMOVED: max_speech_probability: float
-
-
-class AudioChunksTaggingSummary(TypedDict):
-    """Complete summary of chunked audio tagging."""
-    audio_path: str
-    total_duration: float
-    sample_rate: int
-    chunk_duration: float
-    overlap_duration: float
-    total_chunks: int
-    chunks: List[ChunkTaggingResult]
-    overall_top_predictions: List[TaggingResult]
-    total_processing_time: float
-    real_time_factor: float
-    speech_duration: float
-    speech_detected: bool
-    max_speech_probability: float
-    avg_speech_probability: float  # average only across speech chunks
-
-
-class AudioTaggerConfig(TypedDict, total=False):
-    """Typed dictionary for AudioTagger configuration."""
-
-    model_path: Optional[Union[str, Path]]
-    labels_path: Optional[Union[str, Path]]
-    top_k: int
-    num_threads: int
-    provider: str
-    debug: bool
-    speech_prob_threshold: float
-    speech_top_n: int
-    # Chunking defaults (from jet.audio.helpers.config)
-    chunk_duration: float  # seconds
-    chunk_overlap: float  # seconds
-    min_chunk_duration: float  # seconds
-
-
-class AudioTaggingSummary(TypedDict):
-    """Typed dictionary for audio tagging summary."""
-
-    audio_path: str
-    duration_seconds: float
-    sample_rate: int
-    num_results: int
-    top_predictions: List[TaggingResult]
-    speech_detected: bool
-    max_speech_probability: float
-    processing_time_seconds: float
-    real_time_factor: float
-    # NEW: For consistency, also add speech_duration to single-tag summary
-    speech_duration: float
+def calculate_confidence_tier(
+    avg_prob: float,
+    speech_density: float,
+    duration: float,
+    speech_chunk_ratio: float,
+) -> tuple[str, str, bool, bool]:
+    """
+    Duration-aware tiered confidence calculation.
+    Confidence Levels:
+        ✨ High   - Strong, consistent speech with sufficient duration
+        ⚠ Medium - Probable speech with some uncertainty
+        — Low    - Weak or inconsistent signal
+    Duration adjustments:
+        < 0.5s  : Very strict (require near-perfect metrics)
+        0.5-1.5s: Elevated (short segments need strong signal)
+        1.5-5.0s: Standard thresholds
+        > 5.0s  : Slightly relaxed (more reliable with length)
+    Args:
+        avg_prob: Average speech probability across segment
+        speech_density: Percentage of timeline cells above threshold
+        duration: Segment duration in seconds
+        speech_chunk_ratio: Ratio of speech-detected chunks to total chunks
+    Returns:
+        Tuple of (confidence_tier, confidence_label, is_high, is_medium)
+    """
+    if duration < DEFAULT_CONFIDENCE_VERY_SHORT_MAX:
+        high_prob_threshold = DEFAULT_HIGH_CONFIDENCE_VERY_SHORT["prob_threshold"]
+        high_density_threshold = DEFAULT_HIGH_CONFIDENCE_VERY_SHORT["density_threshold"]
+        high_chunk_ratio_threshold = DEFAULT_HIGH_CONFIDENCE_VERY_SHORT["chunk_ratio_threshold"]
+        medium_prob_threshold = DEFAULT_MEDIUM_CONFIDENCE_VERY_SHORT["prob_threshold"]
+        medium_density_threshold = DEFAULT_MEDIUM_CONFIDENCE_VERY_SHORT["density_threshold"]
+        duration_category = "very_short"
+    elif duration < DEFAULT_CONFIDENCE_SHORT_MAX:
+        high_prob_threshold = DEFAULT_HIGH_CONFIDENCE_SHORT["prob_threshold"]
+        high_density_threshold = DEFAULT_HIGH_CONFIDENCE_SHORT["density_threshold"]
+        high_chunk_ratio_threshold = DEFAULT_HIGH_CONFIDENCE_SHORT["chunk_ratio_threshold"]
+        medium_prob_threshold = DEFAULT_MEDIUM_CONFIDENCE_SHORT["prob_threshold"]
+        medium_density_threshold = DEFAULT_MEDIUM_CONFIDENCE_SHORT["density_threshold"]
+        duration_category = "short"
+    elif duration <= DEFAULT_CONFIDENCE_NORMAL_MAX:
+        high_prob_threshold = DEFAULT_HIGH_CONFIDENCE_NORMAL["prob_threshold"]
+        high_density_threshold = DEFAULT_HIGH_CONFIDENCE_NORMAL["density_threshold"]
+        high_chunk_ratio_threshold = DEFAULT_HIGH_CONFIDENCE_NORMAL["chunk_ratio_threshold"]
+        medium_prob_threshold = DEFAULT_MEDIUM_CONFIDENCE_NORMAL["prob_threshold"]
+        medium_density_threshold = DEFAULT_MEDIUM_CONFIDENCE_NORMAL["density_threshold"]
+        duration_category = "normal"
+    else:
+        high_prob_threshold = DEFAULT_HIGH_CONFIDENCE_LONG["prob_threshold"]
+        high_density_threshold = DEFAULT_HIGH_CONFIDENCE_LONG["density_threshold"]
+        high_chunk_ratio_threshold = DEFAULT_HIGH_CONFIDENCE_LONG["chunk_ratio_threshold"]
+        medium_prob_threshold = DEFAULT_MEDIUM_CONFIDENCE_LONG["prob_threshold"]
+        medium_density_threshold = DEFAULT_MEDIUM_CONFIDENCE_LONG["density_threshold"]
+        duration_category = "long"
+    is_high_confidence = (
+        avg_prob >= high_prob_threshold and
+        speech_density >= high_density_threshold and
+        speech_chunk_ratio >= high_chunk_ratio_threshold
+    )
+    is_medium_confidence = not is_high_confidence and (
+        avg_prob >= medium_prob_threshold and
+        speech_density >= medium_density_threshold
+    )
+    if is_high_confidence:
+        confidence_tier = "high"
+        confidence_label = "✨ High"
+        console.print(
+            f"[green]   🟢 High Confidence: "
+            f"avg_prob={avg_prob:.3f}≥{high_prob_threshold}, "
+            f"density={speech_density:.1%}≥{high_density_threshold:.0%}, "
+            f"chunk_ratio={speech_chunk_ratio:.1%}≥{high_chunk_ratio_threshold:.0%} "
+            f"({duration_category})[/green]"
+        )
+    elif is_medium_confidence:
+        confidence_tier = "medium"
+        confidence_label = "⚠ Medium"
+        console.print(
+            f"[yellow]   🟡 Medium Confidence: "
+            f"avg_prob={avg_prob:.3f}≥{medium_prob_threshold}, "
+            f"density={speech_density:.1%}≥{medium_density_threshold:.0%} "
+            f"({duration_category})[/yellow]"
+        )
+    else:
+        confidence_tier = "low"
+        confidence_label = "— Low"
+        console.print(
+            f"[dim]   ⚪ Low Confidence: "
+            f"avg_prob={avg_prob:.3f}<{medium_prob_threshold} or "
+            f"density={speech_density:.1%}<{medium_density_threshold:.0%} "
+            f"({duration_category})[/dim]"
+        )
+    return confidence_tier, confidence_label, is_high_confidence, is_medium_confidence
 
 
 class AudioTagger:
@@ -133,53 +231,24 @@ class AudioTagger:
         >>> chunked = tagger.tag_audio_chunks("long_audio.wav", chunk_duration=5.0)
     """
 
-    DEFAULT_BASE_DIR: Path = (
-        Path("~/.cache/pretrained_models/sherpa-onnx").expanduser().resolve()
-    )
-    DEFAULT_MODEL_PATH: Path = (
-        DEFAULT_BASE_DIR / "sherpa-onnx-zipformer-audio-tagging-2024-04-09/model.onnx"
-    )
-    DEFAULT_LABELS_PATH: Path = (
-        DEFAULT_BASE_DIR
-        / "sherpa-onnx-zipformer-audio-tagging-2024-04-09/class_labels_indices.csv"
-    )
 
-    SPEECH_CLASS_NAMES: List[str] = [
-        "Speech",
-        "Male speech, man speaking",
-        "Female speech, woman speaking",
-        "Child speech, kid speaking",
-        "Conversation",
-        "Narration, monologue",
-    ]
-
-    DEFAULT_SPEECH_PROB_THRESHOLD: float = 0.5
-    DEFAULT_SPEECH_TOP_N: int = 3
-
-    # Default chunking constants from jet.audio.helpers.config
-    # Chunk duration: 100 frames * 0.010s = 1.0s (same as process_audio_chunks window)
-    DEFAULT_CHUNK_DURATION: float = FRAME_PER_SECONDS * FRAME_SHIFT_S  # 1.0s
-    DEFAULT_CHUNK_OVERLAP: float = DEFAULT_CHUNK_DURATION / 2.0  # 0.5s (50%)
-    MIN_CHUNK_DURATION: float = 0.5  # Minimum chunk size in seconds
 
     def __init__(
         self,
         model_path: Optional[Union[str, Path]] = AUDIO_TAGGING_MODEL,
         labels_path: Optional[Union[str, Path]] = CLASS_LABELS_INDICES_CSV,
-        top_k: int = 5,
-        num_threads: int = 1,
-        provider: str = "cpu",
+        top_k: int = DEFAULT_TOP_K,
+        num_threads: int = DEFAULT_NUM_THREADS,
+        provider: str = DEFAULT_PROVIDER,
         debug: bool = False,
         speech_prob_threshold: Optional[float] = None,
         speech_top_n: Optional[int] = None,
-        # Chunking defaults
         chunk_duration: Optional[float] = None,
         chunk_overlap: Optional[float] = None,
         min_chunk_duration: Optional[float] = None,
     ) -> None:
         """
         Initialize the AudioTagger with model configuration.
-
         Args:
             model_path: Path to ONNX model file
             labels_path: Path to class labels CSV
@@ -194,47 +263,53 @@ class AudioTagger:
             min_chunk_duration: Minimum valid chunk duration (default: 0.5s)
         """
         self.model_path: Path = (
-            Path(model_path) if model_path else self.DEFAULT_MODEL_PATH
+            Path(model_path) if model_path else DEFAULT_MODEL_PATH
         )
         self.labels_path: Path = (
-            Path(labels_path) if labels_path else self.DEFAULT_LABELS_PATH
+            Path(labels_path) if labels_path else DEFAULT_LABELS_PATH
         )
         self.top_k: int = top_k
         self.num_threads: int = num_threads
         self.provider: str = provider
         self.debug: bool = debug
-
-        # Use defaults if not provided
+        
+        # Set speech detection parameters with validation
         self.speech_prob_threshold: float = (
             speech_prob_threshold
             if speech_prob_threshold is not None
-            else self.DEFAULT_SPEECH_PROB_THRESHOLD
+            else DEFAULT_SPEECH_PROB_THRESHOLD
         )
         self.speech_top_n: int = (
-            speech_top_n if speech_top_n is not None else self.DEFAULT_SPEECH_TOP_N
+            speech_top_n if speech_top_n is not None else DEFAULT_SPEECH_TOP_N
         )
-
-        # Chunking configuration (from jet.audio.helpers.config)
+        
+        # Validate speech threshold - prevent overly low values that cause false positives
+        if self.speech_prob_threshold < DEFAULT_MIN_SPEECH_PROB_THRESHOLD:
+            console.print(
+                f"[yellow]⚠ Speech probability threshold {self.speech_prob_threshold} "
+                f"is below minimum valid value {DEFAULT_MIN_SPEECH_PROB_THRESHOLD}. "
+                f"Using {DEFAULT_SPEECH_PROB_THRESHOLD} to prevent false positives.[/yellow]"
+            )
+            self.speech_prob_threshold = DEFAULT_SPEECH_PROB_THRESHOLD
+        
         self.chunk_duration: float = (
             chunk_duration
             if chunk_duration is not None
-            else self.DEFAULT_CHUNK_DURATION
+            else DEFAULT_CHUNK_DURATION
         )
         self.chunk_overlap: float = (
-            chunk_overlap if chunk_overlap is not None else self.DEFAULT_CHUNK_OVERLAP
+            chunk_overlap if chunk_overlap is not None else DEFAULT_CHUNK_OVERLAP
         )
         self.min_chunk_duration: float = (
             min_chunk_duration
             if min_chunk_duration is not None
-            else self.MIN_CHUNK_DURATION
+            else DEFAULT_MIN_CHUNK_DURATION
         )
-
-        # Validate chunking parameters
+        
         self._validate_chunking_config()
-
         self._tagger: Optional[sherpa_onnx.AudioTagging] = None
         self._labels_map: Optional[Dict[int, str]] = None
-
+        
         console.print(
             Panel.fit(
                 f"[bold green]AudioTagger Initialized[/bold green]\n"
@@ -319,33 +394,68 @@ class AudioTagger:
             self._labels_map = self._load_labels()
         return self._labels_map
 
-    # ── NEW: Speech detection helper for chunks ───────────────────────
+    # ── Speech detection helper for chunks ───────────────────────
     def _chunk_has_speech(
         self, predictions: List[TaggingResult], top_n: Optional[int] = None
     ) -> tuple[bool, float]:
         """
         Check if chunk predictions indicate speech.
-
         Args:
             predictions: List of tagging results for a chunk
             top_n: Number of top predictions to check (default: self.speech_top_n)
-
         Returns:
             Tuple of (speech_detected: bool, chunk_speech_prob: float)
+        Debug logs trace:
+            - Top-N predictions checked
+            - Speech classes found
+            - Final speech probability and detection result
+            - Threshold comparison
         """
         n_to_check = top_n if top_n is not None else self.speech_top_n
         chunk_speech_prob = 0.0
-
+        speech_classes_found = []
+        
+        # Log the threshold being used
+        console.print(
+            f"[dim]🔍 _chunk_has_speech: checking top {n_to_check} predictions "
+            f"against threshold {self.speech_prob_threshold}[/dim]"
+        )
+        
         for result in predictions[:n_to_check]:
             name = result.get("name", "")
             prob = result.get("prob", 0.0)
-            if name in self.SPEECH_CLASS_NAMES and prob > chunk_speech_prob:
-                chunk_speech_prob = prob
-
-        speech_detected = chunk_speech_prob >= self.speech_prob_threshold
+            if name in SPEECH_CLASS_NAMES:
+                speech_classes_found.append(f"{name}({prob:.3f})")
+                if prob > chunk_speech_prob:
+                    chunk_speech_prob = prob
+        
+        # Validate threshold is reasonable
+        effective_threshold = max(self.speech_prob_threshold, DEFAULT_MIN_SPEECH_PROB_THRESHOLD)  # Minimum 0.1 to prevent false positives
+        if effective_threshold != self.speech_prob_threshold:
+            console.print(
+                f"[yellow]⚠ Speech threshold {self.speech_prob_threshold} is too low, "
+                f"using minimum {effective_threshold}[/yellow]"
+            )
+        
+        speech_detected = chunk_speech_prob >= effective_threshold
+        
+        # Log the decision
+        if speech_classes_found:
+            console.print(
+                f"[dim]   Speech classes found: {', '.join(speech_classes_found)} | "
+                f"max_prob={chunk_speech_prob:.4f} | "
+                f"threshold={effective_threshold} | "
+                f"detected={speech_detected}[/dim]"
+            )
+        else:
+            console.print(
+                f"[dim]   No speech classes in top {n_to_check} | "
+                f"detected={speech_detected}[/dim]"
+            )
+        
         return speech_detected, chunk_speech_prob
 
-    # ── NEW: Calculate speech duration from consecutive speech chunks ──
+    # ── Calculate speech duration from consecutive speech chunks ──
     def _calculate_speech_duration(
         self,
         chunks: List[ChunkTaggingResult],
@@ -703,7 +813,7 @@ class AudioTagger:
         start_time = time.time()
 
         try:
-            waveform, actual_sr = load_audio(audio, sr=sample_rate or 16000, mono=True)
+            waveform, actual_sr = load_audio(audio, sr=sample_rate or SAMPLE_RATE, mono=True)
         except Exception:
             raise
 
@@ -733,77 +843,42 @@ class AudioTagger:
         chunk_duration: Optional[float] = None,
         overlap_duration: Optional[float] = None,
         min_chunk_duration: Optional[float] = None,
-        output_dir: Optional[Union[str, Path]] = None,  # NEW parameter
     ) -> AudioChunksTaggingSummary:
         """
         Process long audio by splitting into overlapping chunks and tagging each.
-        
-        This method splits audio into fixed-duration overlapping chunks,
-        tags each independently, and aggregates results. Useful for:
-        - Very long recordings that exceed model context windows
-        - Tracking how audio content changes over time
-        - Speech/music segmentation at coarse granularity
-        - Computing speech_duration (sum of consecutive speech chunks)
-        
+
         Args:
             audio: Audio input (file path, bytes, numpy array, or torch tensor)
             sample_rate: Sample rate for raw audio data (default: 16000)
             chunk_duration: Duration of each chunk in seconds.
-                        Default: self.chunk_duration (from config, typically 1.0s)
             overlap_duration: Overlap between chunks in seconds.
-                            Default: self.chunk_overlap (typically 0.5s)
             min_chunk_duration: Minimum duration for the last chunk.
-                            Default: self.min_chunk_duration (0.5s)
-            output_dir: Optional directory to save speech chunks.
-                    If provided, speech chunks will be saved under
-                    output_dir / "speech_chunks" / "chunk_<index+1>" /
-                    as sound.wav and meta.json
-        
+
         Returns:
             AudioChunksTaggingSummary with per-chunk results, overall aggregation,
             speech_duration, and avg_speech_probability
-        
-        Example:
-            >>> tagger = AudioTagger()
-            >>> summary = tagger.tag_audio_chunks("long_speech.wav", chunk_duration=5.0)
-            >>> print(f"Processed {summary['total_chunks']} chunks")
-            >>> print(f"Speech duration: {summary['speech_duration']:.2f}s")
-            >>> print(f"Avg speech probability: {summary['avg_speech_probability']:.4f}")
-            >>> for chunk in summary['chunks']:
-            ...     print(f"  Chunk {chunk['chunk_index']}: "
-            ...           f"{chunk['predictions'][0]['name']}")
         """
-        import soundfile as sf  # For saving WAV files
-        
-        _chunk_dur = (
-            chunk_duration if chunk_duration is not None else self.chunk_duration
-        )
-        _overlap = (
-            overlap_duration if overlap_duration is not None else self.chunk_overlap
-        )
+        _chunk_dur = chunk_duration if chunk_duration is not None else self.chunk_duration
+        _overlap = overlap_duration if overlap_duration is not None else self.chunk_overlap
         _min_chunk = (
-            min_chunk_duration
-            if min_chunk_duration is not None
-            else self.min_chunk_duration
+            min_chunk_duration if min_chunk_duration is not None else self.min_chunk_duration
         )
-        
-        # Validate chunking parameters
+
         if _chunk_dur < _min_chunk:
             console.print(
                 f"[yellow]⚠ Chunk duration {_chunk_dur}s < min {_min_chunk}s, "
                 f"using min value[/yellow]"
             )
             _chunk_dur = _min_chunk
+
         if _overlap >= _chunk_dur:
             console.print(
                 f"[yellow]⚠ Overlap {_overlap}s >= chunk duration {_chunk_dur}s, "
                 f"using half chunk duration[/yellow]"
             )
             _overlap = _chunk_dur / 2.0
-        
+
         overall_start = time.time()
-        
-        # Load audio
         try:
             waveform, actual_sr = load_audio(
                 audio, sr=sample_rate or SAMPLE_RATE, mono=True
@@ -811,35 +886,31 @@ class AudioTagger:
         except Exception as e:
             console.print(f"[red]❌ Failed to load audio: {e}[/red]")
             raise
-        
+
         total_samples = len(waveform)
         total_duration = total_samples / actual_sr
-        
         console.print(
             f"[dim]📊 Audio loaded: {total_duration:.2f}s, "
             f"{actual_sr}Hz, {total_samples} samples[/dim]"
         )
-        
-        # Determine audio path string for metadata
+
         if isinstance(audio, (str, Path)):
             audio_path_str = str(audio)
         elif isinstance(audio, bytes):
             audio_path_str = f"bytes_input_{len(audio)}bytes"
         else:
             audio_path_str = f"array_input_{waveform.shape}"
-        
-        # Calculate chunk parameters
+
         chunk_samples = int(_chunk_dur * actual_sr)
         hop_samples = int((_chunk_dur - _overlap) * actual_sr)
         if hop_samples < 1:
             hop_samples = 1
-        
+
         console.print(
             f"[dim]🔧 Chunk config: {_chunk_dur}s chunks, "
             f"{_overlap}s overlap, hop={hop_samples} samples[/dim]"
         )
-        
-        # Calculate chunk positions
+
         chunk_positions = self._calculate_chunk_positions(
             total_samples=total_samples,
             chunk_samples=chunk_samples,
@@ -847,10 +918,8 @@ class AudioTagger:
             min_chunk_duration=_min_chunk,
             sample_rate=actual_sr,
         )
-        
         console.print(f"[dim]📏 Calculated {len(chunk_positions)} chunk positions[/dim]")
-        
-        # Handle empty audio case
+
         if not chunk_positions:
             elapsed = time.time() - overall_start
             console.print("[yellow]⚠ No valid chunk positions found[/yellow]")
@@ -864,47 +933,31 @@ class AudioTagger:
                 chunks=[],
                 overall_top_predictions=[],
                 total_processing_time=elapsed,
-                real_time_factor=elapsed / total_duration
-                if total_duration > 0
-                else 0.0,
+                real_time_factor=elapsed / total_duration if total_duration > 0 else 0.0,
                 speech_duration=0.0,
                 speech_detected=False,
                 max_speech_probability=0.0,
-                avg_speech_probability=0.0,  # NEW
+                avg_speech_probability=0.0,
             )
-        
-        # Setup output directory for speech chunks if specified
-        speech_chunks_base_dir = None
-        if output_dir is not None:
-            output_dir = Path(output_dir)
-            speech_chunks_base_dir = output_dir / "speech_chunks"
-            speech_chunks_base_dir.mkdir(parents=True, exist_ok=True)
-            console.print(
-                f"[dim]💾 Speech chunks will be saved to: "
-                f"{speech_chunks_base_dir}[/dim]"
-            )
-        
-        # Process each chunk
+
         chunks: List[ChunkTaggingResult] = []
         all_predictions: Dict[str, List[float]] = {}
         any_speech_detected = False
         global_max_speech_prob = 0.0
-        speech_probabilities: List[float] = []  # NEW: collect probs for speech chunks
-        
+        speech_probabilities: List[float] = []
+
         for idx, (start_sample, end_sample) in enumerate(chunk_positions):
             chunk_start_time = time.time()
             start_sec = start_sample / actual_sr
             end_sec = end_sample / actual_sr
-            
+
             console.print(
                 f"[dim]🔍 Processing chunk {idx + 1}/{len(chunk_positions)}: "
                 f"{start_sec:.2f}s - {end_sec:.2f}s[/dim]"
             )
-            
-            # Extract chunk waveform
+
             chunk_waveform = waveform[start_sample:end_sample].copy()
-            
-            # Tag the chunk
+
             try:
                 chunk_predictions = self._tag_waveform(chunk_waveform, actual_sr)
                 console.print(
@@ -914,13 +967,12 @@ class AudioTagger:
             except Exception as e:
                 console.print(f"[red]   ❌ Tagging failed: {e}[/red]")
                 chunk_predictions = []
-            
-            # Check for speech
+
             speech_detected, chunk_speech_prob = self._chunk_has_speech(chunk_predictions)
-            
+
             if speech_detected:
                 any_speech_detected = True
-                speech_probabilities.append(chunk_speech_prob)  # NEW: collect for avg
+                speech_probabilities.append(chunk_speech_prob)
                 console.print(
                     f"[green]   🎤 Speech detected! "
                     f"speech_prob={chunk_speech_prob:.4f}[/green]"
@@ -930,20 +982,18 @@ class AudioTagger:
                     f"[dim]   🔇 No speech detected "
                     f"(speech_prob={chunk_speech_prob:.4f})[/dim]"
                 )
-            
+
             if chunk_speech_prob > global_max_speech_prob:
                 global_max_speech_prob = chunk_speech_prob
-            
+
             chunk_elapsed = time.time() - chunk_start_time
-            
-            # Aggregate predictions for overall stats
+
             for pred in chunk_predictions:
                 name = pred["name"]
                 if name not in all_predictions:
                     all_predictions[name] = []
                 all_predictions[name].append(pred["prob"])
-            
-            # Build chunk result (with speech_probability instead of max_speech_probability)
+
             chunk_result = ChunkTaggingResult(
                 chunk_index=idx,
                 start_time=round(start_sec, 3),
@@ -952,27 +1002,12 @@ class AudioTagger:
                 predictions=chunk_predictions,
                 processing_time=round(chunk_elapsed, 4),
                 speech_detected=speech_detected,
-                speech_probability=round(chunk_speech_prob, 4),  # RENAMED: was max_speech_probability
+                speech_probability=round(chunk_speech_prob, 4),
             )
             chunks.append(chunk_result)
-            
-            # NEW: Save speech chunk to disk if output_dir specified
-            if output_dir is not None and speech_detected and speech_chunks_base_dir:
-                self._save_speech_chunk(
-                    chunk_waveform=chunk_waveform,
-                    sample_rate=actual_sr,
-                    chunk_index=idx,
-                    start_time=start_sec,
-                    end_time=end_sec,
-                    speech_probability=chunk_speech_prob,
-                    predictions=chunk_predictions,
-                    base_dir=speech_chunks_base_dir,
-                )
-        
-        # Calculate aggregate metrics
+
         speech_duration = self._calculate_speech_duration(chunks, _overlap)
-        
-        # NEW: Calculate average speech probability
+
         if speech_probabilities:
             avg_speech_prob = float(np.mean(speech_probabilities))
             console.print(
@@ -982,17 +1017,16 @@ class AudioTagger:
         else:
             avg_speech_prob = 0.0
             console.print("[dim]📊 No speech chunks for avg calculation[/dim]")
-        
+
         overall_top = self._aggregate_chunk_predictions(all_predictions, self.top_k)
         total_elapsed = time.time() - overall_start
         rtf = total_elapsed / total_duration if total_duration > 0 else 0.0
-        
+
         console.print(
             f"[dim]⏱ Total processing: {total_elapsed:.2f}s, "
             f"RTF: {rtf:.3f}x[/dim]"
         )
-        
-        # Build final summary with new field
+
         summary = AudioChunksTaggingSummary(
             audio_path=audio_path_str,
             total_duration=round(total_duration, 3),
@@ -1007,17 +1041,518 @@ class AudioTagger:
             speech_duration=round(speech_duration, 3),
             speech_detected=any_speech_detected,
             max_speech_probability=round(global_max_speech_prob, 4),
-            avg_speech_probability=round(avg_speech_prob, 4),  # NEW
+            avg_speech_probability=round(avg_speech_prob, 4),
+        )
+        return summary
+
+    def tag_audio_segments(
+        self,
+        audio: AudioInput,
+        sample_rate: Optional[int] = None,
+        chunk_duration: Optional[float] = None,
+        overlap_duration: Optional[float] = None,
+        min_chunk_duration: Optional[float] = None,
+        speech_threshold: Optional[float] = None,
+        min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_DURATION_SEC,
+        min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_DURATION_SEC,
+        resolution_ms: float = DEFAULT_RESOLUTION_MS,
+        include_non_speech: bool = False,
+    ) -> AudioSegmentsResult:
+        """
+        Tag audio by splitting into chunks, detecting speech, and identifying
+        continuous speech/non-speech segments.
+        This combines tag_audio_chunks() with timeline-based segment detection
+        into a single call that returns structured segment data without writing
+        to disk (use save_speech_segments() for persistence).
+        Args:
+            audio: Audio input (file path, bytes, numpy array, or torch tensor).
+            sample_rate: Sample rate for raw audio data (default: SAMPLE_RATE).
+            chunk_duration: Duration of each analysis chunk in seconds.
+            overlap_duration: Overlap between consecutive chunks.
+            min_chunk_duration: Minimum duration for the last chunk.
+            speech_threshold: Speech probability threshold (default: self.speech_prob_threshold).
+            min_silence_duration_sec: Continuous non-speech gap to close a segment (default: 1.0s).
+            min_speech_duration_sec: Minimum duration for a valid speech segment (default: 1.0s).
+            resolution_ms: Timeline resolution in ms (default: HOP_STEP_MS).
+            include_non_speech: If True, also detect non-speech segments (default: False).
+        Returns:
+            AudioSegmentsResult with chunks, speech_segments, non_speech_segments,
+            and aggregate statistics.
+        Example:
+            >>> tagger = AudioTagger()
+            >>> result = tagger.tag_audio_segments("recording.wav", min_silence_duration_sec=1.0)
+            >>> for seg in result["speech_segments"]:
+            ...     print(f"Speech: {seg['start_time']:.1f}s - {seg['end_time']:.1f}s")
+        Debug logs trace:
+            - Chunk tagging progress (from tag_audio_chunks)
+            - Timeline building statistics
+            - Speech/non-speech transition detection
+            - Segment count and duration summary
+        """
+        _speech_threshold = speech_threshold if speech_threshold is not None else self.speech_prob_threshold
+        if _speech_threshold <= 0.0 or _speech_threshold > 1.0:
+            console.print(
+                f"[yellow]⚠ Invalid speech threshold {_speech_threshold}, using {DEFAULT_SPEECH_PROB_THRESHOLD}[/yellow]"
+            )
+            _speech_threshold = DEFAULT_SPEECH_PROB_THRESHOLD
+        overall_start = time.time()
+        console.print(
+            Panel.fit(
+                f"[bold cyan]tag_audio_segments[/bold cyan]\n"
+                f"speech_threshold={_speech_threshold:.2f} | "
+                f"min_silence={min_silence_duration_sec}s | "
+                f"min_speech={min_speech_duration_sec}s | "
+                f"resolution={resolution_ms}ms | "
+                f"include_non_speech={include_non_speech}",
+                title="Segment-Based Audio Tagging",
+                border_style="cyan",
+            )
+        )
+        # Step 1: Run chunk-level tagging
+        chunk_summary = self.tag_audio_chunks(
+            audio=audio,
+            sample_rate=sample_rate,
+            chunk_duration=chunk_duration,
+            overlap_duration=overlap_duration,
+            min_chunk_duration=min_chunk_duration,
+        )
+        chunks = chunk_summary.get("chunks", [])
+        actual_sr = chunk_summary.get("sample_rate", SAMPLE_RATE)
+        total_duration = chunk_summary.get("total_duration", 0.0)
+        audio_path_str = chunk_summary.get("audio_path", "unknown")
+        if not chunks:
+            elapsed = time.time() - overall_start
+            console.print("[yellow]⚠ No chunks produced, returning empty result[/yellow]")
+            return AudioSegmentsResult(
+                audio_path=audio_path_str,
+                total_duration=total_duration,
+                sample_rate=actual_sr,
+                chunk_duration=chunk_summary.get("chunk_duration", self.chunk_duration),
+                overlap_duration=chunk_summary.get("overlap_duration", self.chunk_overlap),
+                total_chunks=0,
+                speech_threshold=_speech_threshold,
+                min_silence_duration_sec=min_silence_duration_sec,
+                min_speech_duration_sec=min_speech_duration_sec,
+                resolution_ms=resolution_ms,
+                chunks=[],
+                speech_segments=[],
+                non_speech_segments=[],
+                total_speech_duration=0.0,
+                total_non_speech_duration=0.0,
+                overall_top_predictions=[],
+                total_processing_time=round(elapsed, 4),
+                real_time_factor=round(elapsed / total_duration, 4) if total_duration > 0 else 0.0,
+            )
+        # Step 2: Build probability timeline
+        times, probs = self._build_prob_timeline(chunks, resolution_ms=resolution_ms)
+        if len(times) == 0:
+            elapsed = time.time() - overall_start
+            console.print("[yellow]⚠ Empty probability timeline[/yellow]")
+            return AudioSegmentsResult(
+                audio_path=audio_path_str,
+                total_duration=total_duration,
+                sample_rate=actual_sr,
+                chunk_duration=chunk_summary.get("chunk_duration", self.chunk_duration),
+                overlap_duration=chunk_summary.get("overlap_duration", self.chunk_overlap),
+                total_chunks=len(chunks),
+                speech_threshold=_speech_threshold,
+                min_silence_duration_sec=min_silence_duration_sec,
+                min_speech_duration_sec=min_speech_duration_sec,
+                resolution_ms=resolution_ms,
+                chunks=chunks,
+                speech_segments=[],
+                non_speech_segments=[],
+                total_speech_duration=0.0,
+                total_non_speech_duration=0.0,
+                overall_top_predictions=chunk_summary.get("overall_top_predictions", []),
+                total_processing_time=round(elapsed, 4),
+                real_time_factor=round(elapsed / total_duration, 4) if total_duration > 0 else 0.0,
+            )
+        console.print(f"[dim]🎚 Using speech threshold: {_speech_threshold}[/dim]")
+        # Step 3: Detect speech segments from timeline
+        step = resolution_ms / 1000.0
+        min_silence_cells = max(1, int(np.ceil(min_silence_duration_sec / step)))
+        min_speech_cells = max(1, int(np.ceil(min_speech_duration_sec / step)))
+        is_speech = probs >= _speech_threshold
+        speech_cell_count = np.sum(is_speech)
+        total_cells = len(is_speech)
+        console.print(
+            f"[dim]📊 Timeline: {speech_cell_count}/{total_cells} cells above threshold "
+            f"({speech_cell_count/total_cells*100:.1f}%)[/dim]"
+        )
+        raw_segments: List[Tuple[float, float]] = []
+        in_speech = False
+        seg_start_idx = 0
+        silence_run = 0
+        speech_cells_in_current = 0
+        for i, sp in enumerate(is_speech):
+            if not in_speech:
+                if sp:
+                    in_speech = True
+                    seg_start_idx = i
+                    silence_run = 0
+                    speech_cells_in_current = 1
+                    console.print(
+                        f"[dim]🎤 Speech start at cell {i} (time={times[i]:.3f}s)[/dim]"
+                    )
+            else:
+                if sp:
+                    silence_run = 0
+                    speech_cells_in_current += 1
+                else:
+                    silence_run += 1
+                    if silence_run >= min_silence_cells:
+                        seg_end_idx = i - silence_run + 1
+                        seg_start_time = times[seg_start_idx]
+                        seg_end_time = times[seg_end_idx - 1]
+                        raw_segments.append((seg_start_time, seg_end_time))
+                        console.print(
+                            f"[dim]🔇 Speech end at cell {i} (time={times[i]:.3f}s) | "
+                            f"segment: {seg_start_time:.3f}s-{seg_end_time:.3f}s "
+                            f"(silence={silence_run*step:.3f}s)[/dim]"
+                        )
+                        in_speech = False
+                        silence_run = 0
+                        speech_cells_in_current = 0
+        if in_speech:
+            seg_start_time = times[seg_start_idx]
+            seg_end_time = times[-1]
+            raw_segments.append((seg_start_time, seg_end_time))
+            console.print(
+                f"[dim]🎤 Trailing speech segment: {seg_start_time:.3f}s-{seg_end_time:.3f}s[/dim]"
+            )
+        # Step 4: Filter by minimum speech duration
+        speech_segments: List[Tuple[float, float]] = []
+        for s, e in raw_segments:
+            duration = e - s
+            if duration >= min_speech_duration_sec:
+                speech_segments.append((s, e))
+            else:
+                console.print(
+                    f"[dim]⏭ Discarding short segment: {s:.3f}s-{e:.3f}s "
+                    f"(dur={duration:.3f}s < min_speech={min_speech_duration_sec}s)[/dim]"
+                )
+        console.print(f"[bold green]✅ {len(speech_segments)} speech segment(s) detected[/bold green]")
+        # Step 5: Detect non-speech segments (if requested)
+        non_speech_segments: List[Tuple[float, float]] = []
+        if include_non_speech:
+            all_segments_sorted = sorted(speech_segments, key=lambda x: x[0])
+            prev_end = 0.0
+            total_end = times[-1] if len(times) > 0 else max(c["end_time"] for c in chunks)
+            for seg_start, seg_end in all_segments_sorted:
+                if seg_start > prev_end:
+                    gap_duration = seg_start - prev_end
+                    if gap_duration >= min_silence_duration_sec:
+                        non_speech_segments.append((prev_end, seg_start))
+                prev_end = max(prev_end, seg_end)
+            if prev_end < total_end:
+                gap_duration = total_end - prev_end
+                if gap_duration >= min_silence_duration_sec:
+                    non_speech_segments.append((prev_end, total_end))
+            console.print(
+                f"[dim]🔇 {len(non_speech_segments)} non-speech segment(s) detected[/dim]"
+            )
+        # Step 6: Build structured segment results
+        speech_segment_results: List[SpeechSegmentResult] = []
+        for seg_num, (seg_start, seg_end) in enumerate(speech_segments):
+            result = self._build_segment_result(
+                seg_num=seg_num,
+                seg_start=seg_start,
+                seg_end=seg_end,
+                is_speech=True,
+                times=times,
+                probs=probs,
+                chunks=chunks,
+                speech_threshold=_speech_threshold,
+            )
+            speech_segment_results.append(result)
+        non_speech_segment_results: List[SpeechSegmentResult] = []
+        if include_non_speech:
+            for seg_num, (seg_start, seg_end) in enumerate(non_speech_segments):
+                result = self._build_segment_result(
+                    seg_num=seg_num,
+                    seg_start=seg_start,
+                    seg_end=seg_end,
+                    is_speech=False,
+                    times=times,
+                    probs=probs,
+                    chunks=chunks,
+                    speech_threshold=_speech_threshold,
+                )
+                non_speech_segment_results.append(result)
+        total_speech_duration = sum(e - s for s, e in speech_segments)
+        total_non_speech_duration = sum(e - s for s, e in non_speech_segments)
+        total_elapsed = time.time() - overall_start
+        rtf = total_elapsed / total_duration if total_duration > 0 else 0.0
+        console.print(
+            f"[dim]⏱ Segment detection complete: {total_elapsed:.2f}s, RTF: {rtf:.3f}x[/dim]"
+        )
+        final_result: AudioSegmentsResult = {
+            "audio_path": audio_path_str,
+            "total_duration": round(total_duration, 3),
+            "sample_rate": actual_sr,
+            "chunk_duration": chunk_summary.get("chunk_duration", self.chunk_duration),
+            "overlap_duration": chunk_summary.get("overlap_duration", self.chunk_overlap),
+            "total_chunks": len(chunks),
+            "speech_threshold": _speech_threshold,
+            "min_silence_duration_sec": min_silence_duration_sec,
+            "min_speech_duration_sec": min_speech_duration_sec,
+            "resolution_ms": resolution_ms,
+            "chunks": chunks,
+            "speech_segments": speech_segment_results,
+            "non_speech_segments": non_speech_segment_results,
+            "total_speech_duration": round(total_speech_duration, 3),
+            "total_non_speech_duration": round(total_non_speech_duration, 3),
+            "overall_top_predictions": chunk_summary.get("overall_top_predictions", []),
+            "total_processing_time": round(total_elapsed, 4),
+            "real_time_factor": round(rtf, 4),
+        }
+        return final_result
+
+    def _build_prob_timeline(
+        self,
+        chunks: List[ChunkTaggingResult],
+        resolution_ms: float = 10.0,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Build a continuous speech-probability timeline from overlapping chunks.
+        For each (time, speech_prob) observation contributed by a chunk, the
+        probability is spread uniformly over the chunk's interval.  Where chunks
+        overlap the per-cell values are accumulated via a weighted sum and then
+        divided by the total weight (coverage count), giving a coverage-weighted
+        average — the correct formula for non-uniform overlap grids.
+        Formula for each timeline cell t covered by chunk i:
+            prob_timeline[t] += chunk_speech_prob[i]   # accumulate
+            weight[t]        += 1                       # count coverage
+        Final:
+            prob_timeline[t] /= weight[t]              # weighted mean
+        Args:
+            chunks: Chunk results with start_time, end_time, speech_probability.
+            resolution_ms: Timeline resolution in milliseconds (default 10 ms).
+        Returns:
+            (times_sec, probs) arrays of equal length:
+                times_sec — centre of each cell in seconds
+                probs     — consolidated speech probability at that time
+        Debug logs trace:
+            - Number of cells in timeline
+            - Total time span covered
+        """
+        if not chunks:
+            return np.array([]), np.array([])
+        total_end = max(c["end_time"] for c in chunks)
+        step = resolution_ms / 1000.0
+        n_cells = max(1, int(np.ceil(total_end / step)))
+        prob_acc = np.zeros(n_cells, dtype=np.float64)
+        weight   = np.zeros(n_cells, dtype=np.float64)
+        for chunk in chunks:
+            t0  = chunk["start_time"]
+            t1  = chunk["end_time"]
+            sp  = chunk.get("speech_probability", 0.0)
+            i0 = int(t0 / step)
+            i1 = min(int(np.ceil(t1 / step)), n_cells)
+            prob_acc[i0:i1] += sp
+            weight[i0:i1]   += 1.0
+        covered = weight > 0
+        probs = np.where(covered, prob_acc / np.where(covered, weight, 1.0), 0.0)
+        times = (np.arange(n_cells) + 0.5) * step
+        console.print(
+            f"[dim]🕑 Built prob timeline: {n_cells} cells @ {resolution_ms}ms "
+            f"resolution, total_end={total_end:.3f}s[/dim]"
+        )
+        return times.astype(np.float32), probs.astype(np.float32)
+
+    def _build_segment_result(
+        self,
+        seg_num: int,
+        seg_start: float,
+        seg_end: float,
+        is_speech: bool,
+        times: np.ndarray,
+        probs: np.ndarray,
+        chunks: List[ChunkTaggingResult],
+        speech_threshold: float,
+    ) -> SpeechSegmentResult:
+        """
+        Build a SpeechSegmentResult with duration-aware tiered confidence.
+        
+        Confidence considers:
+            1. Average speech probability (quality of speech signal)
+            2. Speech density (consistency of speech throughout segment)
+            3. Segment duration (reliability increases with duration)
+            4. Speech chunk ratio (agreement among overlapping chunks)
+        
+        Duration adjustments:
+            < 0.5s  : Very strict thresholds (likely noise if weak)
+            0.5-1.5s: Elevated thresholds (short segments need strong signal)
+            1.5-5.0s: Standard thresholds (optimal range)
+            > 5.0s  : Relaxed thresholds (long segments are more reliable)
+        
+        Args:
+            seg_num: 0-based segment index.
+            seg_start: Segment start time in seconds.
+            seg_end: Segment end time in seconds.
+            is_speech: True for speech segments, False for non-speech.
+            times: Full probability timeline time array.
+            probs: Full probability timeline probability array.
+            chunks: All chunk results from tag_audio_chunks.
+            speech_threshold: Threshold used for speech detection.
+        
+        Returns:
+            SpeechSegmentResult with all computed statistics including confidence tier.
+        """
+        seg_duration = seg_end - seg_start
+        segment_type = "speech" if is_speech else "non-speech"
+        
+        console.print(
+            f"[dim]🔍 _build_segment_result: {segment_type} segment {seg_num + 1} "
+            f"{seg_start:.3f}s–{seg_end:.3f}s (dur={seg_duration:.3f}s)[/dim]"
         )
         
-        return summary
+        # Extract segment-specific timeline data
+        mask = (times >= seg_start) & (times <= seg_end)
+        seg_times = times[mask]
+        seg_probs = probs[mask]
+        
+        # Calculate probability statistics
+        avg_prob = float(np.mean(seg_probs)) if len(seg_probs) else 0.0
+        max_prob = float(np.max(seg_probs)) if len(seg_probs) else 0.0
+        min_prob = float(np.min(seg_probs)) if len(seg_probs) else 0.0
+        
+        # Calculate speech density (percentage of timeline cells above threshold)
+        speech_density = float(np.mean(seg_probs >= speech_threshold)) if len(seg_probs) else 0.0
+        
+        # Find overlapping chunks
+        seg_chunks = [
+            c for c in chunks
+            if c["start_time"] < seg_end and c["end_time"] > seg_start
+        ]
+        
+        console.print(
+            f"[dim]   Timeline cells: {len(seg_times)} | "
+            f"Overlapping chunks: {len(seg_chunks)} | "
+            f"Duration: {seg_duration:.3f}s[/dim]"
+        )
+        
+        # Aggregate predictions from overlapping chunks
+        pred_acc: Dict[str, List[float]] = {}
+        for c in seg_chunks:
+            for p in c.get("predictions", []):
+                pred_acc.setdefault(p["name"], []).append(p["prob"])
+        
+        top_preds = sorted(
+            [
+                TaggingResult(
+                    index=-1,
+                    name=name,
+                    class_index=-1,
+                    prob=round(float(np.mean(ps)), 4),
+                )
+                for name, ps in pred_acc.items()
+            ],
+            key=lambda x: x["prob"],
+            reverse=True,
+        )[:10]
+        
+        # Count speech chunks
+        speech_chunk_count = sum(
+            1 for c in seg_chunks
+            if c.get("speech_probability", 0.0) >= speech_threshold
+        )
+        
+        # Calculate speech chunk ratio
+        speech_chunk_ratio = (
+            round(speech_chunk_count / len(seg_chunks), 4)
+            if seg_chunks else 0.0
+        )
+        
+        # DURATION-AWARE TIERED CONFIDENCE SYSTEM
+        confidence_tier, confidence_label, is_high_confidence, is_medium_confidence = \
+            calculate_confidence_tier(
+                avg_prob=avg_prob,
+                speech_density=speech_density,
+                duration=seg_duration,
+                speech_chunk_ratio=speech_chunk_ratio,
+            )
+        
+        # Get duration-specific notes
+        duration_note = self._get_duration_confidence_note(
+            duration=seg_duration,
+            confidence_tier=confidence_tier,
+        )
+        
+        if duration_note:
+            console.print(f"[dim]   📝 Duration note: {duration_note}[/dim]")
+        
+        result: SpeechSegmentResult = {
+            "segment_index": seg_num,
+            "segment_type": segment_type,
+            "start_time": round(float(seg_start), 3),
+            "end_time": round(float(seg_end), 3),
+            "duration": round(float(seg_duration), 3),
+            "avg_speech_probability": round(avg_prob, 4),
+            "max_speech_probability": round(max_prob, 4),
+            "min_speech_probability": round(min_prob, 4),
+            "speech_density": round(speech_density, 4),
+            "speech_chunk_count": speech_chunk_count,
+            "total_chunk_count": len(seg_chunks),
+            "speech_chunk_ratio": speech_chunk_ratio,
+            "threshold_used": speech_threshold,
+            "is_high_confidence": is_high_confidence,
+            "is_medium_confidence": is_medium_confidence,
+            "confidence_tier": confidence_tier,
+            "confidence_label": confidence_label,
+            "confidence_duration_note": duration_note,  # NEW: explains duration's impact
+            "is_dense_speech": speech_density >= 0.8,
+            "top_prediction": top_preds[0]["name"] if top_preds else "Unknown",
+            "top_prediction_prob": top_preds[0]["prob"] if top_preds else 0.0,
+            "top_predictions": top_preds[:5],
+            "overlapping_chunks": seg_chunks,
+            "timeline": SpeechSegmentTimeline(
+                times=[round(float(t), 4) for t in seg_times],
+                probs=[round(float(p), 4) for p in seg_probs],
+            ),
+        }
+        
+        return result
+
+    def _get_duration_confidence_note(
+        self,
+        duration: float,
+        confidence_tier: str,
+    ) -> str:
+        """
+        Generate explanatory notes about duration's impact on confidence.
+        
+        Args:
+            duration: Segment duration in seconds
+            confidence_tier: Current confidence tier
+        
+        Returns:
+            Human-readable note about duration impact
+        """
+        notes = []
+        
+        if duration < 0.3 and confidence_tier in ("high", "medium"):
+            notes.append("⚠ Very short - verify manually")
+        elif duration < 0.5 and confidence_tier == "medium":
+            notes.append("Short duration may be noise")
+        elif duration < 1.0 and confidence_tier == "low":
+            notes.append("Too short for reliable classification")
+        
+        if duration > 10.0:
+            notes.append("Long segment - check for mixed content")
+        
+        if duration > 30.0 and confidence_tier == "high":
+            notes.append("Unusually long - may contain multiple speakers")
+        
+        return " | ".join(notes) if notes else ""
 
     def contains_speech(
         self,
         audio: AudioInput,
-        sample_rate: Optional[int] = None,
-        prob_threshold: Optional[float] = None,
-        top_n: Optional[int] = None,
+        sample_rate: Optional[int] = SAMPLE_RATE,
+        prob_threshold: Optional[float] = DEFAULT_SPEECH_PROB_THRESHOLD,
+        top_n: Optional[int] = DEFAULT_SPEECH_TOP_N,
     ) -> bool:
         """
         Check if audio contains speech with high probability.
@@ -1052,7 +1587,7 @@ class AudioTagger:
         for result in results[:n_to_check]:
             name = result.get("name", "")
             prob = result.get("prob", 0.0)
-            if name in self.SPEECH_CLASS_NAMES and prob >= threshold:
+            if name in SPEECH_CLASS_NAMES and prob >= threshold:
                 return True
 
         top_result = results[0]
@@ -1066,7 +1601,7 @@ class AudioTagger:
     def get_speech_probability(
         self,
         audio: AudioInput,
-        sample_rate: Optional[int] = None,
+        sample_rate: Optional[int] = SAMPLE_RATE,
     ) -> float:
         """
         Get the maximum speech probability from tagging results.
@@ -1085,7 +1620,7 @@ class AudioTagger:
 
         max_speech_prob = 0.0
         for result in results:
-            if result.get("name", "") in self.SPEECH_CLASS_NAMES:
+            if result.get("name", "") in SPEECH_CLASS_NAMES:
                 prob = result.get("prob", 0.0)
                 if prob > max_speech_prob:
                     max_speech_prob = prob
@@ -1094,7 +1629,7 @@ class AudioTagger:
     def get_tagging_summary(
         self,
         audio: AudioInput,
-        sample_rate: Optional[int] = None,
+        sample_rate: Optional[int] = SAMPLE_RATE,
         audio_path: str = "unknown",
     ) -> AudioTaggingSummary:
         """
@@ -1118,7 +1653,7 @@ class AudioTagger:
         
         console.print(f"[dim]📊 Loading audio for summary: {audio_path}[/dim]")
         try:
-            waveform, actual_sr = load_audio(audio, sr=sample_rate or 16000, mono=True)
+            waveform, actual_sr = load_audio(audio, sr=sample_rate or SAMPLE_RATE, mono=True)
             audio_duration = len(waveform) / actual_sr if actual_sr > 0 else 0
             console.print(
                 f"[dim]   Loaded: {audio_duration:.2f}s, {actual_sr}Hz[/dim]"
@@ -1163,194 +1698,16 @@ class AudioTagger:
         
         return summary
 
-    def split_speech_audio(
-        self,
-        audio: AudioInput,
-        sample_rate: Optional[int] = None,
-        prob_threshold: Optional[float] = None,
-        top_n: Optional[int] = None,
-        chunk_duration: Optional[float] = None,
-        overlap_duration: Optional[float] = None,
-        min_chunk_duration: Optional[float] = None,
-        min_speech_duration: float = 0.5,
-        merge_gap: Optional[float] = None,
-    ) -> List[np.ndarray]:
-        """
-        Split audio into individual speech segments, returning each as a numpy array.
-
-        Uses chunk-based audio tagging to detect speech regions, merges overlapping
-        speech chunks into continuous segments, and extracts the audio for each segment.
-
-        Args:
-            audio: Audio input (file path, bytes, numpy array, or torch tensor)
-            sample_rate: Sample rate for raw audio data (default: SAMPLE_RATE)
-            prob_threshold: Minimum speech probability threshold (default: self.speech_prob_threshold)
-            top_n: Number of top predictions to check for speech classes (default: self.speech_top_n)
-            chunk_duration: Duration of each analysis chunk in seconds (default: self.chunk_duration)
-            overlap_duration: Overlap between consecutive chunks (default: self.chunk_overlap)
-            min_chunk_duration: Minimum duration for the last chunk (default: self.min_chunk_duration)
-            min_speech_duration: Minimum duration in seconds for a valid speech segment (default: 0.5s)
-            merge_gap: Maximum gap in seconds to merge nearby segments (default: chunk_duration/2)
-
-        Returns:
-            List of numpy arrays, each containing a continuous speech segment
-            (mono, float32, at the given sample_rate)
-
-        Example:
-            >>> tagger = AudioTagger()
-            >>> speech_segments = tagger.split_speech_audio("recording.wav")
-            >>> for i, segment in enumerate(speech_segments):
-            ...     print(f"Segment {i+1}: {len(segment)/16000:.2f}s")
-            >>> # Use with ASR
-            >>> for segment in speech_segments:
-            ...     transcription = asr_model.transcribe(segment)
-
-        Debug logs trace:
-            - Audio loading details
-            - Chunk-based speech detection
-            - Identified speech segments with timestamps
-            - Filtering of segments below min_speech_duration
-            - Final segment count and total speech duration
-        """
-        console.print(
-            Panel.fit(
-                f"[bold cyan]split_speech_audio[/bold cyan]\n"
-                f"prob_threshold={prob_threshold or self.speech_prob_threshold}\n"
-                f"min_speech_duration={min_speech_duration}s\n"
-                f"merge_gap={merge_gap or (chunk_duration or self.chunk_duration) / 2}s",
-                title="Speech Splitting",
-                border_style="cyan",
-            )
-        )
-        
-        # Step 1: Load audio
-        try:
-            waveform, actual_sr = load_audio(
-                audio, sr=sample_rate or SAMPLE_RATE, mono=True
-            )
-        except Exception as e:
-            console.print(f"[red]❌ Failed to load audio: {e}[/red]")
-            raise
-        
-        total_samples = len(waveform)
-        total_duration = total_samples / actual_sr
-        console.print(
-            f"[dim]📊 Audio loaded: {total_duration:.2f}s, "
-            f"{actual_sr}Hz, {total_samples} samples[/dim]"
-        )
-        
-        # Step 2: Run chunk-based speech detection
-        summary = self.tag_audio_chunks(
-            audio=audio,
-            sample_rate=sample_rate,
-            chunk_duration=chunk_duration,
-            overlap_duration=overlap_duration,
-            min_chunk_duration=min_chunk_duration,
-        )
-        
-        chunks = summary.get("chunks", [])
-        if not chunks:
-            console.print("[yellow]⚠ No chunks produced, returning empty list[/yellow]")
-            return []
-        
-        # Step 3: Re-evaluate speech detection with custom parameters if needed
-        threshold = prob_threshold if prob_threshold is not None else self.speech_prob_threshold
-        n_check = top_n if top_n is not None else self.speech_top_n
-        
-        if prob_threshold is not None or top_n is not None:
-            console.print(
-                f"[dim]🔧 Re-evaluating speech detection with "
-                f"threshold={threshold}, top_n={n_check}[/dim]"
-            )
-            for chunk in chunks:
-                predictions = chunk.get("predictions", [])
-                speech_detected, chunk_prob = self._chunk_has_speech(
-                    predictions, top_n=n_check
-                )
-                chunk["speech_detected"] = speech_detected and chunk_prob >= threshold
-                chunk["speech_probability"] = round(chunk_prob, 4)
-        
-        # Step 4: Identify continuous speech segments from chunk results
-        speech_segments = self._identify_speech_segments(
-            chunks=chunks,
-            total_duration=total_duration,
-            edges_only=False,  # We want all segments, not just edges
-        )
-        
-        if not speech_segments:
-            console.print("[yellow]⚠ No speech segments detected[/yellow]")
-            return []
-        
-        # Step 5: Merge nearby segments if gap is small
-        _chunk_dur = chunk_duration if chunk_duration is not None else self.chunk_duration
-        merge_threshold = merge_gap if merge_gap is not None else _chunk_dur / 2.0
-        
-        merged_segments = self._merge_close_segments(
-            speech_segments, max_gap=merge_threshold
-        )
-        
-        console.print(
-            f"[dim]🔗 Merged {len(speech_segments)} raw segments into "
-            f"{len(merged_segments)} segments (gap threshold: {merge_threshold:.3f}s)[/dim]"
-        )
-        
-        # Step 6: Extract audio for each segment, filtering by minimum duration
-        speech_arrays: List[np.ndarray] = []
-        total_speech_duration = 0.0
-        
-        for i, (start_sec, end_sec) in enumerate(merged_segments):
-            duration = end_sec - start_sec
-            
-            if duration < min_speech_duration:
-                console.print(
-                    f"[dim]⏭ Skipping segment {i+1}: {start_sec:.3f}s - {end_sec:.3f}s "
-                    f"(duration {duration:.3f}s < min {min_speech_duration}s)[/dim]"
-                )
-                continue
-            
-            start_sample = int(start_sec * actual_sr)
-            end_sample = int(end_sec * actual_sr)
-            start_sample = max(0, start_sample)
-            end_sample = min(total_samples, end_sample)
-            
-            if end_sample <= start_sample:
-                console.print(
-                    f"[yellow]⚠ Segment {i+1} has no valid samples, skipping[/yellow]"
-                )
-                continue
-            
-            segment_audio = waveform[start_sample:end_sample].copy()
-            speech_arrays.append(segment_audio)
-            total_speech_duration += duration
-            
-            console.print(
-                f"[green]🎤 Segment {len(speech_arrays)}: {start_sec:.3f}s - {end_sec:.3f}s "
-                f"(duration: {duration:.3f}s, samples: {len(segment_audio)})[/green]"
-            )
-        
-        # Step 7: Log summary
-        if speech_arrays:
-            console.print(
-                f"[bold green]✅ Extracted {len(speech_arrays)} speech segment(s) "
-                f"totaling {total_speech_duration:.2f}s[/bold green]"
-            )
-        else:
-            console.print(
-                "[yellow]⚠ No speech segments met the minimum duration criteria[/yellow]"
-            )
-        
-        return speech_arrays
-
     def extract_speech_only(
         self,
         audio: AudioInput,
-        sample_rate: Optional[int] = None,
+        sample_rate: Optional[int] = SAMPLE_RATE,
         edges_only: bool = False,
-        prob_threshold: Optional[float] = None,
-        chunk_duration: Optional[float] = None,
-        overlap_duration: Optional[float] = None,
-        min_chunk_duration: Optional[float] = None,
-        top_n: Optional[int] = None,
+        prob_threshold: Optional[float] = DEFAULT_SPEECH_PROB_THRESHOLD,
+        chunk_duration: Optional[float] = DEFAULT_CHUNK_DURATION,
+        overlap_duration: Optional[float] = DEFAULT_CHUNK_OVERLAP,
+        min_chunk_duration: Optional[float] = DEFAULT_MIN_CHUNK_DURATION,
+        top_n: Optional[int] = DEFAULT_SPEECH_TOP_N,
     ) -> np.ndarray:
         """
         Extract speech-only audio by removing non-speech segments.
@@ -1605,6 +1962,140 @@ class AudioTagger:
                 merged.append([start, end])
         
         return [(s, e) for s, e in merged]
+
+    def extract_high_confidence_speech_segments(
+        self,
+        audio: AudioInput,
+        sample_rate: Optional[int] = None,
+        min_duration: float = 2.0,
+        require_confidence: Optional[List[str]] = None,
+        chunk_duration: Optional[float] = None,
+        overlap_duration: Optional[float] = None,
+        min_chunk_duration: Optional[float] = None,
+        speech_threshold: Optional[float] = None,
+        min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_DURATION_SEC,
+        min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_DURATION_SEC,
+    ) -> Tuple[List[SpeechSegmentResult], List[np.ndarray]]:
+        """
+        Extract high speech segments and their audio from the input.
+        A segment qualifies if duration > min_duration and segment_type == "speech".
+        Args:
+            audio: Audio input (file path, bytes, numpy array, or torch tensor)
+            sample_rate: Sample rate for raw audio data (default: SAMPLE_RATE)
+            min_duration: Minimum segment duration in seconds to include (default: 2.0)
+            require_confidence: (deprecated) No longer used. Kept for backward compatibility.
+            chunk_duration: Duration of each analysis chunk in seconds
+            overlap_duration: Overlap between consecutive chunks
+            min_chunk_duration: Minimum duration for the last chunk
+            speech_threshold: Speech probability threshold
+            min_silence_duration_sec: Continuous non-speech gap to close a segment
+            min_speech_duration_sec: Minimum duration for a valid speech segment
+        Returns:
+            Tuple of:
+                - List[SpeechSegmentResult]: Filtered speech segments
+                - List[np.ndarray]: Corresponding audio arrays for each segment
+        Example:
+            >>> tagger = AudioTagger()
+            >>> segments, audios = tagger.extract_high_confidence_speech_segments(
+            ...     "recording.wav", min_duration=2.0
+            ... )
+            >>> for seg, aud in zip(segments, audios):
+            ...     print(f"{seg['start_time']:.1f}s-{seg['end_time']:.1f}s: {len(aud)} samples")
+        """
+        import soundfile as sf
+        overall_start = time.time()
+        console.print(
+            Panel.fit(
+                f"[bold cyan]extract_high_confidence_speech_segments[/bold cyan]\n"
+                f"min_duration={min_duration}s | "
+                f"filter: duration > {min_duration}s AND segment_type == 'speech'",
+                title="High Speech Segments Extraction",
+                border_style="cyan",
+            )
+        )
+        console.print("[dim]🔍 Running tag_audio_segments...[/dim]")
+        segments_result = self.tag_audio_segments(
+            audio=audio,
+            sample_rate=sample_rate,
+            chunk_duration=chunk_duration,
+            overlap_duration=overlap_duration,
+            min_chunk_duration=min_chunk_duration,
+            speech_threshold=speech_threshold,
+            min_silence_duration_sec=min_silence_duration_sec,
+            min_speech_duration_sec=min_speech_duration_sec,
+            include_non_speech=False,
+        )
+        speech_segments = segments_result.get("speech_segments", [])
+        console.print(f"[dim]📊 Found {len(speech_segments)} total speech segments[/dim]")
+        high_speech_segments: List[SpeechSegmentResult] = []
+        for segment in speech_segments:
+            duration = segment.get("duration", 0.0)
+            segment_type = segment.get("segment_type", "")
+            is_high_speech = duration > min_duration and segment_type == "speech"
+            if is_high_speech:
+                high_speech_segments.append(segment)
+                console.print(
+                    f"[green]   ✅ Segment {segment['segment_index']}: "
+                    f"{segment['start_time']:.2f}s-{segment['end_time']:.2f}s "
+                    f"(dur={duration:.2f}s, type={segment_type})[/green]"
+                )
+            else:
+                reasons = []
+                if duration <= min_duration:
+                    reasons.append(f"duration {duration:.2f}s <= {min_duration}s")
+                if segment_type != "speech":
+                    reasons.append(f"segment_type is '{segment_type}'")
+                console.print(
+                    f"[dim]   ⏭ Skipped segment {segment['segment_index']}: "
+                    f"{', '.join(reasons) if reasons else 'unknown reason'}[/dim]"
+                )
+        console.print(
+            f"[bold green]✅ Filtered {len(high_speech_segments)} "
+            f"high speech segments (duration > {min_duration}s, type=speech)[/bold green]"
+        )
+        high_speech_audios: List[np.ndarray] = []
+        if high_speech_segments:
+            try:
+                audio_data, actual_sr = load_audio(
+                    audio, sr=sample_rate or SAMPLE_RATE, mono=True
+                )
+                console.print(
+                    f"[dim]📂 Loaded audio for extraction: "
+                    f"{len(audio_data)/actual_sr:.2f}s @ {actual_sr}Hz[/dim]"
+                )
+            except Exception as e:
+                console.print(f"[red]❌ Failed to load audio for extraction: {e}[/red]")
+                audio_data = np.array([], dtype=np.float32)
+                actual_sr = sample_rate or SAMPLE_RATE
+            for segment in high_speech_segments:
+                start_sample = int(segment["start_time"] * actual_sr)
+                end_sample = int(segment["end_time"] * actual_sr)
+                start_sample = max(0, start_sample)
+                end_sample = min(len(audio_data), end_sample)
+                if end_sample > start_sample:
+                    segment_audio = audio_data[start_sample:end_sample].copy()
+                    high_speech_audios.append(segment_audio)
+                    seg_dur = len(segment_audio) / actual_sr
+                    console.print(
+                        f"[dim]   ✂ Extracted {seg_dur:.2f}s audio "
+                        f"({len(segment_audio)} samples)[/dim]"
+                    )
+                else:
+                    console.print(
+                        f"[yellow]⚠ Empty audio range for segment "
+                        f"{segment['segment_index']}: "
+                        f"{start_sample}-{end_sample} samples[/yellow]"
+                    )
+                    high_speech_audios.append(np.array([], dtype=np.float32))
+        total_elapsed = time.time() - overall_start
+        total_extracted_duration = sum(
+            len(a) / actual_sr for a in high_speech_audios if len(a) > 0
+        )
+        console.print(
+            f"[dim]⏱ Extraction complete: {total_elapsed:.2f}s | "
+            f"Total extracted: {total_extracted_duration:.2f}s[/dim]"
+        )
+        return high_speech_segments, high_speech_audios
 
     def reset(self) -> None:
         """Reset the tagger instance (useful for testing or model updates)."""
