@@ -1,27 +1,38 @@
 from __future__ import annotations
-
+import argparse
 import json
 import shutil
 from pathlib import Path
 from typing import Any, Union
-
 from audio_utils import load_audio
 from audio_config import SAMPLE_RATE
 from norm_speech_loudness import normalize_audio_for_vad
 from rich.console import Console
+from rich.table import Table, box
 from speech_waves import (
-    DEFAULT_THRESHOLD,
     WaveShapeConfig,
     get_speech_waves,
     build_summary_rows,
     find_parent_segment,
     top5_reports,
     save_wave_data,
+    DEFAULT_THRESHOLD,
+    DEFAULT_MIN_PROMINENCE,
+    DEFAULT_MIN_EXCURSION,
+    DEFAULT_MIN_PEAK_PROB,
+    DEFAULT_MIN_FRAMES,
+    DEFAULT_MIN_DURATION_SEC,
+    DEFAULT_BASELINE_THRESHOLD,
+    DEFAULT_MIN_SPEECH_DURATION_MS,
+    DEFAULT_MIN_SILENCE_DURATION_MS,
 )
-from rich.table import Table, box
+from vad_firered import extract_speech_timestamps
 
-# Create a shared console instance for consistent styling
 console = Console()
+OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
+DEFAULT_AUDIO = str(
+    Path("~/.cache/files/audio/recording_3_speakers.wav").expanduser().resolve()
+)
 
 
 def save_file(
@@ -33,76 +44,40 @@ def save_file(
 ) -> Path:
     """
     Save JSON-serializable data to a file with rich-formatted success logging.
-
     💡 Simple analogy: Like hitting "Save" in a text editor, but with a
     pretty confirmation message that shows exactly where your file went.
-
     Args:
         data: Any data that can be converted to JSON (dict, list, str, etc.)
         file_path: Where to save the file (string or Path object)
         indent: How many spaces to use for JSON formatting (default: 2)
         log_success: Whether to print a success message (default: True)
-
     Returns:
         Path: The absolute path of the saved file (useful for chaining or logging)
-
     Raises:
         OSError: If the file cannot be written (permissions, disk full, etc.)
         TypeError: If data cannot be serialized to JSON
-
     Example:
         >>> save_file({"name": "test"}, "output/data.json")
         ✓ Saved: /full/path/to/output/data.json
     """
-    # 🗂️ Step 1: Normalize the path
     path = Path(file_path)
-
-    # 📁 Step 2: Make sure the folder exists (like mkdir -p)
     path.parent.mkdir(parents=True, exist_ok=True)
-
-    # 💾 Step 3: Write the data as nicely formatted JSON
     with open(path, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=indent, ensure_ascii=False)
-
-    # 🎯 Step 4: Get the full absolute path for the log message
     absolute_path = path.resolve()
-
-    # 🎨 Step 5: Show a pretty success message with rich
     if log_success:
-        # Rich lets us make file paths clickable!
-        # Format: [link=file:///absolute/path]display text[/link]
         console.print(
             f"[bold green]✓[/bold green] Saved: "
             f"[link=file://{absolute_path}]{absolute_path}[/link]"
         )
-
-    # 🔙 Step 6: Return the path so callers can use it if needed
     return absolute_path
 
 
-def main():
-    import argparse
-
-    from rich import box
-    from rich.console import Console
-    from rich.table import Table
-    from vad_firered import extract_speech_timestamps
-    # from vad_tenvad import extract_speech_timestamps
-
-    console = Console()
-
-    OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-
-    DEFAULT_AUDIO = str(
-        Path("~/.cache/files/audio/recording_3_speakers.wav").expanduser().resolve()
-    )
-
+def get_args():
     parser = argparse.ArgumentParser(
         description="Extract and analyse speech waves from audio using FireRedVAD.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-
-    # ── Input / output ────────────────────────────────────────────────────────
     parser.add_argument(
         "input",
         nargs="?",
@@ -116,8 +91,6 @@ def main():
         type=Path,
         help="Output results directory.",
     )
-
-    # ── VAD core ──────────────────────────────────────────────────────────────
     parser.add_argument(
         "-t",
         "--threshold",
@@ -132,13 +105,11 @@ def main():
         default=160,
         help="Frame hop size in samples (160 = 10 ms at 16 kHz).",
     )
-
-    # ── VAD segment filtering ─────────────────────────────────────────────────
     parser.add_argument(
         "-d",
         "--min-speech-duration",
         type=int,
-        default=250,
+        default=DEFAULT_MIN_SPEECH_DURATION_MS,
         metavar="MS",
         help=(
             "Minimum speech segment duration in ms passed to the VAD and "
@@ -149,7 +120,7 @@ def main():
         "-g",
         "--min-silence-duration",
         type=int,
-        default=100,
+        default=DEFAULT_MIN_SILENCE_DURATION_MS,
         metavar="MS",
         help="Minimum silence gap between segments in ms.",
     )
@@ -159,13 +130,11 @@ def main():
         action="store_true",
         help="Include non-speech segments in the VAD output.",
     )
-
-    # ── WaveShapeConfig ───────────────────────────────────────────────────────
     parser.add_argument(
         "-p",
         "--min-prominence",
         type=float,
-        default=WaveShapeConfig.min_prominence,
+        default=DEFAULT_MIN_PROMINENCE,
         metavar="FLOAT",
         help=(
             "Minimum prominence: how much the peak must rise above the "
@@ -176,7 +145,7 @@ def main():
         "-e",
         "--min-excursion",
         type=float,
-        default=WaveShapeConfig.min_excursion,
+        default=DEFAULT_MIN_EXCURSION,
         metavar="FLOAT",
         help=(
             "Minimum excursion: minimum difference between the highest and "
@@ -187,7 +156,7 @@ def main():
         "-P",
         "--min-peak-prob",
         type=float,
-        default=WaveShapeConfig.min_peak_prob,
+        default=DEFAULT_MIN_PEAK_PROB,
         metavar="FLOAT",
         help=(
             "Minimum peak probability: absolute floor the peak frame must "
@@ -198,7 +167,7 @@ def main():
         "-f",
         "--min-frames",
         type=int,
-        default=WaveShapeConfig.min_frames,
+        default=DEFAULT_MIN_FRAMES,
         metavar="N",
         help="Minimum number of frames a wave must span.",
     )
@@ -206,7 +175,7 @@ def main():
         "-b",
         "--baseline-threshold",
         type=float,
-        default=WaveShapeConfig.baseline_threshold,
+        default=DEFAULT_BASELINE_THRESHOLD,
         metavar="FLOAT",
         help=(
             "Probability threshold used to determine when a wave has truly "
@@ -214,7 +183,6 @@ def main():
             "detection and preroll adjustments."
         ),
     )
-
     parser.add_argument(
         "-n",
         "--normalize",
@@ -224,30 +192,37 @@ def main():
             "to improve VAD performance on low-volume or variable-level recordings."
         ),
     )
-
     args = parser.parse_args()
+    console.print(f"[dim]Parsed arguments: {vars(args)}[/dim]")
+    return args
 
-    # ── Build shape config from args ──────────────────────────────────────────
-    # min_duration_sec is always driven by --min-speech-duration so the VAD
-    # segment floor and the wave-level floor are always in sync.
+
+def main():
+    args = get_args()
+
+    # Use all default variables for WaveShapeConfig — no overrides from CLI needed
+    # since CLI args already default to the same constants.
     shape_cfg = WaveShapeConfig(
         min_prominence=args.min_prominence,
         min_excursion=args.min_excursion,
         min_peak_prob=args.min_peak_prob,
         min_frames=args.min_frames,
+        # min_duration_sec=DEFAULT_MIN_DURATION_SEC,  # Use the dedicated default, not derived from VAD ms
         min_duration_sec=args.min_speech_duration / 1000,
         baseline_threshold=args.baseline_threshold,
     )
+    console.print(f"[dim]WaveShapeConfig: {shape_cfg}[/dim]")
 
     shutil.rmtree(args.output_dir, ignore_errors=True)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
-    # Load audio for wave extraction
     audio_np, sr = load_audio(args.input, sr=SAMPLE_RATE, mono=True)
+    console.print(f"[dim]Loaded audio: shape={audio_np.shape}, sr={sr}[/dim]")
 
     if args.normalize:
         audio_np_norm, vad_stats = normalize_audio_for_vad(audio_np, sr)
         audio_np = audio_np_norm
+        console.print(f"[dim]Audio normalized. VAD stats: {vad_stats}[/dim]")
 
     segments, scores = extract_speech_timestamps(
         audio=audio_np,
@@ -257,31 +232,29 @@ def main():
         min_silence_duration_sec=args.min_silence_duration / 1000,
         with_scores=True,
     )
+    console.print(f"[dim]VAD produced {len(segments)} segments, {len(scores)} scores[/dim]")
 
     speech_waves = get_speech_waves(
         args.input,
         scores,
         threshold=args.threshold,
+        sampling_rate=sr,
         shape_cfg=shape_cfg,
     )
+    console.print(f"[dim]Detected {len(speech_waves)} valid speech waves[/dim]")
 
-    # Save main JSON files
     save_file(segments, args.output_dir / "segments.json")
     save_file(scores, args.output_dir / "speech_probs.json")
     save_file(speech_waves, args.output_dir / "speech_waves.json")
-    # save_file(vad_stats, args.output_dir / "vad_stats.json")
 
-    # Create waves directory and save individual wave files
     waves_dir = args.output_dir / "waves"
     waves_dir.mkdir(parents=True, exist_ok=True)
 
     console.print(
         f"\n[bold]Generating files for {len(speech_waves)} valid speech waves...[/bold]"
     )
-
     for wave_idx, wave in enumerate(speech_waves, 1):
         parent_seg_num = find_parent_segment(wave, segments)
-
         save_wave_data(
             wave=wave,
             audio_np=audio_np,
@@ -295,11 +268,9 @@ def main():
             shape_cfg=shape_cfg,
         )
 
-    # ── Summary table & JSON ──────────────────────────────────────────────────
     rows = build_summary_rows(speech_waves, waves_dir, segments)
     save_file(rows, args.output_dir / "summary.json")
 
-    # ── Top-5 waves ───────────────────────────────────────────────────────────
     top5 = top5_reports(speech_waves, waves_dir, segments)
     save_file(top5, args.output_dir / "top_5_waves.json")
 
@@ -322,15 +293,12 @@ def main():
     table.add_column("Sound", style="bright_black", justify="left")
 
     top5_dirs = {w["dir"] for w in top5}
-
     for r in rows:
         is_top5 = r["dir"] in top5_dirs
         row_style = "bold" if is_top5 else ""
         star = "★ " if is_top5 else "  "
-
         dir_cell = f"[link=file://{r['plot_path']}]{r['dir']}[/link]"
         sound_cell = f"[link=file://{r['sound_path']}]▶️[/link]"
-
         table.add_row(
             f"{star}{r['wave']}",
             dir_cell,
@@ -352,7 +320,6 @@ def main():
 
     summary_path = (args.output_dir / "summary.json").resolve()
     top5_path = (args.output_dir / "top_5_waves.json").resolve()
-
     console.print(
         f"[bold green]✓[/bold green] All wave files saved under : "
         f"[cyan][link=file://{waves_dir}]{waves_dir}[/link][/cyan]"

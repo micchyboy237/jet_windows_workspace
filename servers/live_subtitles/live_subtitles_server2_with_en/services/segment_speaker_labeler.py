@@ -19,8 +19,9 @@ try:
         OutlierEntry,
         OutlierMatch,
         DEFAULT_OUTLIER_PREFIX,
-        DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
-        DEFAULT_OUTLIER_TTL,
+        # DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
+        # DEFAULT_OUTLIER_TTL,
+        DEFAULT_OUTLIER_MAX_COUNT,
     )
     from services.speaker_labeler_utils.segment_speaker_labeler_defaults import (
         DEFAULT_THRESHOLD_SAME,
@@ -46,6 +47,7 @@ try:
     from services.speaker_labeler_utils.speaker_maintenance import SpeakerMaintenance
     from services.speaker_labeler_utils.outlier_orchestrator import OutlierOrchestrator
     from services.speaker_labeler_utils.speaker_labeler_serializer import SpeakerLabelerSerializer
+    from services.speech_waves import extract_pure_speech_audio
 except ImportError:
     from audio_config import SAMPLE_RATE
     from embedding_model_factory import BaseEmbeddingModel, EmbeddingThresholdProvider
@@ -58,8 +60,9 @@ except ImportError:
         OutlierEntry,
         OutlierMatch,
         DEFAULT_OUTLIER_PREFIX,
-        DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
-        DEFAULT_OUTLIER_TTL,
+        # DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
+        # DEFAULT_OUTLIER_TTL,
+        DEFAULT_OUTLIER_MAX_COUNT,
     )
     from speaker_labeler_utils.segment_speaker_labeler_defaults import (
         DEFAULT_THRESHOLD_SAME,
@@ -85,6 +88,7 @@ except ImportError:
     from speaker_labeler_utils.speaker_maintenance import SpeakerMaintenance
     from speaker_labeler_utils.outlier_orchestrator import OutlierOrchestrator
     from speaker_labeler_utils.speaker_labeler_serializer import SpeakerLabelerSerializer
+    from speech_waves import extract_pure_speech_audio
 
 console = Console()
 
@@ -152,23 +156,28 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         # NEW: Outlier management
         use_outlier_buffer: bool = True,
         outlier_pool: Optional[OutlierPool] = None,  # Can inject custom pool
-        outlier_promotion_threshold: float = DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
-        outlier_ttl: float = DEFAULT_OUTLIER_TTL,
+        # outlier_promotion_threshold: float = DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
+        # outlier_ttl: float = DEFAULT_OUTLIER_TTL,
+
+        outlier_promotion_threshold: Optional[float] = None,  # None = use model default
+        outlier_max_count: int = DEFAULT_OUTLIER_MAX_COUNT,  # NEW: replaces TTL with max count
 
         debug: bool = False,
     ):
         self.embedding_model = embedding_model
         
-        # Resolve thresholds: use provided values or auto-select from model type
+        # Resolve thresholds (now includes promotion)
         resolved = EmbeddingThresholdProvider.resolve_thresholds(
             model_type=embedding_model.model_type,
             threshold_same=threshold_same,
             threshold_possible=threshold_possible,
             threshold_new_speaker=threshold_new_speaker,
+            threshold_promotion=outlier_promotion_threshold,  # NEW
         )
         self.threshold_same = resolved.same
         self.threshold_possible = resolved.possible
         self.threshold_new_speaker = resolved.new_speaker
+        self.threshold_promotion = resolved.promotion  # NEW
 
         self.min_segments_for_reference = min_segments_for_reference
         self.mature_segment_count = mature_segment_count
@@ -207,13 +216,14 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
 
         # NEW: Outlier pool integration
         self.use_outlier_buffer = use_outlier_buffer
+        # Outlier pool now uses model-specific promotion threshold and max count
         if outlier_pool is not None:
             self.outlier_pool = outlier_pool
         else:
             self.outlier_pool = OutlierPool(
                 prefix=DEFAULT_OUTLIER_PREFIX,
-                promotion_threshold=outlier_promotion_threshold,
-                ttl=outlier_ttl,
+                promotion_threshold=self.threshold_promotion,  # MODEL-SPECIFIC
+                max_count=outlier_max_count,  # NEW: replaces TTL
                 debug=debug,
             )
 
@@ -1661,25 +1671,18 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 edges_only=True,
             )
         else:
-            pure_speech = audio_int16
+            # pure_speech = audio_int16
         
-        # # Call the self-contained extraction function
-        # pure_speech = extract_pure_speech_audio(
-        #     audio=audio_int16,
-        #     sampling_rate=SAMPLE_RATE,  # assumed, could be parameterized
-        #     vad_threshold=0.3,
-        #     min_prominence=self.min_prominence,
-        #     min_excursion=self.min_excursion,
-        #     min_peak_prob=self.min_peak_prob,
-        #     min_frames=self.min_frames,
-        #     min_duration_sec=self.min_duration_sec,
-        #     baseline_threshold=self.baseline_threshold,
-        # )
-        
-        # if pure_speech.size == 0:
-        #     if self.debug:
-        #         console.print("[warning]No pure speech extracted, using original[/warning]")
-        #     return waveform, False
+            # Call the self-contained extraction function
+            pure_speech = extract_pure_speech_audio(
+                audio=audio_int16,
+                sampling_rate=SAMPLE_RATE,  # assumed, could be parameterized
+            )
+            
+            if pure_speech.size == 0:
+                if self.debug:
+                    console.print("[warning]No pure speech extracted, using original[/warning]")
+                return waveform, False
         
         # Convert back to float32 tensor
         waveform_float = pure_speech.astype(np.float32) / 32768.0

@@ -76,7 +76,6 @@ class OutlierOrchestrator:
     ) -> Tuple[List[Dict], bool]:
         """Label using the outlier buffer for speaker validation."""
         labeler = self._labeler
-        labeler.outlier_pool.cleanup_expired()
         outlier_matches = labeler.outlier_pool.find_matches(embedding)
         should_create = self.should_create_new_speaker(
             actual_best_score, top_matches, context, embedding
@@ -213,11 +212,9 @@ class OutlierOrchestrator:
         )
         
         # --- NEW: Log detailed promotion analytics ---
-        outlier_age = matched_outlier.age
         promotion_details = {
             "new_speaker": new_label,
             "outlier_label": best_match.outlier_label,
-            "outlier_age_s": round(outlier_age, 2),
             "outlier_confidence": round(best_match.confidence, 4),
             "cross_similarity": round(cross_similarity, 4),
             "quality_tier": quality_tier,
@@ -231,7 +228,6 @@ class OutlierOrchestrator:
                 f"{best_match.outlier_label} → {new_label}\n"
                 f"   Cross-sim: {cross_similarity:.3f} "
                 f"(tier: {quality_tier})\n"
-                f"   Outlier age: {outlier_age:.1f}s\n"
                 f"   Pool confidence: {best_match.confidence:.3f}\n"
                 f"   Speakers: {labeler.speaker_count}[/]"
             )

@@ -1,10 +1,11 @@
 from typing import Optional, Tuple, Union
 
 import numpy as np
+import torch
 
 
 def quantize_audio(
-    audio: np.ndarray,
+    audio: Union[np.ndarray, torch.Tensor],
     target_dtype: Union[str, np.dtype] = "int16",  # Sensible default for WAV files
     sr: Optional[int] = 22050,  # Sensible default (librosa's default)
     dither: bool = True,
@@ -12,13 +13,13 @@ def quantize_audio(
     normalize: bool = True,
     verbose: bool = True,
     force_mono: bool = True,  # New parameter to handle multi-dimensional audio
-) -> Tuple[np.ndarray, dict]:
+) -> Tuple[Union[np.ndarray, torch.Tensor], dict]:
     """
     Robustly quantize audio to a target dtype with safety checks.
 
     Parameters
     ----------
-    audio : np.ndarray
+    audio : np.ndarray or torch.Tensor
         Input audio array (any dtype, any shape).
     target_dtype : str or np.dtype
         Target dtype. Default 'int16' (standard for 16-bit WAV).
@@ -41,8 +42,8 @@ def quantize_audio(
 
     Returns
     -------
-    quantized : np.ndarray
-        Quantized audio array.
+    quantized : np.ndarray or torch.Tensor
+        Quantized audio array (same type as input).
     metadata : dict
         Information about the quantization process.
 
@@ -55,17 +56,27 @@ def quantize_audio(
     >>> multi_chan = np.random.randn(2, 4, 44100)
     >>> quantized, meta = quantize_audio(multi_chan)
     """
+    # Track input type for return conversion
+    is_torch = isinstance(audio, torch.Tensor)
+
+    # Convert to numpy for processing
+    if is_torch:
+        audio_np = audio.detach().cpu().numpy()
+    else:
+        audio_np = audio
 
     # --- 1. Validate and reshape inputs ---
-    audio = np.asarray(audio, dtype=np.float64)  # Work in double precision internally
+    audio_np = np.asarray(
+        audio_np, dtype=np.float64
+    )  # Work in double precision internally
 
     # Handle multi-dimensional audio gracefully
-    original_shape = audio.shape
-    original_ndim = audio.ndim
+    original_shape = audio_np.shape
+    original_ndim = audio_np.ndim
 
-    if audio.ndim > 2:
+    if audio_np.ndim > 2:
         if verbose:
-            print(f"⚠️  Got {audio.ndim}D audio with shape {audio.shape}")
+            print(f"⚠️  Got {audio_np.ndim}D audio with shape {audio_np.shape}")
 
         if force_mono:
             # Strategy 1: Flatten everything to 1D mono
@@ -73,40 +84,40 @@ def quantize_audio(
                 print("→ Flattening to 1D mono (averaging all dimensions)")
 
             # Keep flattening until we get 1D
-            while audio.ndim > 1:
-                audio = np.mean(audio, axis=0)
+            while audio_np.ndim > 1:
+                audio_np = np.mean(audio_np, axis=0)
 
             if verbose:
-                print(f"→ Resulting shape: {audio.shape}")
+                print(f"→ Resulting shape: {audio_np.shape}")
         else:
             # Strategy 2: Try to preserve as 2D (channels, samples)
-            if audio.ndim == 3:
+            if audio_np.ndim == 3:
                 # Could be (batch, channels, samples) or (channels, samples, something)
                 # Guess: if last dimension is largest, it's likely (..., samples)
-                if audio.shape[-1] > audio.shape[-2]:
+                if audio_np.shape[-1] > audio_np.shape[-2]:
                     # Likely (batch, channels, samples) → (channels, samples)
                     if verbose:
                         print(
                             "→ Assuming shape (batch, channels, samples), averaging batch dimension"
                         )
-                    audio = np.mean(audio, axis=0)
+                    audio_np = np.mean(audio_np, axis=0)
                 else:
                     # Unknown layout, flatten to 2D by merging leading dims
                     if verbose:
                         print("→ Reshaping to 2D by merging leading dimensions")
-                    audio = audio.reshape(-1, audio.shape[-1])
+                    audio_np = audio_np.reshape(-1, audio_np.shape[-1])
             else:
                 # For >3D, merge all but last dimension
-                audio = audio.reshape(-1, audio.shape[-1])
+                audio_np = audio_np.reshape(-1, audio_np.shape[-1])
                 if verbose:
-                    print(f"→ Reshaped to {audio.shape}")
+                    print(f"→ Reshaped to {audio_np.shape}")
 
-    elif audio.ndim == 1:
+    elif audio_np.ndim == 1:
         # Add channel dimension for consistent processing
-        audio = audio.reshape(1, -1)
+        audio_np = audio_np.reshape(1, -1)
 
     # Now audio is guaranteed to be 2D: (channels, samples)
-    n_channels, n_samples = audio.shape
+    n_channels, n_samples = audio_np.shape
 
     # --- 2. Validate dtype ---
     dtype_map = {
@@ -120,26 +131,26 @@ def quantize_audio(
     }
 
     if isinstance(target_dtype, str):
-        target_dtype = target_dtype.lower()
+        target_dtype_str = target_dtype.lower()
     else:
-        target_dtype = str(np.dtype(target_dtype))
+        target_dtype_str = str(np.dtype(target_dtype))
 
-    if target_dtype not in dtype_map:
+    if target_dtype_str not in dtype_map:
         raise ValueError(
-            f"Unsupported target dtype: {target_dtype}. "
+            f"Unsupported target dtype: {target_dtype_str}. "
             f"Choose from: {list(dtype_map.keys())}"
         )
 
-    target_dtype_obj, dtype_family = dtype_map[target_dtype]
+    target_dtype_obj, dtype_family = dtype_map[target_dtype_str]
 
     # --- 3. Build initial metadata ---
     metadata = {
-        "original_dtype": str(audio.dtype),
+        "original_dtype": str(audio_np.dtype),
         "original_shape": original_shape,
-        "processed_shape": audio.shape,
-        "was_reshaped": original_shape != audio.shape,
-        "target_dtype": target_dtype,
-        "original_range": (float(np.min(audio)), float(np.max(audio))),
+        "processed_shape": audio_np.shape,
+        "was_reshaped": original_shape != audio_np.shape,
+        "target_dtype": target_dtype_str,
+        "original_range": (float(np.min(audio_np)), float(np.max(audio_np))),
         "was_normalized": False,
         "was_dithered": False,
         "sample_rate": sr if sr else "unknown",
@@ -147,25 +158,30 @@ def quantize_audio(
     }
 
     # --- 4. Check if quantization is even needed ---
-    if np.dtype(target_dtype_obj) == audio.dtype:
+    if np.dtype(target_dtype_obj) == audio_np.dtype:
         if verbose:
-            print(f"✓ Audio already in {target_dtype}, no quantization needed.")
+            print(f"✓ Audio already in {target_dtype_str}, no quantization needed.")
         # Reshape back if originally 1D
         if original_ndim == 1:
-            audio = audio.flatten()
-        return audio.astype(target_dtype_obj), metadata
+            audio_np = audio_np.flatten()
+        result = audio_np.astype(target_dtype_obj)
+        if is_torch:
+            return torch.from_numpy(result), metadata
+        return result, metadata
 
     # --- 5. Float-to-Float (just type conversion) ---
     if dtype_family == "float":
         if verbose:
-            print(f"✓ Converting float→{target_dtype} (type cast only)")
-        quantized = audio.astype(target_dtype_obj)
+            print(f"✓ Converting float→{target_dtype_str} (type cast only)")
+        quantized = audio_np.astype(target_dtype_obj)
         metadata["quantized_range"] = (
             float(np.min(quantized)),
             float(np.max(quantized)),
         )
         if original_ndim == 1:
             quantized = quantized.flatten()
+        if is_torch:
+            return torch.from_numpy(quantized), metadata
         return quantized, metadata
 
     # --- 6. Float-to-Integer (actual quantization) ---
@@ -176,27 +192,31 @@ def quantize_audio(
         print(f"Target integer range: {int_min} to {int_max}")
 
     # Check if audio is already integer
-    if np.issubdtype(audio.dtype, np.integer):
+    if np.issubdtype(audio_np.dtype, np.integer):
         if verbose:
             print("→ Audio is already integer, converting type...")
-        quantized = audio.astype(target_dtype_obj)
+        quantized = audio_np.astype(target_dtype_obj)
         metadata["quantized_range"] = (
             float(np.min(quantized)),
             float(np.max(quantized)),
         )
         if original_ndim == 1:
             quantized = quantized.flatten()
+        if is_torch:
+            return torch.from_numpy(quantized), metadata
         return quantized, metadata
 
     # --- 7. Normalize if needed ---
-    peak = np.max(np.abs(audio))
+    peak = np.max(np.abs(audio_np))
 
     if peak == 0:
         if verbose:
             print("⚠️  Audio is silence (all zeros). Returning zeros.")
-        quantized = np.zeros_like(audio, dtype=target_dtype_obj)
+        quantized = np.zeros_like(audio_np, dtype=target_dtype_obj)
         if original_ndim == 1:
             quantized = quantized.flatten()
+        if is_torch:
+            return torch.from_numpy(quantized), metadata
         return quantized, metadata
 
     if normalize or peak > 1.0:
@@ -205,39 +225,39 @@ def quantize_audio(
                 print(
                     f"⚠️  Peak amplitude {peak:.2f} exceeds 1.0. Normalizing to prevent clipping."
                 )
-            audio = audio / peak
+            audio_np = audio_np / peak
             metadata["was_normalized"] = True
         elif normalize and peak < 0.01:
             if verbose:
                 print(
                     f"⚠️  Peak amplitude {peak:.6f} is very quiet. Normalizing to full scale."
                 )
-            audio = audio / peak
+            audio_np = audio_np / peak
             metadata["was_normalized"] = True
         elif normalize:
             if verbose:
                 print(f"→ Normalizing to full scale (peak: {peak:.4f})")
-            audio = audio / peak
+            audio_np = audio_np / peak
             metadata["was_normalized"] = True
 
     # Clip to [-1, 1] safety
-    if np.max(np.abs(audio)) > 1.0:
+    if np.max(np.abs(audio_np)) > 1.0:
         if verbose:
             print("→ Clipping audio to [-1, 1]")
-        np.clip(audio, -1.0, 1.0, out=audio)
+        np.clip(audio_np, -1.0, 1.0, out=audio_np)
 
     # --- 8. Scale to integer range ---
     if target_dtype_obj == np.uint8:
-        scaled = (audio * 127.5 + 127.5).astype(np.float64)
+        scaled = (audio_np * 127.5 + 127.5).astype(np.float64)
     else:
-        scaled = audio * int_max
+        scaled = audio_np * int_max
 
     # --- 9. Apply dithering ---
     if dither:
         dither_noise = (
             (
-                np.random.uniform(-1, 1, audio.shape).astype(np.float64)
-                + np.random.uniform(-1, 1, audio.shape).astype(np.float64)
+                np.random.uniform(-1, 1, audio_np.shape).astype(np.float64)
+                + np.random.uniform(-1, 1, audio_np.shape).astype(np.float64)
             )
             * dither_amount
             * 0.5
@@ -264,7 +284,7 @@ def quantize_audio(
 
     if verbose:
         print(
-            f"✓ Quantized to {target_dtype} | "
+            f"✓ Quantized to {target_dtype_str} | "
             f"Shape: {quantized.shape} | "
             f"Range: [{metadata['quantized_range'][0]}, {metadata['quantized_range'][1]}]"
         )
@@ -275,16 +295,21 @@ def quantize_audio(
         if metadata["was_reshaped"]:
             print(f"  (Reshaped from {original_shape} to {quantized.shape})")
 
+    # Return as torch tensor if input was torch
+    if is_torch:
+        return torch.from_numpy(quantized), metadata
     return quantized, metadata
 
 
-def is_quantization_needed(audio: np.ndarray, target_dtype: str = "int16") -> bool:
+def is_quantization_needed(
+    audio: Union[np.ndarray, torch.Tensor], target_dtype: str = "int16"
+) -> bool:
     """
     Check if quantization is needed.
 
     Parameters
     ----------
-    audio : np.ndarray
+    audio : np.ndarray or torch.Tensor
         Input audio.
     target_dtype : str
         Desired dtype. Default 'int16'.
@@ -294,18 +319,27 @@ def is_quantization_needed(audio: np.ndarray, target_dtype: str = "int16") -> bo
     bool
         True if quantization is required.
     """
-    return np.dtype(audio.dtype) != np.dtype(target_dtype)
+    # Get dtype from tensor or array
+    if isinstance(audio, torch.Tensor):
+        current_dtype = str(audio.dtype).replace("torch.", "")
+    else:
+        current_dtype = str(audio.dtype)
+
+    return np.dtype(current_dtype) != np.dtype(target_dtype)
 
 
 def quantize_safe(
-    audio: np.ndarray, target_dtype: str = "int16", sr: Optional[int] = 22050, **kwargs
-) -> np.ndarray:
+    audio: Union[np.ndarray, torch.Tensor],
+    target_dtype: str = "int16",
+    sr: Optional[int] = 22050,
+    **kwargs,
+) -> Union[np.ndarray, torch.Tensor]:
     """
     Simplified version that only returns the quantized array.
 
     Parameters
     ----------
-    audio : np.ndarray
+    audio : np.ndarray or torch.Tensor
         Input audio array.
     target_dtype : str
         Target dtype. Default 'int16'.
@@ -316,8 +350,8 @@ def quantize_safe(
 
     Returns
     -------
-    np.ndarray
-        Quantized audio array.
+    np.ndarray or torch.Tensor
+        Quantized audio array (same type as input).
     """
     quantized, _ = quantize_audio(audio, target_dtype, sr=sr, **kwargs)
     return quantized

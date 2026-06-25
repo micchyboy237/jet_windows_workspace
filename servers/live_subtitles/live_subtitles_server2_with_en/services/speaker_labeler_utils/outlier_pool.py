@@ -5,32 +5,34 @@ Segments that don't match any existing speaker are placed in the outlier
 pool. They're only promoted to permanent SPEAKER_XX when:
   - Two outliers match each other (mutual confirmation)
   - An outlier matches an existing speaker (retroactive merge)
-  - Outliers that expire without matches are garbage collected
+
+Pool size is bounded by max_count. When full, the oldest outlier is
+evicted (FIFO). Promotions automatically remove from the pool — no TTL needed.
 
 This two-phase approach prevents centroid contamination from single
 noisy observations and reduces speaker proliferation.
 """
 from __future__ import annotations
-import time
-from dataclasses import dataclass, field
+
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+
 import numpy as np
 from rich.console import Console
 
 console = Console()
+
 _LOGGER_PREFIX = "[dim cyan]OutlierPool[/dim cyan]"
 
-# ── Default configuration ─────────────────────────────────────
 DEFAULT_OUTLIER_PREFIX = "OUTLIER"
-DEFAULT_MIN_OUTLIER_MATCHES = 2       # Outliers needed to form a speaker
-DEFAULT_OUTLIER_TTL = 60.0            # Seconds before stale outlier expires
-DEFAULT_OUTLIER_PROMOTION_THRESHOLD = 0.55  # Similarity to promote
+DEFAULT_MIN_OUTLIER_MATCHES = 2
+DEFAULT_OUTLIER_MAX_COUNT = 10
 
 
 @dataclass
 class OutlierEntry:
     """A single unconfirmed speaker candidate in the outlier pool.
-    
+
     Attributes
     ----------
     label : str
@@ -45,38 +47,15 @@ class OutlierEntry:
         Duration of the original audio segment.
     match_attempts : int
         How many times this outlier has been checked against others.
-    created_at : float
-        Monotonic creation time for TTL calculations (not in __init__).
     """
+
     label: str
     embedding: np.ndarray
     timestamp: float
     segment_id: str
     audio_duration: float = 0.0
     match_attempts: int = 0
-    # Use init=False so it's auto-set and not required by constructor
-    created_at: float = field(default_factory=time.monotonic, init=False)
-    
-    @property
-    def age(self) -> float:
-        """Age of this outlier in seconds (monotonic clock)."""
-        return time.monotonic() - self.created_at
-    
-    def is_expired(self, ttl: float) -> bool:
-        """Check if this outlier has exceeded its TTL.
-        
-        Parameters
-        ----------
-        ttl : float
-            Time-to-live in seconds.
-            
-        Returns
-        -------
-        bool
-            True if age > ttl.
-        """
-        return self.age > ttl
-    
+
     def to_dict(self) -> Dict:
         """Serialize to dictionary for persistence."""
         return {
@@ -86,17 +65,11 @@ class OutlierEntry:
             "segment_id": self.segment_id,
             "audio_duration": self.audio_duration,
             "match_attempts": self.match_attempts,
-            "created_at": self.created_at,
         }
-    
+
     @classmethod
     def from_dict(cls, data: Dict) -> "OutlierEntry":
-        """Deserialize from dictionary.
-        
-        Note: created_at is NOT restored from serialized data.
-        Instead, the current time is used so restored outliers
-        don't immediately expire.
-        """
+        """Deserialize from dictionary."""
         return cls(
             label=data["label"],
             embedding=np.array(data["embedding"]),
@@ -110,7 +83,7 @@ class OutlierEntry:
 @dataclass
 class OutlierMatch:
     """Result of matching a query embedding against an outlier.
-    
+
     Attributes
     ----------
     outlier_label : str
@@ -120,6 +93,7 @@ class OutlierMatch:
     outlier_entry : OutlierEntry
         Reference to the full outlier entry.
     """
+
     outlier_label: str
     confidence: float
     outlier_entry: OutlierEntry
@@ -128,7 +102,7 @@ class OutlierMatch:
 @dataclass
 class PromotionEvent:
     """Record of an outlier being promoted to a full speaker.
-    
+
     Attributes
     ----------
     type : str
@@ -144,6 +118,7 @@ class PromotionEvent:
     timestamp : float
         When the promotion occurred.
     """
+
     type: str
     outlier_labels: List[str]
     target_speaker: str
@@ -153,67 +128,84 @@ class PromotionEvent:
 
 class OutlierPool:
     """Manages the lifecycle of unconfirmed speaker candidates.
-    
-    Flow:
-    ┌──────────┐     ┌──────────────┐     ┌──────────────┐
-    │  Segment  │────▶│  OutlierPool  │────▶│  SPEAKER_XX  │
-    │  (no match)│    │  (temporary)  │     │  (permanent)  │
-    └──────────┘     └──────────────┘     └──────────────┘
-                           │
-                     ┌─────┴─────┐
-                     │  Expired?  │──▶ Garbage Collected
-                     └───────────┘
-    
+
+    Flow::
+
+        ┌──────────┐     ┌──────────────┐     ┌──────────────┐
+        │  Segment  │────▶│  OutlierPool  │────▶│  SPEAKER_XX  │
+        │  (no match)│    │  (temporary)  │     │  (permanent)  │
+        └──────────┘     └──────────────┘     └──────────────┘
+                               │
+                         ┌─────┴─────┐
+                         │  Pool     │──▶ Oldest evicted when full (FIFO)
+                         │  full?    │
+                         └───────────┘
+
+    Pool size is bounded by *max_count*.  When the pool is full the
+    oldest entry (by insertion order) is silently evicted to make room.
+    Promotions always remove entries from the pool, so normally the pool
+    self-regulates and eviction is rare.
+
     Parameters
     ----------
-    prefix : str
-        Label prefix for outliers (default: 'OUTLIER').
     promotion_threshold : float
-        Minimum cosine similarity to consider two outliers a match.
-    ttl : float
-        Time-to-live in seconds. Outliers older than this are removed.
+        **Required.** Minimum cosine similarity to consider two outliers a
+        match.  Must be model-specific — use the value from
+        ``EmbeddingThresholds.promotion`` for the active embedding model.
+    prefix : str
+        Label prefix for outliers (default: ``'OUTLIER'``).
+    max_count : int
+        Maximum number of outliers to keep (default: 10).
     debug : bool
         Enable debug logging.
     """
-    
+
     def __init__(
         self,
+        promotion_threshold: float,
         prefix: str = DEFAULT_OUTLIER_PREFIX,
-        promotion_threshold: float = DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
-        ttl: float = DEFAULT_OUTLIER_TTL,
+        max_count: int = DEFAULT_OUTLIER_MAX_COUNT,
         debug: bool = False,
     ):
-        self.prefix = prefix
+        if promotion_threshold <= 0 or promotion_threshold > 1:
+            raise ValueError(
+                f"promotion_threshold must be in (0, 1], got {promotion_threshold}"
+            )
+
         self.promotion_threshold = promotion_threshold
-        self.ttl = ttl
+        self.prefix = prefix
+        self.max_count = max_count
         self.debug = debug
-        
+
         self._outliers: Dict[str, OutlierEntry] = {}
         self._next_id: int = 1
         self._promotions: List[PromotionEvent] = []
-    
-    # ── Properties ─────────────────────────────────────────
+        self._insertion_order: List[str] = []
+
+    # ── public read-only properties ──────────────────────────────
+
     @property
     def count(self) -> int:
         """Number of active outliers."""
         return len(self._outliers)
-    
+
     @property
     def labels(self) -> List[str]:
         """Labels of all active outliers."""
         return list(self._outliers.keys())
-    
+
     @property
     def promotion_count(self) -> int:
         """Total number of promotions performed."""
         return len(self._promotions)
-    
+
     @property
     def is_empty(self) -> bool:
         """True if no outliers are present."""
         return len(self._outliers) == 0
-    
-    # ── Core operations ────────────────────────────────────
+
+    # ── core operations ──────────────────────────────────────────
+
     def add(
         self,
         embedding: np.ndarray,
@@ -221,8 +213,8 @@ class OutlierPool:
         segment_id: str,
         audio_duration: float = 0.0,
     ) -> str:
-        """Add a new outlier to the pool.
-        
+        """Add a new outlier to the pool, evicting the oldest if full.
+
         Parameters
         ----------
         embedding : np.ndarray
@@ -233,19 +225,24 @@ class OutlierPool:
             External segment identifier.
         audio_duration : float
             Duration of the audio segment.
-        
+
         Returns
         -------
         str
-            Label of the new outlier (e.g., 'OUTLIER_03').
+            Label of the new outlier (e.g., ``'OUTLIER_03'``).
         """
+        # ── evict oldest if at capacity ──
+        evicted_label: Optional[str] = None
+        if len(self._outliers) >= self.max_count:
+            evicted_label = self._insertion_order.pop(0)
+            del self._outliers[evicted_label]
+
         label = f"{self.prefix}_{self._next_id:02d}"
         self._next_id += 1
-        
-        # Ensure embedding is 2D
+
         if embedding.ndim == 1:
             embedding = embedding.reshape(1, -1)
-        
+
         self._outliers[label] = OutlierEntry(
             label=label,
             embedding=embedding.copy(),
@@ -253,29 +250,31 @@ class OutlierPool:
             segment_id=segment_id,
             audio_duration=audio_duration,
         )
-        
+        self._insertion_order.append(label)
+
         if self.debug:
+            extra = f", evicted: {evicted_label}" if evicted_label else ""
             console.print(
                 f"{_LOGGER_PREFIX} 📦 Added {label} "
-                f"(segment: {segment_id}, total: {self.count})"
+                f"(segment: {segment_id}, pool: {self.count}/{self.max_count}{extra})"
             )
-        
+
         return label
-    
+
     def find_matches(
         self,
         query_embedding: np.ndarray,
         min_similarity: Optional[float] = None,
     ) -> List[OutlierMatch]:
         """Find outliers similar to a query embedding.
-        
+
         Parameters
         ----------
         query_embedding : np.ndarray
             Embedding to match against the pool.
         min_similarity : float, optional
-            Minimum similarity threshold. Defaults to promotion_threshold.
-        
+            Minimum similarity threshold. Defaults to ``self.promotion_threshold``.
+
         Returns
         -------
         List[OutlierMatch]
@@ -283,11 +282,10 @@ class OutlierPool:
         """
         if self.is_empty:
             return []
-        
+
         if min_similarity is None:
             min_similarity = self.promotion_threshold
-        
-        # Prepare embedding matrix
+
         labels = []
         embeddings = []
         for label, entry in self._outliers.items():
@@ -296,67 +294,78 @@ class OutlierPool:
             if emb.ndim == 1:
                 emb = emb.reshape(1, -1)
             embeddings.append(emb)
-        
+
         embeddings_array = np.vstack(embeddings)
-        
-        # Compute cosine similarities
+
         from scipy.spatial.distance import cdist
-        query_2d = query_embedding.reshape(1, -1) if query_embedding.ndim == 1 else query_embedding
+
+        query_2d = (
+            query_embedding.reshape(1, -1)
+            if query_embedding.ndim == 1
+            else query_embedding
+        )
         distances = cdist(query_2d, embeddings_array, metric="cosine")
         similarities = 1.0 - distances.flatten()
-        
-        # Collect matches above threshold
+
         matches = []
         for i, label in enumerate(labels):
             sim = float(similarities[i])
             if sim >= min_similarity:
                 self._outliers[label].match_attempts += 1
-                matches.append(OutlierMatch(
-                    outlier_label=label,
-                    confidence=sim,
-                    outlier_entry=self._outliers[label],
-                ))
-        
+                matches.append(
+                    OutlierMatch(
+                        outlier_label=label,
+                        confidence=sim,
+                        outlier_entry=self._outliers[label],
+                    )
+                )
+
         matches.sort(key=lambda m: m.confidence, reverse=True)
-        
+
         if self.debug and matches:
             console.print(
                 f"{_LOGGER_PREFIX} 🔍 Found {len(matches)} outlier matches "
                 f"(best: {matches[0].outlier_label} "
                 f"sim={matches[0].confidence:.3f})"
             )
-        
+
         return matches
-    
+
     def remove(self, label: str) -> Optional[OutlierEntry]:
         """Remove a specific outlier from the pool.
-        
+
+        Automatically called on promotion.  Also prunes the FIFO
+        insertion-order list.
+
         Parameters
         ----------
         label : str
             Outlier label to remove.
-        
+
         Returns
         -------
         Optional[OutlierEntry]
-            The removed entry, or None if not found.
+            The removed entry, or *None* if not found.
         """
         entry = self._outliers.pop(label, None)
-        if entry and self.debug:
-            console.print(
-                f"{_LOGGER_PREFIX} 🗑️  Removed {label} "
-                f"(remaining: {self.count})"
-            )
+        if entry:
+            if label in self._insertion_order:
+                self._insertion_order.remove(label)
+            if self.debug:
+                console.print(
+                    f"{_LOGGER_PREFIX} 🗑️  Removed {label} "
+                    f"(remaining: {self.count}/{self.max_count})"
+                )
         return entry
-    
+
     def remove_many(self, labels: List[str]) -> int:
         """Remove multiple outliers at once.
-        
+
         Parameters
         ----------
         labels : List[str]
             Labels to remove.
-        
+
         Returns
         -------
         int
@@ -367,32 +376,9 @@ class OutlierPool:
             if self.remove(label) is not None:
                 count += 1
         return count
-    
-    def cleanup_expired(self) -> int:
-        """Remove all outliers that have exceeded their TTL.
-        
-        Returns
-        -------
-        int
-            Number of outliers removed.
-        """
-        expired_labels = [
-            label
-            for label, entry in self._outliers.items()
-            if entry.is_expired(self.ttl)
-        ]
-        
-        for label in expired_labels:
-            entry = self._outliers[label]
-            if self.debug:
-                console.print(
-                    f"{_LOGGER_PREFIX} ⏰ Expired {label} "
-                    f"(age: {entry.age:.1f}s > ttl: {self.ttl}s)"
-                )
-            del self._outliers[label]
-        
-        return len(expired_labels)
-    
+
+    # ── promotion helpers ────────────────────────────────────────
+
     def record_promotion(
         self,
         type_: str,
@@ -402,15 +388,15 @@ class OutlierPool:
         timestamp: float,
     ) -> None:
         """Record a promotion event for history/debugging.
-        
+
         Parameters
         ----------
         type_ : str
-            'single', 'pair', or 'merge'.
+            ``'single'``, ``'pair'``, or ``'merge'``.
         outlier_labels : List[str]
             Labels of outliers involved.
         target_speaker : str
-            SPEAKER_XX label created or merged into.
+            ``SPEAKER_XX`` label created or merged into.
         confidence : float
             Similarity score.
         timestamp : float
@@ -424,40 +410,40 @@ class OutlierPool:
             timestamp=timestamp,
         )
         self._promotions.append(event)
-        
+
         if self.debug:
             console.print(
                 f"{_LOGGER_PREFIX} 🎉 Promotion [{type_}]: "
                 f"{outlier_labels} → {target_speaker} "
                 f"(sim={confidence:.3f})"
             )
-    
-    # ── Pairwise matching ──────────────────────────────────
+
     def find_internal_matches(
         self,
         min_similarity: Optional[float] = None,
     ) -> List[Tuple[str, str, float]]:
         """Find pairs of outliers that match each other.
-        
+
         This is used for periodic maintenance to find outlier pairs
         that should be promoted even without a new incoming segment.
-        
+
         Parameters
         ----------
         min_similarity : float, optional
-            Minimum similarity threshold.
-        
+            Minimum similarity threshold.  Defaults to
+            ``self.promotion_threshold``.
+
         Returns
         -------
         List[Tuple[str, str, float]]
-            List of (label1, label2, similarity) tuples.
+            List of ``(label1, label2, similarity)`` tuples.
         """
         if self.count < 2:
             return []
-        
+
         if min_similarity is None:
             min_similarity = self.promotion_threshold
-        
+
         labels = list(self._outliers.keys())
         embeddings = []
         for label in labels:
@@ -465,13 +451,14 @@ class OutlierPool:
             if emb.ndim == 1:
                 emb = emb.reshape(1, -1)
             embeddings.append(emb)
-        
+
         embeddings_array = np.vstack(embeddings)
-        
+
         from scipy.spatial.distance import cdist
+
         distances = cdist(embeddings_array, embeddings_array, metric="cosine")
         similarities = 1.0 - distances
-        
+
         pairs = []
         seen = set()
         for i in range(len(labels)):
@@ -482,10 +469,10 @@ class OutlierPool:
                     if pair_key not in seen:
                         seen.add(pair_key)
                         pairs.append((labels[i], labels[j], sim))
-        
+
         pairs.sort(key=lambda x: x[2], reverse=True)
         return pairs
-    
+
     def promote_pair(
         self,
         label1: str,
@@ -495,7 +482,7 @@ class OutlierPool:
         target_speaker: str,
     ) -> List[OutlierEntry]:
         """Promote a pair of matching outliers and remove them from pool.
-        
+
         Parameters
         ----------
         label1, label2 : str
@@ -505,8 +492,8 @@ class OutlierPool:
         timestamp : float
             Current timestamp.
         target_speaker : str
-            SPEAKER_XX label they're being merged into.
-        
+            ``SPEAKER_XX`` label they're being merged into.
+
         Returns
         -------
         List[OutlierEntry]
@@ -517,7 +504,7 @@ class OutlierPool:
             entry = self.remove(label)
             if entry:
                 entries.append(entry)
-        
+
         self.record_promotion(
             type_="pair",
             outlier_labels=[label1, label2],
@@ -525,9 +512,8 @@ class OutlierPool:
             confidence=similarity,
             timestamp=timestamp,
         )
-        
         return entries
-    
+
     def promote_single(
         self,
         label: str,
@@ -536,7 +522,7 @@ class OutlierPool:
         confidence: float = 1.0,
     ) -> Optional[OutlierEntry]:
         """Promote a single outlier (force promotion).
-        
+
         Parameters
         ----------
         label : str
@@ -544,14 +530,14 @@ class OutlierPool:
         timestamp : float
             Current timestamp.
         target_speaker : str
-            SPEAKER_XX label being created.
+            ``SPEAKER_XX`` label being created.
         confidence : float
             Confidence score (default 1.0 for forced).
-        
+
         Returns
         -------
         Optional[OutlierEntry]
-            The removed entry, or None if not found.
+            The removed entry, or *None* if not found.
         """
         entry = self.remove(label)
         if entry:
@@ -563,18 +549,21 @@ class OutlierPool:
                 timestamp=timestamp,
             )
         return entry
-    
-    # ── Query & stats ──────────────────────────────────────
+
+    # ── accessors ────────────────────────────────────────────────
+
     def get(self, label: str) -> Optional[OutlierEntry]:
         """Get an outlier entry by label."""
         return self._outliers.get(label)
-    
+
     def get_stats(self) -> Dict:
         """Get comprehensive statistics about the outlier pool."""
         return {
             "total_outliers": self.count,
+            "max_capacity": self.max_count,
             "outlier_labels": self.labels,
             "total_promotions": self.promotion_count,
+            "insertion_order": self._insertion_order.copy(),
             "recent_promotions": [
                 {
                     "type": p.type,
@@ -583,11 +572,10 @@ class OutlierPool:
                     "confidence": p.confidence,
                     "timestamp": p.timestamp,
                 }
-                for p in self._promotions[-10:]  # Last 10
+                for p in self._promotions[-10:]
             ],
             "outlier_details": {
                 label: {
-                    "age": entry.age,
                     "timestamp": entry.timestamp,
                     "segment_id": entry.segment_id,
                     "match_attempts": entry.match_attempts,
@@ -598,18 +586,20 @@ class OutlierPool:
             "config": {
                 "prefix": self.prefix,
                 "promotion_threshold": self.promotion_threshold,
-                "ttl": self.ttl,
+                "max_count": self.max_count,
             },
         }
-    
+
+    # ── serialization ────────────────────────────────────────────
+
     def to_dict(self) -> Dict:
         """Serialize the full pool state for persistence."""
         return {
             "outliers": {
-                label: entry.to_dict()
-                for label, entry in self._outliers.items()
+                label: entry.to_dict() for label, entry in self._outliers.items()
             },
             "next_id": self._next_id,
+            "insertion_order": self._insertion_order.copy(),
             "promotions": [
                 {
                     "type": p.type,
@@ -621,79 +611,91 @@ class OutlierPool:
                 for p in self._promotions
             ],
         }
-    
+
     @classmethod
     def from_dict(
         cls,
         data: Dict,
+        promotion_threshold: float,
         prefix: str = DEFAULT_OUTLIER_PREFIX,
-        promotion_threshold: float = DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
-        ttl: float = DEFAULT_OUTLIER_TTL,
+        max_count: int = DEFAULT_OUTLIER_MAX_COUNT,
         debug: bool = False,
     ) -> "OutlierPool":
         """Deserialize from a dictionary.
-        
+
         Parameters
         ----------
         data : Dict
-            Serialized state from to_dict().
-        prefix, promotion_threshold, ttl, debug
-            Configuration parameters (must match original).
-        
+            Serialized state from :meth:`to_dict`.
+        promotion_threshold : float
+            **Required.** Must match the original pool's threshold.
+        prefix : str
+            Label prefix (must match original).
+        max_count : int
+            Maximum pool size.
+        debug : bool
+            Enable debug logging.
+
         Returns
         -------
         OutlierPool
             Restored pool instance.
         """
         pool = cls(
-            prefix=prefix,
             promotion_threshold=promotion_threshold,
-            ttl=ttl,
+            prefix=prefix,
+            max_count=max_count,
             debug=debug,
         )
-        
-        # Restore outliers
+
         for label, entry_data in data.get("outliers", {}).items():
             pool._outliers[label] = OutlierEntry.from_dict(entry_data)
-        
+
         pool._next_id = data.get("next_id", 1)
-        
-        # Restore promotions
+        pool._insertion_order = data.get("insertion_order", list(pool._outliers.keys()))
+
         for p_data in data.get("promotions", []):
-            pool._promotions.append(PromotionEvent(
-                type=p_data["type"],
-                outlier_labels=p_data["outlier_labels"],
-                target_speaker=p_data["target_speaker"],
-                confidence=p_data["confidence"],
-                timestamp=p_data["timestamp"],
-            ))
-        
+            pool._promotions.append(
+                PromotionEvent(
+                    type=p_data["type"],
+                    outlier_labels=p_data["outlier_labels"],
+                    target_speaker=p_data["target_speaker"],
+                    confidence=p_data["confidence"],
+                    timestamp=p_data["timestamp"],
+                )
+            )
+
         if pool.debug:
             console.print(
                 f"{_LOGGER_PREFIX} 📂 Restored pool: "
                 f"{pool.count} outliers, {pool.promotion_count} promotions"
             )
-        
+
         return pool
-    
+
+    # ── lifecycle ────────────────────────────────────────────────
+
     def reset(self) -> None:
         """Clear all outliers and promotion history."""
         self._outliers.clear()
         self._promotions.clear()
+        self._insertion_order.clear()
         self._next_id = 1
-        
+
         if self.debug:
             console.print(f"{_LOGGER_PREFIX} 🔄 Pool reset")
-    
+
+    # ── dunders ──────────────────────────────────────────────────
+
     def __len__(self) -> int:
         return self.count
-    
+
     def __contains__(self, label: str) -> bool:
         return label in self._outliers
-    
+
     def __repr__(self) -> str:
         return (
-            f"OutlierPool(count={self.count}, "
+            f"OutlierPool(count={self.count}/{self.max_count}, "
             f"promotions={self.promotion_count}, "
-            f"ttl={self.ttl}s)"
+            f"threshold={self.promotion_threshold:.2f})"
         )

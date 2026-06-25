@@ -53,20 +53,10 @@ include_files = [
 
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\speaker_reference.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\segment_types.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\outlier_orchestrator.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\outlier_pool.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\speaker_labeler_serializer.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_config.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_embeddings.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_evaluate_speaker_embeddings.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\generated\_main_evaluate_speaker_embeddings\eval_results",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
     r"",
 ]
 
@@ -90,405 +80,999 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_embeddings.py
-[11:37:20] INFO     Speaker Embedding Evaluation                                      evaluate_speaker_embeddings.py:748
-           INFO     Dataset: C:\Users\druiv\.cache\files\audio\speakers               evaluate_speaker_embeddings.py:749
-           INFO     Models to evaluate: ['pyannote', 'speechbrain_ecapa',             evaluate_speaker_embeddings.py:753
-                    'nemo_titanet', 'modelscope_eres2netv2']
-           INFO     Device: cuda                                                      evaluate_speaker_embeddings.py:764
-           INFO     Scanning dataset at: C:\Users\druiv\.cache\files\audio\speakers   evaluate_speaker_embeddings.py:138
-           WARNING  Skipping speaker 'spyx_yor': only 1 file(s), need >= 2            evaluate_speaker_embeddings.py:151
-           INFO     Found 4 speakers, 23 total utterances                             evaluate_speaker_embeddings.py:156
-           INFO     Generated 32 positive trials                                      evaluate_speaker_embeddings.py:199
-           INFO     Generated 32 negative trials                                      evaluate_speaker_embeddings.py:213
-           INFO     Total trials: 64                                                  evaluate_speaker_embeddings.py:217
-           INFO                                                                       evaluate_speaker_embeddings.py:508
-                    ────────────────────────────────────────────────────────────
-           INFO     Evaluating model: pyannote                                        evaluate_speaker_embeddings.py:509
-[11:37:20] EmbeddingFactory Creating PyannoteEmbeddingModel (device=cuda)                 embedding_model_factory.py:763
-[11:37:26] INFO     NumExpr defaulting to 12 threads.                                                       utils.py:164
-C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\io.py:135: UserWarning: torchcodec is not installed (Could not load libtorchcodec. Likely causes:
-          1. FFmpeg is not properly installed in your environment. We support
-             versions 4, 5, 6, 7, and 8, and we attempt to load libtorchcodec
-             for each of those versions. Errors for versions not installed on
-             your system are expected; only the error for your installed FFmpeg
-             version is relevant. On Windows, ensure you've installed the
-             "full-shared" version which ships DLLs.
-          2. The PyTorch version (2.11.0+cu130) is not compatible with
-             this version of TorchCodec. Refer to the version compatibility
-             table:
-             https://github.com/pytorch/torchcodec?tab=readme-ov-file#installing-torchcodec.
-          3. Another runtime dependency; see exceptions below.
+Replace high-confidence speech extraction logic to use get_valid_speech_waves from speech_waves instead of tagger.extract_high_confidence_speech_segments
 
-        The following exceptions were raised as we tried to load libtorchcodec:
 
-[start of libtorchcodec loading traceback]
-FFmpeg version 8:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1503, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: Could not find module 'C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core8.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+# C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py
 
-The above exception was the direct cause of the following exception:
 
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1505, in load_library
-    raise OSError(f"Could not load this library: {path}") from e
-OSError: Could not load this library: C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core8.dll
+def label_speakers_for_segment(
+    waveform: np.ndarray,
+    sample_rate: int,
+    timestamp: Optional[float] = None,
+    return_multiple: bool = True,
+    segment_id: Optional[str] = None,
+) -> tuple:
+    \"\"\"Label speakers for an audio segment using the progressive labeler.\"\"\"
+    if waveform.size == 0:
+        empty_result = [
+            {
+                "label": "SPEAKER_UNKNOWN",
+                "confidence": 0.0,
+                "match_type": "empty_waveform",
+                "is_primary": True,
+                "is_new_speaker": False,
+            }
+        ]
+        return empty_result, "SPEAKER_UNKNOWN", 0.0, {"error": "empty_waveform"}
 
-FFmpeg version 7:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1503, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-OSError: [WinError 127] The specified procedure could not be found
+    if timestamp is None:
+        timestamp = time.time()
 
-The above exception was the direct cause of the following exception:
+    labeler = _get_speaker_labeler()
+    waveform_float = waveform.astype(np.float32) / 32768.0
+    waveform_tensor = torch.from_numpy(waveform_float)
+    if waveform_tensor.dim() == 1:
+        waveform_tensor = waveform_tensor.unsqueeze(0)
 
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1505, in load_library
-    raise OSError(f"Could not load this library: {path}") from e
-OSError: Could not load this library: C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core7.dll
+    current_speaker = get_current_speaker()
+    last_change_time = get_last_speaker_change_time()
+    context = {
+        "previous_speaker": current_speaker,
+        "time_since_last_change": (
+            timestamp - last_change_time if last_change_time > 0 else float("inf")
+        ),
+        "segment_duration": len(waveform) / sample_rate,
+    }
 
-FFmpeg version 6:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1503, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: Could not find module 'C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core6.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+    if return_multiple:
+        # label_segments now returns List[SegmentGroup]
+        segment_groups = labeler.label_segments(
+            waveform=waveform_tensor,
+            sample_rate=sample_rate,
+            timestamp=timestamp,
+            context=context,
+            segment_id=segment_id,
+        )
+        # Extract matches from the latest segment group
+        latest_group = segment_groups[-1] if segment_groups else None
+        speaker_results = latest_group["matches"] if latest_group else []
+        
+        primary = (
+            speaker_results[0]
+            if speaker_results
+            else {
+                "label": "SPEAKER_UNKNOWN",
+                "confidence": 0.0,
+                "match_type": "unknown",
+                "is_primary": True,
+                "is_new_speaker": False,
+            }
+        )
+        primary_label = primary["label"]
+        primary_confidence = primary["confidence"]
+        metadata = {
+            "match_type": primary.get("match_type", "unknown"),
+            "speaker_list": speaker_results,
+            "total_speakers": len(speaker_results),
+        }
+    else:
+        label, confidence, metadata = labeler.label_segment(
+            waveform=waveform_tensor,
+            sample_rate=sample_rate,
+            timestamp=timestamp,
+            context=context,
+            segment_id=segment_id,
+        )
+        primary_label = label
+        primary_confidence = confidence
+        speaker_results = [
+            {
+                "label": label,
+                "confidence": confidence,
+                "match_type": metadata.get("match_type", "unknown"),
+                "is_primary": True,
+                "is_new_speaker": metadata.get("is_new_speaker", False),
+            }
+        ]
+        metadata["speaker_list"] = speaker_results
 
-The above exception was the direct cause of the following exception:
+    if primary_label and primary_label != current_speaker:
+        console.print(
+            f"[speaker]🔊 Speaker change: {current_speaker} → {primary_label} "
+            f"(confidence: {primary_confidence:.3f})[/speaker]"
+        )
+        set_current_speaker(primary_label)
+        set_last_speaker_change_time(timestamp)
 
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1505, in load_library
-    raise OSError(f"Could not load this library: {path}") from e
-OSError: Could not load this library: C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core6.dll
+    if labeler.total_segments_processed % 10 == 0:
+        save_speaker_state()
 
-FFmpeg version 5:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1503, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: Could not find module 'C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core5.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+    return speaker_results, primary_label, primary_confidence, metadata
 
-The above exception was the direct cause of the following exception:
 
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1505, in load_library
-    raise OSError(f"Could not load this library: {path}") from e
-OSError: Could not load this library: C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core5.dll
+def _perform_speaker_labeling(
+    audio_np: np.ndarray,
+    sample_rate: int,
+    header: dict,
+    full_word_segments_text: str,
+    segment_id: Optional[str] = None,
+) -> tuple:
+    \"\"\"Perform speaker labeling if text content is sufficient.
+    
+    When multiple high-confidence speech segments are extracted, each segment
+    is labeled individually to capture potential speaker changes within the
+    audio chunk. Results are then aggregated with the highest-confidence
+    speaker becoming the primary label.
+    
+    Returns:
+        tuple: (text_has_sufficient_content, speaker_results, primary_label,
+                primary_confidence, speaker_metadata)
+    \"\"\"
+    text_has_sufficient_content = should_label_speaker(
+        full_word_segments_text, min_chars=2
+    )
+    speaker_results = []
+    primary_label = None
+    primary_confidence = 0.0
+    speaker_metadata = {"match_type": "skipped_no_text"}
 
-FFmpeg version 4:
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1503, in load_library
-    ctypes.CDLL(path)
-  File "C:\Users\druiv\.pyenv\pyenv-win\versions\3.12.10\Lib\ctypes\__init__.py", line 379, in __init__
-    self._handle = _dlopen(self._name, mode)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: Could not find module 'C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core4.dll' (or one of its dependencies). Try using the full path with constructor syntax.
+    if text_has_sufficient_content:
+        segment_timestamp = header.get("start_sec", time.time())
+        segment_duration = header.get(
+            "duration_sec",
+            get_audio_duration(audio_np, sr=sample_rate)
+        )
+        use_multiple = segment_duration >= 2.0  # Changed from 3.0 to 2.0 as discussed
+        
+        audio_for_labeler = audio_np
+        extraction_info = {
+            "attempted": False,
+            "successful": False,
+            "segments_found": 0,
+            "used_segment_duration": segment_duration,
+            "original_duration": segment_duration,
+            "individual_segment_results": [],  # NEW: track per-segment results
+        }
+        
+        all_segment_speaker_results = []  # NEW: collect results from all segments
 
-The above exception was the direct cause of the following exception:
+        if segment_duration >= 2.0:
+            extraction_info["attempted"] = True
+            try:
+                tagger = get_audio_tagger()
+                if tagger is not None:
+                    audio_float = audio_np.astype(np.float32) / 32768.0
+                    console.print(
+                        f"[info]🎯 Attempting high-confidence speech extraction "
+                        f"(audio: {segment_duration:.2f}s)...[/info]"
+                    )
+                    high_conf_segments, high_conf_audios = (
+                        tagger.extract_high_confidence_speech_segments(
+                            audio=audio_float,
+                            sample_rate=sample_rate,
+                        )
+                    )
+                    extraction_info["segments_found"] = len(high_conf_audios)
+                    
+                    if high_conf_audios and len(high_conf_audios) > 0:
+                        # ──────────────────────────────────────────────
+                        # NEW: Label EACH high-confidence segment separately
+                        # ──────────────────────────────────────────────
+                        console.print(
+                            f"[success]🎯 Extracted {len(high_conf_audios)} high-confidence "
+                            f"speech segment(s) — labeling each individually:[/success]"
+                        )
+                        
+                        for i, (seg, aud) in enumerate(zip(high_conf_segments, high_conf_audios)):
+                            seg_dur = len(aud) / sample_rate if len(aud) > 0 else 0
+                            seg_start = seg.get('start_time', 0)
+                            seg_end = seg.get('end_time', 0)
+                            seg_prob = seg.get('avg_speech_probability', 0)
+                            
+                            console.print(
+                                f"[dim]  [{i}] {seg_start:.2f}s-{seg_end:.2f}s "
+                                f"({seg_dur:.2f}s, prob={seg_prob:.3f}) → labeling...[/dim]"
+                            )
+                            
+                            # Convert this segment to int16 for the labeler
+                            seg_audio_int16 = (
+                                np.clip(aud, -1.0, 1.0) * 32767.0
+                            ).astype(np.int16)
+                            
+                            # Generate a unique segment_id for this sub-segment
+                            sub_segment_id = f"{segment_id}_sub{i}" if segment_id else None
+                            
+                            # Label THIS individual segment
+                            seg_results, seg_primary, seg_conf, seg_meta = (
+                                label_speakers_for_segment(
+                                    waveform=seg_audio_int16,
+                                    sample_rate=sample_rate,
+                                    timestamp=segment_timestamp + seg_start,
+                                    return_multiple=False,  # Individual segments are short
+                                    segment_id=sub_segment_id,
+                                )
+                            )
+                            
+                            # Store per-segment info
+                            extraction_info["individual_segment_results"].append({
+                                "index": i,
+                                "start_time": seg_start,
+                                "end_time": seg_end,
+                                "duration": seg_dur,
+                                "avg_speech_probability": seg_prob,
+                                "primary_label": seg_primary,
+                                "primary_confidence": seg_conf,
+                                "match_type": seg_meta.get("match_type", "unknown"),
+                                "speaker_results": seg_results,
+                            })
+                            
+                            # Collect all speaker results across segments
+                            all_segment_speaker_results.append({
+                                "segment_index": i,
+                                "start_time": seg_start,
+                                "end_time": seg_end,
+                                "label": seg_primary,
+                                "confidence": seg_conf,
+                                "match_type": seg_meta.get("match_type", "unknown"),
+                                "is_primary": False,  # Will be set after aggregation
+                            })
+                            
+                            console.print(
+                                f"[dim]     → Speaker: {seg_primary} "
+                                f"(confidence: {seg_conf:.3f}, type: {seg_meta.get('match_type', 'unknown')})[/dim]"
+                            )
+                        
+                        # ──────────────────────────────────────────────
+                        # Aggregate results across all segments
+                        # ──────────────────────────────────────────────
+                        # Count which speaker appeared most / with highest confidence
+                        speaker_aggregates = {}
+                        for result in all_segment_speaker_results:
+                            label = result["label"]
+                            if label not in speaker_aggregates:
+                                speaker_aggregates[label] = {
+                                    "label": label,
+                                    "confidences": [],
+                                    "total_duration": 0.0,
+                                    "appearances": 0,
+                                    "match_types": [],
+                                }
+                            agg = speaker_aggregates[label]
+                            agg["confidences"].append(result["confidence"])
+                            agg["appearances"] += 1
+                            agg["match_types"].append(result["match_type"])
+                            # Find corresponding segment info for duration
+                            for seg_info in extraction_info["individual_segment_results"]:
+                                if seg_info["index"] == result["segment_index"]:
+                                    agg["total_duration"] += seg_info["duration"]
+                                    break
+                        
+                        # Build final speaker_results list (ranked by confidence/duration)
+                        ranked_speakers = sorted(
+                            speaker_aggregates.values(),
+                            key=lambda x: (
+                                x["appearances"],  # More appearances = more confident
+                                sum(x["confidences"]) / len(x["confidences"]),  # Avg confidence
+                                x["total_duration"],  # More speech = more reliable
+                            ),
+                            reverse=True,
+                        )
+                        
+                        if ranked_speakers:
+                            primary = ranked_speakers[0]
+                            primary_label = primary["label"]
+                            primary_confidence = (
+                                sum(primary["confidences"]) / len(primary["confidences"])
+                                if primary["confidences"] else 0.0
+                            )
+                            
+                            # Build final speaker_results
+                            speaker_results = []
+                            for rank, spk in enumerate(ranked_speakers):
+                                is_primary = (rank == 0)
+                                # Find the best match_type for this speaker
+                                match_types = spk["match_types"]
+                                best_match_type = max(
+                                    match_types,
+                                    key=lambda mt: {
+                                        "strong_match": 5,
+                                        "early_match": 4,
+                                        "context_match": 4,
+                                        "possible_match": 3,
+                                        "weak_match": 2,
+                                        "new_speaker": 1,
+                                        "first_speaker": 1,
+                                        "unknown": 0,
+                                    }.get(mt, 0),
+                                ) if match_types else "unknown"
+                                
+                                speaker_results.append({
+                                    "label": spk["label"],
+                                    "confidence": round(
+                                        sum(spk["confidences"]) / len(spk["confidences"]), 4
+                                    ) if spk["confidences"] else 0.0,
+                                    "match_type": best_match_type,
+                                    "is_primary": is_primary,
+                                    "is_new_speaker": False,  # Will be updated below
+                                    "segment_count": spk["appearances"],
+                                    "total_speech_duration": round(spk["total_duration"], 3),
+                                })
+                            
+                            # Mark new speakers
+                            for result in speaker_results:
+                                if result["match_type"] in ("new_speaker", "first_speaker"):
+                                    result["is_new_speaker"] = True
+                            
+                            speaker_metadata = {
+                                "match_type": speaker_results[0]["match_type"] if speaker_results else "unknown",
+                                "speaker_list": speaker_results,
+                                "total_speakers": len(speaker_results),
+                                "speech_extraction": extraction_info,
+                                "aggregation_method": "multi_segment_voting",
+                            }
+                            
+                            extraction_info["successful"] = True
+                            extraction_info["used_segment_duration"] = sum(
+                                s["duration"] for s in extraction_info["individual_segment_results"]
+                            )
+                            
+                            console.print(
+                                f"[success]🎯 Aggregated {len(high_conf_audios)} segments → "
+                                f"{len(speaker_results)} unique speaker(s)[/success]"
+                            )
+                            for spk in speaker_results:
+                                console.print(
+                                    f"[dim]   {spk['label']}: avg_conf={spk['confidence']:.3f}, "
+                                    f"appearances={spk['segment_count']}, "
+                                    f"duration={spk['total_speech_duration']:.2f}s, "
+                                    f"type={spk['match_type']}{' ★ PRIMARY' if spk['is_primary'] else ''}[/dim]"
+                                )
+                        else:
+                            # Fallback: no speakers found in any segment
+                            console.print(
+                                f"[warning]⚠️ No speakers identified in any sub-segment, "
+                                f"using full audio[/warning]"
+                            )
+                            # Fall through to full-audio labeling below
+                            all_segment_speaker_results = []
+                    else:
+                        console.print(
+                            f"[dim]🔇 No high-confidence speech segments found "
+                            f"(tagger found {extraction_info['segments_found']} segments, "
+                            f"but none met the min_duration=1.5s threshold), "
+                            f"using full audio for labeling[/dim]"
+                        )
+                else:
+                    console.print(
+                        "[dim]🔇 Audio tagger not available (get_audio_tagger() returned None), "
+                        "skipping speech extraction[/dim]"
+                    )
+            except Exception as e:
+                console.print(
+                    f"[warning]⚠️ extract_high_confidence_speech_segments failed: {e}, "
+                    f"using full audio for labeling[/warning]"
+                )
+                import traceback
+                console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        else:
+            console.print(
+                f"[dim]🔇 Segment too short for speech extraction "
+                f"({segment_duration:.2f}s < 2.0s), using full audio[/dim]"
+            )
 
-Traceback (most recent call last):
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\_core\ops.py", line 57, in load_torchcodec_shared_libraries
-    torch.ops.load_library(core_library_path)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\_ops.py", line 1505, in load_library
-    raise OSError(f"Could not load this library: {path}") from e
-OSError: Could not load this library: C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torchcodec\libtorchcodec_core4.dll
-[end of libtorchcodec loading traceback].). Using soundfile backend instead.
-For better performance and format support, consider installing torchcodec.
-  warnings.warn(
-[11:37:27] EmbeddingFactory Loading pyannote model 'pyannote/embedding'...                embedding_model_factory.py:311
-[11:37:31] INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/pyannote/embedding/resolve/main/pytorch_model.bin "HTTP/1.1
-                    302 Found"
-W0625 11:37:31.409000 41604 Lib\site-packages\torch\utils\flop_counter.py:29] triton not found; flop counting will not work for triton kernels
-C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\lightning\pytorch\utilities\migration\utils.py:197: Redirecting import of pytorch_lightning.callbacks.early_stopping.EarlyStopping to lightning.pytorch.callbacks.early_stopping.EarlyStopping
-C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\lightning\pytorch\utilities\migration\utils.py:197: Redirecting import of pytorch_lightning.callbacks.model_checkpoint.ModelCheckpoint to lightning.pytorch.callbacks.model_checkpoint.ModelCheckpoint
-C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\lightning\pytorch\utilities\migration\migration.py:208: You have multiple `ModelCheckpoint` callback states in this checkpoint, but we found state keys that would end up colliding with each other after an upgrade, which means we can't differentiate which of your checkpoint callbacks needs which states. At least one of your `ModelCheckpoint` callbacks will not be able to reload the state.
-INFO: Lightning automatically upgraded your loaded checkpoint from v1.2.7 to v2.4.0. To apply the upgrade to your files permanently, run `python -m lightning.pytorch.utilities.upgrade_checkpoint C:\Users\druiv\.cache\huggingface\hub\models--pyannote--embedding\snapshots\4db4899737a38b2d618bbd74350915aa10293cb2\pytorch_model.bin`
-           INFO     Lightning automatically upgraded your loaded checkpoint from v1.2.7 to v2.4.0. To apply utils.py:154
-                    the upgrade to your files permanently, run `python -m
-                    lightning.pytorch.utilities.upgrade_checkpoint
-                    C:\Users\druiv\.cache\huggingface\hub\models--pyannote--embedding\snapshots\4db4899737a
-                    38b2d618bbd74350915aa10293cb2\pytorch_model.bin`
-C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\pyannote-audio\src\pyannote\audio\core\model.py:639: UserWarning: Model has been trained with a task-dependent loss function. Set 'strict' to False to load the model without its loss function and prevent this warning from appearing.
-  warnings.warn(msg)
-INFO: Lightning automatically upgraded your loaded checkpoint from v1.2.7 to v2.4.0. To apply the upgrade to your files permanently, run `python -m lightning.pytorch.utilities.upgrade_checkpoint C:\Users\druiv\.cache\huggingface\hub\models--pyannote--embedding\snapshots\4db4899737a38b2d618bbd74350915aa10293cb2\pytorch_model.bin`
-[11:37:32] INFO     Lightning automatically upgraded your loaded checkpoint from v1.2.7 to v2.4.0. To apply utils.py:154
-                    the upgrade to your files permanently, run `python -m
-                    lightning.pytorch.utilities.upgrade_checkpoint
-                    C:\Users\druiv\.cache\huggingface\hub\models--pyannote--embedding\snapshots\4db4899737a
-                    38b2d618bbd74350915aa10293cb2\pytorch_model.bin`
-C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\lightning\pytorch\core\saving.py:195: Found keys that are not in the model state dict but in the checkpoint: ['loss_func.W']
-[11:37:32] EmbeddingFactory Pyannote model ready on cuda                                  embedding_model_factory.py:319
-           INFO     Model loaded: PyannoteEmbeddingModel(type=pyannote, dim=512)      evaluate_speaker_embeddings.py:516
-           EmbeddingFactory Thresholds for pyannote: same=0.2, possible=0.13,             embedding_model_factory.py:162
-           new_speaker=0.14
-           INFO      Configured thresholds — same=0.2, possible=0.13,                 evaluate_speaker_embeddings.py:522
-                    new_speaker=0.14
-           INFO      Extracting embeddings for 23 unique files...                     evaluate_speaker_embeddings.py:252
-[11:37:33] INFO      Done. Cache hits: 0, Computed: 23, Avg time: 75.0 ms             evaluate_speaker_embeddings.py:298
-           INFO      Scored 64 trials                                                 evaluate_speaker_embeddings.py:537
-           INFO      EER=31.25% @ threshold=0.1533                                    evaluate_speaker_embeddings.py:542
-           INFO      minDCF=0.8750                                                    evaluate_speaker_embeddings.py:543
-           INFO      Threshold check OK: configured same=0.2 vs EER threshold=0.1533  evaluate_speaker_embeddings.py:559
-                    (ratio=1.30)
-           INFO      Intra=0.2743 | Inter=0.1080 | Sep=0.1664                         evaluate_speaker_embeddings.py:571
-           INFO      EER=31.25% | minDCF=0.8750 | Intra=0.2743 | Inter=0.1080 |       evaluate_speaker_embeddings.py:793
-                    Sep=0.1664 | Latency=75.0ms | Thresh(same=0.2, possible=0.13,
-                    new_spk=0.14)
-           INFO                                                                       evaluate_speaker_embeddings.py:508
-                    ────────────────────────────────────────────────────────────
-           INFO     Evaluating model: speechbrain_ecapa                               evaluate_speaker_embeddings.py:509
-[11:37:33] EmbeddingFactory Creating SpeechBrainECAPAEmbeddingModel (device=cuda)         embedding_model_factory.py:763
-[11:37:34] INFO     Applied quirks (see `speechbrain.utils.quirks`):                                       quirks.py:115
-           INFO     Excluded quirks specified by the `SB_DISABLE_QUIRKS` environment (comma-separated      quirks.py:120
-                    list): []
-[11:37:34] EmbeddingFactory Loading SpeechBrain ECAPA from                                embedding_model_factory.py:393
-           'speechbrain/spkrec-ecapa-voxceleb'...
-           INFO     Fetch hyperparams.yaml: Fetching from HuggingFace Hub                                fetching.py:403
-                    'speechbrain/spkrec-ecapa-voxceleb' if not cached
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/hyperparams.ya
-                    ml "HTTP/1.1 307 Temporary Redirect"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/api/resolve-cache/models/speechbrain/spkrec-ecapa-voxceleb/0f
-                    99f2d0ebe89ac095bcc5903c4dd8f72b367286/hyperparams.yaml "HTTP/1.1 200 OK"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/hyperparams.ya
-                    ml "HTTP/1.1 307 Temporary Redirect"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/api/resolve-cache/models/speechbrain/spkrec-ecapa-voxceleb/0f
-                    99f2d0ebe89ac095bcc5903c4dd8f72b367286/hyperparams.yaml "HTTP/1.1 200 OK"
-           INFO     Fetch embedding_model.ckpt: Fetching from HuggingFace Hub                            fetching.py:403
-                    'speechbrain/spkrec-ecapa-voxceleb' if not cached
-[11:37:35] INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/embedding_mode
-                    l.ckpt "HTTP/1.1 302 Found"
-Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
-           WARNING  Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN  _http.py:904
-                    to enable higher rate limits and faster downloads.
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/embedding_mode
-                    l.ckpt "HTTP/1.1 302 Found"
-           INFO     Fetch mean_var_norm_emb.ckpt: Fetching from HuggingFace Hub                          fetching.py:403
-                    'speechbrain/spkrec-ecapa-voxceleb' if not cached
-[11:37:36] INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/mean_var_norm_
-                    emb.ckpt "HTTP/1.1 307 Temporary Redirect"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/api/resolve-cache/models/speechbrain/spkrec-ecapa-voxceleb/0f
-                    99f2d0ebe89ac095bcc5903c4dd8f72b367286/mean_var_norm_emb.ckpt "HTTP/1.1 200 OK"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/mean_var_norm_
-                    emb.ckpt "HTTP/1.1 307 Temporary Redirect"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/api/resolve-cache/models/speechbrain/spkrec-ecapa-voxceleb/0f
-                    99f2d0ebe89ac095bcc5903c4dd8f72b367286/mean_var_norm_emb.ckpt "HTTP/1.1 200 OK"
-           INFO     Fetch classifier.ckpt: Fetching from HuggingFace Hub                                 fetching.py:403
-                    'speechbrain/spkrec-ecapa-voxceleb' if not cached
-[11:37:37] INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/classifier.ckp
-                    t "HTTP/1.1 302 Found"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/classifier.ckp
-                    t "HTTP/1.1 302 Found"
-           INFO     Fetch label_encoder.txt: Fetching from HuggingFace Hub                               fetching.py:403
-                    'speechbrain/spkrec-ecapa-voxceleb' if not cached
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/label_encoder.
-                    txt "HTTP/1.1 307 Temporary Redirect"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/api/resolve-cache/models/speechbrain/spkrec-ecapa-voxceleb/0f
-                    99f2d0ebe89ac095bcc5903c4dd8f72b367286/label_encoder.txt "HTTP/1.1 200 OK"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/label_encoder.
-                    txt "HTTP/1.1 307 Temporary Redirect"
-           INFO     HTTP Request: HEAD                                                                   _client.py:1025
-                    https://huggingface.co/api/resolve-cache/models/speechbrain/spkrec-ecapa-voxceleb/0f
-                    99f2d0ebe89ac095bcc5903c4dd8f72b367286/label_encoder.txt "HTTP/1.1 200 OK"
-           INFO     Loading pretrained files for: embedding_model, mean_var_norm_emb,          parameter_transfer.py:301
-                    classifier, label_encoder
-[11:37:38] WARNING  Could not parse CUDA device string 'cuda': not enough values to unpack (expected   interfaces.py:290
-                    2, got 1). Falling back to device 0.
-[11:37:38] EmbeddingFactory SpeechBrain ECAPA ready on cuda                               embedding_model_factory.py:400
-           INFO     Model loaded:                                                     evaluate_speaker_embeddings.py:516
-                    SpeechBrainECAPAEmbeddingModel(type=speechbrain_ecapa, dim=192)
-           EmbeddingFactory Thresholds for speechbrain_ecapa: same=0.23, possible=0.17,   embedding_model_factory.py:162
-           new_speaker=0.17
-           INFO      Configured thresholds — same=0.23, possible=0.17,                evaluate_speaker_embeddings.py:522
-                    new_speaker=0.17
-           INFO      Extracting embeddings for 23 unique files...                     evaluate_speaker_embeddings.py:252
-[11:37:39] INFO      Done. Cache hits: 0, Computed: 23, Avg time: 40.2 ms             evaluate_speaker_embeddings.py:298
-           INFO      Scored 64 trials                                                 evaluate_speaker_embeddings.py:537
-           INFO      EER=32.81% @ threshold=0.1051                                    evaluate_speaker_embeddings.py:542
-           INFO      minDCF=0.7188                                                    evaluate_speaker_embeddings.py:543
-           INFO      Threshold check OK: configured same=0.23 vs EER threshold=0.1051 evaluate_speaker_embeddings.py:559
-                    (ratio=2.19)
-           INFO      Intra=0.3200 | Inter=0.1417 | Sep=0.1783                         evaluate_speaker_embeddings.py:571
-           INFO      EER=32.81% | minDCF=0.7188 | Intra=0.3200 | Inter=0.1417 |       evaluate_speaker_embeddings.py:793
-                    Sep=0.1783 | Latency=40.2ms | Thresh(same=0.23, possible=0.17,
-                    new_spk=0.17)
-           INFO                                                                       evaluate_speaker_embeddings.py:508
-                    ────────────────────────────────────────────────────────────
-           INFO     Evaluating model: nemo_titanet                                    evaluate_speaker_embeddings.py:509
-[11:37:39] EmbeddingFactory Creating NeMoTitaNetEmbeddingModel (device=cuda)              embedding_model_factory.py:763
-[NeMo W 2026-06-25 11:37:39 megatron_init:62] Megatron num_microbatches_calculator not found, using Apex version.
-W0625 11:37:39.780000 41604 Lib\site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
-[11:37:40] INFO     Numba verbose is deactivated. To enable it, set NUMBA_VERBOSE to 1.            transducer_loss.py:27
-[11:37:41] WARNING  OneLogger: Setting error_handling_strategy to DISABLE_QUIETLY_AND_REPORT_METRIC_ERROR  config.py:193
-                    for rank (rank=0) with OneLogger disabled. To override: explicitly set
-                    error_handling_strategy parameter.
-           INFO     Final configuration contains 0 exporter(s)                              export_config_manager.py:108
-           WARNING  No exporters were provided. This means that no telemetry data     training_telemetry_provider.py:309
-                    will be collected.
-[11:37:41] EmbeddingFactory Loading NeMo 'titanet_large'...                               embedding_model_factory.py:447
-[NeMo I 2026-06-25 11:37:41 cloud:58] Found existing object C:\Users\druiv\.cache\torch\NeMo\NeMo_2.7.2\titanet-l\11ba0924fdf87c049e339adbf6899d48\titanet-l.nemo.
-[NeMo I 2026-06-25 11:37:41 cloud:64] Re-using file from: C:\Users\druiv\.cache\torch\NeMo\NeMo_2.7.2\titanet-l\11ba0924fdf87c049e339adbf6899d48\titanet-l.nemo
-[NeMo I 2026-06-25 11:37:41 common:939] Instantiating model from pre-trained checkpoint
-[NeMo W 2026-06-25 11:37:42 modelPT:188] If you intend to do training or fine-tuning, please call the ModelPT.setup_training_data() method and provide a valid configuration file to setup the train data loader.
-    Train config :
-    manifest_filepath: /manifests/combined_fisher_swbd_voxceleb12_librispeech/train.json
-    sample_rate: 16000
-    labels: null
-    batch_size: 64
-    shuffle: true
-    is_tarred: false
-    tarred_audio_filepaths: null
-    tarred_shard_strategy: scatter
-    augmentor:
-      noise:
-        manifest_path: /manifests/noise/rir_noise_manifest.json
-        prob: 0.5
-        min_snr_db: 0
-        max_snr_db: 15
-      speed:
-        prob: 0.5
-        sr: 16000
-        resample_type: kaiser_fast
-        min_speed_rate: 0.95
-        max_speed_rate: 1.05
-    num_workers: 15
-    pin_memory: true
+        # ─────────────────────────────────────────────────────────────
+        # If no sub-segment results, fall back to full audio labeling
+        # ─────────────────────────────────────────────────────────────
+        if not all_segment_speaker_results:
+            speaker_results, primary_label, primary_confidence, speaker_metadata = (
+                label_speakers_for_segment(
+                    waveform=audio_for_labeler,
+                    sample_rate=sample_rate,
+                    timestamp=segment_timestamp,
+                    return_multiple=use_multiple,
+                    segment_id=segment_id,
+                )
+            )
+            speaker_metadata["speech_extraction"] = extraction_info
 
-[NeMo W 2026-06-25 11:37:42 modelPT:195] If you intend to do validation, please call the ModelPT.setup_validation_data() or ModelPT.setup_multiple_validation_data() method and provide a valid configuration file to setup the validation data loader(s).
-    Validation config :
-    manifest_filepath: /manifests/combined_fisher_swbd_voxceleb12_librispeech/dev.json
-    sample_rate: 16000
-    labels: null
-    batch_size: 128
-    shuffle: false
-    num_workers: 15
-    pin_memory: true
+        # ─────────────────────────────────────────────────────────────
+        # Console output
+        # ─────────────────────────────────────────────────────────────
+        if len(speaker_results) > 1:
+            speakers_str = ", ".join(
+                f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
+            )
+            console.print(
+                f"[speaker]Speakers: [{speakers_str}] "
+                f"(primary: {primary_label}, type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+            )
+        else:
+            console.print(
+                f"[speaker]Speaker: {primary_label} "
+                f"(confidence: {primary_confidence:.3f}, "
+                f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+            )
+    else:
+        console.print(
+            f"[warning]Skipping speaker labeling - insufficient text content "
+            f"(text: '{full_word_segments_text[:50]}{'...' if len(full_word_segments_text) > 50 else ''}', "
+            f"length: {len(full_word_segments_text)} chars)[/warning]"
+        )
 
-[NeMo I 2026-06-25 11:37:42 save_restore_connector:285] Model EncDecSpeakerLabelModel was successfully restored from C:\Users\druiv\.cache\torch\NeMo\NeMo_2.7.2\titanet-l\11ba0924fdf87c049e339adbf6899d48\titanet-l.nemo.
-[11:37:42] EmbeddingFactory NeMo TitaNet ready on cuda                                    embedding_model_factory.py:453
-[11:37:42] INFO     Model loaded: NeMoTitaNetEmbeddingModel(type=nemo_titanet,        evaluate_speaker_embeddings.py:516
-                    dim=192)
-           EmbeddingFactory Thresholds for nemo_titanet: same=0.5, possible=0.35,         embedding_model_factory.py:162
-           new_speaker=0.23
-           INFO      Configured thresholds — same=0.5, possible=0.35,                 evaluate_speaker_embeddings.py:522
-                    new_speaker=0.23
-           INFO      Extracting embeddings for 23 unique files...                     evaluate_speaker_embeddings.py:252
-[11:37:43] INFO      Done. Cache hits: 0, Computed: 23, Avg time: 29.3 ms             evaluate_speaker_embeddings.py:298
-           INFO      Scored 64 trials                                                 evaluate_speaker_embeddings.py:537
-           INFO      EER=18.75% @ threshold=0.3568                                    evaluate_speaker_embeddings.py:542
-           INFO      minDCF=0.4062                                                    evaluate_speaker_embeddings.py:543
-           INFO      Threshold check OK: configured same=0.5 vs EER threshold=0.3568  evaluate_speaker_embeddings.py:559
-                    (ratio=1.40)
-           INFO      Intra=0.6197 | Inter=0.2041 | Sep=0.4156                         evaluate_speaker_embeddings.py:571
-           INFO      EER=18.75% | minDCF=0.4062 | Intra=0.6197 | Inter=0.2041 |       evaluate_speaker_embeddings.py:793
-                    Sep=0.4156 | Latency=29.3ms | Thresh(same=0.5, possible=0.35,
-                    new_spk=0.23)
-           INFO                                                                       evaluate_speaker_embeddings.py:508
-                    ────────────────────────────────────────────────────────────
-           INFO     Evaluating model: modelscope_eres2netv2                           evaluate_speaker_embeddings.py:509
-[11:37:43] EmbeddingFactory Creating ModelScopeEres2Netv2EmbeddingModel (device=cuda)     embedding_model_factory.py:763
-           EmbeddingFactory Loading ModelScope ERes2NetV2                                 embedding_model_factory.py:528
-           'iic/speech_eres2netv2_sv_zh-cn_16k-common'...
-Downloading Model from https://www.modelscope.cn to directory: C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common
-2026-06-25 11:38:01,934 - modelscope - INFO - initiate model from C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common
-2026-06-25 11:38:01,934 - modelscope - INFO - initiate model from location C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common.
-2026-06-25 11:38:01,938 - modelscope - INFO - initialize model from C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common
-2026-06-25 11:38:01,938 - modelscope - WARNING - Use allow_remote=True. Will invoke codes from C:\Users\druiv\.cache\modelscope\hub\models\iic\speech_eres2netv2_sv_zh-cn_16k-common. Please make sure that you can trust the external codes.
-2026-06-25 11:38:02,293 - modelscope - WARNING - No preprocessor field found in cfg.
-2026-06-25 11:38:02,293 - modelscope - WARNING - No val key and type key found in preprocessor domain of configuration.json file.
-2026-06-25 11:38:02,293 - modelscope - WARNING - Cannot find available config to build preprocessor at mode inference, current config: {'model_dir': 'C:\\Users\\druiv\\.cache\\modelscope\\hub\\models\\iic\\speech_eres2netv2_sv_zh-cn_16k-common'}. trying to build by task and model information.
-2026-06-25 11:38:02,293 - modelscope - INFO - No preprocessor key ('eres2netv2-sv', 'speaker-verification') found in PREPROCESSOR_MAP, skip building preprocessor. If the pipeline runs normally, please ignore this log.
-[11:38:02] EmbeddingFactory ModelScope ERes2NetV2 ready (pipeline device is managed by    embedding_model_factory.py:536
-           ModelScope)
-[11:38:02] INFO     Model loaded:                                                     evaluate_speaker_embeddings.py:516
-                    ModelScopeEres2Netv2EmbeddingModel(type=modelscope_eres2netv2,
-                    dim=512)
-           EmbeddingFactory Thresholds for modelscope_eres2netv2: same=0.55,              embedding_model_factory.py:162
-           possible=0.4, new_speaker=0.3
-           INFO      Configured thresholds — same=0.55, possible=0.4, new_speaker=0.3 evaluate_speaker_embeddings.py:522
-           INFO      Extracting embeddings for 23 unique files...                     evaluate_speaker_embeddings.py:252
-⠋ Embedding  0:00:00           EmbeddingFactory Updating embedding_dim from 512 to 192                        embedding_model_factory.py:611
-⠹ Embedding  0:00:00           EmbeddingFactory __call__: 44100 Hz input detected — routing through encode()  embedding_model_factory.py:688
-           for pre-resampling (avoids torchaudio.sox_effects)
-           EmbeddingFactory Pre-resampling 44100 Hz → 16000 Hz (avoids                    embedding_model_factory.py:572
-           torchaudio.sox_effects)
-⠼ Embedding  0:00:00           EmbeddingFactory __call__: 44100 Hz input detected — routing through encode()  embedding_model_factory.py:688
-           for pre-resampling (avoids torchaudio.sox_effects)
-           EmbeddingFactory Pre-resampling 44100 Hz → 16000 Hz (avoids                    embedding_model_factory.py:572
-           torchaudio.sox_effects)
-⠇ Embedding  0:00:00           EmbeddingFactory __call__: 44100 Hz input detected — routing through encode()  embedding_model_factory.py:688
-           for pre-resampling (avoids torchaudio.sox_effects)
-           EmbeddingFactory Pre-resampling 44100 Hz → 16000 Hz (avoids                    embedding_model_factory.py:572
-           torchaudio.sox_effects)
-⠏ Embedding  0:00:00[11:38:03] EmbeddingFactory __call__: 44100 Hz input detected — routing through encode()  embedding_model_factory.py:688
-           for pre-resampling (avoids torchaudio.sox_effects)
-           EmbeddingFactory Pre-resampling 44100 Hz → 16000 Hz (avoids                    embedding_model_factory.py:572
-           torchaudio.sox_effects)
-⠴ Embedding  0:00:01           EmbeddingFactory __call__: 44100 Hz input detected — routing through encode()  embedding_model_factory.py:688
-           for pre-resampling (avoids torchaudio.sox_effects)
-           EmbeddingFactory Pre-resampling 44100 Hz → 16000 Hz (avoids                    embedding_model_factory.py:572
-           torchaudio.sox_effects)
-⠦ Embedding  0:00:01           EmbeddingFactory __call__: 44100 Hz input detected — routing through encode()  embedding_model_factory.py:688
-           for pre-resampling (avoids torchaudio.sox_effects)
-           EmbeddingFactory Pre-resampling 44100 Hz → 16000 Hz (avoids                    embedding_model_factory.py:572
-           torchaudio.sox_effects)
-[11:38:04] INFO      Done. Cache hits: 0, Computed: 23, Avg time: 77.9 ms             evaluate_speaker_embeddings.py:298
-           INFO      Scored 64 trials                                                 evaluate_speaker_embeddings.py:537
-           INFO      EER=15.62% @ threshold=0.4838                                    evaluate_speaker_embeddings.py:542
-           INFO      minDCF=0.5000                                                    evaluate_speaker_embeddings.py:543
-           INFO      Threshold check OK: configured same=0.55 vs EER threshold=0.4838 evaluate_speaker_embeddings.py:559
-                    (ratio=1.14)
-           INFO      Intra=0.6943 | Inter=0.3355 | Sep=0.3588                         evaluate_speaker_embeddings.py:571
-           INFO      EER=15.62% | minDCF=0.5000 | Intra=0.6943 | Inter=0.3355 |       evaluate_speaker_embeddings.py:793
-                    Sep=0.3588 | Latency=77.9ms | Thresh(same=0.55, possible=0.4,
-                    new_spk=0.3)
+    return (
+        text_has_sufficient_content,
+        speaker_results,
+        primary_label,
+        primary_confidence,
+        speaker_metadata,
+    )
 
-                                           Speaker Embedding Model Comparison
-┏━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━┳━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━
-┃ #   ┃ Model                ┃ Dim ┃  EER ↓ ┃ EER Thresh ┃ minDCF ↓ ┃ Intra ↑ ┃ Inter ↓ ┃  Sep ↑ ┃ Cfg Same ┃ ms/file ↓
-┡━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━╇━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━
-│ 1   │ modelscope_eres2net… │ 192 │ 15.62% │     0.4838 │   0.5000 │  0.6943 │  0.3355 │ 0.3588 │    0.550 │      77.9
-│ 2   │ nemo_titanet         │ 192 │ 18.75% │     0.3568 │   0.4062 │  0.6197 │  0.2041 │ 0.4156 │    0.500 │      29.3
-│ 3   │ pyannote             │ 512 │ 31.25% │     0.1533 │   0.8750 │  0.2743 │  0.1080 │ 0.1664 │    0.200 │      75.0
-│ 4   │ speechbrain_ecapa    │ 192 │ 32.81% │     0.1051 │   0.7188 │  0.3200 │  0.1417 │ 0.1783 │    0.230 │      40.2
-└─────┴──────────────────────┴─────┴────────┴────────────┴──────────┴─────────┴─────────┴────────┴──────────┴───────────
 
-↓ = lower is better   ↑ = higher is better   Sep = Intra − Inter   Cfg Same = configured same-speaker threshold
+
+# C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speech_waves.py
+
+from __future__ import annotations
+
+import dataclasses
+import json
+import math
+import shutil
+import statistics
+from pathlib import Path
+from typing import List, Literal, Optional
+
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy.io.wavfile as wavfile
+from rich.console import Console
+
+try:
+    from services._types import AudioInput, SpeechWave
+    from services.audio_config import HOP_SIZE, SAMPLE_RATE
+    from services.energy import compute_rms_per_frame
+    from services.audio_utils import load_audio
+    from services.norm_speech_loudness import normalize_audio_for_vad
+    from services.vad_firered import extract_speech_timestamps
+    from services.dtype_conversion import convert_audio_dtype
+except ImportError:
+    from _types import AudioInput, SpeechWave
+    from audio_config import HOP_SIZE, SAMPLE_RATE
+    from energy import compute_rms_per_frame
+    from audio_utils import load_audio
+    from norm_speech_loudness import normalize_audio_for_vad
+    from vad_firered import extract_speech_timestamps
+    from dtype_conversion import convert_audio_dtype
+
+DEFAULT_THRESHOLD = 0.3
+
+DEFAULT_MIN_PROMINENCE = 0.05
+DEFAULT_MIN_EXCURSION = 0.04
+DEFAULT_MIN_PEAK_PROB = 0.55
+DEFAULT_MIN_FRAMES = 3
+DEFAULT_MIN_DURATION_SEC = 1.0
+DEFAULT_BASELINE_THRESHOLD = 0.1
+
+DEFAULT_MIN_SPEECH_DURATION_MS = 1000
+DEFAULT_MIN_SILENCE_DURATION_MS = 100
+
+WaveState = Literal["below", "above"]
+
+console = Console()
+
+@dataclasses.dataclass
+class WaveShapeConfig:
+    \"\"\"
+    Tunable thresholds that decide whether a probability wave has a real
+    mountain shape rather than being a flat plateau or a tiny ripple.
+
+    Attributes:
+        min_prominence: How much the peak must rise above the average of the
+            two surrounding valley endpoints.
+        min_excursion: The minimum difference between the highest and lowest
+            probability inside the wave window.
+        min_peak_prob: Absolute floor — the peak frame must reach at least
+            this probability (guards against waves that never really fire).
+        min_frames: Waves shorter than this many frames are discarded.
+        min_duration_sec: Minimum wall-clock duration in seconds. Waves
+            shorter than this are rejected even if they pass frame and shape
+            checks. Derived independently of min_frames so both constraints
+            must be satisfied.
+        baseline_threshold: Probability threshold used to determine when a
+            wave has truly fallen back to baseline/silence level. Used to
+            detect wave boundaries and preroll adjustments.
+    \"\"\"
+
+    min_prominence: float = DEFAULT_MIN_PROMINENCE
+    min_excursion: float = DEFAULT_MIN_EXCURSION
+    min_peak_prob: float = DEFAULT_MIN_PEAK_PROB
+    min_frames: int = DEFAULT_MIN_FRAMES
+    min_duration_sec: float = DEFAULT_MIN_DURATION_SEC
+    baseline_threshold: float = DEFAULT_BASELINE_THRESHOLD
+
+
+def is_prominent_wave(
+    wave_probs: List[float],
+    entry_prob: float,
+    exit_prob: float,
+    cfg: WaveShapeConfig,
+) -> tuple[bool, dict]:
+    \"\"\"
+    Decide whether a slice of probabilities forms a genuine mountain shape.
+
+    The algorithm:
+      1. Baseline = average of entry_prob and exit_prob (the "ground level").
+      2. Peak     = maximum probability inside the slice.
+      3. Prominence = peak - baseline.
+      4. Excursion  = max - min inside the slice (vertical range).
+
+    Returns:
+        (passed: bool, diagnostics: dict)
+    \"\"\"
+    if not wave_probs:
+        return False, {}
+
+    peak_prob = max(wave_probs)
+    min_prob = min(wave_probs)
+    baseline = (entry_prob + exit_prob) / 2.0
+    prominence = peak_prob - baseline
+    excursion = peak_prob - min_prob
+    n_frames = len(wave_probs)
+
+    passed = (
+        prominence >= cfg.min_prominence
+        and excursion >= cfg.min_excursion
+        and peak_prob >= cfg.min_peak_prob
+        and n_frames >= cfg.min_frames
+    )
+
+    diagnostics = {
+        "baseline": round(baseline, 6),
+        "peak_prob": round(peak_prob, 6),
+        "prominence": round(prominence, 6),
+        "excursion": round(excursion, 6),
+        "n_frames": n_frames,
+        "shape_passed": passed,
+    }
+    return passed, diagnostics
+
+
+def check_speech_waves(
+    speech_probs: List[float],
+    threshold: float = DEFAULT_THRESHOLD,
+    sampling_rate: int = SAMPLE_RATE,
+    shape_cfg: Optional[WaveShapeConfig] = None,
+) -> List[SpeechWave]:
+    if shape_cfg is None:
+        shape_cfg = WaveShapeConfig()
+
+    if not speech_probs:
+        return []
+
+    waves: List[SpeechWave] = []
+    current_wave: SpeechWave | None = None
+    state: WaveState = "below"
+    rise_frame_idx: int | None = None
+
+    if speech_probs:
+        if speech_probs[0] < shape_cfg.baseline_threshold:
+            current_wave = SpeechWave(
+                has_risen=False,
+                has_multi_passed=False,
+                has_fallen=False,
+                is_valid=False,
+                start_sec=0.0,
+                end_sec=0.0,
+                details={
+                    "frame_start": 0,
+                    "frame_end": 0,
+                    "frame_len": 0,
+                    "duration_sec": 0.0,
+                    "min_prob": speech_probs[0],
+                    "max_prob": speech_probs[0],
+                    "avg_prob": speech_probs[0],
+                    "std_prob": 0.0,
+                    "composite_score": 0.0,
+                },
+            )
+            state = "below"
+
+        elif speech_probs[0] >= threshold:
+            state = "above"
+
+    for i, prob in enumerate(speech_probs):
+        frame_time_sec = i * HOP_SIZE / sampling_rate
+
+        if state == "below":
+            if prob >= threshold:
+                rise_frame_idx = i
+
+                # ── Preroll: walk back from rise_frame_idx until we find a
+                #    frame strictly below baseline_threshold (or hit index 0).
+                preroll_start = rise_frame_idx
+                while (
+                    preroll_start > 0
+                    and speech_probs[preroll_start - 1] >= shape_cfg.baseline_threshold
+                ):
+                    preroll_start -= 1
+                preroll_start_sec = preroll_start * HOP_SIZE / sampling_rate
+
+                current_wave = SpeechWave(
+                    has_risen=current_wave["has_risen"] if current_wave else True,
+                    has_multi_passed=False,
+                    has_fallen=False,
+                    is_valid=False,
+                    start_sec=preroll_start_sec,
+                    end_sec=preroll_start_sec,
+                    details={
+                        "frame_start": preroll_start,
+                        "frame_end": preroll_start,
+                        "frame_len": 0,
+                        "duration_sec": 0.0,
+                        "min_prob": prob,
+                        "max_prob": prob,
+                        "avg_prob": prob,
+                        "std_prob": 0.0,
+                        "composite_score": 0.0,
+                    },
+                )
+
+                state = "above"
+        else:
+            if prob >= threshold:
+                if current_wave is not None:
+                    current_wave["has_multi_passed"] = True
+            else:
+                if current_wave is not None:
+                    if prob <= shape_cfg.baseline_threshold:
+                        current_wave["has_fallen"] = True
+
+                    # frame_start uses the preroll-adjusted value stored in details
+                    frame_start = current_wave["details"]["frame_start"]
+                    frame_end = i
+                    wave_probs = speech_probs[frame_start:frame_end]
+                    frame_len = frame_end - frame_start
+
+                    # entry_prob: the frame immediately before the preroll start
+                    entry_prob = (
+                        speech_probs[frame_start - 1] if frame_start > 0 else 0.0
+                    )
+                    exit_prob = prob
+
+                    shape_ok, shape_diag = is_prominent_wave(
+                        wave_probs, entry_prob, exit_prob, shape_cfg
+                    )
+
+                    duration_sec = frame_time_sec - current_wave["start_sec"]
+                    duration_ok = duration_sec >= shape_cfg.min_duration_sec
+
+                    current_wave["is_valid"] = (
+                        current_wave["has_risen"]
+                        and current_wave["has_multi_passed"]
+                        and current_wave["has_fallen"]
+                        and shape_ok
+                        and duration_ok
+                    )
+                    current_wave["end_sec"] = frame_time_sec
+                    current_wave["details"] = {
+                        "frame_start": frame_start,
+                        "frame_end": frame_end,
+                        "frame_len": frame_len,
+                        "duration_sec": duration_sec,
+                        "min_prob": min(wave_probs) if wave_probs else 0.0,
+                        "max_prob": max(wave_probs) if wave_probs else 0.0,
+                        "avg_prob": statistics.mean(wave_probs) if wave_probs else 0.0,
+                        "std_prob": statistics.stdev(wave_probs)
+                        if frame_len > 1
+                        else 0.0,
+                        "duration_ok": duration_ok,
+                        **shape_diag,
+                        "composite_score": 0.0,
+                    }
+                    current_wave["details"]["composite_score"] = (
+                        compute_composite_score(current_wave)
+                    )
+
+                # FIX: Only append if current_wave is not None
+                if prob < shape_cfg.baseline_threshold:
+                    if current_wave is not None:
+                        waves.append(current_wave)
+                    current_wave = None
+                    rise_frame_idx = None
+                    state = "below"
+
+    # FIX: Handle a wave that never fell back below the threshold
+    # Guard ensures we only append if current_wave exists
+    if current_wave is not None:
+        current_wave["has_fallen"] = False
+        current_wave["is_valid"] = False
+        current_wave["end_sec"] = len(speech_probs) * HOP_SIZE / sampling_rate
+
+        if rise_frame_idx is not None:
+            # frame_start is already preroll-adjusted in details
+            frame_start = current_wave["details"]["frame_start"]
+            frame_end = len(speech_probs)
+            wave_probs = speech_probs[frame_start:frame_end]
+            frame_len = frame_end - frame_start
+            duration_sec = current_wave["end_sec"] - current_wave["start_sec"]
+            entry_prob = speech_probs[frame_start - 1] if frame_start > 0 else 0.0
+            exit_prob = threshold
+            shape_ok, shape_diag = is_prominent_wave(
+                wave_probs, entry_prob, exit_prob, shape_cfg
+            )
+            current_wave["details"] = {
+                "frame_start": frame_start,
+                "frame_end": frame_end,
+                "frame_len": frame_len,
+                "duration_sec": duration_sec,
+                "min_prob": min(wave_probs) if wave_probs else 0.0,
+                "max_prob": max(wave_probs) if wave_probs else 0.0,
+                "avg_prob": statistics.mean(wave_probs) if wave_probs else 0.0,
+                "std_prob": statistics.stdev(wave_probs) if frame_len > 1 else 0.0,
+                "duration_ok": False,
+                **shape_diag,
+                "composite_score": 0.0,
+            }
+            current_wave["details"]["composite_score"] = compute_composite_score(
+                current_wave
+            )
+
+        waves.append(current_wave)
+
+    return waves
+
+
+def get_speech_waves(
+    audio: AudioInput,
+    speech_probs: List[float],
+    threshold: float = DEFAULT_THRESHOLD,
+    sampling_rate: int = SAMPLE_RATE,
+    shape_cfg: Optional[WaveShapeConfig] = None,
+    with_audio: bool = False,
+) -> List[SpeechWave] | List[Tuple[SpeechWave, np.ndarray]]:
+    \"\"\"
+    Identify complete speech waves (rise → sustained high → fall) from FireRedVAD probabilities.
+
+    Follows the same pipeline as _main_speech_waves.main():
+      1. Runs shape analysis on pre-computed VAD scores
+      2. Filters to valid waves
+      3. Optionally loads audio and extracts segments
+
+    Args:
+        audio: Audio input (file path, bytes, numpy array, or torch tensor)
+        speech_probs: Speech probability scores from VAD
+        threshold: VAD probability threshold
+        sampling_rate: Audio sample rate in Hz
+        shape_cfg: Configuration for wave shape validation (defaults to WaveShapeConfig())
+        with_audio: If True, returns list of tuples (SpeechWave, np.ndarray) with 
+                   the audio data for each wave extracted from the loaded audio
+
+    Returns:
+        If with_audio=False: List[SpeechWave] containing valid speech waves
+        If with_audio=True: List[Tuple[SpeechWave, np.ndarray]] containing valid 
+                           speech waves paired with their audio segments
+    \"\"\"
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(
+        f"get_speech_waves called with with_audio={with_audio}, threshold={threshold}"
+    )
+
+    if shape_cfg is None:
+        shape_cfg = WaveShapeConfig()
+        logger.debug(f"Using default WaveShapeConfig: {shape_cfg}")
+
+    # Step 1: Shape analysis on existing scores (same as _main_speech_waves)
+    all_waves = check_speech_waves(
+        speech_probs=speech_probs,
+        threshold=threshold,
+        sampling_rate=sampling_rate,
+        shape_cfg=shape_cfg,
+    )
+    logger.info(f"Total waves detected: {len(all_waves)}")
+
+    # Step 2: Filter to valid waves only
+    valid_waves: List[SpeechWave] = []
+    for wave in all_waves:
+        if wave.get("is_valid", False):
+            valid_waves.append(wave)
+
+    logger.info(f"Valid waves (without audio): {len(valid_waves)}")
+
+    # Step 3: Return early if audio extraction not requested
+    if not with_audio:
+        return valid_waves
+
+    # Step 4: Load audio only when needed for extraction
+    loaded_audio, loaded_sr = load_audio(audio, sr=sampling_rate, mono=True)
+    logger.debug(f"Audio loaded for extraction: shape={loaded_audio.shape}, sr={loaded_sr}")
+
+    # Step 5: Extract audio segments
+    valid_waves_with_audio: List[Tuple[SpeechWave, np.ndarray]] = []
+    for wave in valid_waves:
+        frame_start = wave["details"]["frame_start"]
+        frame_end = wave["details"]["frame_end"]
+
+        start_sample = frame_start * HOP_SIZE
+        end_sample = (frame_end + 1) * HOP_SIZE
+        start_sample = max(0, start_sample)
+        end_sample = min(len(loaded_audio), end_sample)
+
+        if end_sample > start_sample:
+            wave_audio = loaded_audio[start_sample:end_sample].copy()
+            valid_waves_with_audio.append((wave, wave_audio))
+            logger.debug(
+                f"Wave audio extracted: frames [{frame_start}:{frame_end}], "
+                f"samples [{start_sample}:{end_sample}], "
+                f"duration={wave['details']['duration_sec']:.3f}s"
+            )
+
+    logger.info(f"Valid waves (with audio): {len(valid_waves_with_audio)}")
+    return valid_waves_with_audio
+
+
+def get_valid_speech_waves(
+    audio: AudioInput,
+    sampling_rate: int = SAMPLE_RATE,
+    vad_threshold: float = DEFAULT_THRESHOLD,
+    min_prominence: float = DEFAULT_MIN_PROMINENCE,
+    min_excursion: float = DEFAULT_MIN_EXCURSION,
+    min_peak_prob: float = DEFAULT_MIN_PEAK_PROB,
+    min_frames: int = DEFAULT_MIN_FRAMES,
+    min_duration_sec: float = DEFAULT_MIN_DURATION_SEC,
+    baseline_threshold: float = DEFAULT_BASELINE_THRESHOLD,
+    min_speech_duration_ms: int = DEFAULT_MIN_SPEECH_DURATION_MS,
+    min_silence_duration_ms: int = DEFAULT_MIN_SILENCE_DURATION_MS,
+    with_audio: bool = False,
+) -> List[SpeechWave] | List[Tuple[SpeechWave, np.ndarray]]:
+    \"\"\"
+    Identify valid speech waves from audio using VAD and shape analysis.
+
+    This function follows the same pipeline as _main_speech_waves.main():
+      1. Loads audio (accepts file path, bytes, numpy array, or torch tensor)
+      2. Runs VAD (extract_speech_timestamps) to get probability scores
+      3. Identifies speech waves via shape analysis (check_speech_waves)
+      4. Filters to only valid (is_valid=True) waves
+      5. Optionally extracts audio segments for each wave
+
+    All parameters default to the module-level DEFAULT_* constants,
+    matching the all-defaults usage in _main_speech_waves.
+
+    Args:
+        audio: Audio input — file path (str/Path), bytes, numpy array, or torch tensor.
+               Accepts the same types as load_audio() (AudioInput union).
+        sampling_rate: Audio sampling rate in Hz (used when audio is not a file)
+        vad_threshold: VAD probability threshold (above = speech)
+        min_prominence: Minimum peak prominence above baseline
+        min_excursion: Minimum peak-to-valley excursion
+        min_peak_prob: Minimum peak probability
+        min_frames: Minimum frames per wave
+        min_duration_sec: Minimum wave duration in seconds
+        baseline_threshold: Probability threshold for silence/baseline
+        min_speech_duration_ms: Minimum speech segment for VAD
+        min_silence_duration_ms: Minimum silence gap for VAD
+        with_audio: If True, returns list of tuples (SpeechWave, np.ndarray)
+                   with the audio data for each wave extracted from the input audio
+
+    Returns:
+        If with_audio=False: List[SpeechWave] containing valid speech waves.
+        If with_audio=True: List[Tuple[SpeechWave, np.ndarray]] containing valid 
+                           speech waves paired with their audio segments.
+        Returns empty list if no valid speech found or VAD fails.
+
+    Example:
+        >>> # With file path
+        >>> waves = get_valid_speech_waves("recording.wav")
+        >>> 
+        >>> # With audio extraction
+        >>> waves_with_audio = get_valid_speech_waves("recording.wav", with_audio=True)
+        >>> for wave, audio_chunk in waves_with_audio:
+        ...     print(f"Duration: {wave['details']['duration_sec']:.2f}s")
+    \"\"\"
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(
+        f"get_valid_speech_waves called with with_audio={with_audio}, "
+        f"vad_threshold={vad_threshold}, min_duration={min_duration_sec}s"
+    )
+
+    # Build WaveShapeConfig from parameters (all default to module constants)
+    shape_cfg = WaveShapeConfig(
+        min_prominence=min_prominence,
+        min_excursion=min_excursion,
+        min_peak_prob=min_peak_prob,
+        min_frames=min_frames,
+        min_duration_sec=min_duration_sec,
+        baseline_threshold=baseline_threshold,
+    )
+    logger.debug(f"WaveShapeConfig: {shape_cfg}")
+
+    # Step 1: Load audio (handles file path, bytes, numpy array, or torch tensor)
+    #          Uses the same load_audio as _main_speech_waves.main()
+    audio_np, sr = load_audio(audio, sr=sampling_rate, mono=True)
+    logger.debug(f"Audio loaded: shape={audio_np.shape}, sr={sr}, dtype={audio_np.dtype}")
+
+    # Step 2: Run VAD — same call as _main_speech_waves.main()
+    try:
+        _, scores = extract_speech_timestamps(
+            audio=audio_np,
+            include_non_speech=False,
+            threshold=vad_threshold,
+            min_speech_duration_sec=min_speech_duration_ms / 1000.0,
+            min_silence_duration_sec=min_silence_duration_ms / 1000.0,
+            with_scores=True,
+        )
+    except Exception as e:
+        logger.error(f"VAD extraction failed: {e}")
+        console.print(f"[error]VAD extraction failed: {e}[/error]")
+        return []
+
+    if not scores:
+        logger.warning("No speech scores returned from VAD")
+        return []
+
+    logger.info(f"VAD produced {len(scores)} probability scores")
+
+    # Step 3: Shape analysis — same call chain as _main_speech_waves.main()
+    all_waves = check_speech_waves(
+        speech_probs=scores,
+        threshold=vad_threshold,
+        sampling_rate=sr,
+        shape_cfg=shape_cfg,
+    )
+    logger.info(f"Total waves detected by shape analysis: {len(all_waves)}")
+
+    # Step 4: Filter to valid waves only (is_valid=True)
+    valid_waves: List[SpeechWave] = []
+    for wave in all_waves:
+        if wave is None:
+            continue
+        if not isinstance(wave, dict):
+            continue
+        if not wave.get("is_valid", False):
+            continue
+        valid_waves.append(wave)
+
+    logger.info(f"Valid waves after filtering: {len(valid_waves)}")
+
+    # Step 5: Return early if audio extraction not requested
+    if not with_audio:
+        return valid_waves
+
+    # Step 6: Extract audio segments for each valid wave
+    valid_waves_with_audio: List[Tuple[SpeechWave, np.ndarray]] = []
+    for wave in valid_waves:
+        frame_start = wave["details"]["frame_start"]
+        frame_end = wave["details"]["frame_end"]
+
+        # Convert frame indices to sample indices using HOP_SIZE (160 samples = 10ms)
+        start_sample = frame_start * HOP_SIZE
+        end_sample = (frame_end + 1) * HOP_SIZE
+
+        # Clamp to valid range within the loaded audio
+        start_sample = max(0, start_sample)
+        end_sample = min(len(audio_np), end_sample)
+
+        if end_sample > start_sample:
+            wave_audio = audio_np[start_sample:end_sample].copy()
+            valid_waves_with_audio.append((wave, wave_audio))
+            logger.debug(
+                f"Wave audio extracted: frames [{frame_start}:{frame_end}], "
+                f"samples [{start_sample}:{end_sample}], "
+                f"duration={wave['details']['duration_sec']:.3f}s"
+            )
+        else:
+            logger.warning(
+                f"Skipping wave with invalid sample range: "
+                f"frames [{frame_start}:{frame_end}] → "
+                f"samples [{start_sample}:{end_sample}] "
+                f"(audio_np length={len(audio_np)})"
+            )
+
+    logger.info(f"Valid waves (with audio): {len(valid_waves_with_audio)}")
+    return valid_waves_with_audio
+
+
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

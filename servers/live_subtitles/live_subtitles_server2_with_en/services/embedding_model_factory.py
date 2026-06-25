@@ -63,6 +63,7 @@ class EmbeddingThresholds:
     same: float
     possible: float
     new_speaker: float
+    promotion: float  # NEW: minimum similarity to consider outliers a match
 
 
 class EmbeddingThresholdProvider:
@@ -95,21 +96,25 @@ class EmbeddingThresholdProvider:
             same=0.75,
             possible=0.50,
             new_speaker=0.30,
+            promotion=0.70,
         ),
         EmbeddingModelType.SPEECHBRAIN_ECAPA: EmbeddingThresholds(
             same=0.65,
             possible=0.40,
             new_speaker=0.25,
+            promotion=0.75,
         ),
         EmbeddingModelType.NEMO_TITANET: EmbeddingThresholds(
             same=0.70,
             possible=0.45,
             new_speaker=0.25,
+            promotion=0.75,
         ),
         EmbeddingModelType.MODELSCOPE_ERES2NETV2: EmbeddingThresholds(
             same=0.70,
             possible=0.55,
             new_speaker=0.35,
+            promotion=0.65,
         ),
     }
 
@@ -165,6 +170,7 @@ class EmbeddingThresholdProvider:
         threshold_same: Optional[float] = None,
         threshold_possible: Optional[float] = None,
         threshold_new_speaker: Optional[float] = None,
+        threshold_promotion: Optional[float] = None,  # NEW
     ) -> EmbeddingThresholds:
         """Resolve thresholds, using provided values or falling back to defaults.
 
@@ -188,19 +194,10 @@ class EmbeddingThresholdProvider:
         """
         defaults = cls.get_thresholds(model_type)
         return EmbeddingThresholds(
-            same=(
-                threshold_same if threshold_same is not None else defaults.same
-            ),
-            possible=(
-                threshold_possible
-                if threshold_possible is not None
-                else defaults.possible
-            ),
-            new_speaker=(
-                threshold_new_speaker
-                if threshold_new_speaker is not None
-                else defaults.new_speaker
-            ),
+            same=(threshold_same if threshold_same is not None else defaults.same),
+            possible=(threshold_possible if threshold_possible is not None else defaults.possible),
+            new_speaker=(threshold_new_speaker if threshold_new_speaker is not None else defaults.new_speaker),
+            promotion=(threshold_promotion if threshold_promotion is not None else defaults.promotion),  # NEW
         )
 
 
