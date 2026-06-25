@@ -24,8 +24,8 @@ console = Console()
 
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 
+audio_path = r"C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav"
 # audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\generated\last_50_segments\segment_002\sound.wav"
-audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\generated\last_50_segments\segment_004\sound.wav"
 
 speech_threshold = None
 

@@ -514,10 +514,10 @@ def _perform_speaker_labeling(
 ) -> tuple:
     """Perform speaker labeling if text content is sufficient.
     
-    Uses extract_high_confidence_speech_segments to improve speaker embedding
-    quality by filtering out silence, noise, and brief utterances. This improves
-    both intra-speaker consistency (cleaner embeddings → same speaker matches better)
-    and inter-speaker separation (distinct embeddings → different speakers more separable).
+    When multiple high-confidence speech segments are extracted, each segment
+    is labeled individually to capture potential speaker changes within the
+    audio chunk. Results are then aggregated with the highest-confidence
+    speaker becoming the primary label.
     
     Returns:
         tuple: (text_has_sufficient_content, speaker_results, primary_label,
@@ -534,94 +534,222 @@ def _perform_speaker_labeling(
     if text_has_sufficient_content:
         segment_timestamp = header.get("start_sec", time.time())
         segment_duration = header.get(
-            "duration_sec", 
+            "duration_sec",
             get_audio_duration(audio_np, sr=sample_rate)
         )
-        use_multiple = segment_duration >= 3.0
+        use_multiple = segment_duration >= 2.0  # Changed from 3.0 to 2.0 as discussed
         
-        # ── NEW: Extract high-confidence speech for better speaker embedding ──
-        # This improves intra-speaker consistency by ensuring embeddings are
-        # computed from clean, continuous speech (not silence/noise).
-        # It improves inter-speaker separation by removing ambiguous audio
-        # that could blur distinctions between speakers.
-        audio_for_labeler = audio_np  # Default: use full audio if extraction fails
+        audio_for_labeler = audio_np
         extraction_info = {
             "attempted": False,
             "successful": False,
             "segments_found": 0,
             "used_segment_duration": segment_duration,
             "original_duration": segment_duration,
+            "individual_segment_results": [],  # NEW: track per-segment results
         }
         
-        if segment_duration >= 2.0:  # Only attempt for segments ≥2s
+        all_segment_speaker_results = []  # NEW: collect results from all segments
+
+        if segment_duration >= 2.0:
             extraction_info["attempted"] = True
             try:
-                # Get the audio tagger singleton
                 tagger = get_audio_tagger()
-                
                 if tagger is not None:
-                    # Convert to float32 for the tagger
                     audio_float = audio_np.astype(np.float32) / 32768.0
-                    
                     console.print(
                         f"[info]🎯 Attempting high-confidence speech extraction "
                         f"(audio: {segment_duration:.2f}s)...[/info]"
                     )
-                    
-                    # Extract only high-confidence speech segments
-                    # min_duration=1.5: Only use segments ≥1.5s (enough for good embedding)
-                    # min_speech_duration_sec=1.0: Minimum speech for segment detection
-                    # min_silence_duration_sec=0.5: Gap to split segments
                     high_conf_segments, high_conf_audios = (
                         tagger.extract_high_confidence_speech_segments(
                             audio=audio_float,
                             sample_rate=sample_rate,
                         )
                     )
-                    
                     extraction_info["segments_found"] = len(high_conf_audios)
                     
                     if high_conf_audios and len(high_conf_audios) > 0:
-                        # Find the longest high-confidence segment
-                        segment_lengths = [len(a) for a in high_conf_audios]
-                        longest_idx = int(np.argmax(segment_lengths))
-                        longest_audio = high_conf_audios[longest_idx]
+                        # ──────────────────────────────────────────────
+                        # NEW: Label EACH high-confidence segment separately
+                        # ──────────────────────────────────────────────
+                        console.print(
+                            f"[success]🎯 Extracted {len(high_conf_audios)} high-confidence "
+                            f"speech segment(s) — labeling each individually:[/success]"
+                        )
                         
-                        if len(longest_audio) > 0:
-                            # Convert back to int16 for the labeler
-                            audio_for_labeler = (
-                                np.clip(longest_audio, -1.0, 1.0) * 32767.0
+                        for i, (seg, aud) in enumerate(zip(high_conf_segments, high_conf_audios)):
+                            seg_dur = len(aud) / sample_rate if len(aud) > 0 else 0
+                            seg_start = seg.get('start_time', 0)
+                            seg_end = seg.get('end_time', 0)
+                            seg_prob = seg.get('avg_speech_probability', 0)
+                            
+                            console.print(
+                                f"[dim]  [{i}] {seg_start:.2f}s-{seg_end:.2f}s "
+                                f"({seg_dur:.2f}s, prob={seg_prob:.3f}) → labeling...[/dim]"
+                            )
+                            
+                            # Convert this segment to int16 for the labeler
+                            seg_audio_int16 = (
+                                np.clip(aud, -1.0, 1.0) * 32767.0
                             ).astype(np.int16)
-                            longest_dur = len(longest_audio) / sample_rate
-                            extraction_info["successful"] = True
-                            extraction_info["used_segment_duration"] = longest_dur
                             
-                            # Log details about all found segments
-                            segment_details = []
-                            for i, (seg, aud) in enumerate(zip(high_conf_segments, high_conf_audios)):
-                                dur = len(aud) / sample_rate if len(aud) > 0 else 0
-                                marker = " ★" if i == longest_idx else ""
-                                segment_details.append(
-                                    f"  [{i}] {seg.get('start_time', 0):.2f}s-{seg.get('end_time', 0):.2f}s "
-                                    f"({dur:.2f}s, prob={seg.get('avg_speech_probability', 0):.3f}){marker}"
+                            # Generate a unique segment_id for this sub-segment
+                            sub_segment_id = f"{segment_id}_sub{i}" if segment_id else None
+                            
+                            # Label THIS individual segment
+                            seg_results, seg_primary, seg_conf, seg_meta = (
+                                label_speakers_for_segment(
+                                    waveform=seg_audio_int16,
+                                    sample_rate=sample_rate,
+                                    timestamp=segment_timestamp + seg_start,
+                                    return_multiple=False,  # Individual segments are short
+                                    segment_id=sub_segment_id,
                                 )
+                            )
+                            
+                            # Store per-segment info
+                            extraction_info["individual_segment_results"].append({
+                                "index": i,
+                                "start_time": seg_start,
+                                "end_time": seg_end,
+                                "duration": seg_dur,
+                                "avg_speech_probability": seg_prob,
+                                "primary_label": seg_primary,
+                                "primary_confidence": seg_conf,
+                                "match_type": seg_meta.get("match_type", "unknown"),
+                                "speaker_results": seg_results,
+                            })
+                            
+                            # Collect all speaker results across segments
+                            all_segment_speaker_results.append({
+                                "segment_index": i,
+                                "start_time": seg_start,
+                                "end_time": seg_end,
+                                "label": seg_primary,
+                                "confidence": seg_conf,
+                                "match_type": seg_meta.get("match_type", "unknown"),
+                                "is_primary": False,  # Will be set after aggregation
+                            })
                             
                             console.print(
-                                f"[success]🎯 Extracted {len(high_conf_audios)} high-confidence "
-                                f"speech segment(s):[/success]"
+                                f"[dim]     → Speaker: {seg_primary} "
+                                f"(confidence: {seg_conf:.3f}, type: {seg_meta.get('match_type', 'unknown')})[/dim]"
                             )
-                            for detail in segment_details:
-                                console.print(f"[dim]{detail}[/dim]")
+                        
+                        # ──────────────────────────────────────────────
+                        # Aggregate results across all segments
+                        # ──────────────────────────────────────────────
+                        # Count which speaker appeared most / with highest confidence
+                        speaker_aggregates = {}
+                        for result in all_segment_speaker_results:
+                            label = result["label"]
+                            if label not in speaker_aggregates:
+                                speaker_aggregates[label] = {
+                                    "label": label,
+                                    "confidences": [],
+                                    "total_duration": 0.0,
+                                    "appearances": 0,
+                                    "match_types": [],
+                                }
+                            agg = speaker_aggregates[label]
+                            agg["confidences"].append(result["confidence"])
+                            agg["appearances"] += 1
+                            agg["match_types"].append(result["match_type"])
+                            # Find corresponding segment info for duration
+                            for seg_info in extraction_info["individual_segment_results"]:
+                                if seg_info["index"] == result["segment_index"]:
+                                    agg["total_duration"] += seg_info["duration"]
+                                    break
+                        
+                        # Build final speaker_results list (ranked by confidence/duration)
+                        ranked_speakers = sorted(
+                            speaker_aggregates.values(),
+                            key=lambda x: (
+                                x["appearances"],  # More appearances = more confident
+                                sum(x["confidences"]) / len(x["confidences"]),  # Avg confidence
+                                x["total_duration"],  # More speech = more reliable
+                            ),
+                            reverse=True,
+                        )
+                        
+                        if ranked_speakers:
+                            primary = ranked_speakers[0]
+                            primary_label = primary["label"]
+                            primary_confidence = (
+                                sum(primary["confidences"]) / len(primary["confidences"])
+                                if primary["confidences"] else 0.0
+                            )
+                            
+                            # Build final speaker_results
+                            speaker_results = []
+                            for rank, spk in enumerate(ranked_speakers):
+                                is_primary = (rank == 0)
+                                # Find the best match_type for this speaker
+                                match_types = spk["match_types"]
+                                best_match_type = max(
+                                    match_types,
+                                    key=lambda mt: {
+                                        "strong_match": 5,
+                                        "early_match": 4,
+                                        "context_match": 4,
+                                        "possible_match": 3,
+                                        "weak_match": 2,
+                                        "new_speaker": 1,
+                                        "first_speaker": 1,
+                                        "unknown": 0,
+                                    }.get(mt, 0),
+                                ) if match_types else "unknown"
+                                
+                                speaker_results.append({
+                                    "label": spk["label"],
+                                    "confidence": round(
+                                        sum(spk["confidences"]) / len(spk["confidences"]), 4
+                                    ) if spk["confidences"] else 0.0,
+                                    "match_type": best_match_type,
+                                    "is_primary": is_primary,
+                                    "is_new_speaker": False,  # Will be updated below
+                                    "segment_count": spk["appearances"],
+                                    "total_speech_duration": round(spk["total_duration"], 3),
+                                })
+                            
+                            # Mark new speakers
+                            for result in speaker_results:
+                                if result["match_type"] in ("new_speaker", "first_speaker"):
+                                    result["is_new_speaker"] = True
+                            
+                            speaker_metadata = {
+                                "match_type": speaker_results[0]["match_type"] if speaker_results else "unknown",
+                                "speaker_list": speaker_results,
+                                "total_speakers": len(speaker_results),
+                                "speech_extraction": extraction_info,
+                                "aggregation_method": "multi_segment_voting",
+                            }
+                            
+                            extraction_info["successful"] = True
+                            extraction_info["used_segment_duration"] = sum(
+                                s["duration"] for s in extraction_info["individual_segment_results"]
+                            )
+                            
                             console.print(
-                                f"[success]   → Using longest segment ({longest_dur:.2f}s) "
-                                f"for speaker labeling (was {segment_duration:.2f}s, "
-                                f"saved {segment_duration - longest_dur:.2f}s of non-speech)[/success]"
+                                f"[success]🎯 Aggregated {len(high_conf_audios)} segments → "
+                                f"{len(speaker_results)} unique speaker(s)[/success]"
                             )
+                            for spk in speaker_results:
+                                console.print(
+                                    f"[dim]   {spk['label']}: avg_conf={spk['confidence']:.3f}, "
+                                    f"appearances={spk['segment_count']}, "
+                                    f"duration={spk['total_speech_duration']:.2f}s, "
+                                    f"type={spk['match_type']}{' ★ PRIMARY' if spk['is_primary'] else ''}[/dim]"
+                                )
                         else:
+                            # Fallback: no speakers found in any segment
                             console.print(
-                                f"[warning]⚠️ Longest high-confidence segment was empty "
-                                f"({len(longest_audio)} samples), using full audio[/warning]"
+                                f"[warning]⚠️ No speakers identified in any sub-segment, "
+                                f"using full audio[/warning]"
                             )
+                            # Fall through to full-audio labeling below
+                            all_segment_speaker_results = []
                     else:
                         console.print(
                             f"[dim]🔇 No high-confidence speech segments found "
@@ -646,21 +774,25 @@ def _perform_speaker_labeling(
                 f"[dim]🔇 Segment too short for speech extraction "
                 f"({segment_duration:.2f}s < 2.0s), using full audio[/dim]"
             )
-        
-        # Perform speaker labeling with the (possibly filtered) audio
-        speaker_results, primary_label, primary_confidence, speaker_metadata = (
-            label_speakers_for_segment(
-                waveform=audio_for_labeler,
-                sample_rate=sample_rate,
-                timestamp=segment_timestamp,
-                return_multiple=use_multiple,
-                segment_id=segment_id,
+
+        # ─────────────────────────────────────────────────────────────
+        # If no sub-segment results, fall back to full audio labeling
+        # ─────────────────────────────────────────────────────────────
+        if not all_segment_speaker_results:
+            speaker_results, primary_label, primary_confidence, speaker_metadata = (
+                label_speakers_for_segment(
+                    waveform=audio_for_labeler,
+                    sample_rate=sample_rate,
+                    timestamp=segment_timestamp,
+                    return_multiple=use_multiple,
+                    segment_id=segment_id,
+                )
             )
-        )
-        
-        # Add extraction info to metadata for debugging
-        speaker_metadata["speech_extraction"] = extraction_info
-        
+            speaker_metadata["speech_extraction"] = extraction_info
+
+        # ─────────────────────────────────────────────────────────────
+        # Console output
+        # ─────────────────────────────────────────────────────────────
         if len(speaker_results) > 1:
             speakers_str = ", ".join(
                 f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]

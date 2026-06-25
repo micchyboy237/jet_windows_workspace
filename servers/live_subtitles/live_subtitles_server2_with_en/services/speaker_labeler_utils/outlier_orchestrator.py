@@ -142,51 +142,113 @@ class OutlierOrchestrator:
         segment_id: str,
         audio_duration: float,
     ) -> Tuple[List[Dict], bool]:
-        """Promote matching outlier(s) to a full speaker."""
+        """Promote matching outlier(s) to a full speaker with validation.
+        
+        Improved logic:
+        1. Validate that the current embedding and outlier embedding are 
+        sufficiently similar (above threshold_same).
+        2. If below threshold_same but above threshold_possible, create the 
+        speaker but mark it as 'young' with low centroid quality.
+        3. Log all promotion validation details for traceability.
+        """
         labeler = self._labeler
         best_match = outlier_matches[0]
         matched_outlier = best_match.outlier_entry
-
+        
+        # --- NEW: Cross-validate the two embeddings ---
+        from scipy.spatial.distance import cdist
+        
+        outlier_emb = matched_outlier.embedding.reshape(1, -1) if matched_outlier.embedding.ndim == 1 else matched_outlier.embedding
+        current_emb = embedding.reshape(1, -1) if embedding.ndim == 1 else embedding
+        
+        cross_similarity = float(1.0 - cdist(outlier_emb, current_emb, metric="cosine")[0, 0])
+        
+        # Determine quality of the new speaker based on cross-similarity
+        if cross_similarity >= labeler.threshold_same:
+            quality_tier = "high"
+            match_type = "outlier_promotion_strong"
+        elif cross_similarity >= labeler.threshold_possible:
+            quality_tier = "medium"
+            match_type = "outlier_promotion_possible"
+        elif cross_similarity >= labeler.outlier_pool.promotion_threshold:
+            quality_tier = "low"
+            match_type = "outlier_promotion_weak"
+        else:
+            # Fallback: cross-similarity below promotion threshold —
+            # still promote but log a warning; the alternative is to keep
+            # the segment as a new outlier
+            quality_tier = "minimal"
+            match_type = "outlier_promotion_minimal"
+            if self.debug:
+                console.print(
+                    f"[yellow]⚠️  Low cross-similarity ({cross_similarity:.3f}) "
+                    f"between outlier {best_match.outlier_label} and current segment. "
+                    f"Promoting anyway but centroid quality will be low.[/]"
+                )
+        
+        # --- Create the new speaker ---
         new_label = labeler.create_new_speaker(
             embedding=matched_outlier.embedding,
             timestamp=matched_outlier.timestamp,
             segment_id=matched_outlier.segment_id,
             audio_duration=matched_outlier.audio_duration,
         )
+        
+        # Promote and remove outlier from pool
         labeler.outlier_pool.promote_single(
             label=best_match.outlier_label,
             timestamp=timestamp,
             target_speaker=new_label,
             confidence=best_match.confidence,
         )
+        
+        # Add current embedding with appropriate match_type
         labeler.update_reference(
             label=new_label,
             embedding=embedding,
             timestamp=timestamp,
             segment_id=segment_id,
             audio_duration=audio_duration,
-            match_type="early_match",
+            match_type=match_type,  # Now reflects actual quality
         )
-
+        
+        # --- NEW: Log detailed promotion analytics ---
+        outlier_age = matched_outlier.age
+        promotion_details = {
+            "new_speaker": new_label,
+            "outlier_label": best_match.outlier_label,
+            "outlier_age_s": round(outlier_age, 2),
+            "outlier_confidence": round(best_match.confidence, 4),
+            "cross_similarity": round(cross_similarity, 4),
+            "quality_tier": quality_tier,
+            "outlier_segment_id": matched_outlier.segment_id,
+            "current_segment_id": segment_id,
+        }
+        
         if self.debug:
             console.print(
-                f"[bold green]🎉 Outlier promotion: "
-                f"{best_match.outlier_label} → {new_label} "
-                f"(sim={best_match.confidence:.3f}, "
-                f"speakers={labeler.speaker_count})[/]"
+                f"[bold green]🎉 Outlier Promotion: "
+                f"{best_match.outlier_label} → {new_label}\n"
+                f"   Cross-sim: {cross_similarity:.3f} "
+                f"(tier: {quality_tier})\n"
+                f"   Outlier age: {outlier_age:.1f}s\n"
+                f"   Pool confidence: {best_match.confidence:.3f}\n"
+                f"   Speakers: {labeler.speaker_count}[/]"
             )
-
+        
         results = [{
             "label": new_label,
-            "confidence": best_match.confidence,
-            "match_type": "outlier_match",
+            "confidence": cross_similarity,  # Use cross-similarity, not pool confidence
+            "match_type": match_type,
             "is_primary": True,
             "is_new_speaker": True,
             "segment_count": labeler._speakers[new_label].segment_count,
             "last_seen": timestamp,
             "segment_id": segment_id,
             "promoted_from_outlier": True,
+            "promotion_details": promotion_details,  # Include for downstream analysis
         }]
+        
         return results, True
 
     # ------------------------------------------------------------------
