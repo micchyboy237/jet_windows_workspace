@@ -26,7 +26,6 @@ Metrics computed per model:
 
 All embeddings are cached to disk to avoid re-computation across runs.
 """
-
 from __future__ import annotations
 
 import json
@@ -45,36 +44,35 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 from rich.table import Table
 
-# ── Local import: your factory ───────────────────────────────────────────────
 from embedding_model_factory import (
     BaseEmbeddingModel,
     EmbeddingModelType,
+    EmbeddingThresholdProvider,
     create_embedding_model,
     list_available_models,
 )
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# ── Logger setup ──────────────────────────────────────────────────────────────
+console = Console()
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
-    handlers=[RichHandler(rich_tracebacks=True, markup=True)],
+    datefmt="[%X]",
+    handlers=[RichHandler(console=console, rich_tracebacks=True, markup=True)],
 )
-log = logging.getLogger("SpeakerEval")
-console = Console()
+log = logging.getLogger("evaluate_speaker_embeddings")
 
 AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".ogg", ".m4a"}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Data structures
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Data classes ──────────────────────────────────────────────────────────────
 
 @dataclass
 class Trial:
     """A single verification trial: two audio paths + ground truth label."""
     path_a: Path
     path_b: Path
-    label: int          # 1 = same speaker, 0 = different
+    label: int
 
     def __repr__(self) -> str:
         return f"Trial({self.path_a.name} vs {self.path_b.name}, label={self.label})"
@@ -85,20 +83,31 @@ class ModelMetrics:
     """Evaluation metrics for one embedding model."""
     model_type: str
     embedding_dim: int
-    eer: float                      # Equal Error Rate [0, 1]
-    eer_threshold: float            # Cosine threshold at EER
-    min_dcf: float                  # Minimum Detection Cost
-    intra_speaker_sim: float        # Avg cosine sim — same speaker
-    inter_speaker_sim: float        # Avg cosine sim — different speakers
-    separation: float               # intra_sim - inter_sim
-    avg_embed_time_ms: float        # Avg embedding extraction time
+    eer: float
+    eer_threshold: float
+    min_dcf: float
+    intra_speaker_sim: float
+    inter_speaker_sim: float
+    separation: float
+    avg_embed_time_ms: float
     n_speakers: int
     n_trials: int
     n_positive_trials: int
     n_negative_trials: int
     per_speaker_intra_sim: Dict[str, float] = field(default_factory=dict)
+    # Thresholds from EmbeddingThresholdProvider for reference
+    configured_same: Optional[float] = None
+    configured_possible: Optional[float] = None
+    configured_new_speaker: Optional[float] = None
 
     def summary(self) -> str:
+        thresh_str = ""
+        if self.configured_same is not None:
+            thresh_str = (
+                f" | Thresh(same={self.configured_same}, "
+                f"possible={self.configured_possible}, "
+                f"new_spk={self.configured_new_speaker})"
+            )
         return (
             f"[{self.model_type}] "
             f"EER={self.eer*100:.2f}% | "
@@ -107,21 +116,21 @@ class ModelMetrics:
             f"Inter={self.inter_speaker_sim:.4f} | "
             f"Sep={self.separation:.4f} | "
             f"Latency={self.avg_embed_time_ms:.1f}ms"
+            f"{thresh_str}"
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Dataset scanning
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Dataset utilities ─────────────────────────────────────────────────────────
 
 def scan_dataset(dataset_root: Path, min_utterances: int = 2) -> Dict[str, List[Path]]:
     """
     Walk dataset_root, treating each subdirectory as a speaker.
+
     Returns {speaker_id: [audio_path, ...]} for speakers with >= min_utterances files.
 
     Args:
-        dataset_root:     Root directory. Each sub-folder is one speaker.
-        min_utterances:   Drop speakers with fewer clips (can't form a pair).
+        dataset_root:   Root directory. Each sub-folder is one speaker.
+        min_utterances: Drop speakers with fewer clips (can't form a pair).
 
     Returns:
         Dict mapping speaker name → list of audio Paths.
@@ -151,10 +160,6 @@ def scan_dataset(dataset_root: Path, min_utterances: int = 2) -> Dict[str, List[
     return dict(speakers)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Trial generation
-# ─────────────────────────────────────────────────────────────────────────────
-
 def generate_trials(
     speakers: Dict[str, List[Path]],
     max_positive_per_speaker: int = 10,
@@ -168,21 +173,18 @@ def generate_trials(
     Negative trials: random cross-speaker pairs, scaled by neg_pos_ratio.
 
     Args:
-        speakers:                   Speaker → files mapping.
-        max_positive_per_speaker:   Cap on same-speaker pairs per speaker.
-        neg_pos_ratio:              Negatives per positive trial.
-        seed:                       RNG seed for reproducibility.
+        speakers:                 Speaker → files mapping.
+        max_positive_per_speaker: Cap on same-speaker pairs per speaker.
+        neg_pos_ratio:            Negatives per positive trial.
+        seed:                     RNG seed for reproducibility.
 
     Returns:
         Shuffled list of Trial objects.
     """
     rng = random.Random(seed)
-    trials: List[Trial] = []
-
     speaker_ids = list(speakers.keys())
-    all_files = [(spk, p) for spk, paths in speakers.items() for p in paths]
 
-    # ── Positive trials (same speaker) ───────────────────────────────────────
+    # Positive trials
     positive: List[Trial] = []
     for spk, files in speakers.items():
         pairs = [
@@ -196,12 +198,11 @@ def generate_trials(
 
     log.info(f"Generated [green]{len(positive)}[/green] positive trials")
 
-    # ── Negative trials (different speakers) ─────────────────────────────────
+    # Negative trials
     n_negative = int(len(positive) * neg_pos_ratio)
     negative: List[Trial] = []
     attempts = 0
     max_attempts = n_negative * 10
-
     while len(negative) < n_negative and attempts < max_attempts:
         spk_a, spk_b = rng.sample(speaker_ids, 2)
         a = rng.choice(speakers[spk_a])
@@ -217,9 +218,7 @@ def generate_trials(
     return trials
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Embedding extraction with caching
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Embedding extraction ──────────────────────────────────────────────────────
 
 def extract_embeddings(
     model: BaseEmbeddingModel,
@@ -228,19 +227,20 @@ def extract_embeddings(
 ) -> Tuple[Dict[Path, np.ndarray], float]:
     """
     Extract embeddings for all unique audio files.
+
     Caches results to {cache_dir}/{model_type}/{stem}.npy to avoid recomputation.
 
     Args:
-        model:          An instance of BaseEmbeddingModel.
-        audio_paths:    List of audio file paths (may contain duplicates).
-        cache_dir:      Directory to read/write .npy cache files.
+        model:       An instance of BaseEmbeddingModel.
+        audio_paths: List of audio file paths (may contain duplicates).
+        cache_dir:   Directory to read/write .npy cache files.
 
     Returns:
         (embeddings_dict, avg_time_ms)
         embeddings_dict: Path → np.ndarray of shape (1, dim)
         avg_time_ms:     Average time to compute one embedding (excluding cache hits)
     """
-    unique_paths = list(dict.fromkeys(audio_paths))   # preserve order, deduplicate
+    unique_paths = list(dict.fromkeys(audio_paths))
     model_name = model.model_type.value
     embeddings: Dict[Path, np.ndarray] = {}
     timings: List[float] = []
@@ -250,7 +250,7 @@ def extract_embeddings(
         model_cache.mkdir(parents=True, exist_ok=True)
 
     log.info(
-        f"[{model_name}] Extracting embeddings for "
+        f" Extracting embeddings for "
         f"{len(unique_paths)} unique files..."
     )
 
@@ -264,9 +264,8 @@ def extract_embeddings(
         task = progress.add_task(
             f"[cyan]Embedding [{model_name}]", total=len(unique_paths)
         )
-
         for path in unique_paths:
-            # ── Cache read ────────────────────────────────────────────────
+            # Cache hit
             if cache_dir is not None:
                 cache_file = model_cache / f"{path.stem}_{path.parent.name}.npy"
                 if cache_file.exists():
@@ -274,43 +273,37 @@ def extract_embeddings(
                     progress.advance(task)
                     continue
 
-            # ── Compute embedding ─────────────────────────────────────────
             try:
                 t0 = time.perf_counter()
-                emb = model(str(path))          # calls BaseEmbeddingModel.__call__
+                emb = model(str(path))
                 elapsed_ms = (time.perf_counter() - t0) * 1000
                 timings.append(elapsed_ms)
 
-                # Normalise to (1, dim) float32
                 if emb.ndim == 1:
                     emb = emb.reshape(1, -1)
                 emb = emb.astype(np.float32)
-
                 embeddings[path] = emb
 
-                # ── Cache write ───────────────────────────────────────────
                 if cache_dir is not None:
                     np.save(str(cache_file), emb)
 
             except Exception as exc:
-                log.error(f"[{model_name}] Failed on {path.name}: {exc}")
-                embeddings[path] = None   # mark as failed; handled in scoring
+                log.error(f"Failed on {path.name}: {exc}")
+                embeddings[path] = None
 
             progress.advance(task)
 
     avg_ms = float(np.mean(timings)) if timings else 0.0
     cache_hits = len(unique_paths) - len(timings)
     log.info(
-        f"[{model_name}] Done. "
+        f" Done. "
         f"Cache hits: {cache_hits}, Computed: {len(timings)}, "
         f"Avg time: {avg_ms:.1f} ms"
     )
     return embeddings, avg_ms
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Cosine similarity scoring
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Scoring and metrics ───────────────────────────────────────────────────────
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     """
@@ -342,16 +335,14 @@ def score_trials(
     """
     scores: List[float] = []
     labels: List[int] = []
-
     skipped = 0
+
     for trial in trials:
         emb_a = embeddings.get(trial.path_a)
         emb_b = embeddings.get(trial.path_b)
-
         if emb_a is None or emb_b is None:
             skipped += 1
             continue
-
         scores.append(cosine_similarity(emb_a, emb_b))
         labels.append(trial.label)
 
@@ -360,10 +351,6 @@ def score_trials(
 
     return np.array(scores, dtype=np.float32), np.array(labels, dtype=np.int32)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Metric computation
-# ─────────────────────────────────────────────────────────────────────────────
 
 def compute_eer(scores: np.ndarray, labels: np.ndarray) -> Tuple[float, float]:
     """
@@ -375,7 +362,6 @@ def compute_eer(scores: np.ndarray, labels: np.ndarray) -> Tuple[float, float]:
     Returns:
         (eer, threshold) both as floats in [0, 1].
     """
-    # Sort thresholds by score
     thresholds = np.unique(scores)
     min_diff = float("inf")
     eer = 0.5
@@ -385,8 +371,8 @@ def compute_eer(scores: np.ndarray, labels: np.ndarray) -> Tuple[float, float]:
     negative_scores = scores[labels == 0]
 
     for thresh in thresholds:
-        far = float(np.mean(negative_scores >= thresh))   # False Accept Rate
-        frr = float(np.mean(positive_scores < thresh))    # False Reject Rate
+        far = float(np.mean(negative_scores >= thresh))
+        frr = float(np.mean(positive_scores < thresh))
         diff = abs(far - frr)
         if diff < min_diff:
             min_diff = diff
@@ -424,7 +410,6 @@ def compute_min_dcf(
     thresholds = np.unique(scores)
     positive = scores[labels == 1]
     negative = scores[labels == 0]
-
     min_cost = float("inf")
     p_non_target = 1.0 - p_target
 
@@ -435,7 +420,6 @@ def compute_min_dcf(
         if cost < min_cost:
             min_cost = cost
 
-    # Normalise by the trivial system cost (always reject or always accept)
     default_cost = min(c_miss * p_target, c_fa * p_non_target)
     return min_cost / default_cost if default_cost > 0 else 0.0
 
@@ -454,7 +438,6 @@ def compute_speaker_similarities(
     Returns:
         (per_speaker_intra, mean_intra, mean_inter)
     """
-    # ── Intra-speaker: all pairs within each speaker ──────────────────────────
     per_speaker_intra: Dict[str, float] = {}
     all_intra: List[float] = []
 
@@ -471,11 +454,9 @@ def compute_speaker_similarities(
         per_speaker_intra[spk] = spk_mean
         all_intra.extend(pair_sims)
 
-    # ── Inter-speaker: sample cross-speaker pairs ─────────────────────────────
     speaker_ids = list(speakers.keys())
     all_inter: List[float] = []
     rng = random.Random(0)
-
     n_inter_samples = min(5000, len(all_intra) * 2)
     for _ in range(n_inter_samples):
         spk_a, spk_b = rng.sample(speaker_ids, 2)
@@ -488,13 +469,10 @@ def compute_speaker_similarities(
 
     mean_intra = float(np.mean(all_intra)) if all_intra else 0.0
     mean_inter = float(np.mean(all_inter)) if all_inter else 0.0
-
     return per_speaker_intra, mean_intra, mean_inter
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Per-model evaluation
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Model evaluation ──────────────────────────────────────────────────────────
 
 def evaluate_model(
     model_type: str,
@@ -509,18 +487,20 @@ def evaluate_model(
 
     Steps:
         1. Load model via factory.
-        2. Extract (cached) embeddings for all unique audio files.
-        3. Score all trials using cosine similarity.
-        4. Compute EER, minDCF.
-        5. Compute intra/inter speaker similarity.
+        2. Load and log configured thresholds from EmbeddingThresholdProvider.
+        3. Extract (cached) embeddings for all unique audio files.
+        4. Score all trials using cosine similarity.
+        5. Compute EER, minDCF.
+        6. Warn if configured thresholds are misaligned with EER threshold.
+        7. Compute intra/inter speaker similarity.
 
     Args:
-        model_type:    One of EmbeddingModelType values.
-        speakers:      Speaker → files mapping.
-        trials:        Pre-generated trial pairs.
-        cache_dir:     Embedding cache root.
-        device:        Torch device override.
-        model_kwargs:  Extra kwargs forwarded to create_embedding_model().
+        model_type:   One of EmbeddingModelType values.
+        speakers:     Speaker → files mapping.
+        trials:       Pre-generated trial pairs.
+        cache_dir:    Embedding cache root.
+        device:       Torch device override.
+        model_kwargs: Extra kwargs forwarded to create_embedding_model().
 
     Returns:
         Populated ModelMetrics object.
@@ -528,7 +508,6 @@ def evaluate_model(
     log.info(f"\n{'─'*60}")
     log.info(f"Evaluating model: [bold yellow]{model_type}[/bold yellow]")
 
-    # ── 1. Load model ─────────────────────────────────────────────────────────
     model = create_embedding_model(
         model_type=model_type,
         device=device,
@@ -536,27 +515,61 @@ def evaluate_model(
     )
     log.info(f"Model loaded: {model}")
 
-    # ── 2. Extract embeddings ─────────────────────────────────────────────────
+    # ── Load configured thresholds from EmbeddingThresholdProvider ────────────
+    configured_thresholds = None
+    try:
+        configured_thresholds = EmbeddingThresholdProvider.get_thresholds(model_type)
+        log.info(
+            f"[{model_type}] Configured thresholds — "
+            f"same={configured_thresholds.same}, "
+            f"possible={configured_thresholds.possible}, "
+            f"new_speaker={configured_thresholds.new_speaker}"
+        )
+    except ValueError as exc:
+        log.warning(f"[{model_type}] Could not load thresholds: {exc}")
+
+    # ── Extract embeddings ─────────────────────────────────────────────────────
     all_paths = list({p for t in trials for p in (t.path_a, t.path_b)})
     embeddings, avg_time_ms = extract_embeddings(model, all_paths, cache_dir)
 
-    # ── 3. Score trials ───────────────────────────────────────────────────────
+    # ── Score trials ───────────────────────────────────────────────────────────
     scores, labels = score_trials(trials, embeddings)
-    log.info(f"[{model_type}] Scored {len(scores)} trials")
+    log.info(f" Scored {len(scores)} trials")
 
-    # ── 4. EER + minDCF ───────────────────────────────────────────────────────
+    # ── EER and minDCF ─────────────────────────────────────────────────────────
     eer, eer_thresh = compute_eer(scores, labels)
     min_dcf = compute_min_dcf(scores, labels)
-    log.info(f"[{model_type}] EER={eer*100:.2f}% @ threshold={eer_thresh:.4f}")
-    log.info(f"[{model_type}] minDCF={min_dcf:.4f}")
+    log.info(f" EER={eer*100:.2f}% @ threshold={eer_thresh:.4f}")
+    log.info(f" minDCF={min_dcf:.4f}")
 
-    # ── 5. Intra / inter speaker similarity ───────────────────────────────────
+    # ── Calibration advisory ───────────────────────────────────────────────────
+    if configured_thresholds is not None:
+        ratio = (
+            configured_thresholds.same / eer_thresh
+            if eer_thresh > 0 else float("inf")
+        )
+        if ratio > 2.5:
+            log.warning(
+                f"[{model_type}] [bold red]Threshold mismatch[/bold red]: "
+                f"configured same={configured_thresholds.same} is "
+                f"{ratio:.1f}× the EER threshold ({eer_thresh:.4f}). "
+                f"Update EmbeddingThresholdProvider._THRESHOLDS."
+            )
+        else:
+            log.info(
+                f"[{model_type}] Threshold check OK: "
+                f"configured same={configured_thresholds.same} "
+                f"vs EER threshold={eer_thresh:.4f} "
+                f"(ratio={ratio:.2f})"
+            )
+
+    # ── Speaker similarity stats ───────────────────────────────────────────────
     per_spk_intra, intra_sim, inter_sim = compute_speaker_similarities(
         speakers, embeddings
     )
     separation = intra_sim - inter_sim
     log.info(
-        f"[{model_type}] Intra={intra_sim:.4f} | "
+        f" Intra={intra_sim:.4f} | "
         f"Inter={inter_sim:.4f} | Sep={separation:.4f}"
     )
 
@@ -575,16 +588,24 @@ def evaluate_model(
         n_positive_trials=int(np.sum(labels == 1)),
         n_negative_trials=int(np.sum(labels == 0)),
         per_speaker_intra_sim=per_spk_intra,
+        configured_same=(
+            configured_thresholds.same if configured_thresholds else None
+        ),
+        configured_possible=(
+            configured_thresholds.possible if configured_thresholds else None
+        ),
+        configured_new_speaker=(
+            configured_thresholds.new_speaker if configured_thresholds else None
+        ),
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Multi-model comparison
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Results display and persistence ──────────────────────────────────────────
 
 def compare_models(results: List[ModelMetrics]) -> None:
     """
     Print a ranked comparison table for all evaluated models.
+
     Rank order: EER ascending (lower is better).
 
     Args:
@@ -601,23 +622,35 @@ def compare_models(results: List[ModelMetrics]) -> None:
     table.add_column("Model", min_width=20)
     table.add_column("Dim", justify="right")
     table.add_column("EER ↓", justify="right")
+    table.add_column("EER Thresh", justify="right")
     table.add_column("minDCF ↓", justify="right")
     table.add_column("Intra ↑", justify="right")
     table.add_column("Inter ↓", justify="right")
     table.add_column("Sep ↑", justify="right")
+    table.add_column("Cfg Same", justify="right")
     table.add_column("ms/file ↓", justify="right")
 
     for rank, m in enumerate(ranked, start=1):
         style = "bold green" if rank == 1 else ""
+        cfg_same = f"{m.configured_same:.3f}" if m.configured_same is not None else "—"
+        # Flag mismatch visually
+        if (
+            m.configured_same is not None
+            and m.eer_threshold > 0
+            and m.configured_same / m.eer_threshold > 2.5
+        ):
+            cfg_same = f"[red]{cfg_same}[/red]"
         table.add_row(
             str(rank),
             m.model_type,
             str(m.embedding_dim),
             f"{m.eer*100:.2f}%",
+            f"{m.eer_threshold:.4f}",
             f"{m.min_dcf:.4f}",
             f"{m.intra_speaker_sim:.4f}",
             f"{m.inter_speaker_sim:.4f}",
             f"{m.separation:.4f}",
+            cfg_same,
             f"{m.avg_embed_time_ms:.1f}",
             style=style,
         )
@@ -626,54 +659,60 @@ def compare_models(results: List[ModelMetrics]) -> None:
     console.print(table)
     console.print(
         "\n[dim]↓ = lower is better   ↑ = higher is better   "
-        "Sep = Intra − Inter (discrimination power)[/dim]\n"
+        "Sep = Intra − Inter   Cfg Same = configured same-speaker threshold[/dim]\n"
     )
 
 
 def save_results(results: List[ModelMetrics], output_dir: Path) -> None:
     """
     Save all ModelMetrics to JSON and a markdown summary.
+
     Args:
         results:    List of evaluated model metrics.
         output_dir: Directory to write results into.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save JSON results
+
     json_path = output_dir / "results.json"
     data = [asdict(m) for m in results]
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, default=str)
     log.info(f"Results saved to [green]{json_path}[/green]")
-    
-    # Save Markdown summary
+
     md_path = output_dir / "summary.md"
     ranked = sorted(results, key=lambda m: m.eer)
     lines = [
         "# Speaker Embedding Model Evaluation\n",
-        "| Rank | Model | Dim | EER ↓ | minDCF ↓ | Intra ↑ | Inter ↓ | Sep ↑ | ms/file ↓ |",
-        "|------|-------|-----|-------|----------|---------|---------|-------|-----------|",
+        "| Rank | Model | Dim | EER ↓ | EER Thresh | minDCF ↓ | Intra ↑ | Inter ↓ | Sep ↑ | Cfg Same | ms/file ↓ |",
+        "|------|-------|-----|-------|------------|----------|---------|---------|-------|----------|-----------|",
     ]
     for rank, m in enumerate(ranked, 1):
+        cfg_same = f"{m.configured_same:.3f}" if m.configured_same is not None else "—"
+        mismatch = (
+            m.configured_same is not None
+            and m.eer_threshold > 0
+            and m.configured_same / m.eer_threshold > 2.5
+        )
+        if mismatch:
+            cfg_same = f"⚠ {cfg_same}"
         lines.append(
             f"| {rank} | {m.model_type} | {m.embedding_dim} "
-            f"| {m.eer*100:.2f}% | {m.min_dcf:.4f} "
+            f"| {m.eer*100:.2f}% | {m.eer_threshold:.4f} | {m.min_dcf:.4f} "
             f"| {m.intra_speaker_sim:.4f} | {m.inter_speaker_sim:.4f} "
-            f"| {m.separation:.4f} | {m.avg_embed_time_ms:.1f} |"
+            f"| {m.separation:.4f} | {cfg_same} | {m.avg_embed_time_ms:.1f} |"
         )
     lines += [
         "",
         "> ↓ = lower is better | ↑ = higher is better | Sep = Intra − Inter",
+        "> Cfg Same = configured same-speaker threshold from EmbeddingThresholdProvider",
+        "> ⚠ = configured threshold is >2.5× the observed EER threshold (needs recalibration)",
         f"\n**Dataset:** {ranked[0].n_speakers} speakers, {ranked[0].n_trials} trials",
     ]
-    # Fix: Specify UTF-8 encoding to handle Unicode characters
     md_path.write_text("\n".join(lines), encoding="utf-8")
     log.info(f"Summary saved to [green]{md_path}[/green]")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Main entry point
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Top-level runner ──────────────────────────────────────────────────────────
 
 def run_evaluation(
     dataset_root: Path,
@@ -709,7 +748,6 @@ def run_evaluation(
     log.info("[bold green]Speaker Embedding Evaluation[/bold green]")
     log.info(f"Dataset: {dataset_root}")
 
-    # ── Resolve models to evaluate ────────────────────────────────────────────
     if model_types is None:
         model_types = [e.value for e in EmbeddingModelType]
     log.info(f"Models to evaluate: {model_types}")
@@ -721,19 +759,16 @@ def run_evaluation(
                 f"Unknown model '{m}'. Available: {list(available.keys())}"
             )
 
-    # ── Device ────────────────────────────────────────────────────────────────
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info(f"Device: [bold]{device}[/bold]")
 
-    # ── Scan dataset ──────────────────────────────────────────────────────────
     speakers = scan_dataset(dataset_root, min_utterances=min_utterances)
     if len(speakers) < 2:
         raise ValueError(
             f"Need at least 2 speakers. Found: {len(speakers)}"
         )
 
-    # ── Generate trials once (shared across all models) ───────────────────────
     trials = generate_trials(
         speakers,
         max_positive_per_speaker=max_positive_per_speaker,
@@ -741,7 +776,6 @@ def run_evaluation(
         seed=seed,
     )
 
-    # ── Evaluate each model ───────────────────────────────────────────────────
     results: List[ModelMetrics] = []
     model_kwargs = model_kwargs or {}
 
@@ -762,16 +796,16 @@ def run_evaluation(
             import traceback
             traceback.print_exc()
 
-    # ── Print comparison table ────────────────────────────────────────────────
     if results:
         compare_models(results)
 
-    # ── Save results ──────────────────────────────────────────────────────────
     if output_dir and results:
         save_results(results, output_dir)
 
     return results
 
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     from main._main_evaluate_speaker_embeddings import _parse_args
