@@ -91,33 +91,25 @@ class EmbeddingThresholdProvider:
     """
 
     _THRESHOLDS: Dict[EmbeddingModelType, EmbeddingThresholds] = {
-        # pyannote embeddings live in a low similarity range (intra ~0.27).
-        # Old thresholds (same=0.75) were ~5× too high and would never match.
         EmbeddingModelType.PYANNOTE: EmbeddingThresholds(
-            same=0.20,          # EER_thresh(0.153) + 0.05
-            possible=0.13,      # midpoint(0.274, 0.108) ≈ 0.19 → conservative
-            new_speaker=0.14,   # inter(0.108) + 0.03
+            same=0.75,
+            possible=0.50,
+            new_speaker=0.30,
         ),
-        # SpeechBrain ECAPA also lives in a low range (intra ~0.32).
-        # Old thresholds (same=0.65) were ~6× the EER threshold.
         EmbeddingModelType.SPEECHBRAIN_ECAPA: EmbeddingThresholds(
-            same=0.23,          # EER_thresh(0.105) + 0.12 — intra is modest
-            possible=0.17,      # midpoint(0.320, 0.142) ≈ 0.23 → keep below same
-            new_speaker=0.17,   # inter(0.142) + 0.03
+            same=0.65,
+            possible=0.40,
+            new_speaker=0.25,
         ),
-        # NeMo TitaNet has the best discrimination (Sep=0.416, EER=18.75%).
-        # Old threshold (same=0.70) was ~2× too high.
         EmbeddingModelType.NEMO_TITANET: EmbeddingThresholds(
-            same=0.50,          # EER_thresh(0.357) + 0.14 — wide intra range needs buffer
-            possible=0.35,      # midpoint(0.620, 0.204) ≈ 0.41 → conservative
-            new_speaker=0.23,   # inter(0.204) + 0.03
+            same=0.70,
+            possible=0.45,
+            new_speaker=0.25,
         ),
-        # ModelScope ERes2NetV2 has best minDCF (0.375) and highest intra (0.64).
-        # Old threshold (same=0.70) was ~1.5× the EER threshold — closest but still high.
         EmbeddingModelType.MODELSCOPE_ERES2NETV2: EmbeddingThresholds(
-            same=0.55,          # EER_thresh(0.465) + 0.08
-            possible=0.40,      # midpoint(0.640, 0.271) ≈ 0.46 → conservative
-            new_speaker=0.30,   # inter(0.271) + 0.03
+            same=0.70,
+            possible=0.55,
+            new_speaker=0.35,
         ),
     }
 
