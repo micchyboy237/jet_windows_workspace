@@ -17,7 +17,7 @@ from core.state import (
 )
 from services.live_subtitles_server_utils import load_segment_counter
 from routes.websocket import websocket_endpoint
-# from routes.speakers import router as speakers_router
+from routes.speakers import router as speakers_router
 from routes.speakers_metrics import router as speakers_metrics_router
 from routes.segments import router as segments_router
 from routes.transcribe import router as transcribe_router
@@ -58,7 +58,7 @@ static_dir = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 app.add_api_websocket_route("/ws/live-subtitles", websocket_endpoint)
-# app.include_router(speakers_router)
+app.include_router(speakers_router)
 app.include_router(speakers_metrics_router)
 app.include_router(segments_router)
 app.include_router(transcribe_router)
@@ -213,18 +213,18 @@ if __name__ == "__main__":
     logger.info("📋 REST endpoints:")
     logger.info("   POST /transcribe")
     logger.info("   POST /translate")
-    # logger.info("")
-    # logger.info("📋 Speaker Labeling endpoints:")
-    # logger.info("   GET  /speakers")
-    # logger.info("   GET  /speakers/status")
-    # logger.info("   GET  /speakers/similarities")
-    # logger.info("   POST /speakers/consolidate")
-    # logger.info("   POST /speakers/reset")
-    # logger.info("   POST /speakers/merge")
-    # logger.info("   GET  /speakers/dashboard")
-    # logger.info("   GET  /speakers/plots")
-    # logger.info("   GET  /speakers/plot/{plot_name}")
-    # logger.info("   GET  /speakers/data/export")
+    logger.info("")
+    logger.info("📋 Speaker Labeling endpoints:")
+    logger.info("   GET  /speakers")
+    logger.info("   GET  /speakers/status")
+    logger.info("   GET  /speakers/similarities")
+    logger.info("   POST /speakers/consolidate")
+    logger.info("   POST /speakers/reset")
+    logger.info("   POST /speakers/merge")
+    logger.info("   GET  /speakers/dashboard")
+    logger.info("   GET  /speakers/plots")
+    logger.info("   GET  /speakers/plot/{plot_name}")
+    logger.info("   GET  /speakers/data/export")
     logger.info("")
     logger.info("📁 Segment endpoints:")
     logger.info("   GET  /segments [HTML]")
