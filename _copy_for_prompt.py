@@ -54,12 +54,10 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_utils.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_config.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_config.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\outlier_orchestrator.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\outlier_pool.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\speaker_maintenance.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers_metrics.py",
     r"",
 ]
 
@@ -83,9 +81,15 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Will the centroids be healthy with only the core embeddings affecting the centroid?
-Are all the core segments close to the centroid?
-Is the outliers and speaker promotion logic robust?
+Please correct these JSON API paths
+
+http://192.168.68.150:8000/speakers/metrics/api/overview
+http://192.168.68.150:8000/speakers/metrics/api/speakers
+http://192.168.68.150:8000/speakers/metrics/api/speakers/SPEAKER_01
+http://192.168.68.150:8000/speakers/metrics/api/segments
+http://192.168.68.150:8000/speakers/metrics/api/separation
+http://192.168.68.150:8000/speakers/metrics/api/outliers
+http://192.168.68.150:8000/speakers/metrics/api/timeline
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from rich.console import Console
 from services.config import TEMPLATES_DIR
+from services.serialization_utils import serialize
 
 console = Console()
 
@@ -297,7 +298,7 @@ async def metrics_overview_json():
     try:
         metrics = labeler.get_speaker_metrics()
         console.print("[info]Returning metrics overview JSON[/]")
-        return JSONResponse(content=metrics)
+        return JSONResponse(content=serialize(metrics))
     except Exception as e:
         console.print(f"[error]Error in metrics_overview_json: {e}[/]")
         raise HTTPException(status_code=500, detail=str(e))
