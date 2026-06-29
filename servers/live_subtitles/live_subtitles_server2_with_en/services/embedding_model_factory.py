@@ -96,25 +96,25 @@ class EmbeddingThresholdProvider:
             same=0.75,
             possible=0.50,
             new_speaker=0.30,
-            promotion=0.70,
+            promotion=0.55,
         ),
         EmbeddingModelType.SPEECHBRAIN_ECAPA: EmbeddingThresholds(
             same=0.65,
             possible=0.40,
             new_speaker=0.25,
-            promotion=0.75,
+            promotion=0.55,
         ),
         EmbeddingModelType.NEMO_TITANET: EmbeddingThresholds(
             same=0.70,
             possible=0.45,
             new_speaker=0.25,
-            promotion=0.75,
+            promotion=0.55,
         ),
         EmbeddingModelType.MODELSCOPE_ERES2NETV2: EmbeddingThresholds(
             same=0.70,
             possible=0.55,
             new_speaker=0.35,
-            promotion=0.65,
+            promotion=0.55,
         ),
     }
 

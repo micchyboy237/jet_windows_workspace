@@ -513,6 +513,7 @@ def main():
         create_embedding_model,
         list_available_models,
     )
+    from audio_tagger import AudioTagger
 
     console = Console()
     
@@ -550,16 +551,21 @@ def main():
         help=f"Similarity threshold for new speaker creation (default: {DEFAULT_THRESHOLD_NEW_SPEAKER})",
     )
     parser.add_argument(
-        "--no-viz",
-        action="store_true",
-        help="Skip visualization generation",
-    )
-    parser.add_argument(
-        "--embedding-model",
+        "-emb", "--embedding-model",
         type=str,
         default="pyannote",
         choices=[e.value for e in EmbeddingModelType],
         help="Speaker embedding model backend.",
+    )
+    parser.add_argument(
+        "--use-tagger",
+        action="store_true",
+        help="Use audio tagger for preprocessing",
+    )
+    parser.add_argument(
+        "--no-viz",
+        action="store_true",
+        help="Skip visualization generation",
     )
     args = parser.parse_args()
     
@@ -596,8 +602,14 @@ def main():
     ):
         embedding_model = create_embedding_model(MODEL_TYPE)
     
+    tagger = None
+
+    if args.use_tagger:
+        tagger = AudioTagger()
+
     labeler = SegmentSpeakerLabeler(
         embedding_model=embedding_model,
+        audio_tagger=tagger,
         threshold_same=args.threshold_same,
         threshold_possible=args.threshold_possible,
         threshold_new_speaker=args.threshold_new_speaker,

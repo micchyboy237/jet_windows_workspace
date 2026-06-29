@@ -63,6 +63,7 @@ try:
         SpeechSegmentResult,
         AudioSegmentsResult,
     )
+    from services.dtype_conversion import convert_audio_dtype
 except ImportError:
     from audio_utils import AudioInput, load_audio
     from audio_config import (
@@ -113,6 +114,7 @@ except ImportError:
         SpeechSegmentResult,
         AudioSegmentsResult,
     )
+    from dtype_conversion import convert_audio_dtype
 
 install_rich_traceback(show_locals=True)
 
@@ -1750,20 +1752,17 @@ class AudioTagger:
             )
         )
         
-        # Load the full waveform first (we need sample-accurate trimming)
-        try:
-            waveform, actual_sr = load_audio(
-                audio, sr=sample_rate or SAMPLE_RATE, mono=True
-            )
-        except Exception as e:
-            console.print(f"[red]❌ Failed to load audio: {e}[/red]")
-            raise
+        # Convert dtype
+        audio_int16 = convert_audio_dtype(audio, "int16")
+        audio = audio_int16
+
+        waveform = audio
         
         total_samples = len(waveform)
-        total_duration = total_samples / actual_sr
+        total_duration = total_samples / sample_rate
         console.print(
             f"[dim]📊 Audio loaded: {total_duration:.2f}s, "
-            f"{actual_sr}Hz, {total_samples} samples[/dim]"
+            f"{sample_rate}Hz, {total_samples} samples[/dim]"
         )
         
         # Tag chunks to identify speech regions
@@ -1820,8 +1819,8 @@ class AudioTagger:
         # Extract speech portions from waveform
         trimmed_waveforms = []
         for start_sec, end_sec in speech_segments:
-            start_sample = int(start_sec * actual_sr)
-            end_sample = int(end_sec * actual_sr)
+            start_sample = int(start_sec * sample_rate)
+            end_sample = int(end_sec * sample_rate)
             start_sample = max(0, start_sample)
             end_sample = min(total_samples, end_sample)
             if end_sample > start_sample:
@@ -1832,7 +1831,7 @@ class AudioTagger:
             return np.array([], dtype=np.float32)
         
         result = np.concatenate(trimmed_waveforms)
-        result_duration = len(result) / actual_sr
+        result_duration = len(result) / sample_rate
         reduction_pct = (1 - len(result) / total_samples) * 100 if total_samples > 0 else 0
         
         console.print(
