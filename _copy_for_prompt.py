@@ -57,6 +57,11 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_config.py",
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\segment_types.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\speaker_types.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_metrics_mixin.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\helpers\speaker_metrics.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers_metrics.py",
     r"",
 ]
@@ -81,15 +86,11 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Please correct these JSON API paths
-
-http://192.168.68.150:8000/speakers/metrics/api/overview
-http://192.168.68.150:8000/speakers/metrics/api/speakers
-http://192.168.68.150:8000/speakers/metrics/api/speakers/SPEAKER_01
-http://192.168.68.150:8000/speakers/metrics/api/segments
-http://192.168.68.150:8000/speakers/metrics/api/separation
-http://192.168.68.150:8000/speakers/metrics/api/outliers
-http://192.168.68.150:8000/speakers/metrics/api/timeline
+Now given these criteria, write JSON and HTML endpoints that displays all metrics properly.
+Create the proper html templates and sub templates under "servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics".
+Write the SpeakerMetricsMixin class for the proper methods formatting the existing data available from SegmentSpeakerLabeler such as self._speakers, self._segment_groups, etc., whichever will contain the info covering all the criteria.
+Write modular, reusable and testable code for speaker_metrics.py
+You may write multiple html pages with detail pages for each speaker and segment. Try to have a base page with navigation.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
