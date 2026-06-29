@@ -1,0 +1,148 @@
+<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/overview.html -->
+{% extends "base.html" %}
+{% block title %}Speaker Metrics Overview{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>📊 Speaker System Overview</h1>
+    <p>Comprehensive health metrics for the speaker labeling system</p>
+  </div>
+  <!-- Overall Health Score -->
+  <div class="card" style="text-align: center;">
+    <div style="font-size: 14px;
+                color: var(--text-secondary);
+                text-transform: uppercase;
+                letter-spacing: 0.5px">Overall Health Score</div>
+    <div style="font-size: 64px;
+                font-weight: 700;
+                color: {% if metrics.overall_status == 'excellent' %}var(--accent-green) {% elif metrics.overall_status == 'good' %}var(--accent-blue) {% elif metrics.overall_status == 'fair' %}var(--accent-yellow) {% else %}var(--accent-red){% endif %}">
+      {{ "%.0f"|format(metrics.overall_health_score * 100) }}%
+    </div>
+    <div>
+      <span class="badge {% if metrics.overall_status == 'excellent' %}badge-green {% elif metrics.overall_status == 'good' %}badge-blue {% elif metrics.overall_status == 'fair' %}badge-yellow {% else %}badge-red{% endif %}">
+        {{ metrics.overall_status | upper }}
+      </span>
+    </div>
+    <div class="score-bar" style="max-width: 400px; margin: 16px auto 0;">
+      <div class="score-bar-fill {% if metrics.overall_health_score >= 0.8 %}green {% elif metrics.overall_health_score >= 0.5 %}yellow {% else %}red{% endif %}"
+           style="width: {{ (metrics.overall_health_score * 100) | int }}%"></div>
+    </div>
+  </div>
+  <!-- System Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value blue">{{ metrics.system_stats.total_segments_processed }}</div>
+      <div class="stat-label">Segments Processed</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value purple">{{ metrics.system_stats.active_speakers }}</div>
+      <div class="stat-label">Active Speakers</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value green">{{ metrics.system_stats.total_speakers_created }}</div>
+      <div class="stat-label">Total Speakers Created</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value yellow">{{ metrics.system_stats.merge_count }}</div>
+      <div class="stat-label">Merges Performed</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value red">{{ metrics.system_stats.rejected_updates }}</div>
+      <div class="stat-label">Rejected Updates</div>
+    </div>
+  </div>
+  <!-- Category Breakdown -->
+  <div class="two-col">
+    <!-- Cohesion -->
+    <div class="card">
+      <div class="card-header">🔗 Speaker Cohesion</div>
+      <div style="margin-bottom: 12px;">
+        <span style="font-size: 24px;
+                     font-weight: 700;
+                     color: {% if metrics.cohesion.average_score and metrics.cohesion.average_score >= 0.7 %}var(--accent-green) {% elif metrics.cohesion.average_score and metrics.cohesion.average_score >= 0.5 %}var(--accent-yellow) {% else %}var(--accent-red){% endif %}">
+          {{ "%.1f"|format((metrics.cohesion.average_score or 0) * 100) }}%
+        </span>
+        <span style="color: var(--text-secondary); font-size: 14px;">avg cohesion</span>
+      </div>
+      <div class="score-bar" style="margin-bottom: 16px;">
+        <div class="score-bar-fill {% if metrics.cohesion.average_score and metrics.cohesion.average_score >= 0.7 %}green {% elif metrics.cohesion.average_score and metrics.cohesion.average_score >= 0.5 %}yellow {% else %}red{% endif %}"
+             style="width: {{ ((metrics.cohesion.average_score or 0) * 100) | int }}%"></div>
+      </div>
+      <div style="display: flex; gap: 16px; font-size: 14px;">
+        <span>✅ {{ metrics.cohesion.healthy }} healthy</span>
+        <span>⚠️ {{ metrics.cohesion.warning }} warning</span>
+        <span>🔴 {{ metrics.cohesion.critical }} critical</span>
+      </div>
+    </div>
+    <!-- Separation -->
+    <div class="card">
+      <div class="card-header">↔️ Speaker Separation</div>
+      <div style="margin-bottom: 12px;">
+        <span style="font-size: 24px;
+                     font-weight: 700;
+                     color: {% if metrics.separation.mean_separation and metrics.separation.mean_separation >= 0.5 %}var(--accent-green) {% elif metrics.separation.mean_separation and metrics.separation.mean_separation >= 0.3 %}var(--accent-yellow) {% else %}var(--accent-red){% endif %}">
+          {{ "%.1f"|format((metrics.separation.mean_separation or 0) * 100) }}%
+        </span>
+        <span style="color: var(--text-secondary); font-size: 14px;">mean separation</span>
+      </div>
+      <div class="score-bar" style="margin-bottom: 16px;">
+        <div class="score-bar-fill {% if metrics.separation.mean_separation and metrics.separation.mean_separation >= 0.5 %}green {% elif metrics.separation.mean_separation and metrics.separation.mean_separation >= 0.3 %}yellow {% else %}red{% endif %}"
+             style="width: {{ ((metrics.separation.mean_separation or 0) * 100) | int }}%"></div>
+      </div>
+      <div style="font-size: 14px;">
+        <span>🔍 {{ metrics.separation.ambiguous_pairs }} ambiguous pairs</span>
+        <span style="margin-left: 12px; color: var(--text-secondary);">{{ metrics.separation.health }}</span>
+      </div>
+    </div>
+  </div>
+  <!-- Segment Health -->
+  <div class="card">
+    <div class="card-header">📋 Segment Labeling Health</div>
+    <div class="stats-grid" style="margin-bottom: 0;">
+      <div class="stat-card">
+        <div class="stat-value blue">{{ "%.1f"|format((metrics.segment_health.mean_confidence or 0) * 100) }}%</div>
+        <div class="stat-label">Mean Confidence</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value purple">{{ "%.1f"|format((metrics.segment_health.temporal_consistency or 0) * 100) }}%</div>
+        <div class="stat-label">Temporal Consistency</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value {% if metrics.segment_health.status == 'healthy' %}green {% elif metrics.segment_health.status == 'fair' %}yellow {% else %}red{% endif %}">
+          {{ metrics.segment_health.status | upper }}
+        </div>
+        <div class="stat-label">Status</div>
+      </div>
+    </div>
+  </div>
+  <!-- Outlier Health -->
+  <div class="card">
+    <div class="card-header">📦 Outlier Pool Health</div>
+    <div class="stats-grid" style="margin-bottom: 0;">
+      <div class="stat-card">
+        <div class="stat-value yellow">{{ metrics.outlier_health.active_outliers }}</div>
+        <div class="stat-label">Active Outliers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value green">{{ metrics.outlier_health.total_promotions }}</div>
+        <div class="stat-label">Promotions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value {% if metrics.outlier_health.status == 'healthy' %}green {% elif metrics.outlier_health.status == 'normal' %}blue {% else %}yellow{% endif %}">
+          {{ metrics.outlier_health.status | upper }}
+        </div>
+        <div class="stat-label">Status</div>
+      </div>
+    </div>
+  </div>
+  <!-- Recommendations -->
+  {% if metrics.recommendations %}
+    <div class="card">
+      <div class="card-header">💡 Recommendations</div>
+      <ul class="recommendation-list">
+        {% for rec in metrics.recommendations %}
+          <li>{{ rec }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+{% endblock %}

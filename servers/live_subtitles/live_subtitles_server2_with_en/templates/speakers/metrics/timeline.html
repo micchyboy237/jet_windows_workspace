@@ -1,0 +1,110 @@
+<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/timeline.html -->
+{% extends "base.html" %}
+{% block title %}Speaker Timeline - Metrics{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>⏱️ Speaker Activity Timeline</h1>
+    <p>Visual representation of speaker activity across segments</p>
+  </div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value blue">{{ timeline.total_segments }}</div>
+      <div class="stat-label">Total Segments</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value purple">{{ timeline.unique_speakers }}</div>
+      <div class="stat-label">Unique Speakers</div>
+    </div>
+  </div>
+  <!-- Speaker Color Legend -->
+  <div class="card">
+    <div class="card-header">🎨 Speaker Legend</div>
+    <div class="speaker-colors" id="speaker-legend"></div>
+  </div>
+  <!-- Timeline Visualization -->
+  <div class="card">
+    <div class="card-header">📈 Segment Timeline</div>
+    <div class="timeline-bar" id="timeline-bar"></div>
+    <p style="color: var(--text-secondary);
+              font-size: 12px;
+              margin-top: 8px">Hover over segments to see details. Each color represents a different speaker.</p>
+  </div>
+  <!-- Segment Table -->
+  <div class="card">
+    <div class="card-header">📋 Segment List</div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Segment ID</th>
+            <th>Timestamp</th>
+            <th>Duration</th>
+            <th>Speaker</th>
+            <th>Confidence</th>
+            <th>Match Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for seg in timeline.timeline %}
+            <tr>
+              <td>{{ seg.index }}</td>
+              <td><code>{{ seg.segment_id[:16] }}...</code></td>
+              <td>{{ "%.2f"|format(seg.timestamp) }}s</td>
+              <td>{{ "%.2f"|format(seg.audio_duration) }}s</td>
+              <td><strong>{{ seg.primary_label }}</strong></td>
+              <td>{{ "%.3f"|format(seg.primary_confidence) }}</td>
+              <td><span class="badge badge-blue">{{ seg.match_type }}</span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
+{% block extra_scripts %}
+  <script>
+    // Color palette for speakers
+    const colors = [
+        '#58a6ff', '#3fb950', '#f0883e', '#a371f7', '#f85149',
+        '#d2991d', '#7ee787', '#db6d28', '#d2a8ff', '#ff7b72',
+        '#79c0ff', '#56d364', '#e3b341', '#bc8cff', '#ffa198'
+    ];
+    
+    const timeline = {{ timeline.timeline | tojson }};
+    const speakers = {{ timeline.speakers | tojson }};
+    
+    // Build color map
+    const speakerColors = {};
+    speakers.forEach((speaker, i) => {
+        speakerColors[speaker] = colors[i % colors.length];
+    });
+    
+    // Render legend
+    const legendEl = document.getElementById('speaker-legend');
+    speakers.forEach(speaker => {
+        const item = document.createElement('div');
+        item.className = 'speaker-color-item';
+        item.innerHTML = `
+            <div class="speaker-color-swatch" style="background: ${speakerColors[speaker]};"></div>
+            <span>${speaker}</span>
+        `;
+        legendEl.appendChild(item);
+    });
+    
+    // Render timeline
+    const timelineEl = document.getElementById('timeline-bar');
+    if (timeline.length > 0) {
+        timeline.forEach(seg => {
+            const div = document.createElement('div');
+            div.className = 'timeline-segment';
+            div.style.background = speakerColors[seg.primary_label] || '#30363d';
+            div.title = `#${seg.index}: ${seg.primary_label} (${seg.primary_confidence.toFixed(3)}) at ${seg.timestamp.toFixed(2)}s`;
+            div.addEventListener('click', () => {
+                alert(`Segment #${seg.index}\nSpeaker: ${seg.primary_label}\nConfidence: ${seg.primary_confidence.toFixed(3)}\nTimestamp: ${seg.timestamp.toFixed(2)}s\nDuration: ${seg.audio_duration.toFixed(2)}s`);
+            });
+            timelineEl.appendChild(div);
+        });
+    }
+  </script>
+{% endblock %}

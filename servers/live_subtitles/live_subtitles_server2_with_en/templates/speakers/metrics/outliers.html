@@ -1,0 +1,78 @@
+<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/outliers.html -->
+{% extends "base.html" %}
+{% block title %}Outlier Pool - Metrics{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>📦 Outlier Pool Health</h1>
+    <p>Status of the outlier buffer and promotion history</p>
+  </div>
+  {% if not outlier_health.enabled %}
+    <div class="card">
+      <div class="card-header">ℹ️ Outlier Buffer Disabled</div>
+      <p style="color: var(--text-secondary);">The outlier buffer is currently disabled. Enable it with <code>use_outlier_buffer=True</code>.</p>
+    </div>
+  {% else %}
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value yellow">{{ outlier_health.active_outliers }}</div>
+        <div class="stat-label">Active Outliers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value green">{{ outlier_health.total_promotions }}</div>
+        <div class="stat-label">Total Promotions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value blue">{{ "%.1f"|format(outlier_health.promotion_rate * 100) }}%</div>
+        <div class="stat-label">Promotion Rate</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value red">{{ outlier_health.old_outliers }}</div>
+        <div class="stat-label">Stale Outliers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value {% if outlier_health.status == 'healthy' %}green {% elif outlier_health.status == 'normal' %}blue {% else %}yellow{% endif %}">
+          {{ outlier_health.status | upper }}
+        </div>
+        <div class="stat-label">Status</div>
+      </div>
+    </div>
+    <!-- Promotion History -->
+    {% if outlier_health.promotions %}
+      <div class="card">
+        <div class="card-header">📜 Recent Promotions</div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Outlier Labels</th>
+                <th>Target Speaker</th>
+                <th>Confidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for promo in outlier_health.promotions | reverse %}
+                <tr>
+                  <td><span class="badge badge-purple">{{ promo.type }}</span></td>
+                  <td>
+                    {% for label in promo.outlier_labels %}
+                      <code>{{ label }}</code>
+                      {% if not loop.last %},{% endif %}
+                    {% endfor %}
+                  </td>
+                  <td><strong>{{ promo.target_speaker }}</strong></td>
+                  <td>{{ "%.3f"|format(promo.confidence) if promo.confidence else 'N/A' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% else %}
+      <div class="card">
+        <div class="card-header">📜 Promotions</div>
+        <p style="color: var(--text-secondary);">No promotions recorded yet.</p>
+      </div>
+    {% endif %}
+  {% endif %}
+{% endblock %}

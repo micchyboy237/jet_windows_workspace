@@ -1,0 +1,134 @@
+<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/speaker_detail.html -->
+{% extends "base.html" %}
+{% block title %}Speaker {{ speaker.speaker_label }} - Details{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>🔍 Speaker: {{ speaker.speaker_label }}</h1>
+    <p>Detailed cohesion and activity metrics</p>
+  </div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value blue">{{ speaker.segment_count }}</div>
+      <div class="stat-label">Segments</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value purple">{{ speaker.embedding_count }}</div>
+      <div class="stat-label">Embeddings</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value {% if speaker.cohesion_score and speaker.cohesion_score >= 0.7 %}green {% elif speaker.cohesion_score and speaker.cohesion_score >= 0.5 %}yellow {% else %}red{% endif %}">
+        {{ "%.3f"|format(speaker.cohesion_score or 0) }}
+      </div>
+      <div class="stat-label">Cohesion Score</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value blue">{{ "%.1f"|format(speaker.active_duration or 0) }}s</div>
+      <div class="stat-label">Active Duration</div>
+    </div>
+  </div>
+  <div class="two-col">
+    <!-- Pairwise Similarity Stats -->
+    <div class="card">
+      <div class="card-header">📐 Pairwise Similarity Statistics</div>
+      <table>
+        <tr>
+          <td>Mean Pairwise Similarity</td>
+          <td><strong>{{ "%.4f"|format(speaker.mean_pairwise_similarity) if speaker.mean_pairwise_similarity else 'N/A' }}</strong></td>
+        </tr>
+        <tr>
+          <td>Std Pairwise Similarity</td>
+          <td>{{ "%.4f"|format(speaker.std_pairwise_similarity) if speaker.std_pairwise_similarity else 'N/A' }}</td>
+        </tr>
+        <tr>
+          <td>Min Pairwise Similarity</td>
+          <td>{{ "%.4f"|format(speaker.min_pairwise_similarity) if speaker.min_pairwise_similarity else 'N/A' }}</td>
+        </tr>
+      </table>
+    </div>
+    <!-- Centroid Stats -->
+    <div class="card">
+      <div class="card-header">🎯 Centroid Statistics</div>
+      <table>
+        <tr>
+          <td>Mean Similarity to Centroid</td>
+          <td><strong>{{ "%.4f"|format(speaker.centroid_similarity_mean) if speaker.centroid_similarity_mean else 'N/A' }}</strong></td>
+        </tr>
+        <tr>
+          <td>Std Similarity to Centroid</td>
+          <td>{{ "%.4f"|format(speaker.centroid_similarity_std) if speaker.centroid_similarity_std else 'N/A' }}</td>
+        </tr>
+        <tr>
+          <td>Min Similarity to Centroid</td>
+          <td>{{ "%.4f"|format(speaker.min_similarity_to_centroid) if speaker.min_similarity_to_centroid else 'N/A' }}</td>
+        </tr>
+        <tr>
+          <td>Max Similarity to Centroid</td>
+          <td>{{ "%.4f"|format(speaker.max_similarity_to_centroid) if speaker.max_similarity_to_centroid else 'N/A' }}</td>
+        </tr>
+        <tr>
+          <td>Centroid Quality</td>
+          <td>{{ "%.2f"|format(speaker.centroid_quality or 0) }}</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+  <!-- Timeline -->
+  <div class="card">
+    <div class="card-header">⏱️ Activity Timeline</div>
+    <table>
+      <tr>
+        <td>First Seen</td>
+        <td>{{ "%.2f"|format(speaker.first_seen or 0) }}s</td>
+      </tr>
+      <tr>
+        <td>Last Seen</td>
+        <td>{{ "%.2f"|format(speaker.last_seen or 0) }}s</td>
+      </tr>
+      <tr>
+        <td>Active Duration</td>
+        <td>{{ "%.2f"|format(speaker.active_duration or 0) }}s</td>
+      </tr>
+      <tr>
+        <td>Status</td>
+        <td><span class="badge {% if speaker.status == 'healthy' %}badge-green{% elif speaker.status == 'warning' %}badge-yellow{% else %}badge-red{% endif %}">{{ speaker.status }}</span></td>
+      </tr>
+    </table>
+  </div>
+  <!-- Associated Segments -->
+  <div class="card">
+    <div class="card-header">📋 Segments ({{ segments.total }})</div>
+    {% if segments.segments %}
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Segment ID</th>
+              <th>Timestamp</th>
+              <th>Duration</th>
+              <th>Confidence</th>
+              <th>Match Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for seg in segments.segments %}
+              <tr>
+                <td>{{ seg.index }}</td>
+                <td><code>{{ seg.segment_id[:16] }}...</code></td>
+                <td>{{ "%.2f"|format(seg.timestamp) }}s</td>
+                <td>{{ "%.2f"|format(seg.audio_duration) }}s</td>
+                <td>{{ "%.3f"|format(seg.primary_confidence) }}</td>
+                <td><span class="badge badge-blue">{{ seg.match_type }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p style="color: var(--text-secondary);">No segments found for this speaker.</p>
+    {% endif %}
+  </div>
+  <div style="margin-top: 16px;">
+    <a href="/speakers/metrics/speakers">← Back to Speaker List</a>
+  </div>
+{% endblock %}

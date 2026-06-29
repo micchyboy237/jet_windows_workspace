@@ -1,0 +1,101 @@
+<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/segments_list.html -->
+{% extends "base.html" %}
+{% block title %}Segments - Metrics{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>📋 Segment Group Health</h1>
+    <p>Labeling quality and temporal consistency metrics</p>
+  </div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value blue">{{ health.total_segments }}</div>
+      <div class="stat-label">Total Segments</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value green">{{ "%.1f"|format((health.mean_confidence or 0) * 100) }}%</div>
+      <div class="stat-label">Mean Confidence</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value purple">{{ "%.1f"|format((health.temporal_consistency_score or 0) * 100) }}%</div>
+      <div class="stat-label">Temporal Consistency</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value yellow">{{ health.label_switches }}</div>
+      <div class="stat-label">Label Switches</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value red">{{ health.unresolved_outliers }}</div>
+      <div class="stat-label">Unresolved Outliers</div>
+    </div>
+  </div>
+  <!-- Confidence Distribution -->
+  <div class="card">
+    <div class="card-header">📊 Confidence Distribution</div>
+    <div style="display: flex;
+                gap: 8px;
+                align-items: flex-end;
+                height: 150px;
+                padding: 16px 0">
+      {% for range, count in health.confidence_distribution.items() %}
+        {% set max_count = health.confidence_distribution.values() | max %}
+        {% set height_pct = (count / max_count * 100) | int if max_count > 0 else 0 %}
+        <div style="flex: 1; text-align: center;">
+          <div style="height: {{ height_pct }}%;
+                      background: var(--accent-blue);
+                      border-radius: 4px 4px 0 0;
+                      min-height: 4px;
+                      transition: height 0.3s"
+               title="{{ range }}: {{ count }} segments"></div>
+          <div style="font-size: 11px;
+                      color: var(--text-secondary);
+                      margin-top: 4px">{{ range }}</div>
+          <div style="font-size: 12px; font-weight: 600;">{{ count }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+  <!-- Match Type Distribution -->
+  <div class="card">
+    <div class="card-header">🏷️ Match Type Distribution</div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Match Type</th>
+            <th>Count</th>
+            <th>Percentage</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% set total_matches = health.match_type_distribution.values() | sum %}
+          {% for type, count in health.match_type_distribution.items() | sort(attribute='1', reverse=True) %}
+            <tr>
+              <td><span class="badge badge-blue">{{ type }}</span></td>
+              <td>{{ count }}</td>
+              <td>
+                {{ "%.1f"|format(count / total_matches * 100) if total_matches > 0 else 0 }}%
+                <div class="score-bar" style="width: 100px;">
+                  <div class="score-bar-fill green"
+                       style="width: {{ (count / total_matches * 100) | int if total_matches > 0 else 0 }}%"></div>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <!-- Recent Label Sequence -->
+  <div class="card">
+    <div class="card-header">🔤 Recent Primary Label Sequence</div>
+    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+      {% for label in health.primary_label_sequence %}
+        <span style="padding: 4px 8px;
+                     background: var(--bg-tertiary);
+                     border-radius: 4px;
+                     font-size: 12px;
+                     font-family: monospace">{{ label }}</span>
+      {% endfor %}
+    </div>
+  </div>
+{% endblock %}

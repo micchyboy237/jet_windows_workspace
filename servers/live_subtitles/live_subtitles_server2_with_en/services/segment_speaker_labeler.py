@@ -12,8 +12,24 @@ try:
     from services.embedding_model_factory import BaseEmbeddingModel, EmbeddingThresholdProvider
     from services.speaker_metrics_mixin import SpeakerMetricsMixin
     from services.audio_tagger import AudioTagger
-    from services.speaker_labeler_utils.speaker_reference import SpeakerReference, SpeakerSegmentInfo
-    from services.speaker_labeler_utils.segment_types import SegmentMatch, SegmentGroup, SegmentGroupsResult
+    from services.speaker_labeler_utils.speaker_types import SpeakerReference, SpeakerSegmentInfo
+    from services.speaker_labeler_utils.segment_types import (
+        SegmentMatch,
+        SegmentGroup,
+        SegmentGroupsResult,
+        TopKMatch,
+        SmartMaintenanceResult,
+        ReevaluationResult,
+        ConsolidationResult,
+        SpeakerInfo,
+        HealthStatus,
+        OutlierStats,
+        PotentialMerge,
+        SpeakerSimilarityMatrix,
+        CentroidHealthStats,
+        CentroidStats,
+        SpeakerHealthReport,
+    )
     from services.speaker_labeler_utils.outlier_pool import (
         OutlierPool,
         OutlierEntry,
@@ -53,8 +69,24 @@ except ImportError:
     from embedding_model_factory import BaseEmbeddingModel, EmbeddingThresholdProvider
     from speaker_metrics_mixin import SpeakerMetricsMixin
     from audio_tagger import AudioTagger
-    from speaker_labeler_utils.speaker_reference import SpeakerReference, SpeakerSegmentInfo
-    from speaker_labeler_utils.segment_types import SegmentMatch, SegmentGroup, SegmentGroupsResult
+    from speaker_labeler_utils.speaker_types import SpeakerReference, SpeakerSegmentInfo
+    from speaker_labeler_utils.segment_types import (
+        SegmentMatch,
+        SegmentGroup,
+        SegmentGroupsResult,
+        TopKMatch,
+        SmartMaintenanceResult,
+        ReevaluationResult,
+        ConsolidationResult,
+        SpeakerInfo,
+        HealthStatus,
+        OutlierStats,
+        PotentialMerge,
+        SpeakerSimilarityMatrix,
+        CentroidHealthStats,
+        CentroidStats,
+        SpeakerHealthReport,
+    )
     from speaker_labeler_utils.outlier_pool import (
         OutlierPool,
         OutlierEntry,
@@ -228,7 +260,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             )
 
         # NEW: Internal segment storage
-        self._segment_groups: List[Dict] = []
+        self._segment_groups: List[SegmentGroup] = []
         """Internal storage for all processed segments with their matches."""
         
         self._labels_finalized: bool = False
@@ -320,11 +352,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         
         return best_label, best_score, sim_dict
     
-    def find_top_k_matches(
-        self,
-        embedding: np.ndarray,
-        k: Optional[int] = None,
-    ) -> List[Dict]:
+    def find_top_k_matches(self, embedding: np.ndarray, k: Optional[int] = None) -> List[TopKMatch]:
         """Find top-K matching speakers with ALL similarities included."""
         if k is None:
             k = self.top_k_speakers
@@ -720,9 +748,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
     def _should_run_maintenance(self, just_created_speaker: bool = False) -> bool:
         return self._maintenance.should_run_maintenance(just_created_speaker)
 
-    def run_smart_maintenance(
-        self, timestamp: float, just_created_speaker: bool = False
-    ) -> Dict:
+    def run_smart_maintenance(self, timestamp: float, just_created_speaker: bool = False) -> SmartMaintenanceResult:
         return self._maintenance.run_smart_maintenance(timestamp, just_created_speaker)
 
     def _cleanup_orphan_speakers(self, current_timestamp: float) -> int:
@@ -734,7 +760,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         max_segments_for_young: int = 2,
         merge_threshold: float = None,
         dry_run: bool = False,
-    ) -> Dict:
+    ) -> ReevaluationResult:
         return self._maintenance.reevaluate_young_speakers(
             min_segments_for_mature=min_segments_for_mature,
             max_segments_for_young=max_segments_for_young,
@@ -745,7 +771,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
     def _should_create_new_speaker(
         self,
         best_score: float,
-        top_matches: List[Dict],
+        top_matches: List[TopKMatch],
         context: Optional[Dict],
         embedding: np.ndarray,
     ) -> bool:
@@ -753,7 +779,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             best_score, top_matches, context, embedding
         )
 
-    def _deduplicate_results(self, results: List[Dict]) -> List[Dict]:
+    def _deduplicate_results(self, results: List[SegmentMatch]) -> List[SegmentMatch]:
         """Remove duplicate speaker labels, keeping the highest confidence entry.
         
         When temporal smoothing or context matching changes the primary label to one
@@ -892,6 +918,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         
         # Store new segment
         self._segment_groups.append({
+            "segment_id": segment_id,
             "timestamp": timestamp,
             "audio_duration": audio_duration,
             "matches": results,
@@ -1083,10 +1110,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         # Outlier was removed (expired/merged) without promotion record
         return label, False, "removed_outlier"
 
-    def resolve_segment_results(
-        self,
-        results: List[Dict],
-    ) -> List[Dict]:
+    def resolve_segment_results(self, results: List[SegmentMatch]) -> List[SegmentMatch]:
         """Resolve all outlier labels in a list of segment results.
         
         Walks through results and replaces OUTLIER_XX labels with their
@@ -1136,7 +1160,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         
         return resolved_results
 
-    def get_outlier_stats_for_display(self) -> Dict:
+    def get_outlier_stats_for_display(self) -> OutlierStats:
         """Get outlier statistics formatted for display/summary.
         
         Returns
@@ -1166,10 +1190,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             ],
         }
 
-    def finalize_labels(
-        self,
-        segment_groups: List[Dict],
-    ) -> List[Dict]:
+    def finalize_labels(self, segment_groups: List[SegmentGroup]) -> List[SegmentGroup]:
         """Resolve OUTLIER_XX labels to final SPEAKER_XX labels retroactively.
         
         Call this ONCE after all segments have been processed via label_segments().
@@ -1264,7 +1285,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         context: Optional[Dict],
         segment_id: str,
         audio_duration: float,
-    ) -> Tuple[List[Dict], bool]:
+    ) -> Tuple[List[SegmentMatch], bool]:
         return self._outlier_orchestrator.label_with_outlier_buffer(
             embedding=embedding,
             top_matches=top_matches,
@@ -1284,7 +1305,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         context: Optional[Dict],
         segment_id: str,
         audio_duration: float,
-    ) -> Tuple[List[Dict], bool]:
+    ) -> Tuple[List[SegmentMatch], bool]:
         """Original labeling logic (outlier buffer disabled)."""
         should_create = self._should_create_new_speaker(
             actual_best_score, top_matches, context, embedding
@@ -1346,7 +1367,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         timestamp: float,
         segment_id: str,
         audio_duration: float,
-    ) -> Tuple[List[Dict], bool]:
+    ) -> Tuple[List[SegmentMatch], bool]:
         return self._outlier_orchestrator.handle_outlier_promotion(
             outlier_matches=outlier_matches,
             embedding=embedding,
@@ -1361,7 +1382,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         timestamp: float,
         segment_id: str,
         audio_duration: float,
-    ) -> List[Dict]:
+    ) -> List[SegmentMatch]:
         return self._outlier_orchestrator.handle_new_outlier(
             embedding=embedding,
             timestamp=timestamp,
@@ -1391,7 +1412,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         context: Optional[Dict],
         segment_id: str,
         audio_duration: float,
-    ) -> List[Dict]:
+    ) -> List[SegmentMatch]:
         """Build standard results list with update/rejection logic."""
         all_scores = {m["label"]: m["confidence"] for m in top_matches}
         results = []
@@ -1496,14 +1517,10 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         
         return results
 
-    def consolidate_speakers(
-        self,
-        threshold: Optional[float] = None,
-        dry_run: bool = False,
-    ) -> Dict:
+    def consolidate_speakers(self, threshold: Optional[float] = None, dry_run: bool = False) -> ConsolidationResult:
         return self._maintenance.consolidate_speakers(threshold=threshold, dry_run=dry_run)
 
-    def get_speaker_info(self, label: str) -> Optional[Dict]:
+    def get_speaker_info(self, label: str) -> Optional[SpeakerInfo]:
         """Get information about a specific speaker."""
         if label not in self._speakers:
             return None
@@ -1527,7 +1544,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             "centroid_shape": centroid_shape,
         }
 
-    def get_all_speakers_info(self) -> Dict[str, Dict]:
+    def get_all_speakers_info(self) -> Dict[str, SpeakerInfo]:
         """Get information about all known speakers."""
         return {label: self.get_speaker_info(label) for label in self._speakers}
 
@@ -1583,17 +1600,17 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         console.print(f"[dim]get_segments: returned info for {len(results)} speakers[/]")
         return results
 
-    def get_health_status(self) -> Dict:
+    def get_health_status(self) -> HealthStatus:
         return self._serializer.get_health_status()
 
-    def get_speaker_similarity_matrix(self) -> Dict:
+    def get_speaker_similarity_matrix(self) -> SpeakerSimilarityMatrix:
         return self._serializer.get_speaker_similarity_matrix()
 
     def find_potential_merges(
         self,
         min_similarity: float = 0.50,
         min_segments_for_source: int = 1,
-    ) -> List[Dict]:
+    ) -> List[PotentialMerge]:
         """Find all potential speaker merges above a similarity threshold."""
         labels = []
         centroids = []
@@ -1701,19 +1718,19 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         """NEW: Get history of all speaker merges for debugging."""
         return self._merge_history.copy()
     
-    def get_speaker_health_report(self) -> Dict:
+    def get_speaker_health_report(self) -> SpeakerHealthReport:
         return self._serializer.get_speaker_health_report()
 
     def _find_missing_speaker_ids(self) -> List[str]:
         return self._serializer.find_missing_speaker_ids()
 
-    def get_centroid_health_stats(self) -> Dict:
+    def get_centroid_health_stats(self) -> CentroidHealthStats:
         return self._serializer.get_centroid_health_stats()
 
     def get_centroid_arrays(self) -> Dict[str, np.ndarray]:
         return self._serializer.get_centroid_arrays()
 
-    def get_centroid_stats(self) -> Dict:
+    def get_centroid_stats(self) -> CentroidStats:
         return self._serializer.get_centroid_stats()
 
     def reset(self) -> None:

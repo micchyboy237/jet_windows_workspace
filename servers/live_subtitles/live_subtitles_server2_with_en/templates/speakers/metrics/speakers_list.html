@@ -1,0 +1,73 @@
+<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/speakers_list.html -->
+{% extends "base.html" %}
+{% block title %}Speaker List - Metrics{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>👥 Speaker Cohesion Details</h1>
+    <p>Intra-speaker cohesion metrics for all {{ total_speakers }} speakers</p>
+  </div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value blue">{{ total_speakers }}</div>
+      <div class="stat-label">Total Speakers</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value green">{{ "%.1f"|format(average_cohesion * 100) }}%</div>
+      <div class="stat-label">Avg Cohesion</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value yellow">{{ warning_count }}</div>
+      <div class="stat-label">Warnings</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value red">{{ critical_count }}</div>
+      <div class="stat-label">Critical</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Speaker Cohesion Table</div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Speaker</th>
+            <th>Segments</th>
+            <th>Embeddings</th>
+            <th>Cohesion Score</th>
+            <th>Mean Pairwise Sim</th>
+            <th>Centroid Sim Mean</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for speaker_label, metrics in speakers.items() %}
+            <tr>
+              <td><strong>{{ speaker_label }}</strong></td>
+              <td>{{ metrics.segment_count }}</td>
+              <td>{{ metrics.embedding_count }}</td>
+              <td>
+                <span style="color: {% if metrics.cohesion_score and metrics.cohesion_score >= 0.7 %}var(--accent-green) {% elif metrics.cohesion_score and metrics.cohesion_score >= 0.5 %}var(--accent-yellow) {% else %}var(--accent-red){% endif %};
+                             font-weight: 600">{{ "%.3f"|format(metrics.cohesion_score or 0) }}</span>
+                <div class="score-bar" style="width: 100px;">
+                  <div class="score-bar-fill {% if metrics.cohesion_score and metrics.cohesion_score >= 0.7 %}green {% elif metrics.cohesion_score and metrics.cohesion_score >= 0.5 %}yellow {% else %}red{% endif %}"
+                       style="width: {{ ((metrics.cohesion_score or 0) * 100) | int }}%"></div>
+                </div>
+              </td>
+              <td>{{ "%.3f"|format(metrics.mean_pairwise_similarity) if metrics.mean_pairwise_similarity else 'N/A' }}</td>
+              <td>{{ "%.3f"|format(metrics.centroid_similarity_mean) if metrics.centroid_similarity_mean else 'N/A' }}</td>
+              <td>
+                <span class="badge {% if metrics.status == 'healthy' %}badge-green {% elif metrics.status == 'warning' %}badge-yellow {% else %}badge-red{% endif %}">
+                  {{ metrics.status }}
+                </span>
+              </td>
+              <td>
+                <a href="/speakers/metrics/speakers/{{ speaker_label }}">Details →</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

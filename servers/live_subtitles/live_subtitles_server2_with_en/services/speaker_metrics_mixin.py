@@ -1,857 +1,758 @@
-"""
-SpeakerMetricsMixin - adds intra/inter speaker metrics and segment group health
-computation to SegmentSpeakerLabeler.
+# Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/services/speaker_metrics_mixin.py
 
-Mixed into SegmentSpeakerLabeler to access:
-    - self._speakers: Dict[str, SpeakerReference]
-    - self._segment_groups: List[Dict] (segment group history)
-    - self.outlier_pool: OutlierPool
-    - self._rejected_updates: int
-    - self.total_segments_processed: int
 """
+SpeakerMetricsMixin - Provides metrics computation methods for SegmentSpeakerLabeler.
+
+This mixin adds comprehensive speaker analytics without modifying the core labeling logic.
+All methods access self._speakers, self._segment_groups, and other internal state
+to compute intra-speaker cohesion, inter-speaker separation, segment group health,
+outlier pool health, and overall system health summaries.
+"""
+
+import logging
+from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
-from rich.console import Console
+from collections import defaultdict
+from scipy.spatial.distance import cdist
 
-try:
-    from services.helpers.speaker_metrics import (
-        HealthStatus,
-        InterSpeakerInput,
-        IntraSpeakerInput,
-        compute_inter_speaker_separation,
-        compute_intra_speaker_variance,
-        cosine_distance,
-    )
-except ImportError:
-    from helpers.speaker_metrics import (
-        HealthStatus,
-        InterSpeakerInput,
-        IntraSpeakerInput,
-        compute_inter_speaker_separation,
-        compute_intra_speaker_variance,
-        cosine_distance,
-    )
-
-console = Console()
+logger = logging.getLogger(__name__)
 
 
 class SpeakerMetricsMixin:
     """
-    Mixin providing speaker metrics methods for SegmentSpeakerLabeler.
+    Mixin providing speaker metrics and health computation methods.
     
-    Requires the host class to have:
-        - self._speakers: Dict[str, SpeakerReference]
-        - self._segment_groups: List[Dict]
-        - self.outlier_pool: OutlierPool (optional)
-        - self._rejected_updates: int
-        - self.total_segments_processed: int
-        
-    SpeakerReference must have:
-        - .label: str
-        - .embeddings: List[np.ndarray]  (each shape (1, dim) or (dim,))
-        - .segment_count: int
-        - .has_valid_centroid: bool
-        - .centroid: np.ndarray
-        - .embedding_metadata: List[Dict] with keys: segment_id, timestamp
-        - .first_seen: float
-        - .last_seen: float
-        - .active_duration: float
-        - .centroid_quality: float
+    Designed to be mixed into SegmentSpeakerLabeler, accessing its internal state
+    to compute various metrics about speaker quality, separation, and system health.
+    
+    Metrics Categories:
+    1. Intra-speaker Cohesion - How consistent are segments within a speaker?
+    2. Inter-speaker Separation - How distinct are different speakers?
+    3. Segment Group Health - Quality metrics for segment labeling
+    4. Outlier Pool Health - Outlier buffer statistics
+    5. Overall System Health - Combined health summary
     """
     
-    # ------------------------------------------------------------------
-    # INTRA-SPEAKER METRICS
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────
+    # 1. INTRA-SPEAKER COHESION METRICS
+    # ─────────────────────────────────────────────────────────────────────
     
-    def compute_intra_speaker_metrics(
-        self,
-        label: Optional[str] = None,
-        healthy_threshold: float = 0.70,
-        warning_threshold: float = 0.55,
-    ) -> Dict:
+    def get_speaker_cohesion(self, speaker_label: str) -> Optional[Dict[str, Any]]:
         """
-        Compute intra-speaker cohesion metrics for one or all speakers.
+        Compute intra-speaker cohesion metrics for a single speaker.
         
-        Uses cosine similarity to centroid (higher = more cohesive).
-        Health classification:
-            - similarity >= healthy_threshold → HEALTHY
-            - similarity >= warning_threshold  → WARNING
-            - otherwise                         → UNHEALTHY
+        Measures:
+        - mean_pairwise_similarity: Average cosine similarity between all pairs of embeddings
+        - centroid_similarity_std: Standard deviation of similarities to centroid
+        - min_similarity_to_centroid: Minimum similarity any embedding has to centroid
+        - max_similarity_to_centroid: Maximum similarity any embedding has to centroid
+        - embedding_count: Number of embeddings used
+        - cohesion_score: Composite score (0-1) combining the above
         
-        Parameters
-        ----------
-        label : str, optional
-            Specific speaker label. If None, computes for all speakers.
-        healthy_threshold : float
-            Mean similarity above this is "healthy" (default 0.70).
-        warning_threshold : float
-            Mean similarity above this is "warning" (default 0.55).
-            
-        Returns
-        -------
-        dict with keys:
-            - speakers: list of per-speaker metrics dicts
-            - overall_status: HealthStatus for the worst speaker
-            - total_speakers_analyzed: int
-            - error: str if something went wrong
+        Returns None if speaker not found or has insufficient embeddings.
         """
-        speakers_to_analyze = {}
+        if speaker_label not in self._speakers:
+            logger.warning(f"Speaker {speaker_label} not found")
+            return None
         
-        if label is not None:
-            if label not in self._speakers:
-                console.print(
-                    f"[warning]compute_intra_speaker_metrics: '{label}' not found in "
-                    f"{list(self._speakers.keys())}[/]"
-                )
-                return {
-                    "speakers": [],
-                    "overall_status": HealthStatus.UNHEALTHY.value,
-                    "total_speakers_analyzed": 0,
-                    "error": f"Speaker '{label}' not found",
-                }
-            speakers_to_analyze[label] = self._speakers[label]
+        ref = self._speakers[speaker_label]
+        embeddings = ref.embeddings
+        
+        if len(embeddings) < 2:
+            logger.debug(f"Speaker {speaker_label} has insufficient embeddings ({len(embeddings)})")
+            return {
+                "speaker_label": speaker_label,
+                "embedding_count": len(embeddings),
+                "mean_pairwise_similarity": None,
+                "centroid_similarity_std": None,
+                "min_similarity_to_centroid": None,
+                "max_similarity_to_centroid": None,
+                "cohesion_score": 1.0 if len(embeddings) == 1 else 0.0,
+                "status": "insufficient_data",
+                "segment_count": ref.segment_count,
+                "first_seen": ref.first_seen,
+                "last_seen": ref.last_seen,
+                "active_duration": ref.active_duration,
+            }
+        
+        # Stack embeddings
+        stacked = np.vstack(embeddings)
+        
+        # Mean pairwise similarity
+        if len(embeddings) > 1:
+            pairwise_distances = cdist(stacked, stacked, metric="cosine")
+            # Get upper triangle (excluding diagonal)
+            triu_indices = np.triu_indices_from(pairwise_distances, k=1)
+            if len(triu_indices[0]) > 0:
+                pairwise_sims = 1.0 - pairwise_distances[triu_indices]
+                mean_pairwise = float(np.mean(pairwise_sims))
+                std_pairwise = float(np.std(pairwise_sims))
+                min_pairwise = float(np.min(pairwise_sims))
+            else:
+                mean_pairwise = 1.0
+                std_pairwise = 0.0
+                min_pairwise = 1.0
         else:
-            speakers_to_analyze = self._speakers
+            mean_pairwise = 1.0
+            std_pairwise = 0.0
+            min_pairwise = 1.0
         
-        results = []
-        worst_status = HealthStatus.HEALTHY
+        # Similarities to centroid
+        if ref.has_valid_centroid:
+            centroid_2d = ref.centroid.reshape(1, -1) if ref.centroid.ndim == 1 else ref.centroid
+            centroid_distances = cdist(stacked, centroid_2d, metric="cosine").flatten()
+            centroid_sims = 1.0 - centroid_distances
+            centroid_sim_mean = float(np.mean(centroid_sims))
+            centroid_sim_std = float(np.std(centroid_sims))
+            centroid_sim_min = float(np.min(centroid_sims))
+            centroid_sim_max = float(np.max(centroid_sims))
+        else:
+            centroid_sim_mean = None
+            centroid_sim_std = None
+            centroid_sim_min = None
+            centroid_sim_max = None
         
-        for spk_label, ref in speakers_to_analyze.items():
-            if not ref.embeddings or len(ref.embeddings) == 0:
-                console.print(f"[dim]Skipping {spk_label}: no embeddings[/]")
-                continue
-            
-            # Build intra-speaker input for the shared helper
-            embeddings_array = np.vstack([
-                emb.reshape(1, -1) if emb.ndim == 1 else emb
-                for emb in ref.embeddings
-            ]).astype(np.float64)
-            
-            # Get other centroids for silhouette calculation
-            other_centroids = {}
-            for other_label, other_ref in self._speakers.items():
-                if other_label != spk_label and other_ref.has_valid_centroid:
-                    other_centroids[other_label] = other_ref.centroid.flatten()
-            
-            try:
-                intra_input: IntraSpeakerInput = {
-                    "label": spk_label,
-                    "embeddings": embeddings_array,
-                }
-                
-                intra_result = compute_intra_speaker_variance(
-                    speaker_input=intra_input,
-                    healthy_threshold=healthy_threshold,
-                    warning_threshold=warning_threshold,
-                    min_embeddings_for_mature=getattr(self, 'mature_segment_count', 5),
-                    other_centroids=other_centroids if other_centroids else None,
-                )
-            except Exception as e:
-                console.print(f"[error]Intra-speaker computation failed for {spk_label}: {e}[/]")
-                continue
-            
-            # Build segment-level data for detailed view
-            centroid = np.mean(embeddings_array, axis=0)
-            segments_data = []
-            for i in range(len(ref.embeddings)):
-                emb = embeddings_array[i]
-                sim_to_centroid = float(1.0 - cosine_distance(emb, centroid))
-                
-                meta = {}
-                if hasattr(ref, 'embedding_metadata') and i < len(ref.embedding_metadata):
-                    meta = ref.embedding_metadata[i]
-                
-                seg_id = meta.get('segment_id', f"segment_{i}")
-                timestamp = meta.get('timestamp', 0.0)
-                duration = self._estimate_segment_duration(ref, i, meta)
-                is_core = meta.get('is_core', True)
-                
-                segments_data.append({
-                    "id": seg_id,
-                    "similarity": round(sim_to_centroid, 4),
-                    "distance": round(1.0 - sim_to_centroid, 4),
-                    "timestamp": timestamp,
-                    "duration": round(duration, 4),
-                    "is_core": is_core,
-                })
-            
-            # Sort segments by timestamp for timeline visualization
-            segments_data.sort(key=lambda s: s["timestamp"])
-            
-            # Build per-speaker result
-            speaker_result = {
-                "label": spk_label,
-                "segmentsCount": len(ref.embeddings),
-                "health": intra_result["status"].value,
-                "meanSimilarity": intra_result["mean_similarity"],
-                "stdSimilarity": intra_result["std_similarity"],
-                "minSimilarity": intra_result["min_similarity"],
-                "silhouetteScore": intra_result["silhouette_score"],
-                "isMature": intra_result["is_mature"],
-                "firstSeen": ref.first_seen if ref.first_seen else 0.0,
-                "lastSeen": ref.last_seen,
-                "activeDuration": ref.active_duration,
-                "centroidQuality": ref.centroid_quality,
-                "segments": segments_data,
-            }
-            
-            results.append(speaker_result)
-            
-            # Track worst status
-            status_order = {
-                HealthStatus.HEALTHY: 0,
-                HealthStatus.WARNING: 1,
-                HealthStatus.UNHEALTHY: 2,
-            }
-            current_status = intra_result["status"]
-            if status_order.get(current_status, 0) > status_order.get(worst_status, 0):
-                worst_status = current_status
-        
-        # Sort results: unhealthy first, then warning, then healthy
-        results.sort(key=lambda r: {
-            HealthStatus.UNHEALTHY.value: 0,
-            HealthStatus.WARNING.value: 1,
-            HealthStatus.HEALTHY.value: 2,
-        }.get(r["health"], 3))
-        
-        console.print(
-            f"[info]✓ Intra-speaker metrics: {len(results)} speakers analyzed, "
-            f"worst_status={worst_status.value}[/]"
-        )
+        # Composite cohesion score (0-1)
+        # Weights: mean_pairwise (0.4), 1-std_pairwise (0.3), centroid_sim_mean (0.3)
+        if mean_pairwise is not None and centroid_sim_mean is not None:
+            normalized_std = max(0, 1.0 - std_pairwise * 2)  # Lower std = better
+            cohesion_score = round(
+                0.4 * mean_pairwise + 
+                0.3 * normalized_std + 
+                0.3 * centroid_sim_mean, 
+                4
+            )
+        else:
+            cohesion_score = mean_pairwise if mean_pairwise is not None else 0.0
         
         return {
-            "speakers": results,
-            "overall_status": worst_status.value,
-            "total_speakers_analyzed": len(results),
+            "speaker_label": speaker_label,
+            "embedding_count": len(embeddings),
+            "segment_count": ref.segment_count,
+            "mean_pairwise_similarity": round(mean_pairwise, 4) if mean_pairwise is not None else None,
+            "std_pairwise_similarity": round(std_pairwise, 4),
+            "min_pairwise_similarity": round(min_pairwise, 4),
+            "centroid_similarity_mean": round(centroid_sim_mean, 4) if centroid_sim_mean is not None else None,
+            "centroid_similarity_std": round(centroid_sim_std, 4) if centroid_sim_std is not None else None,
+            "min_similarity_to_centroid": round(centroid_sim_min, 4) if centroid_sim_min is not None else None,
+            "max_similarity_to_centroid": round(centroid_sim_max, 4) if centroid_sim_max is not None else None,
+            "cohesion_score": round(cohesion_score, 4),
+            "status": "healthy" if cohesion_score >= 0.7 else "warning" if cohesion_score >= 0.5 else "critical",
+            "centroid_quality": ref.centroid_quality,
+            "first_seen": ref.first_seen,
+            "last_seen": ref.last_seen,
+            "active_duration": ref.active_duration,
         }
     
-    # ------------------------------------------------------------------
-    # INTER-SPEAKER METRICS
-    # ------------------------------------------------------------------
-    
-    def compute_inter_speaker_metrics(
-        self,
-        healthy_threshold: float = 0.5,
-        warning_threshold: float = 0.3,
-    ) -> Dict:
+    def get_all_speakers_cohesion(self) -> Dict[str, Any]:
         """
-        Compute inter-speaker separation using speaker centroids.
+        Compute cohesion metrics for all speakers.
         
-        Higher distance = better separation between speakers.
-        Health classification:
-            - mean_separation >= healthy_threshold AND min >= 0.3 → HEALTHY
-            - mean_separation >= warning_threshold AND min >= 0.15  → WARNING
-            - otherwise                                              → UNHEALTHY
+        Returns a summary with per-speaker details and overall averages.
+        """
+        speaker_metrics = {}
+        cohesion_scores = []
+        
+        for label in self._speakers:
+            metrics = self.get_speaker_cohesion(label)
+            if metrics:
+                speaker_metrics[label] = metrics
+                if metrics["cohesion_score"] is not None:
+                    cohesion_scores.append(metrics["cohesion_score"])
+        
+        avg_cohesion = float(np.mean(cohesion_scores)) if cohesion_scores else 0.0
+        
+        # Categorize speakers
+        healthy = [l for l, m in speaker_metrics.items() if m.get("status") == "healthy"]
+        warning = [l for l, m in speaker_metrics.items() if m.get("status") == "warning"]
+        critical = [l for l, m in speaker_metrics.items() if m.get("status") == "critical"]
+        
+        return {
+            "total_speakers": len(speaker_metrics),
+            "average_cohesion_score": round(avg_cohesion, 4),
+            "healthy_count": len(healthy),
+            "warning_count": len(warning),
+            "critical_count": len(critical),
+            "healthy_speakers": healthy,
+            "warning_speakers": warning,
+            "critical_speakers": critical,
+            "speakers": speaker_metrics,
+            "computed_at": datetime.now().isoformat(),
+        }
+    
+    # ─────────────────────────────────────────────────────────────────────
+    # 2. INTER-SPEAKER SEPARATION METRICS
+    # ─────────────────────────────────────────────────────────────────────
+    
+    def get_speaker_separation_matrix(self) -> Dict[str, Any]:
+        """
+        Compute inter-speaker separation metrics.
+        
+        Measures:
+        - pairwise_centroid_similarities: Similarity between all speaker centroids
+        - mean_separation: Average separation between speakers (1 - similarity)
+        - min_separation: Closest pair of speakers
+        - max_separation: Most distant pair of speakers
+        - ambiguous_pairs: Speaker pairs with similarity > threshold (potential confusion)
+        - separation_health: Overall separation quality assessment
+        
+        Returns None for fields if < 2 speakers with valid centroids.
+        """
+        # Get speakers with valid centroids
+        valid_speakers = {
+            label: ref for label, ref in self._speakers.items() 
+            if ref.has_valid_centroid
+        }
+        
+        if len(valid_speakers) < 2:
+            return {
+                "total_speakers_with_centroids": len(valid_speakers),
+                "pairwise_similarities": {},
+                "mean_separation": None,
+                "min_separation": None,
+                "max_separation": None,
+                "ambiguous_pairs": [],
+                "separation_health": "insufficient_data",
+                "computed_at": datetime.now().isoformat(),
+            }
+        
+        labels = list(valid_speakers.keys())
+        centroids = np.vstack([ref.centroid for ref in valid_speakers.values()])
+        
+        # Compute pairwise similarities
+        distances = cdist(centroids, centroids, metric="cosine")
+        similarities = 1.0 - distances
+        
+        # Build pairwise dict
+        pairwise = {}
+        separation_values = []
+        ambiguous_pairs = []
+        
+        for i in range(len(labels)):
+            for j in range(i + 1, len(labels)):
+                sim = float(similarities[i, j])
+                pair_key = f"{labels[i]}___{labels[j]}"
+                sep = 1.0 - sim
+                pairwise[pair_key] = {
+                    "speaker_1": labels[i],
+                    "speaker_2": labels[j],
+                    "cosine_similarity": round(sim, 4),
+                    "separation": round(sep, 4),
+                    "segments_1": valid_speakers[labels[i]].segment_count,
+                    "segments_2": valid_speakers[labels[j]].segment_count,
+                }
+                separation_values.append(sep)
+                
+                # Flag ambiguous pairs (similarity > 0.7 means they're quite similar)
+                if sim > 0.7:
+                    ambiguous_pairs.append({
+                        "speaker_1": labels[i],
+                        "speaker_2": labels[j],
+                        "similarity": round(sim, 4),
+                        "risk": "high" if sim > 0.85 else "medium" if sim > 0.75 else "low",
+                    })
+        
+        mean_sep = float(np.mean(separation_values)) if separation_values else 0.0
+        min_sep = float(np.min(separation_values)) if separation_values else 0.0
+        max_sep = float(np.max(separation_values)) if separation_values else 0.0
+        
+        # Health assessment
+        if len(ambiguous_pairs) == 0:
+            health = "excellent"
+        elif mean_sep > 0.5:
+            health = "good"
+        elif mean_sep > 0.3:
+            health = "fair"
+        else:
+            health = "poor"
+        
+        return {
+            "total_speakers_with_centroids": len(valid_speakers),
+            "pairwise_similarities": pairwise,
+            "mean_separation": round(mean_sep, 4),
+            "min_separation": round(min_sep, 4),
+            "max_separation": round(max_sep, 4),
+            "ambiguous_pairs": ambiguous_pairs,
+            "ambiguous_count": len(ambiguous_pairs),
+            "separation_health": health,
+            "computed_at": datetime.now().isoformat(),
+        }
+    
+    # ─────────────────────────────────────────────────────────────────────
+    # 3. SEGMENT GROUP HEALTH METRICS
+    # ─────────────────────────────────────────────────────────────────────
+    
+    def get_segment_group_health(self) -> Dict[str, Any]:
+        """
+        Compute health metrics for segment groups (labeling quality).
+        
+        Analyzes all processed segments in self._segment_groups to assess:
+        - Match confidence distribution
+        - Match type distribution
+        - Temporal consistency
+        - Label switching frequency
+        - Unresolved outlier segments
+        """
+        if not self._segment_groups:
+            return {
+                "total_segments": 0,
+                "confidence_distribution": {},
+                "match_type_distribution": {},
+                "label_switches": 0,
+                "temporal_consistency_score": None,
+                "unresolved_outliers": 0,
+                "status": "no_data",
+                "computed_at": datetime.now().isoformat(),
+            }
+        
+        total_segments = len(self._segment_groups)
+        
+        # Collect all matches with confidence
+        confidences = []
+        match_types = defaultdict(int)
+        primary_labels = []
+        unresolved_outliers = 0
+        
+        for group in self._segment_groups:
+            matches = group.get("matches", [])
+            for match in matches:
+                conf = match.get("confidence", 0)
+                if conf is not None:
+                    confidences.append(conf)
+                mt = match.get("match_type", "unknown")
+                match_types[mt] += 1
+                
+                # Track primary labels and outliers
+                if match.get("is_primary"):
+                    primary_labels.append(match.get("label", "UNKNOWN"))
+                    # Check for unresolved outliers
+                    if match.get("label", "").startswith("OUTLIER_"):
+                        unresolved_outliers += 1
+        
+        # Confidence distribution
+        bins = {"0.0-0.3": 0, "0.3-0.5": 0, "0.5-0.7": 0, "0.7-0.85": 0, "0.85-0.95": 0, "0.95-1.0": 0}
+        for c in confidences:
+            if c < 0.3:
+                bins["0.0-0.3"] += 1
+            elif c < 0.5:
+                bins["0.3-0.5"] += 1
+            elif c < 0.7:
+                bins["0.5-0.7"] += 1
+            elif c < 0.85:
+                bins["0.7-0.85"] += 1
+            elif c < 0.95:
+                bins["0.85-0.95"] += 1
+            else:
+                bins["0.95-1.0"] += 1
+        
+        mean_confidence = float(np.mean(confidences)) if confidences else 0.0
+        
+        # Label switch frequency
+        label_switches = 0
+        for i in range(1, len(primary_labels)):
+            if primary_labels[i] != primary_labels[i-1]:
+                label_switches += 1
+        
+        # Temporal consistency: ratio of same-speaker consecutive segments
+        if len(primary_labels) > 1:
+            same_consecutive = sum(
+                1 for i in range(1, len(primary_labels)) 
+                if primary_labels[i] == primary_labels[i-1]
+            )
+            temporal_consistency = round(same_consecutive / (len(primary_labels) - 1), 4)
+        else:
+            temporal_consistency = 1.0
+        
+        # Health status
+        if mean_confidence >= 0.8 and temporal_consistency >= 0.7:
+            status = "healthy"
+        elif mean_confidence >= 0.6 and temporal_consistency >= 0.5:
+            status = "fair"
+        else:
+            status = "needs_attention"
+        
+        return {
+            "total_segments": total_segments,
+            "confidence_distribution": bins,
+            "mean_confidence": round(mean_confidence, 4),
+            "match_type_distribution": dict(match_types),
+            "label_switches": label_switches,
+            "temporal_consistency_score": temporal_consistency,
+            "unresolved_outliers": unresolved_outliers,
+            "status": status,
+            "primary_label_sequence": primary_labels[-20:] if primary_labels else [],  # Last 20 for preview
+            "computed_at": datetime.now().isoformat(),
+        }
+    
+    def get_segment_detail(self, segment_index: int) -> Optional[Dict[str, Any]]:
+        """
+        Get detailed information about a specific segment by index.
         
         Parameters
         ----------
-        healthy_threshold : float
-            Mean separation distance above this is "healthy" (default 0.5).
-        warning_threshold : float
-            Mean separation above this is "warning" (default 0.3).
+        segment_index : int
+            Index into self._segment_groups (0-based)
             
-        Returns
-        -------
-        dict with:
-            - meanSeparation, stdSeparation, minSeparation, maxSeparation
-            - health: overall health status
-            - pairwise: list of {speaker1, speaker2, distance, similarity}
-            - num_speakers: int
-            - closest_pair: dict with speaker1, speaker2, distance
-            - error: str if something went wrong
+        Returns None if index out of range.
         """
-        # Collect valid speaker embeddings
-        speaker_embeddings = {}
-        for spk_label, ref in self._speakers.items():
-            if not ref.has_valid_centroid:
-                continue
-            if not ref.embeddings:
-                continue
-            embeddings_list = [emb.flatten() for emb in ref.embeddings]
-            if not embeddings_list:
-                continue
-            speaker_embeddings[spk_label] = np.array(embeddings_list, dtype=np.float64)
+        if segment_index < 0 or segment_index >= len(self._segment_groups):
+            return None
         
-        if len(speaker_embeddings) < 2:
-            console.print(
-                f"[warning]Inter-speaker metrics: need >= 2 speakers with centroids, "
-                f"got {len(speaker_embeddings)}[/]"
-            )
-            return {
-                "meanSeparation": 0.0,
-                "stdSeparation": 0.0,
-                "minSeparation": 0.0,
-                "maxSeparation": 0.0,
-                "health": HealthStatus.UNHEALTHY.value,
-                "pairwise": [],
-                "num_speakers": len(speaker_embeddings),
-                "closest_pair": None,
-                "error": "Need at least 2 speakers with valid centroids",
+        group = self._segment_groups[segment_index]
+        matches = group.get("matches", [])
+        
+        # Enrich matches with speaker info
+        enriched_matches = []
+        for match in matches:
+            label = match.get("label", "")
+            enriched = dict(match)
+            
+            # Add speaker details if available
+            if label in self._speakers:
+                ref = self._speakers[label]
+                enriched["speaker_info"] = {
+                    "segment_count": ref.segment_count,
+                    "first_seen": ref.first_seen,
+                    "last_seen": ref.last_seen,
+                    "centroid_quality": ref.centroid_quality,
+                    "has_valid_centroid": ref.has_valid_centroid,
+                }
+            
+            # Check outlier status
+            if label.startswith("OUTLIER_"):
+                enriched["outlier_info"] = self._get_outlier_info(label)
+            
+            enriched_matches.append(enriched)
+        
+        # Get surrounding context
+        prev_segment = None
+        next_segment = None
+        if segment_index > 0:
+            prev_group = self._segment_groups[segment_index - 1]
+            prev_primary = next((m for m in prev_group.get("matches", []) if m.get("is_primary")), None)
+            prev_segment = {
+                "segment_id": prev_group.get("segment_id"),
+                "timestamp": prev_group.get("timestamp"),
+                "primary_label": prev_primary.get("label") if prev_primary else None,
             }
+        if segment_index < len(self._segment_groups) - 1:
+            next_group = self._segment_groups[segment_index + 1]
+            next_primary = next((m for m in next_group.get("matches", []) if m.get("is_primary")), None)
+            next_segment = {
+                "segment_id": next_group.get("segment_id"),
+                "timestamp": next_group.get("timestamp"),
+                "primary_label": next_primary.get("label") if next_primary else None,
+            }
+        
+        return {
+            "segment_index": segment_index,
+            "segment_id": group.get("segment_id"),
+            "timestamp": group.get("timestamp"),
+            "audio_duration": group.get("audio_duration"),
+            "matches": enriched_matches,
+            "match_count": len(enriched_matches),
+            "primary_match": enriched_matches[0] if enriched_matches else None,
+            "previous_segment": prev_segment,
+            "next_segment": next_segment,
+        }
+    
+    def _get_outlier_info(self, outlier_label: str) -> Optional[Dict[str, Any]]:
+        """Get information about an outlier from the outlier pool."""
+        if not hasattr(self, 'outlier_pool') or not self.use_outlier_buffer:
+            return None
         
         try:
-            inter_input: InterSpeakerInput = {
-                "speakers": speaker_embeddings,
-            }
-            result = compute_inter_speaker_separation(
-                speaker_input=inter_input,
-                healthy_threshold=healthy_threshold,
-                warning_threshold=warning_threshold,
-            )
-            
-            # Build pairwise with both distance and similarity for UI flexibility
-            pairwise = []
-            for p in result["pairwise_distances"]:
-                pairwise.append({
-                    "speaker1": p["speaker_id_1"],
-                    "speaker2": p["speaker_id_2"],
-                    "distance": round(p["distance"], 4),
-                    "similarity": round(1.0 - p["distance"], 4),
-                })
-            
-            # Sort pairwise: most similar (closest) first - these are the risk pairs
-            pairwise.sort(key=lambda p: p["distance"])
-            
-            closest = None
-            if result.get("closest_pair"):
-                cp = result["closest_pair"]
-                closest = {
-                    "speaker1": cp[0],
-                    "speaker2": cp[1],
-                    "distance": round(result["min_separation"], 4),
-                    "similarity": round(1.0 - result["min_separation"], 4),
+            # Check if outlier exists in pool
+            if outlier_label in self.outlier_pool:
+                entry = self.outlier_pool[outlier_label]
+                return {
+                    "label": outlier_label,
+                    "timestamp": getattr(entry, 'timestamp', None),
+                    "promoted": False,
                 }
             
-            console.print(
-                f"[info]✓ Inter-speaker metrics: {result['num_speakers']} speakers, "
-                f"mean_sep={result['mean_separation']:.4f}, "
-                f"status={result['status'].value}[/]"
-            )
-            
-            return {
-                "meanSeparation": round(result["mean_separation"], 4),
-                "stdSeparation": round(result["std_separation"], 4),
-                "minSeparation": round(result["min_separation"], 4),
-                "maxSeparation": round(result["max_separation"], 4),
-                "health": result["status"].value,
-                "pairwise": pairwise,
-                "num_speakers": result["num_speakers"],
-                "closest_pair": closest,
-            }
-            
+            # Check if it was promoted
+            for promo in getattr(self.outlier_pool, '_promotions', []):
+                if outlier_label in promo.outlier_labels:
+                    return {
+                        "label": outlier_label,
+                        "promoted": True,
+                        "target_speaker": promo.target_speaker,
+                        "confidence": promo.confidence,
+                    }
         except Exception as e:
-            console.print(f"[error]Inter-speaker metrics failed: {e}[/]")
-            import traceback
-            console.print(f"[dim]{traceback.format_exc()}[/]")
-            return {
-                "meanSeparation": 0.0,
-                "stdSeparation": 0.0,
-                "minSeparation": 0.0,
-                "maxSeparation": 0.0,
-                "health": HealthStatus.UNHEALTHY.value,
-                "pairwise": [],
-                "num_speakers": len(speaker_embeddings),
-                "closest_pair": None,
-                "error": str(e),
-            }
+            logger.debug(f"Error getting outlier info for {outlier_label}: {e}")
+        
+        return {"label": outlier_label, "status": "unknown"}
     
-    # ------------------------------------------------------------------
-    # SEGMENT GROUP HEALTH METRICS (NEW)
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────
+    # 4. OUTLIER POOL HEALTH METRICS
+    # ─────────────────────────────────────────────────────────────────────
     
-    def compute_segment_group_health(self) -> Dict:
+    def get_outlier_pool_health(self) -> Dict[str, Any]:
         """
-        Analyze the health of the segment labeling process itself.
+        Compute health metrics for the outlier pool.
         
-        Examines self._segment_groups to provide insights on:
-        - Label stability over time
-        - Outlier ratio (how many segments went to outlier pool)
-        - Rejection rate (how many updates were rejected)
-        - Match type distribution (strong vs weak matches)
-        - Temporal coherence (label switching frequency)
-        
-        Returns
-        -------
-        dict with:
-            - totalSegments: int
-            - segmentGroupsCount: int
-            - outlierRatio: float (0-1)
-            - rejectionRate: float (0-1)
-            - matchTypeDistribution: dict
-            - labelSwitches: int
-            - labelStability: float (0-1)
-            - health: HealthStatus
-            - timeline: list of {timestamp, primaryLabel, matchType, isOutlier}
+        Analyzes outlier buffer state, promotion rates, and unresolved outliers.
         """
-        groups = getattr(self, '_segment_groups', [])
-        if not groups:
-            console.print("[dim]Segment group health: no segment groups available[/]")
-            return {
-                "totalSegments": 0,
-                "segmentGroupsCount": 0,
-                "outlierRatio": 0.0,
-                "rejectionRate": 0.0,
-                "matchTypeDistribution": {},
-                "labelSwitches": 0,
-                "labelStability": 1.0,
-                "health": HealthStatus.HEALTHY.value,
-                "timeline": [],
-            }
-        
-        total = len(groups)
-        outlier_count = 0
-        match_types = {}
-        label_switches = 0
-        prev_primary = None
-        timeline = []
-        
-        for group in groups:
-            matches = group.get("matches", [])
-            if not matches:
-                continue
-            
-            primary = matches[0]
-            primary_label = primary.get("label", "UNKNOWN")
-            match_type = primary.get("match_type", "unknown")
-            is_outlier = primary.get("is_outlier", False)
-            timestamp = group.get("timestamp", 0.0)
-            
-            if is_outlier or primary_label.startswith("OUTLIER_"):
-                outlier_count += 1
-            
-            match_types[match_type] = match_types.get(match_type, 0) + 1
-            
-            if prev_primary is not None and primary_label != prev_primary:
-                label_switches += 1
-            prev_primary = primary_label
-            
-            timeline.append({
-                "timestamp": timestamp,
-                "primaryLabel": primary_label,
-                "matchType": match_type,
-                "isOutlier": is_outlier or primary_label.startswith("OUTLIER_"),
-            })
-        
-        outlier_ratio = outlier_count / max(total, 1)
-        rejection_rate = getattr(self, '_rejected_updates', 0) / max(
-            getattr(self, 'total_segments_processed', 1), 1
-        )
-        label_stability = 1.0 - (label_switches / max(total - 1, 1))
-        
-        # Health classification based on segment group quality
-        if outlier_ratio <= 0.1 and rejection_rate <= 0.1 and label_stability >= 0.9:
-            health = HealthStatus.HEALTHY
-        elif outlier_ratio <= 0.3 and rejection_rate <= 0.2 and label_stability >= 0.7:
-            health = HealthStatus.WARNING
-        else:
-            health = HealthStatus.UNHEALTHY
-        
-        console.print(
-            f"[info]✓ Segment group health: {total} groups, "
-            f"outlier_ratio={outlier_ratio:.2%}, "
-            f"rejection_rate={rejection_rate:.2%}, "
-            f"stability={label_stability:.2%}, "
-            f"health={health.value}[/]"
-        )
-        
-        return {
-            "totalSegments": getattr(self, 'total_segments_processed', total),
-            "segmentGroupsCount": total,
-            "outlierRatio": round(outlier_ratio, 4),
-            "rejectionRate": round(rejection_rate, 4),
-            "matchTypeDistribution": match_types,
-            "labelSwitches": label_switches,
-            "labelStability": round(label_stability, 4),
-            "health": health.value,
-            "timeline": timeline,
-        }
-    
-    # ------------------------------------------------------------------
-    # OUTLIER HEALTH METRICS (NEW)
-    # ------------------------------------------------------------------
-    
-    def compute_outlier_health(self) -> Dict:
-        """
-        Get health metrics for the outlier pool.
-        
-        Provides visibility into:
-        - Active outlier count and age distribution
-        - Promotion history (outlier → speaker transitions)
-        - Pool turnover rate
-        
-        Returns
-        -------
-        dict with:
-            - enabled: bool
-            - activeCount: int
-            - totalPromotions: int
-            - promotionHistory: list
-            - outlierDetails: list
-            - health: HealthStatus
-        """
-        if not hasattr(self, 'outlier_pool') or not getattr(self, 'use_outlier_buffer', False):
+        if not hasattr(self, 'outlier_pool') or not self.use_outlier_buffer:
             return {
                 "enabled": False,
-                "activeCount": 0,
-                "totalPromotions": 0,
-                "promotionHistory": [],
-                "outlierDetails": [],
-                "health": HealthStatus.HEALTHY.value,
+                "status": "disabled",
+                "computed_at": datetime.now().isoformat(),
             }
         
-        pool = self.outlier_pool
-        stats = pool.get_stats()
+        outlier_count = self.outlier_pool.count if hasattr(self.outlier_pool, 'count') else 0
+        promotion_count = self.outlier_pool.promotion_count if hasattr(self.outlier_pool, 'promotion_count') else 0
         
-        active_count = stats["total_outliers"]
-        total_promotions = stats["total_promotions"]
+        # Get promotion history
+        promotions = []
+        if hasattr(self.outlier_pool, '_promotions'):
+            for promo in self.outlier_pool._promotions:
+                promotions.append({
+                    "type": getattr(promo, 'type', 'unknown'),
+                    "outlier_labels": getattr(promo, 'outlier_labels', []),
+                    "target_speaker": getattr(promo, 'target_speaker', ''),
+                    "confidence": getattr(promo, 'confidence', 0.0),
+                })
         
-        # Build outlier details for UI
-        outlier_details = []
-        for label, detail in stats.get("outlier_details", {}).items():
-            outlier_details.append({
-                "label": label,
-                "age": round(detail["age"], 1),
-                "timestamp": detail["timestamp"],
-                "segmentId": detail["segment_id"],
-                "matchAttempts": detail["match_attempts"],
-                "audioDuration": detail["audio_duration"],
-            })
+        # Check for old outliers that haven't been promoted
+        max_age_warning = 300  # 5 minutes
+        old_outliers = 0
+        if hasattr(self.outlier_pool, 'entries'):
+            current_time = datetime.now().timestamp()
+            for entry in self.outlier_pool.entries.values():
+                ts = getattr(entry, 'timestamp', 0)
+                if ts and (current_time - ts) > max_age_warning:
+                    old_outliers += 1
         
-        # Sort by age (oldest first - these are at risk of expiry)
-        outlier_details.sort(key=lambda o: o["age"], reverse=True)
-        
-        # Health: too many active outliers or old outliers is concerning
-        old_outliers = sum(1 for o in outlier_details if o["age"] > pool.ttl * 0.8)
-        if active_count == 0:
-            health = HealthStatus.HEALTHY
-        elif active_count <= 3 and old_outliers == 0:
-            health = HealthStatus.HEALTHY
-        elif active_count <= 5 and old_outliers <= 1:
-            health = HealthStatus.WARNING
+        # Health assessment
+        if outlier_count == 0 and promotion_count > 0:
+            status = "healthy"
+        elif outlier_count <= 3:
+            status = "normal"
+        elif outlier_count <= 10:
+            status = "elevated"
         else:
-            health = HealthStatus.UNHEALTHY
+            status = "high"
         
-        console.print(
-            f"[info]✓ Outlier health: {active_count} active, "
-            f"{total_promotions} promotions, "
-            f"health={health.value}[/]"
-        )
+        if old_outliers > 0:
+            status = "stale_outliers" if status == "normal" else status
         
         return {
             "enabled": True,
-            "activeCount": active_count,
-            "totalPromotions": total_promotions,
-            "promotionThreshold": pool.promotion_threshold,
-            "ttl": pool.ttl,
-            "promotionHistory": stats.get("recent_promotions", []),
-            "outlierDetails": outlier_details,
-            "health": health.value,
+            "active_outliers": outlier_count,
+            "total_promotions": promotion_count,
+            "promotion_rate": round(promotion_count / max(1, promotion_count + outlier_count), 4),
+            "promotions": promotions[-10:],  # Last 10 promotions
+            "old_outliers": old_outliers,
+            "max_capacity": getattr(self.outlier_pool, 'max_count', None),
+            "status": status,
+            "computed_at": datetime.now().isoformat(),
         }
     
-    # ------------------------------------------------------------------
-    # COMBINED METRICS (primary API endpoint)
-    # ------------------------------------------------------------------
+    # ─────────────────────────────────────────────────────────────────────
+    # 5. OVERALL SYSTEM HEALTH SUMMARY
+    # ─────────────────────────────────────────────────────────────────────
     
-    def get_speaker_metrics(
-        self,
-        label: Optional[str] = None,
-    ) -> Dict:
+    def get_speaker_metrics(self) -> Dict[str, Any]:
         """
-        Combined metrics endpoint returning ALL speaker health data.
+        Compute comprehensive system health summary.
         
-        This is the primary method called by the API route. It returns
-        intra-speaker, inter-speaker, segment group health, and outlier
-        health in a single structured response.
-        
-        Parameters
-        ----------
-        label : str, optional
-            Filter intra-speaker metrics to a specific speaker.
-            
-        Returns
-        -------
-        dict with:
-            - intra_speaker: dict (from compute_intra_speaker_metrics)
-            - inter_speaker: dict (from compute_inter_speaker_metrics)
-            - segment_groups: dict (from compute_segment_group_health)
-            - outliers: dict (from compute_outlier_health)
-            - summary: dict (overall health summary)
-            - timestamp: ISO datetime
+        Aggregates all metrics into a single overview combining:
+        - Speaker cohesion stats
+        - Speaker separation stats
+        - Segment group health
+        - Outlier pool health
+        - System statistics
         """
-        console.print(
-            f"[bold blue]📊 Computing speaker metrics (label={label or 'all'})[/]"
-        )
+        cohesion = self.get_all_speakers_cohesion()
+        separation = self.get_speaker_separation_matrix()
+        segment_health = self.get_segment_group_health()
+        outlier_health = self.get_outlier_pool_health()
         
-        intra = self.compute_intra_speaker_metrics(label=label)
-        inter = self.compute_inter_speaker_metrics()
-        segment_groups = self.compute_segment_group_health()
-        outliers = self.compute_outlier_health()
+        # Get speaker categories
+        speaker_categories = {}
+        if hasattr(self, '_get_speaker_categories'):
+            try:
+                speaker_categories = self._get_speaker_categories()
+            except Exception as e:
+                logger.debug(f"Could not get speaker categories: {e}")
         
-        # Compute overall summary health
-        health_scores = {
-            HealthStatus.HEALTHY.value: 3,
-            HealthStatus.WARNING.value: 2,
-            HealthStatus.UNHEALTHY.value: 1,
-        }
+        # Compute overall health score (weighted)
+        scores = []
+        weights = []
         
-        all_healths = [
-            intra.get("overall_status", "healthy"),
-            inter.get("health", "healthy"),
-            segment_groups.get("health", "healthy"),
-            outliers.get("health", "healthy"),
-        ]
+        if cohesion.get("average_cohesion_score") is not None:
+            scores.append(cohesion["average_cohesion_score"])
+            weights.append(0.25)
         
-        min_score = min(health_scores.get(h, 1) for h in all_healths)
-        if min_score >= 3:
-            overall = HealthStatus.HEALTHY.value
-        elif min_score >= 2:
-            overall = HealthStatus.WARNING.value
+        if separation.get("mean_separation") is not None:
+            scores.append(separation["mean_separation"])
+            weights.append(0.25)
+        
+        if segment_health.get("temporal_consistency_score") is not None:
+            scores.append(segment_health["temporal_consistency_score"])
+            weights.append(0.25)
+        
+        if segment_health.get("mean_confidence") is not None:
+            scores.append(segment_health["mean_confidence"])
+            weights.append(0.25)
+        
+        if scores:
+            total_weight = sum(weights)
+            overall_score = round(sum(s * w for s, w in zip(scores, weights)) / total_weight, 4)
         else:
-            overall = HealthStatus.UNHEALTHY.value
+            overall_score = 0.0
         
-        summary = {
-            "overall": overall,
-            "intra": intra.get("overall_status", "healthy"),
-            "inter": inter.get("health", "healthy"),
-            "segmentGroups": segment_groups.get("health", "healthy"),
-            "outliers": outliers.get("health", "healthy"),
-            "totalSpeakers": intra.get("total_speakers_analyzed", 0),
-            "totalSegments": segment_groups.get("totalSegments", 0),
-            "outlierCount": outliers.get("activeCount", 0),
-        }
+        # Determine overall status
+        if overall_score >= 0.8:
+            overall_status = "excellent"
+        elif overall_score >= 0.65:
+            overall_status = "good"
+        elif overall_score >= 0.5:
+            overall_status = "fair"
+        else:
+            overall_status = "needs_attention"
         
-        console.print(
-            f"[bold green]✅ Speaker metrics complete: overall={overall}[/]"
-        )
+        # Generate recommendations
+        recommendations = []
+        if cohesion.get("critical_count", 0) > 0:
+            recommendations.append(f"{cohesion['critical_count']} speaker(s) have critical cohesion - consider merging or reviewing")
+        if separation.get("ambiguous_count", 0) > 0:
+            recommendations.append(f"{separation['ambiguous_count']} ambiguous speaker pair(s) detected - possible over-segmentation")
+        if segment_health.get("unresolved_outliers", 0) > 0:
+            recommendations.append(f"{segment_health['unresolved_outliers']} unresolved outlier segment(s) - consider running consolidation")
+        if outlier_health.get("status") == "stale_outliers":
+            recommendations.append(f"Stale outliers detected - consider reviewing outlier pool")
+        if self.total_segments_processed < 10:
+            recommendations.append("Low segment count - metrics will improve with more data")
         
         return {
-            "intra_speaker": intra,
-            "inter_speaker": inter,
-            "segment_groups": segment_groups,
-            "outliers": outliers,
-            "summary": summary,
-            "timestamp": datetime.now().isoformat(),
+            "overall_health_score": overall_score,
+            "overall_status": overall_status,
+            "system_stats": {
+                "total_segments_processed": self.total_segments_processed,
+                "total_speakers_created": self.total_speakers_created,
+                "active_speakers": self.speaker_count if hasattr(self, 'speaker_count') else len(self._speakers),
+                "rejected_updates": getattr(self, '_rejected_updates', 0),
+                "merge_count": len(getattr(self, '_merge_history', [])),
+                "speaker_categories": speaker_categories,
+            },
+            "cohesion": {
+                "average_score": cohesion.get("average_cohesion_score"),
+                "healthy": cohesion.get("healthy_count", 0),
+                "warning": cohesion.get("warning_count", 0),
+                "critical": cohesion.get("critical_count", 0),
+            },
+            "separation": {
+                "mean_separation": separation.get("mean_separation"),
+                "ambiguous_pairs": separation.get("ambiguous_count", 0),
+                "health": separation.get("separation_health"),
+            },
+            "segment_health": {
+                "mean_confidence": segment_health.get("mean_confidence"),
+                "temporal_consistency": segment_health.get("temporal_consistency_score"),
+                "status": segment_health.get("status"),
+            },
+            "outlier_health": {
+                "active_outliers": outlier_health.get("active_outliers", 0),
+                "total_promotions": outlier_health.get("total_promotions", 0),
+                "status": outlier_health.get("status"),
+            },
+            "recommendations": recommendations,
+            "computed_at": datetime.now().isoformat(),
         }
     
-    # ------------------------------------------------------------------
-    # SEGMENT DETAIL (existing, enhanced)
-    # ------------------------------------------------------------------
-    
-    def get_segment_detail(self, segment_id: str) -> Optional[Dict]:
+    def get_speaker_timeline(self) -> Dict[str, Any]:
         """
-        Get detailed information about a specific segment by its ID.
+        Build a timeline of speaker activity across segments.
         
-        Searches through all speakers AND segment groups to find the segment.
+        Returns speaker labels with their segment timestamps for visualization.
+        """
+        if not self._segment_groups:
+            return {"timeline": [], "speakers": []}
+        
+        timeline = []
+        for i, group in enumerate(self._segment_groups):
+            primary = next((m for m in group.get("matches", []) if m.get("is_primary")), None)
+            timeline.append({
+                "index": i,
+                "segment_id": group.get("segment_id"),
+                "timestamp": group.get("timestamp"),
+                "audio_duration": group.get("audio_duration"),
+                "primary_label": primary.get("label") if primary else "UNKNOWN",
+                "primary_confidence": primary.get("confidence") if primary else 0,
+                "match_type": primary.get("match_type") if primary else "unknown",
+            })
+        
+        # Get unique speaker labels
+        speakers = list(set(
+            entry["primary_label"] for entry in timeline 
+            if entry["primary_label"] != "UNKNOWN"
+        ))
+        speakers.sort()
+        
+        return {
+            "total_segments": len(timeline),
+            "unique_speakers": len(speakers),
+            "speakers": speakers,
+            "timeline": timeline,
+            "computed_at": datetime.now().isoformat(),
+        }
+    
+    def get_speaker_segment_list(
+        self, 
+        speaker_label: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        Get list of segments, optionally filtered by speaker.
         
         Parameters
         ----------
-        segment_id : str
-            The unique segment identifier (e.g., 'segment_a3f2b1c4')
+        speaker_label : str, optional
+            Filter segments where this speaker is the primary match
+        limit : int
+            Maximum number of segments to return
+        offset : int
+            Number of segments to skip
             
-        Returns
-        -------
-        dict or None
-            Segment detail with keys:
-            - segment_id, speaker_label, timestamp, embedding_index
-            - segment_duration, match_type, confidence, is_outlier
-            - speaker_segment_count, centroid_quality
-            Returns None if segment_id not found.
+        Returns paginated segment list with metadata.
         """
-        console.print(
-            f"[info]get_segment_detail: searching for segment_id='{segment_id}'[/]"
-        )
+        if not self._segment_groups:
+            return {
+                "total": 0,
+                "limit": limit,
+                "offset": offset,
+                "segments": [],
+            }
         
-        # First, search in speaker references
-        for spk_label, ref in self._speakers.items():
-            if not hasattr(ref, 'embedding_metadata'):
-                continue
-            for i, meta in enumerate(ref.embedding_metadata):
-                if meta.get('segment_id') == segment_id:
-                    return self._build_segment_detail(
-                        segment_id=segment_id,
-                        speaker_label=spk_label,
-                        ref=ref,
-                        meta=meta,
-                        embedding_index=i,
-                    )
-        
-        # Fallback: search in segment groups
-        for group in getattr(self, '_segment_groups', []):
-            for match in group.get("matches", []):
-                if match.get("segment_id") == segment_id:
-                    console.print(
-                        f"[success]get_segment_detail: found {segment_id} "
-                        f"in segment groups (label: {match.get('label')})[/]"
-                    )
-                    return {
-                        "segment_id": segment_id,
-                        "speaker_label": match.get("label", "UNKNOWN"),
-                        "timestamp": group.get("timestamp", 0.0),
-                        "match_type": match.get("match_type", "unknown"),
-                        "confidence": match.get("confidence", 0.0),
-                        "is_outlier": match.get("is_outlier", False),
-                        "source": "segment_groups",
-                    }
-        
-        console.print(f"[warning]get_segment_detail: '{segment_id}' not found[/]")
-        return None
-    
-    def _build_segment_detail(
-        self,
-        segment_id: str,
-        speaker_label: str,
-        ref,
-        meta: Dict,
-        embedding_index: int,
-    ) -> Dict:
-        """Build comprehensive segment detail from speaker reference data."""
-        duration = self._estimate_segment_duration(ref, embedding_index, meta)
-        
-        detail = {
-            "segment_id": segment_id,
-            "speaker_label": speaker_label,
-            "timestamp": meta.get('timestamp', 0.0),
-            "added_at": meta.get('added_at', meta.get('timestamp', 0.0)),
-            "embedding_index": embedding_index,
-            "speaker_segment_count": ref.segment_count,
-            "embedding_dim": (
-                ref.embeddings[embedding_index].shape[0]
-                if embedding_index < len(ref.embeddings)
-                else 0
-            ),
-            "segment_duration": round(duration, 4),
-            "speaker_first_seen": ref.first_seen if ref.first_seen else 0.0,
-            "speaker_last_seen": ref.last_seen,
-            "speaker_active_duration": ref.active_duration,
-            "centroid_quality": ref.centroid_quality,
-            "is_core": meta.get('is_core', True),
-            "source": "speaker_reference",
-        }
-        
-        console.print(
-            f"[success]get_segment_detail: found {segment_id} "
-            f"in speaker '{speaker_label}' (index {embedding_index})[/]"
-        )
-        return detail
-    
-    def _estimate_segment_duration(
-        self,
-        ref,
-        embedding_index: int,
-        meta: Dict,
-    ) -> float:
-        """Estimate segment duration from metadata or gaps between segments."""
-        duration = meta.get('audio_duration', 0.0)
-        if duration > 0.0:
-            return duration
-        
-        timestamp = meta.get('timestamp', 0.0)
-        
-        if hasattr(ref, 'embedding_metadata') and len(ref.embedding_metadata) > 1:
-            if embedding_index < len(ref.embedding_metadata) - 1:
-                next_ts = ref.embedding_metadata[embedding_index + 1].get(
-                    'timestamp', timestamp
-                )
-                duration = max(0.0, next_ts - timestamp)
-            else:
-                # Last segment: use average gap of previous segments
-                gaps = []
-                for j in range(len(ref.embedding_metadata) - 1):
-                    t1 = ref.embedding_metadata[j].get('timestamp', 0)
-                    t2 = ref.embedding_metadata[j + 1].get('timestamp', 0)
-                    if t2 > t1:
-                        gaps.append(t2 - t1)
-                if gaps:
-                    duration = sum(gaps) / len(gaps)
-        
-        return duration
-    
-    # ------------------------------------------------------------------
-    # AUDIO INFO (existing, unchanged)
-    # ------------------------------------------------------------------
-    
-    def get_segment_audio_info(self, segment_id: str) -> Dict:
-        """
-        Check if audio data is available for a segment.
-        
-        Checks the context buffer and last_n_segments directory.
-        
-        Parameters
-        ----------
-        segment_id : str
-            The unique segment identifier
+        filtered = []
+        for i, group in enumerate(self._segment_groups):
+            primary = next((m for m in group.get("matches", []) if m.get("is_primary")), None)
+            primary_label = primary.get("label") if primary else "UNKNOWN"
             
-        Returns
-        -------
-        dict with: segment_id, has_audio, audio_source, sample_rate, duration_seconds
-        """
-        result = {
-            "segment_id": segment_id,
-            "has_audio": False,
-            "audio_source": None,
-            "sample_rate": None,
-            "duration_seconds": 0.0,
+            if speaker_label is None or primary_label == speaker_label:
+                filtered.append({
+                    "index": i,
+                    "segment_id": group.get("segment_id"),
+                    "timestamp": group.get("timestamp"),
+                    "audio_duration": group.get("audio_duration"),
+                    "primary_label": primary_label,
+                    "primary_confidence": primary.get("confidence") if primary else 0,
+                    "match_type": primary.get("match_type") if primary else "unknown",
+                })
+        
+        total = len(filtered)
+        paginated = filtered[offset:offset + limit]
+        
+        return {
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "segments": paginated,
+            "filter_speaker": speaker_label,
         }
-        
-        # Check context buffer
-        try:
-            from core.state import get_context_buffer
-            context_buffer = get_context_buffer()
-            if context_buffer and hasattr(context_buffer, 'segments'):
-                for segment_audio, metadata in context_buffer.segments:
-                    if metadata.get('segment_id') == segment_id:
-                        try:
-                            from services.audio_utils import get_audio_duration
-                            sample_rate = 16000
-                            duration = get_audio_duration(segment_audio, sr=sample_rate)
-                        except ImportError:
-                            sample_rate = 16000
-                            if hasattr(segment_audio, 'shape'):
-                                duration = segment_audio.shape[-1] / sample_rate
-                            else:
-                                duration = len(segment_audio) / sample_rate
-                        
-                        result["has_audio"] = True
-                        result["audio_source"] = "context_buffer"
-                        result["sample_rate"] = sample_rate
-                        result["duration_seconds"] = round(duration, 3)
-                        console.print(
-                            f"[dim]get_segment_audio_info: found {segment_id} "
-                            f"in context_buffer ({duration:.3f}s)[/]"
-                        )
-                        return result
-        except ImportError:
-            console.print("[dim]get_segment_audio_info: core.state not importable[/]")
-        except Exception as e:
-            console.print(f"[warning]get_segment_audio_info: context buffer error: {e}[/]")
-        
-        # Check disk
-        try:
-            from services.audio_config import OUTPUT_DIR
-            last_n_dir = OUTPUT_DIR / "last_50_segments"
-            if last_n_dir.exists():
-                audio_path = last_n_dir / f"{segment_id}.wav"
-                if audio_path.exists():
-                    try:
-                        from services.audio_utils import get_audio_duration
-                        duration = get_audio_duration(str(audio_path))
-                    except ImportError:
-                        import wave
-                        with wave.open(str(audio_path), 'rb') as wf:
-                            duration = wf.getnframes() / wf.getframerate()
-                    
-                    result["has_audio"] = True
-                    result["audio_source"] = "disk"
-                    result["sample_rate"] = 16000
-                    result["duration_seconds"] = round(duration, 3)
-                    console.print(
-                        f"[dim]get_segment_audio_info: found {segment_id} "
-                        f"on disk ({duration:.3f}s)[/]"
-                    )
-                    return result
-        except Exception as e:
-            console.print(f"[dim]get_segment_audio_info: disk check failed: {e}[/]")
-        
-        console.print(f"[dim]get_segment_audio_info: no audio found for {segment_id}[/]")
-        return result

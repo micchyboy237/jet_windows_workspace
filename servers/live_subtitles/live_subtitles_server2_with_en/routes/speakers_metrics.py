@@ -1,6 +1,7 @@
+# Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/routes/speakers_metrics.py
+
 """
 Speaker metrics and health dashboard routes.
-
 Provides API endpoints and HTML pages for:
     - Intra-speaker cohesion metrics
     - Inter-speaker separation metrics
@@ -8,33 +9,26 @@ Provides API endpoints and HTML pages for:
     - Outlier pool health
     - Overall speaker system health summary
 """
-
 from datetime import datetime
 from typing import Optional
-
 from core.state import get_speaker_labeler
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from rich.console import Console
 from services.config import TEMPLATES_DIR
 
 console = Console()
-router = APIRouter(prefix="/speakers", tags=["speakers"])
 
+router = APIRouter(prefix="/speakers/metrics", tags=["metrics"])
 
-# ---------------------------------------------------------------------------
-# Jinja2 template environment
-# ---------------------------------------------------------------------------
-_templates_dir = TEMPLATES_DIR / "speakers"
+_templates_dir = TEMPLATES_DIR / "speakers" / "metrics"
 _templates_dir.mkdir(parents=True, exist_ok=True)
-
 _jinja_env = Environment(
     loader=FileSystemLoader(str(_templates_dir)),
     autoescape=select_autoescape(["html", "xml"]),
 )
-
-console.print(f"[info]Speaker templates directory: {_templates_dir}[/info]")
+console.print(f"[info]Speaker metrics templates directory: {_templates_dir}[/info]")
 
 
 def get_template(name: str):
@@ -74,250 +68,372 @@ def _check_labeler():
     return labeler
 
 
-# ============================================================
-# COMBINED METRICS (primary data endpoint)
-# ============================================================
+# ═══════════════════════════════════════════════════════════════════════
+# HTML Endpoints (Browser-friendly pages)
+# ═══════════════════════════════════════════════════════════════════════
 
-
-@router.get("/metrics/data")
-async def get_speaker_metrics_data(
-    label: Optional[str] = Query(
-        None,
-        description="Filter intra-speaker metrics to a specific speaker label (e.g., 'SPEAKER_01')",
-    ),
-):
+@router.get("", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
+async def metrics_overview_html(request: Request):
     """
-    Get comprehensive speaker metrics data for the frontend dashboard.
-
-    Returns intra-speaker cohesion, inter-speaker separation, segment group
-    health, and outlier pool health in a single response.
-
-    Parameters
-    ----------
-    label : str, optional
-        Specific speaker label to filter intra-speaker results.
-
-    Returns
-    -------
-    JSON with structure:
-    {
-        "intra_speaker": { speakers, overall_status, total_speakers_analyzed },
-        "inter_speaker": { meanSeparation, health, pairwise, closest_pair, ... },
-        "segment_groups": { totalSegments, outlierRatio, labelStability, timeline, ... },
-        "outliers": { activeCount, totalPromotions, outlierDetails, ... },
-        "summary": { overall, intra, inter, segmentGroups, outliers, totalSpeakers, ... },
-        "timestamp": "ISO datetime"
-    }
+    Main metrics overview page with system health summary.
     """
     labeler = _check_labeler()
-
-    console.print(
-        f"[info]📊 Fetching full speaker metrics data (label={label or 'all'})[/]"
-    )
+    
     try:
-        metrics_data = labeler.get_speaker_metrics(label=label)
+        metrics = labeler.get_speaker_metrics()
+        console.print("[info]Rendering metrics overview page[/]")
         
-        # Log summary for quick diagnosis
-        summary = metrics_data.get("summary", {})
-        console.print(
-            f"[success]✅ Speaker metrics: "
-            f"overall={summary.get('overall', '?')}, "
-            f"speakers={summary.get('totalSpeakers', 0)}, "
-            f"segments={summary.get('totalSegments', 0)}, "
-            f"outliers={summary.get('outlierCount', 0)}[/]"
-        )
-        return JSONResponse(content=metrics_data)
+        return render_template("overview.html", {
+            "active_page": "overview",
+            "metrics": metrics,
+            "computed_at": metrics.get("computed_at", datetime.now().isoformat()),
+            "request": request,
+        })
     except Exception as e:
-        console.print(f"[error]Failed to compute speaker metrics: {e}[/]")
-        import traceback
-        console.print(f"[dim]{traceback.format_exc()}[/]")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to compute speaker metrics: {str(e)}"
+        console.print(f"[error]Error computing metrics: {e}[/]")
+        raise HTTPException(status_code=500, detail=f"Failed to compute metrics: {e}")
+
+
+@router.get("/speakers", response_class=HTMLResponse)
+async def speakers_list_html(request: Request):
+    """
+    List all speakers with their cohesion metrics.
+    """
+    labeler = _check_labeler()
+    
+    try:
+        cohesion = labeler.get_all_speakers_cohesion()
+        console.print(f"[info]Rendering speakers list page: {cohesion.get('total_speakers', 0)} speakers[/]")
+        
+        return render_template("speakers_list.html", {
+            "active_page": "speakers",
+            "total_speakers": cohesion.get("total_speakers", 0),
+            "average_cohesion": cohesion.get("average_cohesion_score", 0),
+            "healthy_count": cohesion.get("healthy_count", 0),
+            "warning_count": cohesion.get("warning_count", 0),
+            "critical_count": cohesion.get("critical_count", 0),
+            "speakers": cohesion.get("speakers", {}),
+            "computed_at": cohesion.get("computed_at", datetime.now().isoformat()),
+            "request": request,
+        })
+    except Exception as e:
+        console.print(f"[error]Error computing speaker cohesion: {e}[/]")
+        raise HTTPException(status_code=500, detail=f"Failed to compute speaker cohesion: {e}")
+
+
+@router.get("/speakers/{speaker_label}", response_class=HTMLResponse)
+async def speaker_detail_html(request: Request, speaker_label: str):
+    """
+    Detailed view for a single speaker with cohesion metrics and segment list.
+    """
+    labeler = _check_labeler()
+    
+    try:
+        # Get speaker cohesion metrics
+        speaker = labeler.get_speaker_cohesion(speaker_label)
+        if not speaker:
+            raise HTTPException(status_code=404, detail=f"Speaker '{speaker_label}' not found")
+        
+        # Get segments for this speaker
+        segments = labeler.get_speaker_segment_list(
+            speaker_label=speaker_label,
+            limit=50,
+            offset=0,
         )
+        
+        console.print(f"[info]Rendering speaker detail page for {speaker_label}[/]")
+        
+        return render_template("speaker_detail.html", {
+            "active_page": "speakers",
+            "speaker": speaker,
+            "segments": segments,
+            "computed_at": datetime.now().isoformat(),
+            "request": request,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.print(f"[error]Error computing speaker detail for {speaker_label}: {e}[/]")
+        raise HTTPException(status_code=500, detail=f"Failed to compute speaker detail: {e}")
 
 
-# ============================================================
-# INDIVIDUAL METRICS ENDPOINTS
-# ============================================================
+@router.get("/segments", response_class=HTMLResponse)
+async def segments_list_html(request: Request):
+    """
+    Segment group health page showing labeling quality metrics.
+    """
+    labeler = _check_labeler()
+    
+    try:
+        health = labeler.get_segment_group_health()
+        console.print(f"[info]Rendering segments health page: {health.get('total_segments', 0)} segments[/]")
+        
+        return render_template("segments_list.html", {
+            "active_page": "segments",
+            "health": health,
+            "computed_at": health.get("computed_at", datetime.now().isoformat()),
+            "request": request,
+        })
+    except Exception as e:
+        console.print(f"[error]Error computing segment health: {e}[/]")
+        raise HTTPException(status_code=500, detail=f"Failed to compute segment health: {e}")
 
 
-@router.get("/metrics/intra")
-async def get_intra_speaker_metrics(
-    label: Optional[str] = Query(None, description="Filter to specific speaker label"),
+@router.get("/segments/{segment_index}", response_class=HTMLResponse)
+async def segment_detail_html(request: Request, segment_index: int):
+    """
+    Detailed view for a single segment showing all matches and context.
+    """
+    labeler = _check_labeler()
+    
+    try:
+        detail = labeler.get_segment_detail(segment_index)
+        if not detail:
+            raise HTTPException(status_code=404, detail=f"Segment at index {segment_index} not found")
+        
+        console.print(f"[info]Rendering segment detail page for index {segment_index}[/]")
+        
+        # For now, use a simple inline render since we don't have a separate template yet
+        return render_template("segments_list.html", {
+            "active_page": "segments",
+            "health": {
+                "total_segments": len(labeler._segment_groups),
+                "mean_confidence": detail.get("primary_match", {}).get("confidence", 0) if detail.get("primary_match") else 0,
+                "temporal_consistency_score": 1.0,
+                "label_switches": 0,
+                "unresolved_outliers": 0,
+                "confidence_distribution": {},
+                "match_type_distribution": {},
+                "primary_label_sequence": [],
+                "status": "healthy",
+            },
+            "computed_at": datetime.now().isoformat(),
+            "request": request,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.print(f"[error]Error computing segment detail for {segment_index}: {e}[/]")
+        raise HTTPException(status_code=500, detail=f"Failed to compute segment detail: {e}")
+
+
+@router.get("/separation", response_class=HTMLResponse)
+async def separation_html(request: Request):
+    """
+    Inter-speaker separation metrics page.
+    """
+    labeler = _check_labeler()
+    
+    try:
+        separation = labeler.get_speaker_separation_matrix()
+        console.print(f"[info]Rendering separation page: {separation.get('total_speakers_with_centroids', 0)} speakers[/]")
+        
+        return render_template("separation.html", {
+            "active_page": "separation",
+            "separation": separation,
+            "computed_at": separation.get("computed_at", datetime.now().isoformat()),
+            "request": request,
+        })
+    except Exception as e:
+        console.print(f"[error]Error computing separation metrics: {e}[/]")
+        raise HTTPException(status_code=500, detail=f"Failed to compute separation metrics: {e}")
+
+
+@router.get("/outliers", response_class=HTMLResponse)
+async def outliers_html(request: Request):
+    """
+    Outlier pool health page.
+    """
+    labeler = _check_labeler()
+    
+    try:
+        outlier_health = labeler.get_outlier_pool_health()
+        console.print(f"[info]Rendering outlier pool page: enabled={outlier_health.get('enabled')}[/]")
+        
+        return render_template("outliers.html", {
+            "active_page": "outliers",
+            "outlier_health": outlier_health,
+            "computed_at": outlier_health.get("computed_at", datetime.now().isoformat()),
+            "request": request,
+        })
+    except Exception as e:
+        console.print(f"[error]Error computing outlier health: {e}[/]")
+        raise HTTPException(status_code=500, detail=f"Failed to compute outlier health: {e}")
+
+
+@router.get("/timeline", response_class=HTMLResponse)
+async def timeline_html(request: Request):
+    """
+    Speaker activity timeline visualization.
+    """
+    labeler = _check_labeler()
+    
+    try:
+        timeline = labeler.get_speaker_timeline()
+        console.print(f"[info]Rendering timeline page: {timeline.get('total_segments', 0)} segments[/]")
+        
+        return render_template("timeline.html", {
+            "active_page": "timeline",
+            "timeline": timeline,
+            "computed_at": timeline.get("computed_at", datetime.now().isoformat()),
+            "request": request,
+        })
+    except Exception as e:
+        console.print(f"[error]Error computing timeline: {e}[/]")
+        raise HTTPException(status_code=500, detail=f"Failed to compute timeline: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# JSON Endpoints (API responses)
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/api/overview")
+async def metrics_overview_json():
+    """
+    JSON endpoint: Full system health overview.
+    """
+    labeler = _check_labeler()
+    try:
+        metrics = labeler.get_speaker_metrics()
+        console.print("[info]Returning metrics overview JSON[/]")
+        return JSONResponse(content=metrics)
+    except Exception as e:
+        console.print(f"[error]Error in metrics_overview_json: {e}[/]")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/speakers")
+async def speakers_list_json():
+    """
+    JSON endpoint: All speakers cohesion metrics.
+    """
+    labeler = _check_labeler()
+    try:
+        cohesion = labeler.get_all_speakers_cohesion()
+        console.print(f"[info]Returning speakers cohesion JSON: {cohesion.get('total_speakers', 0)} speakers[/]")
+        return JSONResponse(content=cohesion)
+    except Exception as e:
+        console.print(f"[error]Error in speakers_list_json: {e}[/]")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/speakers/{speaker_label}")
+async def speaker_detail_json(speaker_label: str):
+    """
+    JSON endpoint: Single speaker cohesion detail.
+    """
+    labeler = _check_labeler()
+    try:
+        speaker = labeler.get_speaker_cohesion(speaker_label)
+        if not speaker:
+            raise HTTPException(status_code=404, detail=f"Speaker '{speaker_label}' not found")
+        console.print(f"[info]Returning speaker detail JSON for {speaker_label}[/]")
+        return JSONResponse(content=speaker)
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.print(f"[error]Error in speaker_detail_json: {e}[/]")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/speakers/{speaker_label}/segments")
+async def speaker_segments_json(
+    speaker_label: str,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     """
-    Get intra-speaker cohesion metrics only.
-    
-    Returns per-speaker similarity to centroid, silhouette scores,
-    and segment-level detail for timeline visualization.
+    JSON endpoint: Segments for a specific speaker (paginated).
     """
     labeler = _check_labeler()
-
-    console.print(f"[info]📊 Fetching intra-speaker metrics (label={label or 'all'})[/]")
-    result = labeler.compute_intra_speaker_metrics(label=label)
-    return JSONResponse(content=result)
-
-
-@router.get("/metrics/inter")
-async def get_inter_speaker_metrics():
-    """
-    Get inter-speaker separation metrics only.
-    
-    Returns pairwise distances between speaker centroids, closest pair
-    identification, and distance matrix data.
-    """
-    labeler = _check_labeler()
-
-    console.print("[info]📊 Fetching inter-speaker metrics[/]")
-    result = labeler.compute_inter_speaker_metrics()
-    return JSONResponse(content=result)
-
-
-@router.get("/metrics/segments")
-async def get_segment_group_health():
-    """
-    Get segment group health metrics.
-    
-    Shows labeling quality: outlier ratio, rejection rate, label stability,
-    and match type distribution over time.
-    """
-    labeler = _check_labeler()
-
-    console.print("[info]📊 Fetching segment group health metrics[/]")
-    result = labeler.compute_segment_group_health()
-    return JSONResponse(content=result)
-
-
-@router.get("/metrics/outliers")
-async def get_outlier_health():
-    """
-    Get outlier pool health metrics.
-    
-    Shows active outliers, promotion history, and pool statistics.
-    """
-    labeler = _check_labeler()
-
-    console.print("[info]📊 Fetching outlier health metrics[/]")
-    result = labeler.compute_outlier_health()
-    return JSONResponse(content=result)
-
-
-@router.get("/metrics/segment-detail/{segment_id}")
-async def get_segment_detail(segment_id: str):
-    """
-    Get detailed information about a specific segment.
-    
-    Parameters
-    ----------
-    segment_id : str
-        The unique segment identifier (e.g., 'segment_a3f2b1c4')
-    """
-    labeler = _check_labeler()
-
-    console.print(f"[info]🔍 Fetching segment detail for '{segment_id}'[/]")
-    result = labeler.get_segment_detail(segment_id)
-    if result is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Segment '{segment_id}' not found",
-        )
-    return JSONResponse(content=result)
-
-
-# ============================================================
-# HEALTH SUMMARY
-# ============================================================
-
-
-@router.get("/metrics/health")
-async def get_speaker_metrics_health():
-    """
-    Quick health check endpoint for speaker metrics.
-    
-    Returns a simple summary of overall speaker system health
-    suitable for monitoring/alerting.
-    """
-    labeler = _check_labeler()
-
-    metrics = labeler.get_speaker_metrics()
-    summary = metrics.get("summary", {})
-    
-    return JSONResponse(
-        content={
-            "overall": summary.get("overall", "unknown"),
-            "intra_status": summary.get("intra", "unknown"),
-            "inter_health": summary.get("inter", "unknown"),
-            "segment_groups_health": summary.get("segmentGroups", "unknown"),
-            "outlier_health": summary.get("outliers", "unknown"),
-            "total_speakers": summary.get("totalSpeakers", 0),
-            "total_segments": summary.get("totalSegments", 0),
-            "active_outliers": summary.get("outlierCount", 0),
-            "timestamp": metrics.get("timestamp", datetime.now().isoformat()),
-        }
-    )
-
-
-# ============================================================
-# HTML PAGES
-# ============================================================
-
-
-@router.get("/metrics", response_class=HTMLResponse)
-async def get_speaker_metrics_page(request: Request):
-    """
-    Serve the speaker metrics HTML dashboard page.
-    
-    This returns the speaker_metrics.html template as a complete page.
-    The frontend JavaScript will then fetch data from /speakers/metrics/data
-    and render the interactive dashboard.
-    """
-    labeler = get_speaker_labeler()
-    if not labeler:
-        console.print("[warning]Speaker labeler not initialized for metrics page[/]")
-    
-    console.print("[info]🖥️  Serving speaker metrics HTML page[/]")
     try:
-        html_content = render_template(
-            "speaker_metrics.html",
-            {
-                "title": "Speaker Metrics Dashboard",
-                "timestamp": datetime.now().isoformat(),
-                "has_labeler": labeler is not None,
-            },
+        segments = labeler.get_speaker_segment_list(
+            speaker_label=speaker_label,
+            limit=limit,
+            offset=offset,
         )
-        console.print("[success]Speaker metrics page rendered[/]")
-        return HTMLResponse(content=html_content)
+        console.print(f"[info]Returning speaker segments JSON for {speaker_label}: {segments.get('total', 0)} total[/]")
+        return JSONResponse(content=segments)
     except Exception as e:
-        console.print(f"[error]Failed to render speaker metrics page: {e}[/]")
-        # Fallback to raw HTML file
-        metrics_html_path = _templates_dir / "speaker_metrics.html"
-        if metrics_html_path.exists():
-            console.print("[info]Falling back to raw HTML file[/]")
-            return HTMLResponse(content=metrics_html_path.read_text(encoding="utf-8"))
-        raise HTTPException(
-            status_code=500, detail=f"Failed to render metrics page: {str(e)}"
-        )
+        console.print(f"[error]Error in speaker_segments_json: {e}[/]")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("segments2", response_class=HTMLResponse)
-async def get_segments_page(request: Request):
+@router.get("/api/segments")
+async def segments_list_json():
     """
-    Serve the segments overview HTML page.
-    
-    Shows segment group history, label timeline, and outlier tracking.
+    JSON endpoint: Segment group health metrics.
     """
-    console.print("[info]🖥️  Serving segments overview HTML page[/]")
+    labeler = _check_labeler()
     try:
-        html_content = render_template(
-            "segments.html",
-            {
-                "title": "Segments Overview",
-                "timestamp": datetime.now().isoformat(),
-            },
-        )
-        return HTMLResponse(content=html_content)
+        health = labeler.get_segment_group_health()
+        console.print(f"[info]Returning segments health JSON: {health.get('total_segments', 0)} segments[/]")
+        return JSONResponse(content=health)
     except Exception as e:
-        console.print(f"[error]Failed to render segments page: {e}[/]")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to render segments page: {str(e)}"
-        )
+        console.print(f"[error]Error in segments_list_json: {e}[/]")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/segments/{segment_index}")
+async def segment_detail_json(segment_index: int):
+    """
+    JSON endpoint: Single segment detail.
+    """
+    labeler = _check_labeler()
+    try:
+        detail = labeler.get_segment_detail(segment_index)
+        if not detail:
+            raise HTTPException(status_code=404, detail=f"Segment at index {segment_index} not found")
+        console.print(f"[info]Returning segment detail JSON for index {segment_index}[/]")
+        return JSONResponse(content=detail)
+    except HTTPException:
+        raise
+    except Exception as e:
+        console.print(f"[error]Error in segment_detail_json: {e}[/]")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/separation")
+async def separation_json():
+    """
+    JSON endpoint: Inter-speaker separation matrix.
+    """
+    labeler = _check_labeler()
+    try:
+        separation = labeler.get_speaker_separation_matrix()
+        console.print(f"[info]Returning separation JSON: {separation.get('total_speakers_with_centroids', 0)} speakers[/]")
+        return JSONResponse(content=separation)
+    except Exception as e:
+        console.print(f"[error]Error in separation_json: {e}[/]")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/outliers")
+async def outliers_json():
+    """
+    JSON endpoint: Outlier pool health.
+    """
+    labeler = _check_labeler()
+    try:
+        outlier_health = labeler.get_outlier_pool_health()
+        console.print(f"[info]Returning outlier pool JSON[/]")
+        return JSONResponse(content=outlier_health)
+    except Exception as e:
+        console.print(f"[error]Error in outliers_json: {e}[/]")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/timeline")
+async def timeline_json():
+    """
+    JSON endpoint: Speaker activity timeline.
+    """
+    labeler = _check_labeler()
+    try:
+        timeline = labeler.get_speaker_timeline()
+        console.print(f"[info]Returning timeline JSON: {timeline.get('total_segments', 0)} segments[/]")
+        return JSONResponse(content=timeline)
+    except Exception as e:
+        console.print(f"[error]Error in timeline_json: {e}[/]")
+        raise HTTPException(status_code=500, detail=str(e))
