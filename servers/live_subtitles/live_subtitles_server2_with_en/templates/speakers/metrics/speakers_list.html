@@ -62,7 +62,12 @@
                 </span>
               </td>
               <td>
-                <a href="/speakers/metrics/speakers/{{ speaker_label }}">Details →</a>
+                <div class="actions-cell">
+                  <a href="/speakers/metrics/speakers/{{ speaker_label }}"
+                     title="View speaker details">📋 Details</a>
+                  <a href="/speakers/metrics/api/speakers/{{ speaker_label }}"
+                     title="View JSON data">JSON</a>
+                </div>
               </td>
             </tr>
           {% endfor %}

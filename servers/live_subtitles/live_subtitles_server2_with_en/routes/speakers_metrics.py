@@ -17,7 +17,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from rich.console import Console
 from services.config import TEMPLATES_DIR
-from services.serialization_utils import serialize
 
 console = Console()
 
@@ -76,9 +75,7 @@ def _check_labeler():
 @router.get("", response_class=HTMLResponse)
 @router.get("/", response_class=HTMLResponse)
 async def metrics_overview_html(request: Request):
-    """
-    Main metrics overview page with system health summary.
-    """
+    """Main metrics overview page with system health summary."""
     labeler = _check_labeler()
     
     try:
@@ -98,9 +95,7 @@ async def metrics_overview_html(request: Request):
 
 @router.get("/speakers", response_class=HTMLResponse)
 async def speakers_list_html(request: Request):
-    """
-    List all speakers with their cohesion metrics.
-    """
+    """List all speakers with their cohesion metrics."""
     labeler = _check_labeler()
     
     try:
@@ -125,25 +120,21 @@ async def speakers_list_html(request: Request):
 
 @router.get("/speakers/{speaker_label}", response_class=HTMLResponse)
 async def speaker_detail_html(request: Request, speaker_label: str):
-    """
-    Detailed view for a single speaker with cohesion metrics and segment list.
-    """
+    """Detailed view for a single speaker with cohesion metrics and segment list."""
     labeler = _check_labeler()
     
     try:
-        # Get speaker cohesion metrics
         speaker = labeler.get_speaker_cohesion(speaker_label)
         if not speaker:
             raise HTTPException(status_code=404, detail=f"Speaker '{speaker_label}' not found")
         
-        # Get segments for this speaker
         segments = labeler.get_speaker_segment_list(
             speaker_label=speaker_label,
-            limit=50,
+            limit=100,
             offset=0,
         )
         
-        console.print(f"[info]Rendering speaker detail page for {speaker_label}[/]")
+        console.print(f"[info]Rendering speaker detail page for {speaker_label} with {segments.get('total', 0)} segments[/]")
         
         return render_template("speaker_detail.html", {
             "active_page": "speakers",
@@ -161,9 +152,7 @@ async def speaker_detail_html(request: Request, speaker_label: str):
 
 @router.get("/segments", response_class=HTMLResponse)
 async def segments_list_html(request: Request):
-    """
-    Segment group health page showing labeling quality metrics.
-    """
+    """Segment group health page showing labeling quality metrics."""
     labeler = _check_labeler()
     
     try:
@@ -185,6 +174,7 @@ async def segments_list_html(request: Request):
 async def segment_detail_html(request: Request, segment_index: int):
     """
     Detailed view for a single segment showing all matches and context.
+    The segment_index corresponds to the position in _segment_groups (0-based).
     """
     labeler = _check_labeler()
     
@@ -195,20 +185,10 @@ async def segment_detail_html(request: Request, segment_index: int):
         
         console.print(f"[info]Rendering segment detail page for index {segment_index}[/]")
         
-        # For now, use a simple inline render since we don't have a separate template yet
-        return render_template("segments_list.html", {
+        return render_template("segment_detail.html", {
             "active_page": "segments",
-            "health": {
-                "total_segments": len(labeler._segment_groups),
-                "mean_confidence": detail.get("primary_match", {}).get("confidence", 0) if detail.get("primary_match") else 0,
-                "temporal_consistency_score": 1.0,
-                "label_switches": 0,
-                "unresolved_outliers": 0,
-                "confidence_distribution": {},
-                "match_type_distribution": {},
-                "primary_label_sequence": [],
-                "status": "healthy",
-            },
+            "segment": detail,
+            "total_segments": len(labeler._segment_groups),
             "computed_at": datetime.now().isoformat(),
             "request": request,
         })
@@ -221,9 +201,7 @@ async def segment_detail_html(request: Request, segment_index: int):
 
 @router.get("/separation", response_class=HTMLResponse)
 async def separation_html(request: Request):
-    """
-    Inter-speaker separation metrics page.
-    """
+    """Inter-speaker separation metrics page."""
     labeler = _check_labeler()
     
     try:
@@ -243,9 +221,7 @@ async def separation_html(request: Request):
 
 @router.get("/outliers", response_class=HTMLResponse)
 async def outliers_html(request: Request):
-    """
-    Outlier pool health page.
-    """
+    """Outlier pool health page."""
     labeler = _check_labeler()
     
     try:
@@ -265,9 +241,7 @@ async def outliers_html(request: Request):
 
 @router.get("/timeline", response_class=HTMLResponse)
 async def timeline_html(request: Request):
-    """
-    Speaker activity timeline visualization.
-    """
+    """Speaker activity timeline visualization."""
     labeler = _check_labeler()
     
     try:
@@ -291,14 +265,12 @@ async def timeline_html(request: Request):
 
 @router.get("/api/overview")
 async def metrics_overview_json():
-    """
-    JSON endpoint: Full system health overview.
-    """
+    """JSON endpoint: Full system health overview."""
     labeler = _check_labeler()
     try:
         metrics = labeler.get_speaker_metrics()
         console.print("[info]Returning metrics overview JSON[/]")
-        return JSONResponse(content=serialize(metrics))
+        return JSONResponse(content=metrics)
     except Exception as e:
         console.print(f"[error]Error in metrics_overview_json: {e}[/]")
         raise HTTPException(status_code=500, detail=str(e))
@@ -306,9 +278,7 @@ async def metrics_overview_json():
 
 @router.get("/api/speakers")
 async def speakers_list_json():
-    """
-    JSON endpoint: All speakers cohesion metrics.
-    """
+    """JSON endpoint: All speakers cohesion metrics."""
     labeler = _check_labeler()
     try:
         cohesion = labeler.get_all_speakers_cohesion()
@@ -321,9 +291,7 @@ async def speakers_list_json():
 
 @router.get("/api/speakers/{speaker_label}")
 async def speaker_detail_json(speaker_label: str):
-    """
-    JSON endpoint: Single speaker cohesion detail.
-    """
+    """JSON endpoint: Single speaker cohesion detail."""
     labeler = _check_labeler()
     try:
         speaker = labeler.get_speaker_cohesion(speaker_label)
@@ -344,9 +312,7 @@ async def speaker_segments_json(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    """
-    JSON endpoint: Segments for a specific speaker (paginated).
-    """
+    """JSON endpoint: Segments for a specific speaker (paginated)."""
     labeler = _check_labeler()
     try:
         segments = labeler.get_speaker_segment_list(
@@ -363,9 +329,7 @@ async def speaker_segments_json(
 
 @router.get("/api/segments")
 async def segments_list_json():
-    """
-    JSON endpoint: Segment group health metrics.
-    """
+    """JSON endpoint: Segment group health metrics."""
     labeler = _check_labeler()
     try:
         health = labeler.get_segment_group_health()
@@ -378,9 +342,7 @@ async def segments_list_json():
 
 @router.get("/api/segments/{segment_index}")
 async def segment_detail_json(segment_index: int):
-    """
-    JSON endpoint: Single segment detail.
-    """
+    """JSON endpoint: Single segment detail."""
     labeler = _check_labeler()
     try:
         detail = labeler.get_segment_detail(segment_index)
@@ -397,9 +359,7 @@ async def segment_detail_json(segment_index: int):
 
 @router.get("/api/separation")
 async def separation_json():
-    """
-    JSON endpoint: Inter-speaker separation matrix.
-    """
+    """JSON endpoint: Inter-speaker separation matrix."""
     labeler = _check_labeler()
     try:
         separation = labeler.get_speaker_separation_matrix()
@@ -412,9 +372,7 @@ async def separation_json():
 
 @router.get("/api/outliers")
 async def outliers_json():
-    """
-    JSON endpoint: Outlier pool health.
-    """
+    """JSON endpoint: Outlier pool health."""
     labeler = _check_labeler()
     try:
         outlier_health = labeler.get_outlier_pool_health()
@@ -427,9 +385,7 @@ async def outliers_json():
 
 @router.get("/api/timeline")
 async def timeline_json():
-    """
-    JSON endpoint: Speaker activity timeline.
-    """
+    """JSON endpoint: Speaker activity timeline."""
     labeler = _check_labeler()
     try:
         timeline = labeler.get_speaker_timeline()

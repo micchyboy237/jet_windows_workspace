@@ -114,9 +114,8 @@ class SpeakerMetricsMixin:
             centroid_sim_max = None
         
         # Composite cohesion score (0-1)
-        # Weights: mean_pairwise (0.4), 1-std_pairwise (0.3), centroid_sim_mean (0.3)
         if mean_pairwise is not None and centroid_sim_mean is not None:
-            normalized_std = max(0, 1.0 - std_pairwise * 2)  # Lower std = better
+            normalized_std = max(0, 1.0 - std_pairwise * 2)
             cohesion_score = round(
                 0.4 * mean_pairwise + 
                 0.3 * normalized_std + 
@@ -146,11 +145,7 @@ class SpeakerMetricsMixin:
         }
     
     def get_all_speakers_cohesion(self) -> Dict[str, Any]:
-        """
-        Compute cohesion metrics for all speakers.
-        
-        Returns a summary with per-speaker details and overall averages.
-        """
+        """Compute cohesion metrics for all speakers."""
         speaker_metrics = {}
         cohesion_scores = []
         
@@ -163,7 +158,6 @@ class SpeakerMetricsMixin:
         
         avg_cohesion = float(np.mean(cohesion_scores)) if cohesion_scores else 0.0
         
-        # Categorize speakers
         healthy = [l for l, m in speaker_metrics.items() if m.get("status") == "healthy"]
         warning = [l for l, m in speaker_metrics.items() if m.get("status") == "warning"]
         critical = [l for l, m in speaker_metrics.items() if m.get("status") == "critical"]
@@ -186,20 +180,7 @@ class SpeakerMetricsMixin:
     # ─────────────────────────────────────────────────────────────────────
     
     def get_speaker_separation_matrix(self) -> Dict[str, Any]:
-        """
-        Compute inter-speaker separation metrics.
-        
-        Measures:
-        - pairwise_centroid_similarities: Similarity between all speaker centroids
-        - mean_separation: Average separation between speakers (1 - similarity)
-        - min_separation: Closest pair of speakers
-        - max_separation: Most distant pair of speakers
-        - ambiguous_pairs: Speaker pairs with similarity > threshold (potential confusion)
-        - separation_health: Overall separation quality assessment
-        
-        Returns None for fields if < 2 speakers with valid centroids.
-        """
-        # Get speakers with valid centroids
+        """Compute inter-speaker separation metrics."""
         valid_speakers = {
             label: ref for label, ref in self._speakers.items() 
             if ref.has_valid_centroid
@@ -220,11 +201,9 @@ class SpeakerMetricsMixin:
         labels = list(valid_speakers.keys())
         centroids = np.vstack([ref.centroid for ref in valid_speakers.values()])
         
-        # Compute pairwise similarities
         distances = cdist(centroids, centroids, metric="cosine")
         similarities = 1.0 - distances
         
-        # Build pairwise dict
         pairwise = {}
         separation_values = []
         ambiguous_pairs = []
@@ -244,7 +223,6 @@ class SpeakerMetricsMixin:
                 }
                 separation_values.append(sep)
                 
-                # Flag ambiguous pairs (similarity > 0.7 means they're quite similar)
                 if sim > 0.7:
                     ambiguous_pairs.append({
                         "speaker_1": labels[i],
@@ -257,7 +235,6 @@ class SpeakerMetricsMixin:
         min_sep = float(np.min(separation_values)) if separation_values else 0.0
         max_sep = float(np.max(separation_values)) if separation_values else 0.0
         
-        # Health assessment
         if len(ambiguous_pairs) == 0:
             health = "excellent"
         elif mean_sep > 0.5:
@@ -284,16 +261,7 @@ class SpeakerMetricsMixin:
     # ─────────────────────────────────────────────────────────────────────
     
     def get_segment_group_health(self) -> Dict[str, Any]:
-        """
-        Compute health metrics for segment groups (labeling quality).
-        
-        Analyzes all processed segments in self._segment_groups to assess:
-        - Match confidence distribution
-        - Match type distribution
-        - Temporal consistency
-        - Label switching frequency
-        - Unresolved outlier segments
-        """
+        """Compute health metrics for segment groups (labeling quality)."""
         if not self._segment_groups:
             return {
                 "total_segments": 0,
@@ -308,7 +276,6 @@ class SpeakerMetricsMixin:
         
         total_segments = len(self._segment_groups)
         
-        # Collect all matches with confidence
         confidences = []
         match_types = defaultdict(int)
         primary_labels = []
@@ -323,14 +290,11 @@ class SpeakerMetricsMixin:
                 mt = match.get("match_type", "unknown")
                 match_types[mt] += 1
                 
-                # Track primary labels and outliers
                 if match.get("is_primary"):
                     primary_labels.append(match.get("label", "UNKNOWN"))
-                    # Check for unresolved outliers
                     if match.get("label", "").startswith("OUTLIER_"):
                         unresolved_outliers += 1
         
-        # Confidence distribution
         bins = {"0.0-0.3": 0, "0.3-0.5": 0, "0.5-0.7": 0, "0.7-0.85": 0, "0.85-0.95": 0, "0.95-1.0": 0}
         for c in confidences:
             if c < 0.3:
@@ -348,13 +312,11 @@ class SpeakerMetricsMixin:
         
         mean_confidence = float(np.mean(confidences)) if confidences else 0.0
         
-        # Label switch frequency
         label_switches = 0
         for i in range(1, len(primary_labels)):
             if primary_labels[i] != primary_labels[i-1]:
                 label_switches += 1
         
-        # Temporal consistency: ratio of same-speaker consecutive segments
         if len(primary_labels) > 1:
             same_consecutive = sum(
                 1 for i in range(1, len(primary_labels)) 
@@ -364,7 +326,6 @@ class SpeakerMetricsMixin:
         else:
             temporal_consistency = 1.0
         
-        # Health status
         if mean_confidence >= 0.8 and temporal_consistency >= 0.7:
             status = "healthy"
         elif mean_confidence >= 0.6 and temporal_consistency >= 0.5:
@@ -381,13 +342,13 @@ class SpeakerMetricsMixin:
             "temporal_consistency_score": temporal_consistency,
             "unresolved_outliers": unresolved_outliers,
             "status": status,
-            "primary_label_sequence": primary_labels[-20:] if primary_labels else [],  # Last 20 for preview
+            "primary_label_sequence": primary_labels[-20:] if primary_labels else [],
             "computed_at": datetime.now().isoformat(),
         }
     
     def get_segment_detail(self, segment_index: int) -> Optional[Dict[str, Any]]:
         """
-        Get detailed information about a specific segment by index.
+        Get detailed information about a specific segment by index in _segment_groups.
         
         Parameters
         ----------
@@ -425,13 +386,14 @@ class SpeakerMetricsMixin:
             
             enriched_matches.append(enriched)
         
-        # Get surrounding context
+        # Get surrounding context (adjacent segments in _segment_groups)
         prev_segment = None
         next_segment = None
         if segment_index > 0:
             prev_group = self._segment_groups[segment_index - 1]
             prev_primary = next((m for m in prev_group.get("matches", []) if m.get("is_primary")), None)
             prev_segment = {
+                "index": segment_index - 1,
                 "segment_id": prev_group.get("segment_id"),
                 "timestamp": prev_group.get("timestamp"),
                 "primary_label": prev_primary.get("label") if prev_primary else None,
@@ -440,6 +402,7 @@ class SpeakerMetricsMixin:
             next_group = self._segment_groups[segment_index + 1]
             next_primary = next((m for m in next_group.get("matches", []) if m.get("is_primary")), None)
             next_segment = {
+                "index": segment_index + 1,
                 "segment_id": next_group.get("segment_id"),
                 "timestamp": next_group.get("timestamp"),
                 "primary_label": next_primary.get("label") if next_primary else None,
@@ -463,7 +426,6 @@ class SpeakerMetricsMixin:
             return None
         
         try:
-            # Check if outlier exists in pool
             if outlier_label in self.outlier_pool:
                 entry = self.outlier_pool[outlier_label]
                 return {
@@ -472,7 +434,6 @@ class SpeakerMetricsMixin:
                     "promoted": False,
                 }
             
-            # Check if it was promoted
             for promo in getattr(self.outlier_pool, '_promotions', []):
                 if outlier_label in promo.outlier_labels:
                     return {
@@ -491,11 +452,7 @@ class SpeakerMetricsMixin:
     # ─────────────────────────────────────────────────────────────────────
     
     def get_outlier_pool_health(self) -> Dict[str, Any]:
-        """
-        Compute health metrics for the outlier pool.
-        
-        Analyzes outlier buffer state, promotion rates, and unresolved outliers.
-        """
+        """Compute health metrics for the outlier pool."""
         if not hasattr(self, 'outlier_pool') or not self.use_outlier_buffer:
             return {
                 "enabled": False,
@@ -506,7 +463,6 @@ class SpeakerMetricsMixin:
         outlier_count = self.outlier_pool.count if hasattr(self.outlier_pool, 'count') else 0
         promotion_count = self.outlier_pool.promotion_count if hasattr(self.outlier_pool, 'promotion_count') else 0
         
-        # Get promotion history
         promotions = []
         if hasattr(self.outlier_pool, '_promotions'):
             for promo in self.outlier_pool._promotions:
@@ -517,7 +473,6 @@ class SpeakerMetricsMixin:
                     "confidence": getattr(promo, 'confidence', 0.0),
                 })
         
-        # Check for old outliers that haven't been promoted
         max_age_warning = 300  # 5 minutes
         old_outliers = 0
         if hasattr(self.outlier_pool, 'entries'):
@@ -527,7 +482,6 @@ class SpeakerMetricsMixin:
                 if ts and (current_time - ts) > max_age_warning:
                     old_outliers += 1
         
-        # Health assessment
         if outlier_count == 0 and promotion_count > 0:
             status = "healthy"
         elif outlier_count <= 3:
@@ -545,7 +499,7 @@ class SpeakerMetricsMixin:
             "active_outliers": outlier_count,
             "total_promotions": promotion_count,
             "promotion_rate": round(promotion_count / max(1, promotion_count + outlier_count), 4),
-            "promotions": promotions[-10:],  # Last 10 promotions
+            "promotions": promotions[-10:],
             "old_outliers": old_outliers,
             "max_capacity": getattr(self.outlier_pool, 'max_count', None),
             "status": status,
@@ -557,22 +511,12 @@ class SpeakerMetricsMixin:
     # ─────────────────────────────────────────────────────────────────────
     
     def get_speaker_metrics(self) -> Dict[str, Any]:
-        """
-        Compute comprehensive system health summary.
-        
-        Aggregates all metrics into a single overview combining:
-        - Speaker cohesion stats
-        - Speaker separation stats
-        - Segment group health
-        - Outlier pool health
-        - System statistics
-        """
+        """Compute comprehensive system health summary."""
         cohesion = self.get_all_speakers_cohesion()
         separation = self.get_speaker_separation_matrix()
         segment_health = self.get_segment_group_health()
         outlier_health = self.get_outlier_pool_health()
         
-        # Get speaker categories
         speaker_categories = {}
         if hasattr(self, '_get_speaker_categories'):
             try:
@@ -580,7 +524,6 @@ class SpeakerMetricsMixin:
             except Exception as e:
                 logger.debug(f"Could not get speaker categories: {e}")
         
-        # Compute overall health score (weighted)
         scores = []
         weights = []
         
@@ -606,7 +549,6 @@ class SpeakerMetricsMixin:
         else:
             overall_score = 0.0
         
-        # Determine overall status
         if overall_score >= 0.8:
             overall_status = "excellent"
         elif overall_score >= 0.65:
@@ -616,7 +558,6 @@ class SpeakerMetricsMixin:
         else:
             overall_status = "needs_attention"
         
-        # Generate recommendations
         recommendations = []
         if cohesion.get("critical_count", 0) > 0:
             recommendations.append(f"{cohesion['critical_count']} speaker(s) have critical cohesion - consider merging or reviewing")
@@ -666,11 +607,7 @@ class SpeakerMetricsMixin:
         }
     
     def get_speaker_timeline(self) -> Dict[str, Any]:
-        """
-        Build a timeline of speaker activity across segments.
-        
-        Returns speaker labels with their segment timestamps for visualization.
-        """
+        """Build a timeline of speaker activity across segments."""
         if not self._segment_groups:
             return {"timeline": [], "speakers": []}
         
@@ -687,7 +624,6 @@ class SpeakerMetricsMixin:
                 "match_type": primary.get("match_type") if primary else "unknown",
             })
         
-        # Get unique speaker labels
         speakers = list(set(
             entry["primary_label"] for entry in timeline 
             if entry["primary_label"] != "UNKNOWN"
@@ -721,6 +657,8 @@ class SpeakerMetricsMixin:
             Number of segments to skip
             
         Returns paginated segment list with metadata.
+        The 'index' field is the position in self._segment_groups,
+        which can be used to link to /speakers/metrics/segments/{index}
         """
         if not self._segment_groups:
             return {
