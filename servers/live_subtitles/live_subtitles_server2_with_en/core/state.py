@@ -16,6 +16,7 @@ from services.config import (
     N_SEGMENT_RESULTS,
     LAST_N_SEGMENTS_DIR,
     LIVE_AUDIO_BUFFER_DIR,
+    SEGMENT_AUDIO_DIR,
     SPEAKER_STATE_PATH,
 )
 from services.segment_speaker_labeler import SegmentSpeakerLabeler
@@ -70,6 +71,10 @@ def get_last_n_segments_dir() -> Path:
 def get_live_audio_buffer_dir() -> Path:
     """Get the live audio buffer directory."""
     return LIVE_AUDIO_BUFFER_DIR
+
+def get_segments_audio_dir() -> Path:
+    """Get the segment audio directory."""
+    return SEGMENT_AUDIO_DIR
 
 def get_speaker_state_path() -> Path:
     """Get the speaker state file path."""

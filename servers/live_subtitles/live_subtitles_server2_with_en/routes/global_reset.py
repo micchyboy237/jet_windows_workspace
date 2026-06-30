@@ -24,6 +24,7 @@ from core.state import (
     get_segment_index_path,
     get_last_n_segments_dir,
     get_live_audio_buffer_dir,
+    get_segments_audio_dir,
     get_audio_tagger,
     set_audio_tagger,
     get_embedding_inference,
@@ -364,6 +365,7 @@ def _clean_output_directories(debug: bool = False) -> Dict[str, Any]:
     directories_to_clean = [
         get_last_n_segments_dir(),
         get_live_audio_buffer_dir(),
+        get_segments_audio_dir(),
     ]
     
     # Also clean OUTPUT_DIR itself, but recreate it
@@ -412,6 +414,7 @@ def _clean_output_directories(debug: bool = False) -> Dict[str, Any]:
     try:
         get_last_n_segments_dir().mkdir(parents=True, exist_ok=True)
         get_live_audio_buffer_dir().mkdir(parents=True, exist_ok=True)
+        get_segments_audio_dir().mkdir(parents=True, exist_ok=True)
         stats["reset_success"] = True
     except Exception as e:
         stats["errors"].append(f"Failed to recreate directories: {str(e)}")
@@ -688,6 +691,7 @@ async def get_global_status():
     try:
         last_n_dir = get_last_n_segments_dir()
         live_dir = get_live_audio_buffer_dir()
+        audio_segments_dir = get_segments_audio_dir()
         
         def count_items(directory):
             if not directory.exists():
@@ -699,6 +703,7 @@ async def get_global_status():
         status["components"]["output_directories"] = {
             "last_n_segments": count_items(last_n_dir),
             "live_audio_buffer": count_items(live_dir),
+            "audio_segments": count_items(audio_segments_dir),
         }
     except Exception as e:
         status["components"]["output_directories"] = {
