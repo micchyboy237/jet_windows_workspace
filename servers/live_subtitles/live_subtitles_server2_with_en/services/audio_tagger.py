@@ -1055,7 +1055,7 @@ class AudioTagger:
         overlap_duration: Optional[float] = None,
         min_chunk_duration: Optional[float] = None,
         speech_threshold: Optional[float] = None,
-        min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_DURATION_SEC,
+        min_silence_duration_sec: Optional[float] = None,
         min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_DURATION_SEC,
         resolution_ms: float = DEFAULT_RESOLUTION_MS,
         include_non_speech: bool = False,
@@ -1073,7 +1073,8 @@ class AudioTagger:
             overlap_duration: Overlap between consecutive chunks.
             min_chunk_duration: Minimum duration for the last chunk.
             speech_threshold: Speech probability threshold (default: self.speech_prob_threshold).
-            min_silence_duration_sec: Continuous non-speech gap to close a segment (default: 1.0s).
+            min_silence_duration_sec: Continuous non-speech gap to close a segment.
+                If None, auto-calculated as 2× the hop size (chunk_duration - overlap).
             min_speech_duration_sec: Minimum duration for a valid speech segment (default: 1.0s).
             resolution_ms: Timeline resolution in ms (default: HOP_STEP_MS).
             include_non_speech: If True, also detect non-speech segments (default: False).
@@ -1097,6 +1098,21 @@ class AudioTagger:
                 f"[yellow]⚠ Invalid speech threshold {_speech_threshold}, using {DEFAULT_SPEECH_PROB_THRESHOLD}[/yellow]"
             )
             _speech_threshold = DEFAULT_SPEECH_PROB_THRESHOLD
+
+        # Auto-calculate min_silence_duration_sec if not explicitly set.
+        # Uses 2× the hop size so the threshold scales naturally with the
+        # chunking configuration. For standard 0.5s chunks / 0.25s overlap,
+        # hop=0.25s → min_silence=0.5s.
+        _chunk_dur = chunk_duration if chunk_duration is not None else self.chunk_duration
+        _overlap = overlap_duration if overlap_duration is not None else self.chunk_overlap
+        if min_silence_duration_sec is None:
+            hop_duration = _chunk_dur - _overlap
+            min_silence_duration_sec = max(hop_duration * 2.0, 0.1)
+            console.print(
+                f"[dim]🔧 Auto min_silence_duration_sec={min_silence_duration_sec:.3f}s "
+                f"(2× hop={hop_duration:.3f}s, chunk={_chunk_dur}s, overlap={_overlap}s)[/dim]"
+            )
+
         overall_start = time.time()
         console.print(
             Panel.fit(
@@ -1145,7 +1161,7 @@ class AudioTagger:
                 total_processing_time=round(elapsed, 4),
                 real_time_factor=round(elapsed / total_duration, 4) if total_duration > 0 else 0.0,
             )
-        # Step 2: Build probability timeline
+        # Step 2: Build probability timeline (only from speech-detected chunks)
         times, probs = self._build_prob_timeline(chunks, resolution_ms=resolution_ms)
         if len(times) == 0:
             elapsed = time.time() - overall_start
@@ -1318,35 +1334,54 @@ class AudioTagger:
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Build a continuous speech-probability timeline from overlapping chunks.
-        For each (time, speech_prob) observation contributed by a chunk, the
-        probability is spread uniformly over the chunk's interval.  Where chunks
-        overlap the per-cell values are accumulated via a weighted sum and then
-        divided by the total weight (coverage count), giving a coverage-weighted
-        average — the correct formula for non-uniform overlap grids.
-        Formula for each timeline cell t covered by chunk i:
+        
+        Only chunks with speech_detected=True contribute to the probability
+        accumulation. Non-speech chunks are skipped entirely so they don't
+        dilute the signal or cause probability bleed into silent regions.
+        
+        Where speech chunks overlap, the per-cell values are accumulated via a
+        weighted sum and then divided by the total weight (coverage count),
+        giving a coverage-weighted average.
+
+        Formula for each timeline cell t covered by speech chunk i:
             prob_timeline[t] += chunk_speech_prob[i]   # accumulate
             weight[t]        += 1                       # count coverage
         Final:
             prob_timeline[t] /= weight[t]              # weighted mean
+
         Args:
-            chunks: Chunk results with start_time, end_time, speech_probability.
+            chunks: Chunk results with start_time, end_time, speech_probability,
+                    and speech_detected flag.
             resolution_ms: Timeline resolution in milliseconds (default 10 ms).
+
         Returns:
             (times_sec, probs) arrays of equal length:
                 times_sec — centre of each cell in seconds
                 probs     — consolidated speech probability at that time
+
         Debug logs trace:
+            - Number of speech vs total chunks used
             - Number of cells in timeline
             - Total time span covered
         """
         if not chunks:
             return np.array([]), np.array([])
+        
         total_end = max(c["end_time"] for c in chunks)
         step = resolution_ms / 1000.0
         n_cells = max(1, int(np.ceil(total_end / step)))
         prob_acc = np.zeros(n_cells, dtype=np.float64)
         weight   = np.zeros(n_cells, dtype=np.float64)
+        
+        speech_chunks_used = 0
+        total_chunks = len(chunks)
+        
         for chunk in chunks:
+            # Only use chunks where speech was actually detected
+            if not chunk.get("speech_detected", False):
+                continue
+            
+            speech_chunks_used += 1
             t0  = chunk["start_time"]
             t1  = chunk["end_time"]
             sp  = chunk.get("speech_probability", 0.0)
@@ -1354,13 +1389,21 @@ class AudioTagger:
             i1 = min(int(np.ceil(t1 / step)), n_cells)
             prob_acc[i0:i1] += sp
             weight[i0:i1]   += 1.0
+        
         covered = weight > 0
         probs = np.where(covered, prob_acc / np.where(covered, weight, 1.0), 0.0)
         times = (np.arange(n_cells) + 0.5) * step
+        
+        speech_cells = int(np.sum(covered))
+        total_cells = n_cells
+        
         console.print(
-            f"[dim]🕑 Built prob timeline: {n_cells} cells @ {resolution_ms}ms "
+            f"[dim]🕑 Built prob timeline: {speech_chunks_used}/{total_chunks} speech chunks → "
+            f"{speech_cells}/{total_cells} cells with probability > 0 "
+            f"({speech_cells/total_cells*100:.1f}%) @ {resolution_ms}ms "
             f"resolution, total_end={total_end:.3f}s[/dim]"
         )
+        
         return times.astype(np.float32), probs.astype(np.float32)
 
     def _build_segment_result(
@@ -1963,13 +2006,13 @@ class AudioTagger:
         self,
         audio: AudioInput,
         sample_rate: Optional[int] = None,
-        min_duration: float = 1.5,
+        min_duration: float = 1.0,
         require_confidence: Optional[List[str]] = None,
         chunk_duration: Optional[float] = None,
         overlap_duration: Optional[float] = None,
         min_chunk_duration: Optional[float] = None,
         speech_threshold: Optional[float] = None,
-        min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_DURATION_SEC,
+        min_silence_duration_sec: Optional[float] = None,
         min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_DURATION_SEC,
     ) -> Tuple[List[SpeechSegmentResult], List[np.ndarray]]:
         """
@@ -1984,7 +2027,8 @@ class AudioTagger:
             overlap_duration: Overlap between consecutive chunks
             min_chunk_duration: Minimum duration for the last chunk
             speech_threshold: Speech probability threshold
-            min_silence_duration_sec: Continuous non-speech gap to close a segment
+            min_silence_duration_sec: Continuous non-speech gap to close a segment.
+                If None, auto-calculated as 2× the hop size (chunk_duration - overlap).
             min_speech_duration_sec: Minimum duration for a valid speech segment
         Returns:
             Tuple of:
@@ -2000,10 +2044,28 @@ class AudioTagger:
         """
         import soundfile as sf
         overall_start = time.time()
+        
+        # Auto-calculate min_silence_duration_sec if not explicitly set.
+        # Use 2× the hop size (chunk_duration - overlap) as a sensible default
+        # that scales with the chunking configuration. For the standard
+        # 0.5s chunks with 0.25s overlap, this gives 0.5s — meaning gaps
+        # shorter than one full chunk are merged, which is the intended
+        # behaviour for continuous speech.
+        _chunk_dur = chunk_duration if chunk_duration is not None else self.chunk_duration
+        _overlap = overlap_duration if overlap_duration is not None else self.chunk_overlap
+        if min_silence_duration_sec is None:
+            hop_duration = _chunk_dur - _overlap
+            min_silence_duration_sec = max(hop_duration * 2.0, 0.1)
+            console.print(
+                f"[dim]🔧 Auto min_silence_duration_sec={min_silence_duration_sec:.3f}s "
+                f"(2× hop={hop_duration:.3f}s, chunk={_chunk_dur}s, overlap={_overlap}s)[/dim]"
+            )
+        
         console.print(
             Panel.fit(
                 f"[bold cyan]extract_high_confidence_speech_segments[/bold cyan]\n"
                 f"min_duration={min_duration}s | "
+                f"min_silence={min_silence_duration_sec}s | "
                 f"filter: duration > {min_duration}s AND segment_type == 'speech'",
                 title="High Speech Segments Extraction",
                 border_style="cyan",

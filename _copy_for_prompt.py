@@ -56,8 +56,14 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_utils.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_config.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger.py",
+   #  r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger.py",
     r"",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\generated\test_audio_tagger\chunk_summary.json",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\generated\test_audio_tagger\high_speech_segments.json",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\generated\test_audio_tagger\segments_result.json",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\generated\test_audio_tagger\speech_segments.json",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_audio_tagger.py",
     r"",
 ]
 
@@ -81,7 +87,247 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Find code relevant to speech duration calculation, then evaluate each.
+Check
+
+
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_audio_tagger.py "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\generated\segment_audio\segment_081.wav"
+╭─── AudioTagger Configuration ────╮
+│ AudioTagger Initialized          │
+│ Model: model.onnx                │
+│ Labels: class_labels_indices.csv │
+│ Speech Threshold: 0.1            │
+│ Speech Top N: 3                  │
+│ Chunk Duration: 0.5s             │
+│ Chunk Overlap: 0.25s             │
+│ Min Chunk Duration: 0.5s         │
+╰──────────────────────────────────╯
+
+Analyzing audio: segment_081.wav
+
+📊 Audio loaded: 2.86s, 16000Hz, 45760 samples
+🔧 Chunk config: 0.5s chunks, 0.25s overlap, hop=4000 samples
+📏 Calculated 10 chunk positions
+🔍 Processing chunk 1/10: 0.00s - 0.50s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   Speech classes found: Speech(0.243) | max_prob=0.2431 | threshold=0.1 | detected=True
+   🎤 Speech detected! speech_prob=0.2431
+🔍 Processing chunk 2/10: 0.25s - 0.75s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 3/10: 0.50s - 1.00s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   Speech classes found: Speech(0.981) | max_prob=0.9813 | threshold=0.1 | detected=True
+   🎤 Speech detected! speech_prob=0.9813
+🔍 Processing chunk 4/10: 0.75s - 1.25s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 5/10: 1.00s - 1.50s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 6/10: 1.25s - 1.75s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   Speech classes found: Speech(0.377) | max_prob=0.3772 | threshold=0.1 | detected=True
+   🎤 Speech detected! speech_prob=0.3772
+🔍 Processing chunk 7/10: 1.50s - 2.00s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 8/10: 1.75s - 2.25s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 9/10: 2.00s - 2.50s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 10/10: 2.25s - 2.75s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+📊 Avg speech probability: 0.5339 (from 3 speech chunks)
+⏱ Total processing: 3.04s, RTF: 1.062x
+🔧 Auto min_silence_duration_sec=0.500s (2× hop=0.250s, chunk=0.5s, overlap=0.25s)
+╭─────────────────────────────────────── Segment-Based Audio Tagging ───────────────────────────────────────╮
+│ tag_audio_segments                                                                                        │
+│ speech_threshold=0.10 | min_silence=0.5s | min_speech=0.5s | resolution=10.0ms | include_non_speech=False │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+📊 Audio loaded: 2.86s, 16000Hz, 45760 samples
+🔧 Chunk config: 0.5s chunks, 0.25s overlap, hop=4000 samples
+📏 Calculated 10 chunk positions
+🔍 Processing chunk 1/10: 0.00s - 0.50s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   Speech classes found: Speech(0.243) | max_prob=0.2431 | threshold=0.1 | detected=True
+   🎤 Speech detected! speech_prob=0.2431
+🔍 Processing chunk 2/10: 0.25s - 0.75s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 3/10: 0.50s - 1.00s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   Speech classes found: Speech(0.981) | max_prob=0.9813 | threshold=0.1 | detected=True
+   🎤 Speech detected! speech_prob=0.9813
+🔍 Processing chunk 4/10: 0.75s - 1.25s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 5/10: 1.00s - 1.50s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 6/10: 1.25s - 1.75s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   Speech classes found: Speech(0.377) | max_prob=0.3772 | threshold=0.1 | detected=True
+   🎤 Speech detected! speech_prob=0.3772
+🔍 Processing chunk 7/10: 1.50s - 2.00s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 8/10: 1.75s - 2.25s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 9/10: 2.00s - 2.50s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 10/10: 2.25s - 2.75s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+📊 Avg speech probability: 0.5339 (from 3 speech chunks)
+⏱ Total processing: 0.33s, RTF: 0.116x
+🕑 Built prob timeline: 3/10 speech chunks → 150/275 cells with probability > 0 (54.5%) @ 10.0ms resolution,
+total_end=2.750s
+🎚 Using speech threshold: 0.1
+📊 Timeline: 150/275 cells above threshold (54.5%)
+🎤 Speech start at cell 0 (time=0.005s)
+🔇 Speech end at cell 224 (time=2.245s) | segment: 0.005s-1.745s (silence=0.500s)
+✅ 1 speech segment(s) detected
+🔍 _build_segment_result: speech segment 1 0.005s–1.745s (dur=1.740s)
+   Timeline cells: 175 | Overlapping chunks: 7 | Duration: 1.740s
+   🟡 Medium Confidence: avg_prob=0.458≥0.4, density=85.7%≥50% (normal)
+⏱ Segment detection complete: 0.34s, RTF: 0.118x
+🔧 Auto min_silence_duration_sec=0.500s (2× hop=0.250s, chunk=0.5s, overlap=0.25s)
+╭────────────────────────────── High Speech Segments Extraction ──────────────────────────────╮
+│ extract_high_confidence_speech_segments                                                     │
+│ min_duration=1.5s | min_silence=0.5s | filter: duration > 1.5s AND segment_type == 'speech' │
+╰─────────────────────────────────────────────────────────────────────────────────────────────╯
+🔍 Running tag_audio_segments...
+╭─────────────────────────────────────── Segment-Based Audio Tagging ───────────────────────────────────────╮
+│ tag_audio_segments                                                                                        │
+│ speech_threshold=0.10 | min_silence=0.5s | min_speech=0.5s | resolution=10.0ms | include_non_speech=False │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+📊 Audio loaded: 2.86s, 16000Hz, 45760 samples
+🔧 Chunk config: 0.5s chunks, 0.25s overlap, hop=4000 samples
+📏 Calculated 10 chunk positions
+🔍 Processing chunk 1/10: 0.00s - 0.50s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   Speech classes found: Speech(0.243) | max_prob=0.2431 | threshold=0.1 | detected=True
+   🎤 Speech detected! speech_prob=0.2431
+🔍 Processing chunk 2/10: 0.25s - 0.75s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 3/10: 0.50s - 1.00s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   Speech classes found: Speech(0.981) | max_prob=0.9813 | threshold=0.1 | detected=True
+   🎤 Speech detected! speech_prob=0.9813
+🔍 Processing chunk 4/10: 0.75s - 1.25s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 5/10: 1.00s - 1.50s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 6/10: 1.25s - 1.75s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   Speech classes found: Speech(0.377) | max_prob=0.3772 | threshold=0.1 | detected=True
+   🎤 Speech detected! speech_prob=0.3772
+🔍 Processing chunk 7/10: 1.50s - 2.00s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 8/10: 1.75s - 2.25s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 9/10: 2.00s - 2.50s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+🔍 Processing chunk 10/10: 2.25s - 2.75s
+   ✅ Tagged successfully: 5 predictions
+🔍 _chunk_has_speech: checking top 3 predictions against threshold 0.1
+   No speech classes in top 3 | detected=False
+   🔇 No speech detected (speech_prob=0.0000)
+📊 Avg speech probability: 0.5339 (from 3 speech chunks)
+⏱ Total processing: 0.34s, RTF: 0.120x
+🕑 Built prob timeline: 3/10 speech chunks → 150/275 cells with probability > 0 (54.5%) @ 10.0ms resolution,
+total_end=2.750s
+🎚 Using speech threshold: 0.1
+📊 Timeline: 150/275 cells above threshold (54.5%)
+🎤 Speech start at cell 0 (time=0.005s)
+🔇 Speech end at cell 224 (time=2.245s) | segment: 0.005s-1.745s (silence=0.500s)
+✅ 1 speech segment(s) detected
+🔍 _build_segment_result: speech segment 1 0.005s–1.745s (dur=1.740s)
+   Timeline cells: 175 | Overlapping chunks: 7 | Duration: 1.740s
+   🟡 Medium Confidence: avg_prob=0.458≥0.4, density=85.7%≥50% (normal)
+⏱ Segment detection complete: 0.35s, RTF: 0.122x
+📊 Found 1 total speech segments
+   ✅ Segment 0: 0.01s-1.75s (dur=1.74s, type=speech)
+✅ Filtered 1 high speech segments (duration > 1.5s, type=speech)
+📂 Loaded audio for extraction: 2.86s @ 16000Hz
+   ✂ Extracted 1.74s audio (27840 samples)
+⏱ Extraction complete: 0.35s | Total extracted: 1.74s
+Chunks summary saved to: chunk_summary.json
+Segment summary saved to: segments_result.json
+Filtered speech segments saved to: high_speech_segments.json
+
+Extracting individual segments...
+[04:32:45] ✓ Saved audio:                                                                       test_audio_tagger.py:117
+           C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_s
+           ubtitles_server2_with_en\services\generated\test_audio_tagger\segments\segment_000\s
+           ound.wav
+           ✓ Saved metadata:                                                                    test_audio_tagger.py:123
+           C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_s
+           ubtitles_server2_with_en\services\generated\test_audio_tagger\segments\segment_000\s
+           egment.json
+
+✓ Extracted 1 segments to: segments
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

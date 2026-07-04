@@ -27,7 +27,8 @@ OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 audio_path = r"C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav"
 # audio_path = r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\generated\last_50_segments\segment_002\sound.wav"
 
-speech_threshold = None
+speech_threshold = 0.1
+sample_rate = 16000
 
 args = get_args(audio_path, OUTPUT_DIR)
 audio_path = args.audio_path
@@ -52,14 +53,16 @@ chunk_summary = tagger.tag_audio_chunks(
 segments_result = tagger.tag_audio_segments(
     audio_path,
     include_non_speech=False,
+    speech_threshold=speech_threshold,
 )
-speech_segments = segments_result["speech_segments"]
 
 # ---------------------------------------------------------------------------
 # Step 2: Extract high-confidence speech segments using the new method
 # ---------------------------------------------------------------------------
 high_speech_segments, high_speech_audios = tagger.extract_high_confidence_speech_segments(
     audio_path,
+    sample_rate=sample_rate,
+    speech_threshold=speech_threshold,
 )
 
 # ---------------------------------------------------------------------------
@@ -72,14 +75,6 @@ with open(chunk_summary_output, "w", encoding="utf-8") as f:
     json.dump(chunk_summary, f, indent=2, ensure_ascii=False)
 console.print(
     f"[green]Chunks summary saved to: {linkify(str(chunk_summary_output))}[/green]"
-)
-
-# Save all speech segments (full detail)
-speech_segments_output = output_dir_param / "speech_segments.json"
-with open(speech_segments_output, "w", encoding="utf-8") as f:
-    json.dump(speech_segments, f, indent=2, ensure_ascii=False)
-console.print(
-    f"[green]Segment summary saved to: {linkify(str(speech_segments_output))}[/green]"
 )
 
 # Save complete segments result
