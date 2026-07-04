@@ -1743,30 +1743,37 @@ class AudioTagger:
     def extract_speech_only(
         self,
         audio: AudioInput,
-        sample_rate: Optional[int] = SAMPLE_RATE,
+        sample_rate: Optional[int] = None,
         edges_only: bool = False,
-        prob_threshold: Optional[float] = DEFAULT_SPEECH_PROB_THRESHOLD,
-        chunk_duration: Optional[float] = DEFAULT_CHUNK_DURATION,
-        overlap_duration: Optional[float] = DEFAULT_CHUNK_OVERLAP,
-        min_chunk_duration: Optional[float] = DEFAULT_MIN_CHUNK_DURATION,
-        top_n: Optional[int] = DEFAULT_SPEECH_TOP_N,
+        speech_threshold: Optional[float] = None,
+        chunk_duration: Optional[float] = None,
+        overlap_duration: Optional[float] = None,
+        min_chunk_duration: Optional[float] = None,
+        top_n: Optional[int] = None,
+        min_silence_duration_sec: Optional[float] = None,
+        min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_DURATION_SEC,
     ) -> np.ndarray:
         """
         Extract speech-only audio by removing non-speech segments.
         
-        Uses tag_audio_chunks internally to detect speech regions,
-        then trims the audio to keep only speech portions.
+        Uses tag_audio_segments internally for consistent segment detection
+        with the rest of the system.
         
         Args:
             audio: Audio input (file path, bytes, numpy array, or torch tensor)
             sample_rate: Sample rate for raw audio data (default: SAMPLE_RATE)
             edges_only: If True, only trim leading/trailing non-speech;
                     if False (default), remove all non-speech segments
-            prob_threshold: Override default speech probability threshold
+            speech_threshold: Speech probability threshold.
+                If None, uses the instance default (self.speech_prob_threshold).
             chunk_duration: Override default chunk duration in seconds
             overlap_duration: Override default overlap between chunks
             min_chunk_duration: Override minimum chunk duration
-            top_n: Override number of top predictions to check for speech
+            top_n: Override number of top predictions to check for speech.
+                If None, uses the instance default (self.speech_top_n).
+            min_silence_duration_sec: Continuous non-speech gap to close a segment.
+                If None, auto-calculated (see tag_audio_segments).
+            min_speech_duration_sec: Minimum duration for a valid speech segment.
         
         Returns:
             Trimmed numpy audio array containing only speech portions
@@ -1775,92 +1782,84 @@ class AudioTagger:
             >>> tagger = AudioTagger()
             >>> speech_audio = tagger.extract_speech_only("recording.wav")
             >>> trimmed = tagger.extract_speech_only("recording.wav", edges_only=True)
-        
-        Debug logs trace:
-            - Input parameters
-            - Chunk tagging results
-            - Identified speech segments
-            - Trimmed audio duration vs original
         """
+        _threshold = speech_threshold if speech_threshold is not None else self.speech_prob_threshold
+        _sample_rate = sample_rate if sample_rate is not None else SAMPLE_RATE
+        
         console.print(
             Panel.fit(
                 f"[bold cyan]extract_speech_only[/bold cyan]\n"
                 f"edges_only={edges_only}\n"
-                f"prob_threshold={prob_threshold or self.speech_prob_threshold}",
+                f"speech_threshold={_threshold}",
                 title="Speech Extraction",
                 border_style="cyan",
             )
         )
         
-        # Convert dtype
-        audio_int16 = convert_audio_dtype(audio, "int16")
-        audio = audio_int16
-
-        waveform = audio
+        # Load audio once for both tagging and extraction
+        try:
+            waveform, actual_sr = load_audio(audio, sr=_sample_rate, mono=True)
+        except Exception as e:
+            console.print(f"[red]❌ Failed to load audio: {e}[/red]")
+            raise
         
         total_samples = len(waveform)
-        total_duration = total_samples / sample_rate
+        total_duration = total_samples / actual_sr
         console.print(
             f"[dim]📊 Audio loaded: {total_duration:.2f}s, "
-            f"{sample_rate}Hz, {total_samples} samples[/dim]"
+            f"{actual_sr}Hz, {total_samples} samples[/dim]"
         )
         
-        # Tag chunks to identify speech regions
-        summary = self.tag_audio_chunks(
-            audio=audio,
-            sample_rate=sample_rate,
+        # Use tag_audio_segments for consistent segment detection.
+        # This reuses the same timeline-based approach as the rest of the
+        # system, including auto-calculated min_silence_duration_sec and
+        # the fixed _build_prob_timeline that only uses speech-detected chunks.
+        segments_result = self.tag_audio_segments(
+            audio=waveform,
+            sample_rate=actual_sr,
             chunk_duration=chunk_duration,
             overlap_duration=overlap_duration,
             min_chunk_duration=min_chunk_duration,
+            speech_threshold=_threshold,
+            min_silence_duration_sec=min_silence_duration_sec,
+            min_speech_duration_sec=min_speech_duration_sec,
+            include_non_speech=False,
         )
         
-        chunks = summary.get("chunks", [])
-        if not chunks:
-            console.print("[yellow]⚠ No chunks produced, returning empty array[/yellow]")
-            return np.array([], dtype=np.float32)
+        speech_segments_list = segments_result.get("speech_segments", [])
         
-        # Override speech detection threshold if provided
-        threshold = prob_threshold if prob_threshold is not None else self.speech_prob_threshold
-        n_check = top_n if top_n is not None else self.speech_top_n
-        
-        # Re-evaluate speech detection with potentially overridden threshold
-        # (tag_audio_chunks uses instance defaults; we may need stricter/looser)
-        if prob_threshold is not None or top_n is not None:
-            console.print(
-                f"[dim]🔧 Re-evaluating speech detection with "
-                f"threshold={threshold}, top_n={n_check}[/dim]"
-            )
-            for chunk in chunks:
-                predictions = chunk.get("predictions", [])
-                speech_detected, chunk_prob = self._chunk_has_speech(
-                    predictions, top_n=n_check
-                )
-                # Override with custom threshold
-                speech_detected = chunk_prob >= threshold
-                chunk["speech_detected"] = speech_detected
-                chunk["speech_probability"] = round(chunk_prob, 4)
-        
-        # Identify speech segments from chunks
-        speech_segments = self._identify_speech_segments(
-            chunks=chunks,
-            total_duration=total_duration,
-            edges_only=edges_only,
-        )
-        
-        if not speech_segments:
+        if not speech_segments_list:
             console.print("[yellow]⚠ No speech segments found, returning empty array[/yellow]")
             return np.array([], dtype=np.float32)
         
-        console.print(f"[green]🎤 Found {len(speech_segments)} speech segment(s):[/green]")
+        # Extract (start, end) tuples from the structured results
+        speech_segments: List[Tuple[float, float]] = [
+            (seg["start_time"], seg["end_time"])
+            for seg in speech_segments_list
+        ]
+        
+        if edges_only and len(speech_segments) > 1:
+            # Collapse to single segment covering first to last speech
+            first_start = speech_segments[0][0]
+            last_end = speech_segments[-1][1]
+            speech_segments = [(first_start, last_end)]
+            console.print(
+                f"[dim]🔍 Edges-only: trimmed to {first_start:.3f}s - {last_end:.3f}s "
+                f"(duration: {last_end - first_start:.3f}s)[/dim]"
+            )
+        
+        console.print(f"[green]🎤 Extracting {len(speech_segments)} speech segment(s):[/green]")
         for i, (start, end) in enumerate(speech_segments):
-            console.print(f"[green]   Segment {i + 1}: {start:.3f}s - {end:.3f}s "
-                        f"(duration: {end - start:.3f}s)[/green]")
+            console.print(
+                f"[green]   Segment {i + 1}: {start:.3f}s - {end:.3f}s "
+                f"(duration: {end - start:.3f}s)[/green]"
+            )
         
         # Extract speech portions from waveform
         trimmed_waveforms = []
         for start_sec, end_sec in speech_segments:
-            start_sample = int(start_sec * sample_rate)
-            end_sample = int(end_sec * sample_rate)
+            start_sample = int(start_sec * actual_sr)
+            end_sample = int(end_sec * actual_sr)
             start_sample = max(0, start_sample)
             end_sample = min(total_samples, end_sample)
             if end_sample > start_sample:
@@ -1871,7 +1870,7 @@ class AudioTagger:
             return np.array([], dtype=np.float32)
         
         result = np.concatenate(trimmed_waveforms)
-        result_duration = len(result) / sample_rate
+        result_duration = len(result) / actual_sr
         reduction_pct = (1 - len(result) / total_samples) * 100 if total_samples > 0 else 0
         
         console.print(

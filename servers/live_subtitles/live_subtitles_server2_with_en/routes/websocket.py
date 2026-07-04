@@ -11,7 +11,7 @@ from core.state import (
     get_active_connections,
     get_executor,
 )
-from core.processing import blocking_process_audio, _get_speaker_labeler
+from core.processing import blocking_process_audio
 
 console = Console()
 logger = logging.getLogger("uvicorn.error")
@@ -59,8 +59,6 @@ async def websocket_endpoint(websocket: WebSocket):
         f" from [value]{client_info}[/value]"
         f" — total [bright_blue]{len(active_connections)}[/bright_blue]"
     )
-    
-    _get_speaker_labeler()
     
     try:
         while True:

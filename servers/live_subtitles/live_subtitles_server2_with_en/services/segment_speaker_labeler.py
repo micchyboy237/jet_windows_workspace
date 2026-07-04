@@ -64,6 +64,7 @@ try:
     from services.speaker_labeler_utils.outlier_orchestrator import OutlierOrchestrator
     from services.speaker_labeler_utils.speaker_labeler_serializer import SpeakerLabelerSerializer
     from services.speech_waves import extract_pure_speech_audio
+    from services.dtype_conversion import convert_audio_dtype
 except ImportError:
     from audio_config import SAMPLE_RATE
     from embedding_model_factory import BaseEmbeddingModel, EmbeddingThresholdProvider
@@ -121,6 +122,7 @@ except ImportError:
     from speaker_labeler_utils.outlier_orchestrator import OutlierOrchestrator
     from speaker_labeler_utils.speaker_labeler_serializer import SpeakerLabelerSerializer
     from speech_waves import extract_pure_speech_audio
+    from dtype_conversion import convert_audio_dtype
 
 console = Console()
 
@@ -1679,7 +1681,8 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             waveform_np = waveform.cpu().numpy()
         
         # Convert float32 [-1,1] back to int16 for VAD processing
-        audio_int16 = (waveform_np * 32768.0).astype(np.int16)
+        # audio_int16 = (waveform_np * 32768.0).astype(np.int16)
+        audio_int16 = convert_audio_dtype(waveform_np, "int16")
 
         if self.audio_tagger:
             pure_speech = self.audio_tagger.extract_speech_only(

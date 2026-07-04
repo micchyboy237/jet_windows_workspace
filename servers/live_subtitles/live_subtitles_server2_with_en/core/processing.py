@@ -57,83 +57,6 @@ console = Console()
 SPACELESS_LANGUAGES = {"ja", "jpn", "zh", "chi", "zho", "ko", "kor", "th", "tha"}
 
 
-def _get_speaker_labeler():
-    """Get or initialize the speaker labeler singleton."""
-    from core.state import (
-        get_speaker_labeler,
-        get_speaker_state_path,
-        set_embedding_inference,
-        set_speaker_labeler,
-    )
-    from pyannote.audio import Inference, Model
-    from services.segment_speaker_labeler import SegmentSpeakerLabeler
-
-    labeler = get_speaker_labeler()
-    if labeler is not None:
-        return labeler
-
-    console.print("[info]Loading speaker embedding model...[/info]")
-    try:
-        # embedding_model = Model.from_pretrained("pyannote/embedding")
-        # embedding_inference = Inference(embedding_model, window="whole")
-
-        from services.embedding_model_factory import (
-            EmbeddingModelType,
-            create_embedding_model,
-            list_available_models,
-        )
-
-        MODEL_TYPE = EmbeddingModelType.MODELSCOPE_ERES2NETV2
-
-        console.print(f"[bold]Available embedding models:[/bold]")
-        for name, info in list_available_models().items():
-            console.print(f"  • {name} (dim={info['embedding_dim']})")
-
-        with console.status(
-            f"[bold green]Loading embedding model '{MODEL_TYPE.value}'...[/bold green]",
-            spinner="dots",
-        ):
-            embedding_inference = create_embedding_model(MODEL_TYPE)
-
-        set_embedding_inference(embedding_inference)
-
-        speaker_state_path = get_speaker_state_path()
-        # tagger = AudioTagger()
-        if speaker_state_path.exists():
-            try:
-                with open(speaker_state_path, "r") as f:
-                    state = json.load(f)
-                labeler = SegmentSpeakerLabeler.from_dict(
-                    state,
-                    embedding_model=embedding_inference,
-                    # audio_tagger=tagger,
-                )
-                set_speaker_labeler(labeler)
-                console.print(
-                    f"[success]Restored speaker state: "
-                    f"{labeler.speaker_count} speaker(s), "
-                    f"{labeler.total_segments_processed} segments processed[/success]"
-                )
-                return labeler
-            except Exception as e:
-                console.print(
-                    f"[warning]Could not restore speaker state: {e}[/warning]"
-                )
-
-        labeler = SegmentSpeakerLabeler(
-            embedding_model=embedding_inference,
-            # audio_tagger=tagger,
-            debug=True,
-        )
-        set_speaker_labeler(labeler)
-        console.print("[success]Speaker labeler initialized[/success]")
-    except Exception as e:
-        console.print(f"[error]Failed to initialize speaker labeler: {e}[/error]")
-        raise
-
-    return labeler
-
-
 def should_reset_context(header: dict) -> bool:
     """Determine if we should reset the context buffer based on time gap or silence."""
     return True
@@ -185,7 +108,7 @@ def label_speakers_for_segment(
     if timestamp is None:
         timestamp = time.time()
 
-    labeler = _get_speaker_labeler()
+    labeler = get_speaker_labeler()
     waveform_float = waveform.astype(np.float32) / 32768.0
     waveform_tensor = torch.from_numpy(waveform_float)
     if waveform_tensor.dim() == 1:
