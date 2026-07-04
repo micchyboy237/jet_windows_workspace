@@ -511,13 +511,27 @@ def _perform_speaker_labeling(
     header: dict,
     full_word_segments_text: str,
     segment_id: Optional[str] = None,
+    min_label_duration: float = 2.0,
+    max_label_duration: float = 7.0,
 ) -> tuple:
-    """Perform speaker labeling if text content is sufficient.
+    """Perform speaker labeling only on high-confidence speech segments.
     
-    When multiple high-confidence speech segments are extracted, each segment
-    is labeled individually to capture potential speaker changes within the
-    audio chunk. Results are then aggregated with the highest-confidence
-    speaker becoming the primary label.
+    Only segments extracted by the audio tagger (high speech confidence) are
+    labeled. If no high-confidence speech segments are found, speaker labeling
+    is skipped entirely for this chunk. Each segment is truncated to a maximum
+    duration to ensure optimal embedding quality.
+    
+    Args:
+        audio_np: Audio data as numpy array
+        sample_rate: Sample rate of the audio
+        header: Header dict with start_sec and duration_sec
+        full_word_segments_text: Transcribed text for the segment
+        segment_id: Optional segment identifier
+        min_label_duration: Minimum segment duration in seconds to attempt
+            speech extraction (default: 2.0)
+        max_label_duration: Maximum duration in seconds to use for speaker
+            labeling per sub-segment; longer segments are truncated to
+            the first N seconds (default: 7.0)
     
     Returns:
         tuple: (text_has_sufficient_content, speaker_results, primary_label,
@@ -537,21 +551,21 @@ def _perform_speaker_labeling(
             "duration_sec",
             get_audio_duration(audio_np, sr=sample_rate)
         )
-        use_multiple = segment_duration >= 2.0  # Changed from 3.0 to 2.0 as discussed
         
-        audio_for_labeler = audio_np
         extraction_info = {
             "attempted": False,
             "successful": False,
             "segments_found": 0,
             "used_segment_duration": segment_duration,
             "original_duration": segment_duration,
-            "individual_segment_results": [],  # NEW: track per-segment results
+            "min_label_duration": min_label_duration,
+            "max_label_duration": max_label_duration,
+            "individual_segment_results": [],
         }
         
-        all_segment_speaker_results = []  # NEW: collect results from all segments
+        all_segment_speaker_results = []
 
-        if segment_duration >= 2.0:
+        if segment_duration >= min_label_duration:
             extraction_info["attempted"] = True
             try:
                 tagger = get_audio_tagger()
@@ -559,7 +573,9 @@ def _perform_speaker_labeling(
                     audio_float = audio_np.astype(np.float32) / 32768.0
                     console.print(
                         f"[info]🎯 Attempting high-confidence speech extraction "
-                        f"(audio: {segment_duration:.2f}s)...[/info]"
+                        f"(audio: {segment_duration:.2f}s, "
+                        f"min_label={min_label_duration}s, "
+                        f"max_label={max_label_duration}s)...[/info]"
                     )
                     high_conf_segments, high_conf_audios = (
                         tagger.extract_high_confidence_speech_segments(
@@ -571,11 +587,12 @@ def _perform_speaker_labeling(
                     
                     if high_conf_audios and len(high_conf_audios) > 0:
                         # ──────────────────────────────────────────────
-                        # NEW: Label EACH high-confidence segment separately
+                        # Label EACH high-confidence segment separately
                         # ──────────────────────────────────────────────
                         console.print(
                             f"[success]🎯 Extracted {len(high_conf_audios)} high-confidence "
-                            f"speech segment(s) — labeling each individually:[/success]"
+                            f"speech segment(s) — labeling each individually "
+                            f"(max {max_label_duration}s per segment):[/success]"
                         )
                         
                         for i, (seg, aud) in enumerate(zip(high_conf_segments, high_conf_audios)):
@@ -583,16 +600,32 @@ def _perform_speaker_labeling(
                             seg_start = seg.get('start_time', 0)
                             seg_end = seg.get('end_time', 0)
                             seg_prob = seg.get('avg_speech_probability', 0)
-                            console.print(
-                                f"[dim]  [{i}] {seg_start:.2f}s-{seg_end:.2f}s "
-                                f"({seg_dur:.2f}s, prob={seg_prob:.3f}) → labeling...[/dim]"
-                            )
+                            
+                            # ──────────────────────────────────────────
+                            # Truncate to max_label_duration if needed
+                            # ──────────────────────────────────────────
+                            original_dur = seg_dur
+                            if seg_dur > max_label_duration:
+                                max_samples = int(max_label_duration * sample_rate)
+                                aud = aud[:max_samples]  # Take first N seconds
+                                seg_dur = max_label_duration
+                                console.print(
+                                    f"[dim]  [{i}] {seg_start:.2f}s-{seg_end:.2f}s "
+                                    f"(orig={original_dur:.2f}s, prob={seg_prob:.3f}) → "
+                                    f"truncated to {max_label_duration}s for labeling...[/dim]"
+                                )
+                            else:
+                                console.print(
+                                    f"[dim]  [{i}] {seg_start:.2f}s-{seg_end:.2f}s "
+                                    f"({seg_dur:.2f}s, prob={seg_prob:.3f}) → labeling...[/dim]"
+                                )
+                            
                             seg_audio_int16 = (
                                 np.clip(aud, -1.0, 1.0) * 32767.0
                             ).astype(np.int16)
                             sub_segment_id = f"{segment_id}_sub{i}" if segment_id else None
                             
-                            # Save sub-segment audio
+                            # Save sub-segment audio (truncated version for playback accuracy)
                             if sub_segment_id:
                                 save_segment_audio_for_playback(
                                     audio_np=seg_audio_int16,
@@ -604,8 +637,11 @@ def _perform_speaker_labeling(
                                         "start_time": seg_start,
                                         "end_time": seg_end,
                                         "duration": seg_dur,
+                                        "original_duration": original_dur,
                                         "avg_speech_probability": seg_prob,
                                         "timestamp": segment_timestamp + seg_start,
+                                        "truncated": seg_dur != original_dur,
+                                        "max_label_duration": max_label_duration,
                                     }
                                 )
                             
@@ -625,6 +661,7 @@ def _perform_speaker_labeling(
                                 "start_time": seg_start,
                                 "end_time": seg_end,
                                 "duration": seg_dur,
+                                "original_duration": original_dur,
                                 "avg_speech_probability": seg_prob,
                                 "primary_label": seg_primary,
                                 "primary_confidence": seg_conf,
@@ -754,69 +791,96 @@ def _perform_speaker_labeling(
                                     f"type={spk['match_type']}{' ★ PRIMARY' if spk['is_primary'] else ''}[/dim]"
                                 )
                         else:
-                            # Fallback: no speakers found in any segment
+                            # No speakers identified in any segment
                             console.print(
                                 f"[warning]⚠️ No speakers identified in any sub-segment, "
-                                f"using full audio[/warning]"
+                                f"skipping speaker labeling[/warning]"
                             )
-                            # Fall through to full-audio labeling below
-                            all_segment_speaker_results = []
+                            speaker_metadata = {
+                                "match_type": "skipped_no_high_confidence_speech",
+                                "speaker_list": [],
+                                "total_speakers": 0,
+                                "speech_extraction": extraction_info,
+                                "aggregation_method": "none",
+                            }
                     else:
+                        # ─────────────────────────────────────────────────
+                        # NO high-confidence segments found → skip labeling
+                        # ─────────────────────────────────────────────────
                         console.print(
                             f"[dim]🔇 No high-confidence speech segments found "
                             f"(tagger found {extraction_info['segments_found']} segments, "
                             f"but none met the min_duration=1.5s threshold), "
-                            f"using full audio for labeling[/dim]"
+                            f"skipping speaker labeling[/dim]"
                         )
+                        speaker_metadata = {
+                            "match_type": "skipped_no_high_confidence_speech",
+                            "speaker_list": [],
+                            "total_speakers": 0,
+                            "speech_extraction": extraction_info,
+                            "aggregation_method": "none",
+                        }
                 else:
                     console.print(
                         "[dim]🔇 Audio tagger not available (get_audio_tagger() returned None), "
-                        "skipping speech extraction[/dim]"
+                        "skipping speaker labeling[/dim]"
                     )
+                    speaker_metadata = {
+                        "match_type": "skipped_tagger_unavailable",
+                        "speaker_list": [],
+                        "total_speakers": 0,
+                        "speech_extraction": extraction_info,
+                        "aggregation_method": "none",
+                    }
             except Exception as e:
                 console.print(
                     f"[warning]⚠️ extract_high_confidence_speech_segments failed: {e}, "
-                    f"using full audio for labeling[/warning]"
+                    f"skipping speaker labeling[/warning]"
                 )
                 import traceback
                 console.print(f"[dim]{traceback.format_exc()}[/dim]")
+                speaker_metadata = {
+                    "match_type": "skipped_extraction_error",
+                    "speaker_list": [],
+                    "total_speakers": 0,
+                    "speech_extraction": extraction_info,
+                    "aggregation_method": "none",
+                }
         else:
             console.print(
                 f"[dim]🔇 Segment too short for speech extraction "
-                f"({segment_duration:.2f}s < 2.0s), using full audio[/dim]"
+                f"({segment_duration:.2f}s < {min_label_duration}s), "
+                f"skipping speaker labeling[/dim]"
             )
-
-        # ─────────────────────────────────────────────────────────────
-        # If no sub-segment results, fall back to full audio labeling
-        # ─────────────────────────────────────────────────────────────
-        if not all_segment_speaker_results:
-            speaker_results, primary_label, primary_confidence, speaker_metadata = (
-                label_speakers_for_segment(
-                    waveform=audio_for_labeler,
-                    sample_rate=sample_rate,
-                    timestamp=segment_timestamp,
-                    return_multiple=use_multiple,
-                    segment_id=segment_id,
-                )
-            )
-            speaker_metadata["speech_extraction"] = extraction_info
+            speaker_metadata = {
+                "match_type": "skipped_too_short",
+                "speaker_list": [],
+                "total_speakers": 0,
+                "speech_extraction": extraction_info,
+                "aggregation_method": "none",
+            }
 
         # ─────────────────────────────────────────────────────────────
         # Console output
         # ─────────────────────────────────────────────────────────────
-        if len(speaker_results) > 1:
-            speakers_str = ", ".join(
-                f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
-            )
-            console.print(
-                f"[speaker]Speakers: [{speakers_str}] "
-                f"(primary: {primary_label}, type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
-            )
+        if speaker_results:
+            if len(speaker_results) > 1:
+                speakers_str = ", ".join(
+                    f"{r['label']}({r['confidence']:.2f})" for r in speaker_results[:3]
+                )
+                console.print(
+                    f"[speaker]Speakers: [{speakers_str}] "
+                    f"(primary: {primary_label}, type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+                )
+            else:
+                console.print(
+                    f"[speaker]Speaker: {primary_label} "
+                    f"(confidence: {primary_confidence:.3f}, "
+                    f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+                )
         else:
             console.print(
-                f"[speaker]Speaker: {primary_label} "
-                f"(confidence: {primary_confidence:.3f}, "
-                f"type: {speaker_metadata.get('match_type', 'unknown')})[/speaker]"
+                f"[dim]🔇 Speaker labeling skipped: {speaker_metadata.get('match_type', 'unknown')}[/dim]"
             )
     else:
         console.print(
