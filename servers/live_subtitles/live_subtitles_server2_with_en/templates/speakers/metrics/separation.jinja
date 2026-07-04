@@ -1,0 +1,210 @@
+<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/separation.jinja -->
+{% extends "base.jinja" %}
+{% block title %}Speaker Separation - Metrics{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>↔️ Inter-Speaker Separation</h1>
+    <p>Cosine distance between speaker centroids — higher distance = more distinct speakers</p>
+  </div>
+  <!-- Explanation card -->
+  <div class="card"
+       style="border-left: 3px solid var(--accent-blue);
+              margin-bottom: 24px">
+    <div class="card-header">📐 How to Read This</div>
+    <div style="display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 16px;
+                font-size: 14px">
+      <div>
+        <strong style="color: var(--accent-red);">Distance &lt; 0.15</strong>
+        <br>
+        <span style="color: var(--text-secondary);">Very similar centroids</span>
+        <br>
+        <span style="color: var(--text-muted); font-size: 12px;">These speakers may be the same person and should likely be merged.</span>
+      </div>
+      <div>
+        <strong style="color: var(--accent-yellow);">Distance 0.15–0.30</strong>
+        <br>
+        <span style="color: var(--text-secondary);">Moderately similar</span>
+        <br>
+        <span style="color: var(--text-muted); font-size: 12px;">Worth monitoring — could be different speakers with similar voices.</span>
+      </div>
+      <div>
+        <strong style="color: var(--accent-green);">Distance &gt; 0.30</strong>
+        <br>
+        <span style="color: var(--text-secondary);">Well-separated</span>
+        <br>
+        <span style="color: var(--text-muted); font-size: 12px;">These are clearly distinct speakers. No action needed.</span>
+      </div>
+    </div>
+  </div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value blue">{{ separation.total_speakers_with_centroids }}</div>
+      <div class="stat-label">Speakers with Centroids</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value {% if separation.mean_separation is not none and separation.mean_separation >= 0.5 %}green {% elif separation.mean_separation is not none and separation.mean_separation >= 0.3 %}yellow {% else %}red{% endif %}">
+        {{ "%.4f"|format(separation.mean_separation or 0) }}
+      </div>
+      <div class="stat-label">Mean Cosine Distance</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value {% if separation.min_separation is not none and separation.min_separation >= 0.3 %}green {% elif separation.min_separation is not none and separation.min_separation >= 0.15 %}yellow {% else %}red{% endif %}">
+        {{ "%.4f"|format(separation.min_separation or 0) }}
+      </div>
+      <div class="stat-label">Closest Pair Distance</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value yellow">{{ separation.ambiguous_count }}</div>
+      <div class="stat-label">Ambiguous Pairs (&lt;0.30)</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value {% if separation.separation_health == 'excellent' or separation.separation_health == 'good' %}green {% elif separation.separation_health == 'fair' %}yellow {% else %}red{% endif %}">
+        {{ separation.separation_health | upper }}
+      </div>
+      <div class="stat-label">Health</div>
+    </div>
+  </div>
+  <!-- Ambiguous Pairs (Low Distance = Problem) -->
+  {% if separation.ambiguous_pairs %}
+    <div class="card" style="border-left: 3px solid var(--accent-yellow);">
+      <div class="card-header">⚠️ Ambiguous Speaker Pairs <span style="font-weight: 400;
+              color: var(--text-secondary);
+              font-size: 13px">(cosine distance &lt; 0.30)</span></div>
+      <p style="color: var(--text-secondary); margin-bottom: 16px;">
+        These speaker pairs have centroids that are too close together.
+        They may represent <strong>over-segmentation</strong> (same speaker split into multiple IDs)
+        and should be considered for merging.
+      </p>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Speaker 1</th>
+              <th>Speaker 2</th>
+              <th>Cosine Distance</th>
+              <th>Equivalent Similarity</th>
+              <th>Risk Level</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for pair in separation.ambiguous_pairs %}
+              <tr>
+                <td>
+                  <strong>{{ pair.speaker_1 }}</strong>
+                  <a href="/speakers/metrics/speakers/{{ pair.speaker_1 }}"
+                     style="font-size: 12px;
+                            margin-left: 4px">→</a>
+                </td>
+                <td>
+                  <strong>{{ pair.speaker_2 }}</strong>
+                  <a href="/speakers/metrics/speakers/{{ pair.speaker_2 }}"
+                     style="font-size: 12px;
+                            margin-left: 4px">→</a>
+                </td>
+                <td>
+                  <span style="color: {% if pair.cosine_distance < 0.15 %}var(--accent-red) {% elif pair.cosine_distance < 0.25 %}var(--accent-yellow) {% else %}var(--accent-blue){% endif %};
+                               font-weight: 600;
+                               font-size: 16px">{{ "%.4f"|format(pair.cosine_distance) }}</span>
+                  <div class="score-bar" style="width: 120px;">
+                    <div class="score-bar-fill {% if pair.cosine_distance < 0.15 %}red {% elif pair.cosine_distance < 0.25 %}yellow {% else %}blue{% endif %}"
+                         style="width: {{ (pair.cosine_distance * 100) | int }}%"></div>
+                  </div>
+                </td>
+                <td style="color: var(--text-secondary);">{{ "%.4f"|format(1.0 - pair.cosine_distance) }}</td>
+                <td>
+                  <span class="badge {% if pair.risk == 'high' %}badge-red {% elif pair.risk == 'medium' %}badge-yellow {% else %}badge-blue{% endif %}">
+                    {{ pair.risk }}
+                  </span>
+                </td>
+                <td>
+                  <a href="/speakers?merge={{ pair.speaker_1 }}&with={{ pair.speaker_2 }}"
+                     style="font-size: 12px;
+                            color: var(--accent-yellow)">Consider Merge</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% else %}
+    <div class="card" style="border-left: 3px solid var(--accent-green);">
+      <div class="card-header">✅ All Speakers Well-Separated</div>
+      <p style="color: var(--accent-green);">
+        All speaker pairs show cosine distance ≥ 0.30 — no ambiguous pairs detected.
+        Each speaker has a distinct centroid.
+      </p>
+    </div>
+  {% endif %}
+  <!-- Full Pairwise Distance Matrix -->
+  <div class="card">
+    <div class="card-header">🔢 Complete Pairwise Centroid Distances</div>
+    <p style="color: var(--text-secondary);
+              margin-bottom: 16px;
+              font-size: 14px">
+      <strong>Cosine distance</strong> between every pair of speaker centroids.
+      Distance 0 = identical, Distance 1 = orthogonal, Distance 2 = opposite.
+      <br>
+      Sorted from closest (most similar) to furthest (most distinct).
+    </p>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Speaker 1</th>
+            <th>Speaker 2</th>
+            <th>Cosine Distance</th>
+            <th>Equivalent Similarity</th>
+            <th>Segments (1 / 2)</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for key, pair in separation.pairwise_distances.items() | sort(attribute='1.cosine_distance') %}
+            <tr>
+              <td>
+                <strong>{{ pair.speaker_1 }}</strong>
+                <a href="/speakers/metrics/speakers/{{ pair.speaker_1 }}"
+                   style="font-size: 12px;
+                          margin-left: 4px">→</a>
+              </td>
+              <td>
+                <strong>{{ pair.speaker_2 }}</strong>
+                <a href="/speakers/metrics/speakers/{{ pair.speaker_2 }}"
+                   style="font-size: 12px;
+                          margin-left: 4px">→</a>
+              </td>
+              <td>
+                <span style="color: {% if pair.cosine_distance < 0.15 %}var(--accent-red) {% elif pair.cosine_distance < 0.30 %}var(--accent-yellow) {% else %}var(--accent-green){% endif %};
+                             font-weight: 600">{{ "%.4f"|format(pair.cosine_distance) }}</span>
+                <div class="score-bar" style="width: 120px;">
+                  <div class="score-bar-fill {% if pair.cosine_distance < 0.15 %}red {% elif pair.cosine_distance < 0.30 %}yellow {% else %}green{% endif %}"
+                       style="width: {{ (pair.cosine_distance * 50) | int }}%"></div>
+                </div>
+              </td>
+              <td style="color: var(--text-secondary);">{{ "%.4f"|format(1.0 - pair.cosine_distance) }}</td>
+              <td>{{ pair.segments_1 }} / {{ pair.segments_2 }}</td>
+              <td>
+                {% if pair.cosine_distance < 0.15 %}
+                  <span class="badge badge-red">⚠️ Review</span>
+                {% elif pair.cosine_distance < 0.30 %}
+                  <span class="badge badge-yellow">Monitor</span>
+                {% else %}
+                  <span class="badge badge-green">✓ Good</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div style="margin-top: 16px;">
+    <a href="/speakers/metrics">← Back to Overview</a>
+    <span style="color: var(--text-muted); margin: 0 8px;">|</span>
+    <a href="/speakers/metrics/api/separation">View JSON →</a>
+  </div>
+{% endblock %}

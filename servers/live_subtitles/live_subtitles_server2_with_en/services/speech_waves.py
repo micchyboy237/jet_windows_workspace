@@ -412,7 +412,13 @@ def get_valid_speech_waves(
     min_speech_duration_ms: int = DEFAULT_MIN_SPEECH_DURATION_MS,
     min_silence_duration_ms: int = DEFAULT_MIN_SILENCE_DURATION_MS,
     with_audio: bool = False,
-) -> List[SpeechWave] | List[Tuple[SpeechWave, np.ndarray]]:
+    with_scores: bool = False,
+) -> Union[
+    List[SpeechWave],
+    List[Tuple[SpeechWave, np.ndarray]],
+    Tuple[List[SpeechWave], List[float]],
+    Tuple[List[Tuple[SpeechWave, np.ndarray]], List[float]],
+]:
     """
     Identify valid speech waves from audio using VAD and shape analysis.
 
@@ -422,6 +428,7 @@ def get_valid_speech_waves(
       3. Identifies speech waves via shape analysis (check_speech_waves)
       4. Filters to only valid (is_valid=True) waves
       5. Optionally extracts audio segments for each wave
+      6. Optionally returns VAD probability scores
 
     All parameters default to the module-level DEFAULT_* constants,
     matching the all-defaults usage in _main_speech_waves.
@@ -441,30 +448,52 @@ def get_valid_speech_waves(
         min_silence_duration_ms: Minimum silence gap for VAD
         with_audio: If True, returns list of tuples (SpeechWave, np.ndarray)
                    with the audio data for each wave extracted from the input audio
+        with_scores: If True, also returns the raw VAD probability scores as a
+                    second element in a tuple
 
     Returns:
-        If with_audio=False: List[SpeechWave] containing valid speech waves.
-        If with_audio=True: List[Tuple[SpeechWave, np.ndarray]] containing valid 
-                           speech waves paired with their audio segments.
+        If with_audio=False and with_scores=False:
+            List[SpeechWave] containing valid speech waves.
+        If with_audio=True and with_scores=False:
+            List[Tuple[SpeechWave, np.ndarray]] containing valid speech waves
+            paired with their audio segments.
+        If with_audio=False and with_scores=True:
+            Tuple[List[SpeechWave], List[float]] containing valid speech waves
+            and VAD probability scores.
+        If with_audio=True and with_scores=True:
+            Tuple[List[Tuple[SpeechWave, np.ndarray]], List[float]] containing
+            valid speech waves with audio and VAD probability scores.
         Returns empty list if no valid speech found or VAD fails.
 
     Example:
-        >>> # With file path
+        >>> # Basic usage
         >>> waves = get_valid_speech_waves("recording.wav")
-        >>> 
+        >>>
+        >>> # With scores
+        >>> waves, scores = get_valid_speech_waves("recording.wav", with_scores=True)
+        >>> print(f"Found {len(waves)} waves, {len(scores)} probability scores")
+        >>>
         >>> # With audio extraction
         >>> waves_with_audio = get_valid_speech_waves("recording.wav", with_audio=True)
         >>> for wave, audio_chunk in waves_with_audio:
         ...     print(f"Duration: {wave['details']['duration_sec']:.2f}s")
+        >>>
+        >>> # With both audio and scores
+        >>> waves_with_audio, scores = get_valid_speech_waves(
+        ...     "recording.wav",
+        ...     with_audio=True,
+        ...     with_scores=True
+        ... )
     """
     import logging
+
     logger = logging.getLogger(__name__)
     logger.info(
         f"get_valid_speech_waves called with with_audio={with_audio}, "
-        f"vad_threshold={vad_threshold}, min_duration={min_duration_sec}s"
+        f"with_scores={with_scores}, vad_threshold={vad_threshold}, "
+        f"min_duration={min_duration_sec}s"
     )
 
-    # Build WaveShapeConfig from parameters (all default to module constants)
     shape_cfg = WaveShapeConfig(
         min_prominence=min_prominence,
         min_excursion=min_excursion,
@@ -475,12 +504,11 @@ def get_valid_speech_waves(
     )
     logger.debug(f"WaveShapeConfig: {shape_cfg}")
 
-    # Step 1: Load audio (handles file path, bytes, numpy array, or torch tensor)
-    #          Uses the same load_audio as _main_speech_waves.main()
     audio_np, sr = load_audio(audio, sr=sampling_rate, mono=True)
-    logger.debug(f"Audio loaded: shape={audio_np.shape}, sr={sr}, dtype={audio_np.dtype}")
+    logger.debug(
+        f"Audio loaded: shape={audio_np.shape}, sr={sr}, dtype={audio_np.dtype}"
+    )
 
-    # Step 2: Run VAD — same call as _main_speech_waves.main()
     try:
         _, scores = extract_speech_timestamps(
             audio=audio_np,
@@ -493,15 +521,18 @@ def get_valid_speech_waves(
     except Exception as e:
         logger.error(f"VAD extraction failed: {e}")
         console.print(f"[error]VAD extraction failed: {e}[/error]")
+        if with_scores:
+            return [], []
         return []
 
     if not scores:
         logger.warning("No speech scores returned from VAD")
+        if with_scores:
+            return [], []
         return []
 
     logger.info(f"VAD produced {len(scores)} probability scores")
 
-    # Step 3: Shape analysis — same call chain as _main_speech_waves.main()
     all_waves = check_speech_waves(
         speech_probs=scores,
         threshold=vad_threshold,
@@ -510,7 +541,6 @@ def get_valid_speech_waves(
     )
     logger.info(f"Total waves detected by shape analysis: {len(all_waves)}")
 
-    # Step 4: Filter to valid waves only (is_valid=True)
     valid_waves: List[SpeechWave] = []
     for wave in all_waves:
         if wave is None:
@@ -523,42 +553,44 @@ def get_valid_speech_waves(
 
     logger.info(f"Valid waves after filtering: {len(valid_waves)}")
 
-    # Step 5: Return early if audio extraction not requested
-    if not with_audio:
+    # Handle all return type combinations
+    if not with_audio and not with_scores:
         return valid_waves
 
-    # Step 6: Extract audio segments for each valid wave
-    valid_waves_with_audio: List[Tuple[SpeechWave, np.ndarray]] = []
-    for wave in valid_waves:
-        frame_start = wave["details"]["frame_start"]
-        frame_end = wave["details"]["frame_end"]
+    if with_audio:
+        valid_waves_with_audio: List[Tuple[SpeechWave, np.ndarray]] = []
+        for wave in valid_waves:
+            frame_start = wave["details"]["frame_start"]
+            frame_end = wave["details"]["frame_end"]
+            start_sample = frame_start * HOP_SIZE
+            end_sample = (frame_end + 1) * HOP_SIZE
+            start_sample = max(0, start_sample)
+            end_sample = min(len(audio_np), end_sample)
+            if end_sample > start_sample:
+                wave_audio = audio_np[start_sample:end_sample].copy()
+                valid_waves_with_audio.append((wave, wave_audio))
+                logger.debug(
+                    f"Wave audio extracted: frames [{frame_start}:{frame_end}], "
+                    f"samples [{start_sample}:{end_sample}], "
+                    f"duration={wave['details']['duration_sec']:.3f}s"
+                )
+            else:
+                logger.warning(
+                    f"Skipping wave with invalid sample range: "
+                    f"frames [{frame_start}:{frame_end}] → "
+                    f"samples [{start_sample}:{end_sample}] "
+                    f"(audio_np length={len(audio_np)})"
+                )
+        logger.info(f"Valid waves (with audio): {len(valid_waves_with_audio)}")
 
-        # Convert frame indices to sample indices using HOP_SIZE (160 samples = 10ms)
-        start_sample = frame_start * HOP_SIZE
-        end_sample = (frame_end + 1) * HOP_SIZE
+        if with_scores:
+            logger.info("Returning waves with audio AND scores")
+            return valid_waves_with_audio, scores
+        return valid_waves_with_audio
 
-        # Clamp to valid range within the loaded audio
-        start_sample = max(0, start_sample)
-        end_sample = min(len(audio_np), end_sample)
-
-        if end_sample > start_sample:
-            wave_audio = audio_np[start_sample:end_sample].copy()
-            valid_waves_with_audio.append((wave, wave_audio))
-            logger.debug(
-                f"Wave audio extracted: frames [{frame_start}:{frame_end}], "
-                f"samples [{start_sample}:{end_sample}], "
-                f"duration={wave['details']['duration_sec']:.3f}s"
-            )
-        else:
-            logger.warning(
-                f"Skipping wave with invalid sample range: "
-                f"frames [{frame_start}:{frame_end}] → "
-                f"samples [{start_sample}:{end_sample}] "
-                f"(audio_np length={len(audio_np)})"
-            )
-
-    logger.info(f"Valid waves (with audio): {len(valid_waves_with_audio)}")
-    return valid_waves_with_audio
+    # with_scores=True, with_audio=False
+    logger.info("Returning waves with scores (no audio)")
+    return valid_waves, scores
 
 
 def extract_pure_speech_segments(

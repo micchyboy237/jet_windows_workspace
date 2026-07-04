@@ -5,7 +5,10 @@ from typing import List, Optional, TypedDict
 
 from rapidfuzz import fuzz, process, utils
 
-from services.sentence_utils import split_sentences_ja
+try:
+    from services.sentence_utils import split_sentences_ja
+except ImportError:
+    from sentence_utils import split_sentences_ja
 
 
 class FuzzyMatchInput(TypedDict):

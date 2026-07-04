@@ -15,7 +15,11 @@ import sys
 from functools import lru_cache
 from typing import Any
 from llama_cpp import Llama
-from services.sentence_matcher_ja import fuzzy_match_prefix_texts
+
+try:
+    from services.sentence_matcher_ja import fuzzy_match_prefix_texts
+except ImportError:
+    from sentence_matcher_ja import fuzzy_match_prefix_texts
 
 MODEL_PATH = (
     r"C:\Users\druiv\.cache\llama.cpp\translators"
@@ -51,6 +55,42 @@ SYSTEM_PROMPT = (
     "Output ONLY the English translation — no explanations, no romaji, "
     "no Japanese text, no extra commentary."
 )
+
+
+def _create_translation_logit_bias(llm: Llama) -> dict:
+    """Create logit_bias to force English and prevent refusals."""
+    penalize_strings = [
+        "申", "訳", "あり", "ませ", "でき", "ご", "ざ", "い",
+        "I cannot", "I can't", "I'm sorry", "I am sorry", "I apologize",
+        "unable to", "not able to", "cannot translate", "can't translate",
+        "inappropriate", "offensive", "I won't",
+    ]
+
+    boost_strings = [
+        "The", "This", "It", "I", "He", "She", "They", "We",
+        "A", "An", "In", "On", "At", "With",
+    ]
+
+    logit_bias = {}
+
+    for text in penalize_strings:
+        try:
+            tokens = llm.tokenize(text.encode("utf-8"), add_bos=False, special=False)
+            for token_id in tokens:
+                logit_bias[token_id] = logit_bias.get(token_id, 0) - 20.0
+        except Exception as e:
+            print(f"[translate_llm] Could not tokenize penalty text '{text}': {e}", flush=True)
+
+    for text in boost_strings:
+        try:
+            tokens = llm.tokenize(text.encode("utf-8"), add_bos=False, special=False)
+            for token_id in tokens:
+                logit_bias[token_id] = logit_bias.get(token_id, 0) + 5.0
+        except Exception as e:
+            print(f"[translate_llm] Could not tokenize boost text '{text}': {e}", flush=True)
+
+    print(f"[translate_llm] Created logit_bias with {len(logit_bias)} token entries", flush=True)
+    return logit_bias
 
 
 @lru_cache(maxsize=1)
@@ -91,7 +131,7 @@ def translate_japanese_to_english(
 ) -> dict[str, Any]:
     """
     Translate a Japanese string to English.
-
+    
     Parameters
     ----------
     text        : Japanese text to translate.
@@ -102,7 +142,7 @@ def translate_japanese_to_english(
     top_p       : Nucleus sampling threshold.
     top_k       : Top-K sampling.
     repeat_penalty : Repetition penalty.
-
+    
     Returns
     -------
     dict with keys:
@@ -116,7 +156,10 @@ def translate_japanese_to_english(
     if history:
         messages.extend(history)
     messages.append({"role": "user", "content": text})
-
+    
+    # Create logit bias to force English output
+    logit_bias = _create_translation_logit_bias(llm)
+    
     t0 = time.perf_counter()
     response = llm.create_chat_completion(
         messages=messages,
@@ -125,16 +168,17 @@ def translate_japanese_to_english(
         top_p=top_p,
         top_k=top_k,
         repeat_penalty=repeat_penalty,
+        logit_bias=logit_bias,
         stream=False,
     )
     latency_ms = (time.perf_counter() - t0) * 1000
-
+    
     translation: str = response["choices"][0]["message"]["content"].strip()
     usage = response.get("usage", {})
     tokens_evaluated: int = usage.get("prompt_tokens", 0)
     tokens_generated: int = usage.get("completion_tokens", 0)
     tokens_cached: int = getattr(llm, "_n_past_cached", 0)
-
+    
     return {
         "text": translation,
         "tokens_evaluated": tokens_evaluated,

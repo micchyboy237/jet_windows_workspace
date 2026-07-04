@@ -1,11 +1,11 @@
-<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/base.html -->
+<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/base.jinja -->
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Speaker Metrics{% endblock %}</title>
-    <style>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>{% block title %}Speaker Metrics{% endblock %}</title>
+        <style>
         /* Reset & Base */
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         
@@ -305,38 +305,38 @@
             height: 14px;
             border-radius: 3px;
         }
-    </style>
-    {% block extra_head %}{% endblock %}
-  </head>
-  <body>
-    <nav class="nav-bar">
-      <a href="/speakers/metrics" class="nav-brand">🎙 Speaker Metrics</a>
-      <ul class="nav-links">
-        <li><a href="/speakers/metrics"
+        </style>
+        {% block extra_head %}{% endblock %}
+    </head>
+    <body>
+        <nav class="nav-bar">
+            <a href="/speakers/metrics" class="nav-brand">🎙 Speaker Metrics</a>
+            <ul class="nav-links">
+                <li><a href="/speakers/metrics"
    class="{% if active_page == 'overview' %}active{% endif %}">Overview</a></li>
-        <li><a href="/speakers/metrics/speakers"
+                <li><a href="/speakers/metrics/speakers"
    class="{% if active_page == 'speakers' %}active{% endif %}">Speakers</a></li>
-        <li><a href="/speakers/metrics/segments"
+                <li><a href="/speakers/metrics/segments"
    class="{% if active_page == 'segments' %}active{% endif %}">Segments</a></li>
-        <li><a href="/speakers/metrics/separation"
+                <li><a href="/speakers/metrics/separation"
    class="{% if active_page == 'separation' %}active{% endif %}">Separation</a></li>
-        <li><a href="/speakers/metrics/outliers"
+                <li><a href="/speakers/metrics/outliers"
    class="{% if active_page == 'outliers' %}active{% endif %}">Outliers</a></li>
-        <li><a href="/speakers/metrics/timeline"
+                <li><a href="/speakers/metrics/timeline"
    class="{% if active_page == 'timeline' %}active{% endif %}">Timeline</a></li>
-      </ul>
-    </nav>
-    <div class="container">
-      {% block content %}{% endblock %}
-    </div>
-    <div class="footer">
-      Speaker Metrics Dashboard • Computed at
-      {% if computed_at %}
-        {{ computed_at }}
-      {% else %}
-        now
-      {% endif %}
-    </div>
-    {% block extra_scripts %}{% endblock %}
-  </body>
+            </ul>
+        </nav>
+        <div class="container">
+            {% block content %}{% endblock %}
+        </div>
+        <div class="footer">
+            Speaker Metrics Dashboard • Computed at
+            {% if computed_at %}
+                {{ computed_at }}
+            {% else %}
+                now
+            {% endif %}
+        </div>
+        {% block extra_scripts %}{% endblock %}
+    </body>
 </html>

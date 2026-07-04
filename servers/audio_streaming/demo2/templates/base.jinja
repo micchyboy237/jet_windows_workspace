@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}Audio Player{% endblock %}</title>
+    <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      height: 100vh;
+    }
+    
+    /* ---- Sidebar ---- */
+    .sidebar {
+      width: 280px;
+      background: #1a1d23;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid #2d3139;
+      flex-shrink: 0;
+    }
+    .sidebar-header {
+      padding: 1.25rem;
+      background: #21252b;
+      border-bottom: 1px solid #2d3139;
+    }
+    .sidebar-header h2 {
+      font-size: 1.1rem;
+      margin-bottom: 0.5rem;
+      color: #61afef;
+    }
+    .sidebar-header .audio-count {
+      font-size: 0.75rem;
+      color: #7f848e;
+    }
+    .search-box {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #2d3139;
+    }
+    .search-box input {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border: 1px solid #3a3f4b;
+      border-radius: 6px;
+      background: #282c34;
+      color: #abb2bf;
+      font-size: 0.85rem;
+      outline: none;
+    }
+    .search-box input:focus {
+      border-color: #61afef;
+    }
+    .file-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.5rem 0;
+    }
+    .file-item {
+      padding: 0.65rem 1.25rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: #abb2bf;
+      transition: all 0.15s;
+      border-left: 3px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .file-item:hover {
+      background: #2d3139;
+      color: #fff;
+    }
+    .file-item.active {
+      background: #2d3139;
+      color: #61afef;
+      border-left-color: #61afef;
+    }
+    .file-item .icon {
+      font-size: 1rem;
+      opacity: 0.7;
+    }
+    .file-item .file-info {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-width: 0;
+    }
+    .file-item .file-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .file-item .file-meta {
+      font-size: 0.7rem;
+      color: #5c6370;
+    }
+    .no-results {
+      padding: 1.5rem;
+      text-align: center;
+      color: #5c6370;
+      font-size: 0.85rem;
+    }
+    .file-list::-webkit-scrollbar { width: 6px; }
+    .file-list::-webkit-scrollbar-track { background: transparent; }
+    .file-list::-webkit-scrollbar-thumb { background: #3a3f4b; border-radius: 3px; }
+    
+    /* ---- Navigation ---- */
+    .nav-links {
+      padding: 0.5rem 1rem;
+      border-bottom: 1px solid #2d3139;
+      display: flex;
+      gap: 0.25rem;
+      flex-wrap: wrap;
+    }
+    .nav-links a {
+      color: #abb2bf;
+      text-decoration: none;
+      font-size: 0.75rem;
+      padding: 0.35rem 0.65rem;
+      border-radius: 4px;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .nav-links a:hover {
+      background: #2d3139;
+      color: #fff;
+    }
+    .nav-links a.active {
+      background: #61afef;
+      color: #fff;
+    }
+    
+    /* ---- Main Player Area ---- */
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .player-container {
+      flex: 1;
+      padding: 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+      overflow-y: auto;
+    }
+    .now-playing {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      margin-bottom: 1.5rem;
+    }
+    .now-playing h3 {
+      color: #1a1d23;
+      font-size: 1rem;
+      margin-bottom: 0.25rem;
+    }
+    .now-playing .track-name {
+      color: #61afef;
+      font-size: 1.2rem;
+      font-weight: 600;
+    }
+    .controls-section {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      margin-bottom: 0.75rem;
+    }
+    {% block badge_style %}{% endblock %}
+    .info {
+      color: #555;
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+      line-height: 1.6;
+    }
+    .controls {
+      display: flex;
+      gap: 0.5rem;
+      margin: 1rem 0;
+      flex-wrap: wrap;
+    }
+    button {
+      border: none;
+      padding: 0.6rem 1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+    {% block button_style %}{% endblock %}
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 1rem;
+      color: #333;
+      background: #f8f9fa;
+      padding: 0.75rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    .status strong { color: #000; }
+    #log {
+      margin-top: 1rem;
+      background: #1e1e1e;
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      padding: 0.75rem;
+      border-radius: 6px;
+      max-height: 150px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    {% block log_color %}{% endblock %}
+    
+    /* ---- Seek bar (default, can be overridden) ---- */
+    #seekBar {
+      width: 100%;
+      margin: 0.5rem 0;
+    }
+    {% block seek_bar_extra %}{% endblock %}
+    </style>
+    {% block extra_head %}{% endblock %}
+  </head>
+  <body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>🎵 Audio Files</h2>
+        <div class="audio-count" id="audioCount">Loading...</div>
+      </div>
+      <div class="nav-links">
+        <a href="/partial"
+           class="{% if current_page == 'partial' %}active{% endif %}">Partial Range</a>
+        <a href="/full" class="{% if current_page == 'full' %}active{% endif %}">Full Range</a>
+      </div>
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="🔍 Search files..." />
+      </div>
+      <div class="file-list" id="fileList">
+        <div class="no-results">Loading audio files...</div>
+      </div>
+    </aside>
+    <!-- Main Player -->
+    <main class="main-content">
+      <div class="player-container">
+        {% block player_content %}{% endblock %}
+      </div>
+    </main>
+    <!-- Shared JavaScript -->
+    <script>
+    // ---- Shared State & Utilities ----
+    let allFiles = [];
+    let currentFile = null;
+    
+    const fileList = document.getElementById('fileList');
+    const searchInput = document.getElementById('searchInput');
+    const audioCount = document.getElementById('audioCount');
+    const currentTrack = document.getElementById('currentTrack');
+    const currentFileEl = document.getElementById('currentFile');
+    const logPanel = document.getElementById('log');
+    
+    function formatTime(sec) {
+      if (!isFinite(sec) || sec < 0) return "0:00";
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60).toString().padStart(2, "0");
+      return `${m}:${s}`;
+    }
+    
+    function formatBytes(bytes) {
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+    
+    function log(msg) {
+      const time = new Date().toLocaleTimeString();
+      const line = `[${time}] ${msg}`;
+      console.log(line);
+      logPanel.textContent += line + "\n";
+      logPanel.scrollTop = logPanel.scrollHeight;
+    }
+    
+    log("{% block page_name %}Audio Player{% endblock %} initialized");
+    
+    // ---- Sidebar Logic ----
+    async function loadAudioList() {
+      try {
+        log('Fetching audio file list...');
+        const res = await fetch('/audio-list');
+        const data = await res.json();
+        allFiles = data.files;
+        audioCount.textContent = `${allFiles.length} file(s) found`;
+        log(`Loaded ${allFiles.length} audio files`);
+        renderFileList(allFiles);
+      } catch (err) {
+        log(`Error loading audio list: ${err.message}`);
+        fileList.innerHTML = '<div class="no-results">Error loading files</div>';
+      }
+    }
+    
+    function renderFileList(files) {
+      if (files.length === 0) {
+        fileList.innerHTML = '<div class="no-results">No files found</div>';
+        return;
+      }
+      
+      fileList.innerHTML = files.map((f) => {
+        const extIcon = {'.wav':'🎵','.mp3':'🎵','.ogg':'🎵','.flac':'🎵','.aac':'🎵'}[f.extension] || '🎧';
+        const isActive = currentFile?.path === f.path;
+        return `
+          <div class="file-item ${isActive ? 'active' : ''}" data-path="${f.path}">
+            <span class="icon">${extIcon}</span>
+            <div class="file-info">
+              <span class="file-name">${f.name}</span>
+              <span class="file-meta">${f.extension} · ${formatBytes(f.size)}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+      
+      fileList.querySelectorAll('.file-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const path = item.dataset.path;
+          const file = allFiles.find(f => f.path === path);
+          if (file) selectFile(file);
+        });
+      });
+    }
+    
+    function selectFile(file) {
+      currentFile = file;
+      currentTrack.textContent = file.name;
+      currentFileEl.textContent = `${file.extension} · ${formatBytes(file.size)}`;
+      
+      fileList.querySelectorAll('.file-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.path === file.path);
+      });
+      
+      log(`Selected: ${file.name}`);
+      onFileSelected(file);  // Hook for page-specific logic
+    }
+    
+    searchInput.addEventListener('input', () => {
+      const query = searchInput.value.toLowerCase().trim();
+      const filtered = query 
+        ? allFiles.filter(f => f.name.toLowerCase().includes(query))
+        : allFiles;
+      renderFileList(filtered);
+    });
+    
+    // ---- Init ----
+    loadAudioList();
+    </script>
+    {% block extra_scripts %}{% endblock %}
+  </body>
+</html>

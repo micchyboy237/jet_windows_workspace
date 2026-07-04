@@ -1,29 +1,19 @@
+import io
 import json
+import os
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+from typing import List, Literal, Optional, Tuple, TypedDict, Union
 
 import matplotlib
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import librosa
 import numpy as np
+import numpy.typing as npt
 import soundfile as sf
 import torch
 from fireredvad.core.constants import SAMPLE_RATE
-from fireredvad.core.stream_vad_postprocessor import StreamVadFrameResult
 from fireredvad.stream_vad import FireRedStreamVad, FireRedStreamVadConfig
-
-try:
-    from services._types import AudioInput, SpeechSegment, WordSegment
-    from services.vad_config import DEFAULT_USE_HYBRID
-    from services.audio_utils import load_audio
-    from services.vad_utils import compute_hybrid_probs
-except ImportError:
-    from _types import AudioInput, SpeechSegment, WordSegment
-    from vad_config import DEFAULT_USE_HYBRID
-    from audio_utils import load_audio
-    from vad_utils import compute_hybrid_probs
-
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -34,6 +24,13 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+try:
+    from services._types import AudioInput, SpeechSegment, WordSegment
+    from services.audio_utils import load_audio
+except ImportError:
+    from _types import AudioInput, SpeechSegment, WordSegment
+    from audio_utils import load_audio
+
 console = Console()
 
 SAVE_DIR = str(
@@ -41,10 +38,9 @@ SAVE_DIR = str(
 )
 
 DEFAULT_THRESHOLD = 0.5
-DEFAULT_NEG_THRESHOLD = 0.1
 DEFAULT_MIN_SILENCE_SEC = 0.250
 DEFAULT_MIN_SPEECH_SEC = 0.250
-DEFAULT_MAX_SPEECH_SEC = None
+DEFAULT_MAX_SPEECH_SEC = 15.0
 DEFAULT_SAMPLING_RATE = 16000
 DEFAULT_RETURN_SECONDS = False
 DEFAULT_WITH_SCORES = False
@@ -54,9 +50,6 @@ DEFAULT_SMOOTH_WINDOW_SIZE = 5
 DEFAULT_PAD_START_FRAME = 5
 DEFAULT_MAX_BUFFER_SEC = 1.2
 
-DEFAULT_PROB_WEIGHT = 0.5
-DEFAULT_RMS_WEIGHT = 0.5
-
 
 # Single global cached instance to avoid repeated model loading
 _global_vad_cache: Optional["FireRedVAD"] = None
@@ -65,29 +58,30 @@ _global_vad_cache_config: Optional[dict] = None  # Track the config used
 
 def get_global_vad(
     threshold: float = DEFAULT_THRESHOLD,
-    neg_threshold: float = DEFAULT_NEG_THRESHOLD,
     min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_SEC,
     min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_SEC,
-    max_speech_duration_sec: float | None = DEFAULT_MAX_SPEECH_SEC,  # Now accepts None
+    max_speech_duration_sec: float = DEFAULT_MAX_SPEECH_SEC,
     smooth_window_size: int = DEFAULT_SMOOTH_WINDOW_SIZE,
     pad_start_frame: int = DEFAULT_PAD_START_FRAME,
     max_buffer_sec: float = DEFAULT_MAX_BUFFER_SEC,
-    use_hybrid: bool = DEFAULT_USE_HYBRID,
     **model_kwargs,
 ) -> "FireRedVAD":
-    """Get or create the global cached VAD instance."""
+    """Get or create the global cached VAD instance.
+    
+    If parameters change, the existing instance is reused as-is (with a warning)
+    since the underlying VAD model cannot be reconfigured without reinitialization.
+    For parameter changes to take effect, clear the cache first.
+    """
     global _global_vad_cache, _global_vad_cache_config
-
+    
     current_config = {
         "threshold": threshold,
-        "neg_threshold": neg_threshold,
         "min_silence_duration_sec": min_silence_duration_sec,
         "min_speech_duration_sec": min_speech_duration_sec,
-        "max_speech_duration_sec": max_speech_duration_sec,  # Can be None
+        "max_speech_duration_sec": max_speech_duration_sec,
         "smooth_window_size": smooth_window_size,
         "pad_start_frame": pad_start_frame,
         "max_buffer_sec": max_buffer_sec,
-        "use_hybrid": use_hybrid,
     }
     current_config.update(model_kwargs)
 
@@ -98,19 +92,19 @@ def get_global_vad(
             _global_vad_cache = FireRedVAD(
                 model_dir=SAVE_DIR,
                 threshold=threshold,
-                neg_threshold=neg_threshold,
                 min_silence_duration_sec=min_silence_duration_sec,
                 min_speech_duration_sec=min_speech_duration_sec,
-                max_speech_duration_sec=max_speech_duration_sec,  # Can be None
+                max_speech_duration_sec=max_speech_duration_sec,
                 smooth_window_size=smooth_window_size,
                 pad_start_frame=pad_start_frame,
                 max_buffer_sec=max_buffer_sec,
-                use_hybrid=use_hybrid,
                 **model_kwargs,
             )
             _global_vad_cache_config = current_config
     else:
+        # Check if config differs from cached version
         if _global_vad_cache_config != current_config:
+            # Log warning about parameter mismatch
             changed_params = {
                 k: (v, current_config[k])
                 for k, v in _global_vad_cache_config.items()
@@ -146,66 +140,41 @@ class FireRedVAD:
         model_dir: str = SAVE_DIR,
         device: str | None = None,
         threshold: float = DEFAULT_THRESHOLD,
-        neg_threshold: float = DEFAULT_NEG_THRESHOLD,
         min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_SEC,
         min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_SEC,
-        max_speech_duration_sec: float
-        | None = DEFAULT_MAX_SPEECH_SEC,  # Now accepts None
+        max_speech_duration_sec: float = DEFAULT_MAX_SPEECH_SEC,
         smooth_window_size: int = DEFAULT_SMOOTH_WINDOW_SIZE,
         pad_start_frame: int = DEFAULT_PAD_START_FRAME,
         max_buffer_sec: float = DEFAULT_MAX_BUFFER_SEC,
-        use_hybrid: bool = DEFAULT_USE_HYBRID,
     ) -> None:
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device)
-        self.neg_threshold = neg_threshold
-
         console.print(f"[cyan]Loading FireRedVAD (streaming) on {self.device}…[/cyan]")
-        console.print(
-            f"[cyan]Neg threshold: {self.neg_threshold}, Max speech duration: {max_speech_duration_sec}[/cyan]"
-        )
-
         frames_per_sec = 100
-
-        # Convert max_speech_duration_sec to frames, or use a very large value if None
-        if max_speech_duration_sec is None:
-            max_speech_frame = 30000  # Large enough to effectively be unlimited
-        else:
-            max_speech_frame = int(max_speech_duration_sec * frames_per_sec)
-
         config = FireRedStreamVadConfig(
             use_gpu=(device == "cuda"),
             speech_threshold=threshold,
             smooth_window_size=smooth_window_size,
             pad_start_frame=pad_start_frame,
             min_speech_frame=int(min_speech_duration_sec * frames_per_sec),
-            max_speech_frame=max_speech_frame,
+            max_speech_frame=int(max_speech_duration_sec * frames_per_sec),
             min_silence_frame=int(min_silence_duration_sec * frames_per_sec),
             chunk_max_frame=30000,
         )
         self.vad = FireRedStreamVad.from_pretrained(model_dir, config=config)
         self.vad.vad_model.to(self.device)
         console.print("[green]done.[/green]")
-
         self.sample_rate = SAMPLE_RATE
         self.audio_buffer: np.ndarray = np.array([], dtype=np.float32)
         self.last_prob: float = 0.0
         self.max_buffer_samples = int(max_buffer_sec * self.sample_rate)
-
-        # Track segments for neg threshold logic
-        self._current_segment_probs: List[float] = []
-        self._in_segment: bool = False
-
-        self._use_hybrid = use_hybrid
 
     def reset(self) -> None:
         """Reset internal VAD state and clear audio buffer."""
         self.vad.reset()
         self.audio_buffer = np.array([], dtype=np.float32)
         self.last_prob = 0.0
-        self._current_segment_probs = []  # NEW
-        self._in_segment = False  # NEW
 
     def _normalize_chunk(self, chunk: np.ndarray) -> np.ndarray:
         """Simple dynamic range compression / gain normalization."""
@@ -251,321 +220,48 @@ class FireRedVAD:
         """
         return None
 
-    def detect_full(self, audio):
-        self.reset()
-        if self._use_hybrid:
-            frame_results, result = self.detect_full_hybrid(audio)
-        else:
-            frame_results, result = self.vad.detect_full(audio)
-        if self.neg_threshold > 0:
-            frame_results = self._apply_neg_threshold_to_results(frame_results)
-            result["timestamps"] = FireRedStreamVad.results_to_timestamps(frame_results)
-        return frame_results, result
-
-    def detect_full_hybrid(
+    def detect_full(
         self,
         audio: Union[str, np.ndarray],
-        prob_weight: float = DEFAULT_PROB_WEIGHT,
-        rms_weight: float = DEFAULT_RMS_WEIGHT,
-    ) -> Tuple[List[StreamVadFrameResult], dict]:
-        """
-        detect_full variant that blends model probs with RMS energy.
-
-        Strategy:
-        1. Run FireRedStreamVad.detect_full normally to get raw model probs.
-        2. Load audio samples for RMS computation.
-        3. Compute hybrid probs via compute_hybrid_probs.
-        4. Reset postprocessor and re-feed hybrid probs frame-by-frame so the
-            state machine operates on blended values.
-        5. Re-derive timestamps from the hybrid results.
-
-        This avoids duplicating the model-forward / chunking logic from
-        FireRedStreamVad.detect_full.
-        """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        # --- Step 1: base inference (always non-hybrid at the FireRedStreamVad level) ---
+    ) -> tuple[list, dict]:
+        self.reset()
         frame_results, result = self.vad.detect_full(audio)
-
-        raw_probs = [r.raw_prob for r in frame_results]
-        logger.debug(
-            "detect_full_hybrid: got %d raw model probs from base VAD",
-            len(raw_probs),
-        )
-
-        # --- Step 2: load audio for RMS ---
-        if isinstance(audio, str):
-            audio_np, _ = sf.read(audio)
-            if audio_np.ndim > 1:
-                audio_np = audio_np.mean(axis=1)
-        else:
-            audio_np = audio
-
-        # --- Step 3: compute hybrid probs ---
-        hybrid_probs = compute_hybrid_probs(
-            probs=raw_probs,
-            audio_np=audio_np,
-            prob_weight=prob_weight,
-            rms_weight=rms_weight,
-        )
-        logger.debug(
-            "detect_full_hybrid: computed %d hybrid probs (prob_w=%.2f, rms_w=%.2f)",
-            len(hybrid_probs),
-            prob_weight,
-            rms_weight,
-        )
-
-        # --- Step 4: re-run postprocessor with hybrid values ---
-        self.vad.postprocessor.reset()
-        hybrid_frame_results: List[StreamVadFrameResult] = []
-        for hybrid_prob in hybrid_probs:
-            hfr = self.vad.postprocessor.process_one_frame(float(hybrid_prob))
-            hybrid_frame_results.append(hfr)
-
-        # --- Step 5: re-derive timestamps ---
-        timestamps = FireRedStreamVad.results_to_timestamps(hybrid_frame_results)
-        hybrid_result = {
-            "dur": result["dur"],
-            "timestamps": timestamps,
-        }
-        if isinstance(audio, str):
-            hybrid_result["wav_path"] = audio
-
-        logger.info(
-            "detect_full_hybrid: blended %d frames → %d speech segments",
-            len(hybrid_frame_results),
-            len(timestamps),
-        )
-        return hybrid_frame_results, hybrid_result
-
-    def _apply_neg_threshold_to_results(self, frame_results: List) -> List:
-        """
-        Post-process frame results to apply neg threshold logic.
-        Segments include trailing frames below neg_threshold at the end,
-        but stop when probability rises above neg_threshold again or
-        after min_silence_frames of below-threshold frames.
-        """
-        if not frame_results:
-            return frame_results
-
-        # Collect probabilities
-        all_probs = [r.smoothed_prob for r in frame_results]
-
-        # Get the min_speech_frame and min_silence_frame from the postprocessor
-        min_speech_frames = self.vad.postprocessor.min_speech_frame
-        min_silence_frames = self.vad.postprocessor.min_silence_frame
-
-        console.print(
-            f"[cyan]Neg threshold: {self.neg_threshold}, Min speech: {min_speech_frames} frames, Min silence: {min_silence_frames} frames[/cyan]"
-        )
-
-        # Find segments with trailing low-probability frames
-        segments = []
-        i = 0
-
-        while i < len(all_probs):
-            # Skip frames below threshold until we find speech
-            if all_probs[i] < self.neg_threshold:
-                i += 1
-                continue
-
-            # Found speech start
-            segment_start = i
-
-            # Find the main speech segment (frames above threshold)
-            while i < len(all_probs) and all_probs[i] >= self.neg_threshold:
-                i += 1
-
-            # Now include trailing frames below threshold
-            trailing_start = i
-            trailing_count = 0
-
-            while i < len(all_probs) and all_probs[i] < self.neg_threshold:
-                trailing_count += 1
-                i += 1
-
-                # Stop if we've collected enough trailing frames
-                if trailing_count >= min_silence_frames:
-                    # Don't include this frame if we've reached min_silence
-                    i -= 1  # Back up one frame
-                    break
-
-                # Stop if probability goes back above threshold
-                # (This shouldn't happen since we check < threshold, but just in case)
-
-            segment_end = i - 1
-
-            segments.append((segment_start, segment_end))
-
-            console.print(
-                f"[dim]Segment: frames {segment_start}-{segment_end} "
-                f"({segment_end - segment_start + 1} frames, "
-                f"{(segment_end - segment_start + 1) * 0.01:.2f}s) "
-                f"[trailing: {trailing_count} frames below threshold][/dim]"
-            )
-
-        console.print(
-            f"[cyan]Raw segments with trailing frames: {len(segments)}[/cyan]"
-        )
-
-        # Apply min_speech_frame filter
-        filtered_segments = []
-        for start_idx, end_idx in segments:
-            segment_duration = end_idx - start_idx + 1
-            if segment_duration >= min_speech_frames:
-                filtered_segments.append((start_idx, end_idx))
-            else:
-                console.print(
-                    f"[yellow]Filtered out short segment: frames {start_idx}-{end_idx} "
-                    f"({segment_duration} frames < {min_speech_frames})[/yellow]"
-                )
-
-        console.print(f"[cyan]After min_speech filter: {len(filtered_segments)}[/cyan]")
-
-        # Apply min_silence_frame filter (merge close segments)
-        if min_silence_frames > 0 and len(filtered_segments) > 1:
-            merged_segments = [filtered_segments[0]]
-            for current_start, current_end in filtered_segments[1:]:
-                prev_start, prev_end = merged_segments[-1]
-                silence_gap = current_start - prev_end
-
-                if silence_gap <= min_silence_frames:
-                    # Merge segments
-                    merged_segments[-1] = (prev_start, current_end)
-                    console.print(
-                        f"[cyan]Merged segments with {silence_gap} frame gap[/cyan]"
-                    )
-                else:
-                    merged_segments.append((current_start, current_end))
-
-            final_segments = merged_segments
-        else:
-            final_segments = filtered_segments
-
-        console.print(f"[green]Final segments: {len(final_segments)}[/green]")
-
-        # Reset all segment markers
-        for result in frame_results:
-            try:
-                result.is_speech_start = False
-                result.is_speech_end = False
-                if hasattr(result, "speech_start_frame"):
-                    result.speech_start_frame = -1
-                if hasattr(result, "speech_end_frame"):
-                    result.speech_end_frame = -1
-            except (AttributeError, TypeError):
-                pass
-
-        # Set new markers
-        for start_idx, end_idx in final_segments:
-            if 0 <= start_idx < len(frame_results):
-                result = frame_results[start_idx]
-                try:
-                    result.is_speech_start = True
-                    if hasattr(result, "speech_start_frame"):
-                        result.speech_start_frame = start_idx + 1
-                    console.print(
-                        f"[green]Speech start: frame {start_idx} "
-                        f"(prob={all_probs[start_idx]:.4f})[/green]"
-                    )
-                except (AttributeError, TypeError):
-                    console.print(
-                        f"[yellow]Warning: Could not set start marker on frame {start_idx}[/yellow]"
-                    )
-
-            if 0 <= end_idx < len(frame_results):
-                result = frame_results[end_idx]
-                try:
-                    result.is_speech_end = True
-                    if hasattr(result, "speech_end_frame"):
-                        result.speech_end_frame = end_idx + 1
-                    console.print(
-                        f"[green]Speech end: frame {end_idx} "
-                        f"(prob={all_probs[end_idx]:.4f})[/green]"
-                    )
-                except (AttributeError, TypeError):
-                    console.print(
-                        f"[yellow]Warning: Could not set end marker on frame {end_idx}[/yellow]"
-                    )
-
-        return frame_results
-
-    def _apply_neg_threshold(self, prob: float) -> bool:
-        """
-        Check if current probability falls below neg_threshold.
-        Returns True if segment should end, False otherwise.
-        """
-        if self._in_segment and prob < self.neg_threshold:
-            console.print(
-                f"[green]Segment ended due to neg_threshold: prob={prob:.4f} < {self.neg_threshold}[/green]"
-            )
-            self._in_segment = False
-            self._current_segment_probs = []
-            return True
-        return False
-
-    def _update_segment_state(self, prob: float) -> None:
-        """Update segment tracking state based on probability."""
-        if prob >= self.neg_threshold:
-            if not self._in_segment:
-                self._in_segment = True
-                console.print(
-                    f"[cyan]Segment started: prob={prob:.4f} >= {self.neg_threshold}[/cyan]"
-                )
-            self._current_segment_probs.append(prob)
-        elif self._in_segment:
-            console.print(
-                f"[green]Segment ended: prob={prob:.4f} < {self.neg_threshold}[/green]"
-            )
-            self._in_segment = False
-            self._current_segment_probs = []
+        return frame_results, result
 
 
 def extract_speech_timestamps(
     audio: Union[str, Path, np.ndarray, torch.Tensor, list[np.ndarray]],
     threshold: float = DEFAULT_THRESHOLD,
-    neg_threshold: float = DEFAULT_NEG_THRESHOLD,
     min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_SEC,
     min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_SEC,
-    max_speech_duration_sec: float
-    | None = DEFAULT_MAX_SPEECH_SEC,  # Now None by default
+    max_speech_duration_sec: float | None = None,
     return_seconds: bool = DEFAULT_RETURN_SECONDS,
     with_scores: bool = DEFAULT_WITH_SCORES,
     include_non_speech: bool = DEFAULT_INCLUDE_NON_SPEECH,
     smooth_window_size: int = DEFAULT_SMOOTH_WINDOW_SIZE,
     pad_start_frame: int = DEFAULT_PAD_START_FRAME,
     max_buffer_sec: float = DEFAULT_MAX_BUFFER_SEC,
-    use_hybrid: bool = DEFAULT_USE_HYBRID,
     **kwargs,
 ) -> Union[List[SpeechSegment], tuple[List[SpeechSegment], List[float]]]:
     """
     Extract speech timestamps using FireRedVAD.
     When include_non_speech=True, returns both speech and non-speech (silence) segments.
-
-    Args:
-        neg_threshold: Probability below which segments are ended (default: 0.1)
-        max_speech_duration_sec: Maximum speech duration (None = unlimited)
     """
-    # Remove the default assignment since it's now None by default
-    # if max_speech_duration_sec is None:
-    #     max_speech_duration_sec = DEFAULT_MAX_SPEECH_SEC
+    if max_speech_duration_sec is None:
+        max_speech_duration_sec = DEFAULT_MAX_SPEECH_SEC
 
     audio_np, sr = load_audio(audio, sr=16000, mono=True)
     if sr != 16000:
         raise ValueError(f"FireRedVAD requires 16000 Hz, got {sr}")
 
-    vad = get_global_vad(
+    vad = get_global_vad(  # Fixed: removed model_dir parameter
         threshold=threshold,
-        neg_threshold=neg_threshold,
         min_silence_duration_sec=min_silence_duration_sec,
         min_speech_duration_sec=min_speech_duration_sec,
-        max_speech_duration_sec=max_speech_duration_sec,  # Pass None directly
+        max_speech_duration_sec=max_speech_duration_sec,
         smooth_window_size=smooth_window_size,
         pad_start_frame=pad_start_frame,
         max_buffer_sec=max_buffer_sec,
-        use_hybrid=use_hybrid,
     )
 
     with console.status("[bold blue]Running FireRedVAD inference...[/bold blue]"):
@@ -637,15 +333,12 @@ def extract_speech_audio(
     audio: Union[str, Path, np.ndarray, torch.Tensor, list[np.ndarray]],
     sampling_rate: int = DEFAULT_SAMPLING_RATE,
     threshold: float = DEFAULT_THRESHOLD,
-    neg_threshold: float = DEFAULT_NEG_THRESHOLD,
     min_silence_duration_sec: float = DEFAULT_MIN_SILENCE_SEC,
     min_speech_duration_sec: float = DEFAULT_MIN_SPEECH_SEC,
-    max_speech_duration_sec: float
-    | None = DEFAULT_MAX_SPEECH_SEC,  # Now None by default
+    max_speech_duration_sec: float | None = None,
     smooth_window_size: int = DEFAULT_SMOOTH_WINDOW_SIZE,
     pad_start_frame: int = DEFAULT_PAD_START_FRAME,
     max_buffer_sec: float = DEFAULT_MAX_BUFFER_SEC,
-    use_hybrid: bool = DEFAULT_USE_HYBRID,
 ) -> List[np.ndarray]:
     """
     Extract contiguous speech segments from the input audio using FireRedVAD.
@@ -658,16 +351,14 @@ def extract_speech_audio(
     speech_segments = extract_speech_timestamps(
         audio=audio,
         threshold=threshold,
-        neg_threshold=neg_threshold,
         min_silence_duration_sec=min_silence_duration_sec,
         min_speech_duration_sec=min_speech_duration_sec,
-        max_speech_duration_sec=max_speech_duration_sec,  # Can be None
+        max_speech_duration_sec=max_speech_duration_sec,
         return_seconds=True,
         include_non_speech=False,
         smooth_window_size=smooth_window_size,
         pad_start_frame=pad_start_frame,
         max_buffer_sec=max_buffer_sec,
-        use_hybrid=use_hybrid,
     )
 
     audio_np, sr = load_audio(audio=audio, sr=sampling_rate, mono=True)
@@ -694,7 +385,6 @@ def extract_speech_audio(
 # Helpers used by save_segments
 # ---------------------------------------------------------------------------
 
-
 def _frames_from_seconds(sec: float) -> int:
     """Convert seconds to a 10 ms frame index (100 frames per second)."""
     return int(round(sec * 100.0))
@@ -717,7 +407,7 @@ def _compute_rms(
         start = i * hop_length
         frame = signal[start : start + frame_length]
         if frame.size:
-            rms[i] = float(np.sqrt(np.mean(frame**2)))
+            rms[i] = float(np.sqrt(np.mean(frame ** 2)))
     return rms
 
 
@@ -746,12 +436,8 @@ def _generate_plot(
     ax.plot(probs, color=color, linewidth=1.8, label=label)
     ax.fill_between(range(num_frames), probs, color=color, alpha=0.14)
     ax.axhline(
-        y=0.4,
-        linestyle="--",
-        color="#d62728",
-        alpha=0.65,
-        linewidth=1.2,
-        label="threshold ≈ 0.4",
+        y=0.4, linestyle="--", color="#d62728", alpha=0.65,
+        linewidth=1.2, label="threshold ≈ 0.4",
     )
     ax.set_ylim(-0.03, 1.03)
     ax.set_xlim(0, num_frames - 1)
@@ -762,8 +448,7 @@ def _generate_plot(
     )
     ax.set_title(
         f"Segment {segment_idx:03d} — {'Dummy ' if is_dummy else ''}Model Probabilities",
-        fontsize=12,
-        pad=12,
+        fontsize=12, pad=12,
     )
     ax.grid(True, alpha=0.28, linestyle="--", zorder=0)
     ax.legend(loc="upper right", fontsize=9.5, framealpha=0.92)
@@ -786,7 +471,6 @@ def _generate_plot(
 # ---------------------------------------------------------------------------
 # save_segments
 # ---------------------------------------------------------------------------
-
 
 def save_segments(
     segments: List[SpeechSegment],
@@ -855,7 +539,7 @@ def save_segments(
             # ── 1. WAV ────────────────────────────────────────────────────
             wav_path = seg_dir / "sound.wav"
             try:
-                sf.write(str(wav_path), audio_np, 16000, subtype="PCM_16")
+                sf.write(str(wav_path), audio_np, 16000, subtype='PCM_16')
             except Exception as exc:
                 console.print(f"[red]Failed to save WAV {wav_path}: {exc}[/red]")
                 progress.advance(task)
@@ -882,17 +566,19 @@ def save_segments(
             # ── 3. probs_info summary stats ───────────────────────────────
             probs_info = {
                 "num_frames": int(len(seg_probs_arr)),
-                "mean": float(np.mean(seg_probs_arr)),
-                "max": float(np.max(seg_probs_arr)),
-                "min": float(np.min(seg_probs_arr)),
-                "std": float(np.std(seg_probs_arr)),
-                "median": float(np.median(seg_probs_arr)),
+                "mean":       float(np.mean(seg_probs_arr)),
+                "max":        float(np.max(seg_probs_arr)),
+                "min":        float(np.min(seg_probs_arr)),
+                "std":        float(np.std(seg_probs_arr)),
+                "median":     float(np.median(seg_probs_arr)),
                 "frame_rate_hz": 100,
             }
 
             # ── 4. meta.json ──────────────────────────────────────────────
             meta_to_save = dict(meta)
-            meta_to_save["output_path"] = str(wav_path.relative_to(output_base_dir))
+            meta_to_save["output_path"] = str(
+                wav_path.relative_to(output_base_dir)
+            )
             meta_to_save["probs_info"] = probs_info
             # segment_probs can be large; keep it out of meta.json
             meta_to_save.pop("segment_probs", None)
@@ -949,9 +635,9 @@ def save_segments(
 
 if __name__ == "__main__":
     import argparse
-    import platform
     import shutil
     import subprocess
+    import platform
 
     OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
     DEFAULT_AUDIO = str(
@@ -982,13 +668,6 @@ if __name__ == "__main__":
         help=f"speech threshold (default: {DEFAULT_THRESHOLD})",
     )
     parser.add_argument(
-        "-nt",
-        "--neg-threshold",
-        type=float,
-        default=DEFAULT_NEG_THRESHOLD,
-        help=f"threshold below which segments end (default: {DEFAULT_NEG_THRESHOLD})",
-    )
-    parser.add_argument(
         "-ms",
         "--min-silence",
         type=float,
@@ -1006,8 +685,8 @@ if __name__ == "__main__":
         "-mx",
         "--max-speech",
         type=float,
-        default=DEFAULT_MAX_SPEECH_SEC,
-        help="maximum speech duration in seconds (None = unlimited)",
+        default=8.0,
+        help="maximum speech duration in seconds",
     )
     # === NEW ARGUMENTS ===
     parser.add_argument(
@@ -1059,10 +738,9 @@ if __name__ == "__main__":
     segments, speech_probs = extract_speech_timestamps(
         audio_path,
         threshold=args.threshold,
-        neg_threshold=args.neg_threshold,
         min_silence_duration_sec=args.min_silence,
         min_speech_duration_sec=args.min_speech,
-        max_speech_duration_sec=args.max_speech,  # Can be None
+        max_speech_duration_sec=args.max_speech,
         return_seconds=True,
         with_scores=True,
         include_non_speech=False,
@@ -1097,7 +775,6 @@ if __name__ == "__main__":
         audio_path,
         sampling_rate=DEFAULT_SAMPLING_RATE,
         threshold=args.threshold,
-        neg_threshold=args.neg_threshold,  # NEW
         min_silence_duration_sec=args.min_silence,
         min_speech_duration_sec=args.min_speech,
         max_speech_duration_sec=args.max_speech,
@@ -1116,17 +793,10 @@ if __name__ == "__main__":
     # Helper to play sound
     def play_segment(wav_path: Path):
         try:
-            if platform.system() == "Darwin":  # macOS
+            if platform.system() == "Darwin":      # macOS
                 subprocess.run(["afplay", str(wav_path)], check=False)
             elif platform.system() == "Windows":
-                subprocess.run(
-                    [
-                        "powershell",
-                        "-c",
-                        f"(New-Object Media.SoundPlayer '{wav_path}').PlaySync()",
-                    ],
-                    check=False,
-                )
+                subprocess.run(["powershell", "-c", f"(New-Object Media.SoundPlayer '{wav_path}').PlaySync()"], check=False)
             else:  # Linux
                 subprocess.run(["aplay", str(wav_path)], check=False)
         except Exception:
@@ -1157,7 +827,8 @@ if __name__ == "__main__":
     summary_path = output_dir / "all_speech_segments.json"
     with open(summary_path, "w", encoding="utf-8") as fh:
         slim = [
-            {k: v for k, v in m.items() if k != "segment_probs"} for m in saved_metas
+            {k: v for k, v in m.items() if k != "segment_probs"}
+            for m in saved_metas
         ]
         json.dump(slim, fh, ensure_ascii=False, indent=2)
 

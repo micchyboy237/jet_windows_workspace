@@ -180,7 +180,16 @@ class SpeakerMetricsMixin:
     # ─────────────────────────────────────────────────────────────────────
     
     def get_speaker_separation_matrix(self) -> Dict[str, Any]:
-        """Compute inter-speaker separation metrics."""
+        """
+        Compute inter-speaker separation metrics.
+        
+        Uses cosine DISTANCE between speaker centroids as the separation metric.
+        - Distance of 0.0 = identical centroids (same speaker, should merge)
+        - Distance of 1.0 = orthogonal centroids (completely different)
+        - Distance of 2.0 = opposite centroids (maximally different)
+        
+        Returns separation distances, not similarities.
+        """
         valid_speakers = {
             label: ref for label, ref in self._speakers.items() 
             if ref.has_valid_centroid
@@ -189,7 +198,7 @@ class SpeakerMetricsMixin:
         if len(valid_speakers) < 2:
             return {
                 "total_speakers_with_centroids": len(valid_speakers),
-                "pairwise_similarities": {},
+                "pairwise_distances": {},
                 "mean_separation": None,
                 "min_separation": None,
                 "max_separation": None,
@@ -201,40 +210,44 @@ class SpeakerMetricsMixin:
         labels = list(valid_speakers.keys())
         centroids = np.vstack([ref.centroid for ref in valid_speakers.values()])
         
+        # Compute cosine DISTANCES (not similarities)
+        # cdist returns cosine distance: 0 = identical, 1 = orthogonal, 2 = opposite
         distances = cdist(centroids, centroids, metric="cosine")
-        similarities = 1.0 - distances
         
         pairwise = {}
-        separation_values = []
+        distance_values = []
         ambiguous_pairs = []
         
         for i in range(len(labels)):
             for j in range(i + 1, len(labels)):
-                sim = float(similarities[i, j])
+                # Cosine distance between centroids
+                cos_dist = float(distances[i, j])
                 pair_key = f"{labels[i]}___{labels[j]}"
-                sep = 1.0 - sim
+                
                 pairwise[pair_key] = {
                     "speaker_1": labels[i],
                     "speaker_2": labels[j],
-                    "cosine_similarity": round(sim, 4),
-                    "separation": round(sep, 4),
+                    "cosine_distance": round(cos_dist, 4),
                     "segments_1": valid_speakers[labels[i]].segment_count,
                     "segments_2": valid_speakers[labels[j]].segment_count,
                 }
-                separation_values.append(sep)
+                distance_values.append(cos_dist)
                 
-                if sim > 0.7:
+                # Flag ambiguous pairs: LOW distance means speakers are too similar
+                # Cosine distance < 0.3 means cosine similarity > 0.7 (problematic)
+                if cos_dist < 0.3:
                     ambiguous_pairs.append({
                         "speaker_1": labels[i],
                         "speaker_2": labels[j],
-                        "similarity": round(sim, 4),
-                        "risk": "high" if sim > 0.85 else "medium" if sim > 0.75 else "low",
+                        "cosine_distance": round(cos_dist, 4),
+                        "risk": "high" if cos_dist < 0.15 else "medium" if cos_dist < 0.25 else "low",
                     })
         
-        mean_sep = float(np.mean(separation_values)) if separation_values else 0.0
-        min_sep = float(np.min(separation_values)) if separation_values else 0.0
-        max_sep = float(np.max(separation_values)) if separation_values else 0.0
+        mean_sep = float(np.mean(distance_values)) if distance_values else 0.0
+        min_sep = float(np.min(distance_values)) if distance_values else 0.0
+        max_sep = float(np.max(distance_values)) if distance_values else 0.0
         
+        # Health assessment based on separation (higher is better)
         if len(ambiguous_pairs) == 0:
             health = "excellent"
         elif mean_sep > 0.5:
@@ -246,7 +259,7 @@ class SpeakerMetricsMixin:
         
         return {
             "total_speakers_with_centroids": len(valid_speakers),
-            "pairwise_similarities": pairwise,
+            "pairwise_distances": pairwise,
             "mean_separation": round(mean_sep, 4),
             "min_separation": round(min_sep, 4),
             "max_separation": round(max_sep, 4),
@@ -255,7 +268,7 @@ class SpeakerMetricsMixin:
             "separation_health": health,
             "computed_at": datetime.now().isoformat(),
         }
-    
+
     # ─────────────────────────────────────────────────────────────────────
     # 3. SEGMENT GROUP HEALTH METRICS
     # ─────────────────────────────────────────────────────────────────────
@@ -426,14 +439,18 @@ class SpeakerMetricsMixin:
             return None
         
         try:
-            if outlier_label in self.outlier_pool:
-                entry = self.outlier_pool[outlier_label]
+            # CORRECT: Use ._outliers dict (not .entries or __contains__ on pool directly)
+            if outlier_label in self.outlier_pool._outliers:
+                entry = self.outlier_pool._outliers[outlier_label]
                 return {
                     "label": outlier_label,
-                    "timestamp": getattr(entry, 'timestamp', None),
+                    "timestamp": entry.timestamp,
+                    "segment_id": entry.segment_id,
                     "promoted": False,
+                    "match_attempts": entry.match_attempts,
                 }
             
+            # Check promotions for this label
             for promo in getattr(self.outlier_pool, '_promotions', []):
                 if outlier_label in promo.outlier_labels:
                     return {
@@ -446,7 +463,7 @@ class SpeakerMetricsMixin:
             logger.debug(f"Error getting outlier info for {outlier_label}: {e}")
         
         return {"label": outlier_label, "status": "unknown"}
-    
+
     # ─────────────────────────────────────────────────────────────────────
     # 4. OUTLIER POOL HEALTH METRICS
     # ─────────────────────────────────────────────────────────────────────
@@ -460,8 +477,9 @@ class SpeakerMetricsMixin:
                 "computed_at": datetime.now().isoformat(),
             }
         
-        outlier_count = self.outlier_pool.count if hasattr(self.outlier_pool, 'count') else 0
-        promotion_count = self.outlier_pool.promotion_count if hasattr(self.outlier_pool, 'promotion_count') else 0
+        # FIX: Use ._outliers (the actual dict), not .entries (doesn't exist)
+        outlier_count = len(self.outlier_pool._outliers) if hasattr(self.outlier_pool, '_outliers') else 0
+        promotion_count = len(self.outlier_pool._promotions) if hasattr(self.outlier_pool, '_promotions') else 0
         
         promotions = []
         if hasattr(self.outlier_pool, '_promotions'):
@@ -473,14 +491,14 @@ class SpeakerMetricsMixin:
                     "confidence": getattr(promo, 'confidence', 0.0),
                 })
         
+        # FIX: Use ._outliers instead of .entries
         max_age_warning = 300  # 5 minutes
         old_outliers = 0
-        if hasattr(self.outlier_pool, 'entries'):
-            current_time = datetime.now().timestamp()
-            for entry in self.outlier_pool.entries.values():
-                ts = getattr(entry, 'timestamp', 0)
-                if ts and (current_time - ts) > max_age_warning:
-                    old_outliers += 1
+        current_time = datetime.now().timestamp()
+        for entry in self.outlier_pool._outliers.values():
+            ts = getattr(entry, 'timestamp', 0)
+            if ts and (current_time - ts) > max_age_warning:
+                old_outliers += 1
         
         if outlier_count == 0 and promotion_count > 0:
             status = "healthy"
@@ -505,7 +523,7 @@ class SpeakerMetricsMixin:
             "status": status,
             "computed_at": datetime.now().isoformat(),
         }
-    
+
     # ─────────────────────────────────────────────────────────────────────
     # 5. OVERALL SYSTEM HEALTH SUMMARY
     # ─────────────────────────────────────────────────────────────────────

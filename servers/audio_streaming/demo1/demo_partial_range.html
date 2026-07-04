@@ -54,10 +54,88 @@
         background: #ccc;
         cursor: not-allowed;
       }
-      #seekBar {
+
+      /* ---- Seek bar container ---- */
+      .seek-container {
+        position: relative;
         width: 100%;
         margin: 0.5rem 0;
+        height: 6px;
+        background: #e0e0e0;
+        border-radius: 3px;
+        overflow: visible;
       }
+      /* Buffered portion (gray) — sits on top of the background track */
+      .buffered-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 0%;
+        background: #c0c0c0;
+        border-radius: 3px;
+        z-index: 1;
+        transition: width 0.2s ease;
+        pointer-events: none;
+      }
+      /* Played portion (blue) — sits on top of buffered bar */
+      .played-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        width: 0%;
+        background: #007bff;
+        border-radius: 3px;
+        z-index: 2;
+        pointer-events: none;
+      }
+      /* The actual range input — transparent, sits above everything */
+      #seekBar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        margin: 0;
+        z-index: 3;
+        -webkit-appearance: none;
+        appearance: none;
+        background: transparent;
+        height: 6px;
+        cursor: pointer;
+      }
+      /* Thumb styles */
+      #seekBar::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        background: #007bff;
+        border: 2px solid white;
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        margin-top: -5px;
+      }
+      #seekBar::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        background: #007bff;
+        border: 2px solid white;
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+      }
+      /* Hide default tracks */
+      #seekBar::-webkit-slider-runnable-track {
+        background: transparent;
+        height: 6px;
+      }
+      #seekBar::-moz-range-track {
+        background: transparent;
+        height: 6px;
+      }
+
       .status {
         margin-top: 1rem;
         color: #333;
@@ -92,7 +170,11 @@
         Uses the browser's native <strong>&lt;audio&gt;</strong> element
         directly (no Howler.js). The browser issues real HTTP
         <code>Range</code> requests as you seek &mdash; you can jump to any
-        point in the track before the full file has downloaded.
+        point in the track before the full file has downloaded. <br /><br />
+        <strong>Track colors:</strong>
+        <span style="color: #e0e0e0">■</span> Unloaded &nbsp;
+        <span style="color: #c0c0c0">■</span> Buffered &nbsp;
+        <span style="color: #007bff">■</span> Played
       </p>
       <div class="controls">
         <button id="playBtn">▶ Play</button>
@@ -101,7 +183,11 @@
         <button id="seekMidBtn">⏩ Seek to 50%</button>
         <button id="seekEndBtn">⏭ Seek to 90%</button>
       </div>
-      <input type="range" id="seekBar" min="0" max="100" value="0" />
+      <div class="seek-container">
+        <div class="buffered-bar" id="bufferedBar"></div>
+        <div class="played-bar" id="playedBar"></div>
+        <input type="range" id="seekBar" min="0" max="100" value="0" />
+      </div>
       <div class="status">
         <div><strong>State:</strong> <span id="stateText">idle</span></div>
         <div>
@@ -128,13 +214,14 @@
         logPanel.textContent += line + "\n";
         logPanel.scrollTop = logPanel.scrollHeight;
       }
-
       log("Initialized — using native <audio> element (no Howler.js)");
 
       const stateText = document.getElementById("stateText");
       const posText = document.getElementById("posText");
       const durText = document.getElementById("durText");
       const seekBar = document.getElementById("seekBar");
+      const bufferedBar = document.getElementById("bufferedBar");
+      const playedBar = document.getElementById("playedBar");
       const playBtn = document.getElementById("playBtn");
       const pauseBtn = document.getElementById("pauseBtn");
 
@@ -148,34 +235,46 @@
       }
 
       // ---- Native <audio> element ----
-      // The browser natively handles Range requests when seeking
-      // in an <audio> element pointed at a server that supports 206 Partial Content.
       const audio = new Audio();
       audio.src = "/audio";
-      audio.preload = "metadata"; // Only fetch metadata/header first, not the whole file
-
+      audio.preload = "metadata";
       log("Audio element created — preload='metadata', src='/audio'");
       log(
         "Browser will issue Range requests automatically during seek operations",
       );
 
       /**
-       * Update the progress display based on audio element state
+       * Update all seek bar layers: played (blue) + slider position
        */
       function updateProgress() {
+        const pos = audio.currentTime;
+        const dur = audio.duration || 1;
+        const pct = (pos / dur) * 100;
+
+        posText.textContent = formatTime(pos);
+        seekBar.value = pct;
+        playedBar.style.width = pct + "%";
+
         if (!audio.paused) {
-          const pos = audio.currentTime;
-          const dur = audio.duration || 1;
-          posText.textContent = formatTime(pos);
-          seekBar.value = (pos / dur) * 100;
           requestAnimationFrame(updateProgress);
         }
       }
 
       /**
+       * Update the buffered bar (gray) from audio.buffered
+       */
+      function updateBuffered() {
+        if (audio.buffered.length > 0) {
+          const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+          const dur = audio.duration;
+          if (dur && isFinite(dur) && dur > 0) {
+            bufferedBar.style.width = (bufferedEnd / dur) * 100 + "%";
+          }
+        }
+      }
+
+      /**
        * Seek to a fraction of the total duration.
-       * The browser will automatically issue a Range request to fetch
-       * the relevant portion of the file from the server.
        */
       function seekTo(fraction) {
         const dur = audio.duration;
@@ -191,7 +290,6 @@
       }
 
       // ---- Audio element event handlers ----
-
       audio.addEventListener("loadstart", () => {
         log("Audio load started — browser fetching metadata/initial data");
         stateText.textContent = "loading";
@@ -199,9 +297,7 @@
 
       audio.addEventListener("loadedmetadata", () => {
         const dur = audio.duration;
-        log(
-          `Metadata loaded. Duration: ${formatTime(dur)}${isFinite(dur) ? "" : " (streaming — duration may update)"}`,
-        );
+        log(`Metadata loaded. Duration: ${formatTime(dur)}`);
         if (isFinite(dur)) {
           durText.textContent = formatTime(dur);
         }
@@ -233,6 +329,9 @@
         stateText.textContent = "ended";
         playBtn.disabled = false;
         pauseBtn.disabled = true;
+        playedBar.style.width = "0%";
+        seekBar.value = 0;
+        posText.textContent = "0:00";
       });
 
       audio.addEventListener("seeking", () => {
@@ -242,19 +341,16 @@
 
       audio.addEventListener("seeked", () => {
         log(`Seek complete — now at ${formatTime(audio.currentTime)}`);
-        if (!audio.paused) {
-          stateText.textContent = "playing";
-        } else {
-          stateText.textContent = "paused";
-        }
+        stateText.textContent = audio.paused ? "paused" : "playing";
+        updateProgress();
       });
 
       audio.addEventListener("timeupdate", () => {
-        // This fires during playback — we also update from rAF for smoother updates
         const pos = audio.currentTime;
         const dur = audio.duration || 1;
         posText.textContent = formatTime(pos);
         seekBar.value = (pos / dur) * 100;
+        playedBar.style.width = (pos / dur) * 100 + "%";
       });
 
       audio.addEventListener("error", (e) => {
@@ -275,22 +371,10 @@
       });
 
       audio.addEventListener("progress", () => {
-        // This fires as the browser loads the file progressively
-        // We could show buffered ranges if needed
-        if (audio.buffered.length > 0) {
-          const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
-          const dur = audio.duration;
-          if (dur && isFinite(dur)) {
-            const pct = Math.round((bufferedEnd / dur) * 100);
-            log(
-              `Buffered: ${formatTime(bufferedEnd)} / ${formatTime(dur)} (${pct}%)`,
-            );
-          }
-        }
+        updateBuffered();
       });
 
       // ---- Button Event Listeners ----
-
       playBtn.addEventListener("click", () => {
         log("Play button clicked");
         audio.play().catch((err) => {
@@ -303,17 +387,15 @@
         audio.pause();
       });
 
-      document.getElementById("seekStartBtn").addEventListener("click", () => {
-        seekTo(0);
-      });
-
-      document.getElementById("seekMidBtn").addEventListener("click", () => {
-        seekTo(0.5);
-      });
-
-      document.getElementById("seekEndBtn").addEventListener("click", () => {
-        seekTo(0.9);
-      });
+      document
+        .getElementById("seekStartBtn")
+        .addEventListener("click", () => seekTo(0));
+      document
+        .getElementById("seekMidBtn")
+        .addEventListener("click", () => seekTo(0.5));
+      document
+        .getElementById("seekEndBtn")
+        .addEventListener("click", () => seekTo(0.9));
 
       seekBar.addEventListener("input", () => {
         seekTo(seekBar.value / 100);

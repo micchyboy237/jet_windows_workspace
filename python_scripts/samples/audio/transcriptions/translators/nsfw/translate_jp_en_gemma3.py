@@ -9,18 +9,19 @@ Source: https://huggingface.co/mradermacher/Gemma3-UNCENSORED-1B-GGUF
 Usage Scenario: Translate Japanese text to English, including explicit/mature content.
 The system prompt includes zero-shot examples to guide translation quality.
 """
-import logging
+
+import os
 import sys
 from typing import Generator
+
 from llama_cpp import Llama
 
-# Configure logging with stream handler for live output
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stderr)]
-)
-log = logging.getLogger(__name__)
+# Rich imports
+from rich.console import Console
+from rich.panel import Panel
+
+# Shared rich console
+console = Console(stderr=True, highlight=False)
 
 MODEL_PATH = r"C:\Users\druiv\.cache\llama.cpp\nsfw\Gemma3-UNCENSORED-1B.Q4_K_M.gguf"
 
@@ -47,9 +48,14 @@ English: Shit! I lost again.
 
 Translate the following Japanese text to English, following these guidelines precisely."""
 
+
 def load_model() -> Llama:
     """Load the Gemma3-UNCENSORED-1B model."""
-    log.info("Loading Gemma3-UNCENSORED-1B Q4_K_M …")
+    console.print("Loading Gemma3-UNCENSORED-1B Q4_K_M …", style="bold cyan")
+
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError(f"Model not found at: {MODEL_PATH}")
+
     llm = Llama(
         model_path=MODEL_PATH,
         n_ctx=8192,
@@ -64,36 +70,44 @@ def load_model() -> Llama:
         flash_attn=False,
         verbose=False,
     )
-    log.info("Model loaded. Context=%d  Vocab=%d", llm.n_ctx(), llm.n_vocab())
+    console.print("[bold green]Model loaded successfully[/]")
+    console.print(f"Context = [cyan]{llm.n_ctx()}[/] | Vocab = [cyan]{llm.n_vocab()}[/]")
     return llm
 
+
 def stream_and_log_completion(llm: Llama, prompt: str, **kwargs) -> str:
-    """Generic streaming completion with live chunk logging."""
-    log.info("Starting streaming generation...")
+    """Generic streaming completion with live colored chunk output."""
+    console.print("[bold cyan]Starting streaming generation...[/]")
+
     full_response = ""
     chunk_count = 0
-    
+
+    console.print(Panel("Live chunk stream (completion)", style="bold cyan"))
+    console.print("[bold]CHUNKS:[/]")
+
     for chunk in llm(prompt, stream=True, **kwargs):
         delta = chunk["choices"][0]["text"]
         if delta:
             chunk_count += 1
             full_response += delta
-            log.info("Chunk %d: %s", chunk_count, repr(delta))
-    
-    log.info("Streaming complete. Total chunks: %d", chunk_count)
+            console.print(delta, end="", style="green", highlight=False)
+            console.file.flush()
+
+    console.print(f"\n[bold green]--- End chunks (total: {chunk_count}) ---[/]\n")
+    console.print(f"Streaming complete. Total chunks: [cyan]{chunk_count}[/]")
     return full_response
+
 
 def example_completion_translation(llm: Llama) -> None:
     """Translate Japanese text using completion mode with streaming."""
-    log.info("=== Example 1: Streaming Translation (Completion Mode) ===")
-    
+    console.print("\n[bold magenta]=== Example 1: Streaming Translation (Completion Mode) ===[/]")
+
     japanese_text = "日本のアニメは世界中で人気があります。特に、大人向けのアニメには過激な表現も含まれています。"
-    
-    # Format user prompt for translation
+
     user_prompt = f"{SYSTEM_PROMPT}\n\nJapanese: {japanese_text}\nEnglish:"
-    
-    log.info("Source text: %s", japanese_text)
-    
+
+    console.print(f"Source: [dim]{japanese_text}[/]")
+
     translation = stream_and_log_completion(
         llm,
         user_prompt,
@@ -105,26 +119,30 @@ def example_completion_translation(llm: Llama) -> None:
         repeat_penalty=1.1,
         stop=["\n\n", "Japanese:"],
     )
-    
-    log.info("Final translation: %s", translation.strip())
+
+    console.print("\n[bold]Final translation:[/]")
+    console.print(translation.strip())
+
 
 def example_chat_translation(llm: Llama) -> None:
-    """Translate using chat completion with streaming and chunk logging."""
-    log.info("=== Example 2: Streaming Chat Translation ===")
-    
+    """Translate using chat completion with streaming."""
+    console.print("\n[bold magenta]=== Example 2: Streaming Chat Translation ===[/]")
+
     japanese_text = "彼の書いた小説は非常に官能的で、一部の読者からは批判されたが、多くの文学賞を受賞した。"
-    
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"Translate this Japanese text to English:\n\n{japanese_text}"}
     ]
-    
-    log.info("Source text: %s", japanese_text)
-    log.info("Starting chat streaming...")
-    
+
+    console.print(f"Source: [dim]{japanese_text}[/]")
+
     full_response = ""
     chunk_count = 0
-    
+
+    console.print(Panel("Live chunk stream (chat)", style="bold cyan"))
+    console.print("[bold]CHUNKS:[/]")
+
     for chunk in llm.create_chat_completion(
         messages=messages,
         max_tokens=256,
@@ -136,32 +154,39 @@ def example_chat_translation(llm: Llama) -> None:
         stream=True,
     ):
         delta = chunk["choices"][0]["delta"]
-        if "content" in delta:
-            chunk_count += 1
+        if "content" in delta and delta["content"]:
             content = delta["content"]
+            chunk_count += 1
             full_response += content
-            log.info("Chat chunk %d: %s", chunk_count, repr(content))
-    
-    log.info("Chat streaming complete. Total chunks: %d", chunk_count)
-    log.info("Final translation: %s", full_response.strip())
+            console.print(content, end="", style="green", highlight=False)
+            console.file.flush()
+
+    console.print(f"\n[bold green]--- End chunks (total: {chunk_count}) ---[/]\n")
+    console.print(f"Chat streaming complete. Total chunks: [cyan]{chunk_count}[/]")
+
+    console.print("\n[bold]Final translation:[/]")
+    console.print(full_response.strip())
+
 
 def example_explicit_translation(llm: Llama) -> None:
     """Translate explicit/mature Japanese content with streaming."""
-    log.info("=== Example 3: Explicit Content Translation ===")
-    
+    console.print("\n[bold magenta]=== Example 3: Explicit Content Translation ===[/]")
+
     japanese_text = "このエロゲーは過激な性的描写と暴力シーンが含まれているため、18歳未満は購入できません。"
-    
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"Translate accurately, preserving all explicit content:\n\n{japanese_text}"}
     ]
-    
-    log.info("Source text: %s", japanese_text)
-    log.info("Starting explicit content streaming...")
-    
+
+    console.print(f"Source: [dim]{japanese_text}[/]")
+
     full_response = ""
     chunk_count = 0
-    
+
+    console.print(Panel("Live chunk stream (explicit)", style="bold cyan"))
+    console.print("[bold]CHUNKS:[/]")
+
     for chunk in llm.create_chat_completion(
         messages=messages,
         max_tokens=256,
@@ -173,18 +198,23 @@ def example_explicit_translation(llm: Llama) -> None:
         stream=True,
     ):
         delta = chunk["choices"][0]["delta"]
-        if "content" in delta:
-            chunk_count += 1
+        if "content" in delta and delta["content"]:
             content = delta["content"]
+            chunk_count += 1
             full_response += content
-            log.info("Explicit chunk %d: %s", chunk_count, repr(content))
-    
-    log.info("Explicit content streaming complete. Total chunks: %d", chunk_count)
-    log.info("Final translation: %s", full_response.strip())
+            console.print(content, end="", style="green", highlight=False)
+            console.file.flush()
+
+    console.print(f"\n[bold green]--- End chunks (total: {chunk_count}) ---[/]\n")
+    console.print(f"Explicit streaming complete. Total chunks: [cyan]{chunk_count}[/]")
+
+    console.print("\n[bold]Final translation:[/]")
+    console.print(full_response.strip())
+
 
 if __name__ == "__main__":
     llm = load_model()
     example_completion_translation(llm)
     example_chat_translation(llm)
     example_explicit_translation(llm)
-    log.info("All translation examples completed.")
+    console.print("\n[bold green]✅ All translation examples completed successfully.[/]")

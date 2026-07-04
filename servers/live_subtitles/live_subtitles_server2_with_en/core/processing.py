@@ -583,27 +583,38 @@ def _perform_speaker_labeling(
                             seg_start = seg.get('start_time', 0)
                             seg_end = seg.get('end_time', 0)
                             seg_prob = seg.get('avg_speech_probability', 0)
-                            
                             console.print(
                                 f"[dim]  [{i}] {seg_start:.2f}s-{seg_end:.2f}s "
                                 f"({seg_dur:.2f}s, prob={seg_prob:.3f}) → labeling...[/dim]"
                             )
-                            
-                            # Convert this segment to int16 for the labeler
                             seg_audio_int16 = (
                                 np.clip(aud, -1.0, 1.0) * 32767.0
                             ).astype(np.int16)
-                            
-                            # Generate a unique segment_id for this sub-segment
                             sub_segment_id = f"{segment_id}_sub{i}" if segment_id else None
                             
-                            # Label THIS individual segment
+                            # Save sub-segment audio
+                            if sub_segment_id:
+                                save_segment_audio_for_playback(
+                                    audio_np=seg_audio_int16,
+                                    segment_id=sub_segment_id,
+                                    sample_rate=sample_rate,
+                                    metadata={
+                                        "parent_segment_id": segment_id,
+                                        "sub_segment_index": i,
+                                        "start_time": seg_start,
+                                        "end_time": seg_end,
+                                        "duration": seg_dur,
+                                        "avg_speech_probability": seg_prob,
+                                        "timestamp": segment_timestamp + seg_start,
+                                    }
+                                )
+                            
                             seg_results, seg_primary, seg_conf, seg_meta = (
                                 label_speakers_for_segment(
                                     waveform=seg_audio_int16,
                                     sample_rate=sample_rate,
                                     timestamp=segment_timestamp + seg_start,
-                                    return_multiple=False,  # Individual segments are short
+                                    return_multiple=False,
                                     segment_id=sub_segment_id,
                                 )
                             )

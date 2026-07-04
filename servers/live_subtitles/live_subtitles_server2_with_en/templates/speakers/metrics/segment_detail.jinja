@@ -1,0 +1,797 @@
+{# Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/segment_detail.jinja #}
+{% extends "base.jinja" %}
+{% block title %}Segment #{{ segment.segment_index }} - Details{% endblock %}
+{% block extra_head %}
+  <style>
+  /* Audio Player Section */
+  .audio-player-section {
+    background: var(--bg-secondary, #f8f9fa);
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  
+  .audio-controls {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+  
+  .play-pause-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 2px solid #007bff;
+    background: white;
+    color: #007bff;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+    padding: 0;
+    line-height: 1;
+  }
+  
+  .play-pause-btn:hover:not(:disabled) {
+    background: #007bff;
+    color: white;
+    transform: scale(1.05);
+  }
+  
+  .play-pause-btn:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+  
+  .play-pause-btn.playing {
+    background: #007bff;
+    color: white;
+  }
+  
+  .play-pause-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+    border-color: #999;
+    color: #999;
+  }
+  
+  /* Seek Container - Layered Design */
+  .seek-wrapper {
+    position: relative;
+    width: 100%;
+    margin-bottom: 8px;
+  }
+  
+  .seek-container {
+    position: relative;
+    width: 100%;
+    height: 8px;
+    background: #e8e8e8;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  
+  .buffered-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 0%;
+    background: #b0b0b0;
+    border-radius: 4px;
+    z-index: 1;
+    transition: width 0.15s ease;
+    pointer-events: none;
+  }
+  
+  .played-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 0%;
+    background: #007bff;
+    border-radius: 4px;
+    z-index: 2;
+    pointer-events: none;
+    transition: width 0.1s linear;
+  }
+  
+  #seekBar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 8px;
+    margin: 0;
+    z-index: 3;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+    opacity: 1;
+  }
+  
+  #seekBar::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    background: #007bff;
+    border: 2px solid white;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    margin-top: -5px;
+  }
+  
+  #seekBar::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    background: #007bff;
+    border: 2px solid white;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  
+  #seekBar::-webkit-slider-runnable-track {
+    background: transparent;
+    height: 8px;
+  }
+  
+  #seekBar::-moz-range-track {
+    background: transparent;
+    height: 8px;
+  }
+  
+  .audio-time-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--text-secondary, #666);
+    margin-bottom: 4px;
+  }
+  
+  .audio-time-display {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+  }
+  
+  .audio-status-text {
+    font-size: 11px;
+    color: #888;
+    font-style: italic;
+  }
+  
+  .track-colors-info {
+    font-size: 11px;
+    color: #888;
+    background: #f0f0f0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+  }
+  
+  .track-colors-info span {
+    font-weight: bold;
+  }
+  
+  /* Force visibility of buffered bar during testing */
+  .seek-container.debug .buffered-bar {
+    outline: 1px dashed rgba(0,0,0,0.15);
+  }
+  </style>
+{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>🔍 Segment #{{ segment.segment_index }}</h1>
+    <p>Detailed view of segment <code>{{ segment.segment_id }}</code></p>
+  </div>
+  <!-- Navigation between segments -->
+  <div style="display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-bottom: 20px;
+              padding: 12px 16px;
+              background: var(--bg-secondary);
+              border: 1px solid var(--border-color);
+              border-radius: 8px">
+    <div>
+      {% if segment.previous_segment %}
+        <a href="/speakers/metrics/segments/{{ segment.previous_segment.index }}"
+           style="text-decoration: none">← Previous (#{{ segment.previous_segment.index }})</a>
+      {% else %}
+        <span style="color: var(--text-muted);">← Previous (none)</span>
+      {% endif %}
+    </div>
+    <div style="color: var(--text-secondary); font-size: 14px;">
+      Segment {{ segment.segment_index + 1 }} of {{ total_segments }}
+    </div>
+    <div>
+      {% if segment.next_segment %}
+        <a href="/speakers/metrics/segments/{{ segment.next_segment.index }}"
+           style="text-decoration: none">Next (#{{ segment.next_segment.index }}) →</a>
+      {% else %}
+        <span style="color: var(--text-muted);">Next (none) →</span>
+      {% endif %}
+    </div>
+  </div>
+  <!-- Audio Player Section -->
+  <div class="audio-player-section" id="audioPlayerSection">
+    <div class="audio-controls">
+      <button id="playBtn" class="play-pause-btn" disabled title="Play">▶</button>
+      <button id="pauseBtn"
+              class="play-pause-btn"
+              disabled
+              title="Pause"
+              style="display: none">⏸</button>
+      <div style="flex: 1; min-width: 0;">
+        <!-- Buffer Indicator (visible even for tiny files) -->
+        <div style="font-size: 10px;
+                    color: #999;
+                    margin-bottom: 2px"
+             id="bufferIndicator">Buffer: 0%</div>
+        <!-- Seek Container -->
+        <div class="seek-wrapper">
+          <div class="seek-container debug" id="seekContainer">
+            <div class="buffered-bar" id="bufferedBar"></div>
+            <div class="played-bar" id="playedBar"></div>
+            <input type="range" id="seekBar" min="0" max="100" value="0" />
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="audio-time-info">
+      <div class="audio-time-display">
+        <span id="posText">0:00</span> / <span id="durText">0:00</span>
+      </div>
+      <div class="audio-status-text" id="stateText">Loading audio player...</div>
+    </div>
+    <div class="track-colors-info">
+      <strong>Track:</strong>
+      <span style="color:#e8e8e8">■</span> Unloaded &nbsp;
+      <span style="color:#b0b0b0">■</span> Buffered &nbsp;
+      <span style="color:#007bff">■</span> Played
+    </div>
+  </div>
+  <!-- Segment Info Cards -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-value blue">{{ "%.2f"|format(segment.timestamp) }}s</div>
+      <div class="stat-label">Timestamp</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value purple">{{ "%.2f"|format(segment.audio_duration) }}s</div>
+      <div class="stat-label">Audio Duration</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value green">{{ segment.match_count }}</div>
+      <div class="stat-label">Total Matches</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value blue">{{ segment.segment_id }}</div>
+      <div class="stat-label">Segment ID</div>
+    </div>
+  </div>
+  <!-- Primary Match -->
+  {% if segment.primary_match %}
+    <div class="card">
+      <div class="card-header">⭐ Primary Match</div>
+      <table>
+        <tr>
+          <td style="width: 180px;">Speaker Label</td>
+          <td><strong>{{ segment.primary_match.label }}</strong></td>
+        </tr>
+        <tr>
+          <td>Confidence</td>
+          <td>
+            <span style="color: {% if segment.primary_match.confidence >= 0.8 %}var(--accent-green) {% elif segment.primary_match.confidence >= 0.6 %}var(--accent-yellow) {% else %}var(--accent-red){% endif %};
+                         font-weight: 600">{{ "%.4f"|format(segment.primary_match.confidence) }}</span>
+            <div class="score-bar"
+                 style="width: 150px;
+                        display: inline-block;
+                        margin-left: 12px;
+                        vertical-align: middle">
+              <div class="score-bar-fill {% if segment.primary_match.confidence >= 0.8 %}green {% elif segment.primary_match.confidence >= 0.6 %}yellow {% else %}red{% endif %}"
+                   style="width: {{ (segment.primary_match.confidence * 100) | int }}%"></div>
+            </div>
+          </td>
+        </tr>
+        <tr>
+          <td>Match Type</td>
+          <td><span class="badge badge-blue">{{ segment.primary_match.match_type }}</span></td>
+        </tr>
+        <tr>
+          <td>Is New Speaker</td>
+          <td>{{ segment.primary_match.is_new_speaker }}</td>
+        </tr>
+        {% if segment.primary_match.is_outlier %}
+          <tr>
+            <td>Outlier Status</td>
+            <td><span class="badge badge-yellow">OUTLIER</span></td>
+          </tr>
+        {% endif %}
+        {% if segment.primary_match.original_outlier_label %}
+          <tr>
+            <td>Original Outlier Label</td>
+            <td><code>{{ segment.primary_match.original_outlier_label }}</code></td>
+          </tr>
+          <tr>
+            <td>Resolution Method</td>
+            <td><span class="badge badge-purple">{{ segment.primary_match.resolution_method }}</span></td>
+          </tr>
+        {% endif %}
+        {% if segment.primary_match.promoted_from_outlier %}
+          <tr>
+            <td>Promoted From Outlier</td>
+            <td><span class="badge badge-green">Yes</span></td>
+          </tr>
+        {% endif %}
+        {% if segment.primary_match.speaker_info %}
+          <tr>
+            <td>Speaker Segments</td>
+            <td>{{ segment.primary_match.speaker_info.segment_count }}</td>
+          </tr>
+          <tr>
+            <td>Speaker First Seen</td>
+            <td>{{ "%.2f"|format(segment.primary_match.speaker_info.first_seen or 0) }}s</td>
+          </tr>
+          <tr>
+            <td>Speaker Last Seen</td>
+            <td>{{ "%.2f"|format(segment.primary_match.speaker_info.last_seen or 0) }}s</td>
+          </tr>
+          <tr>
+            <td>Centroid Quality</td>
+            <td>{{ "%.2f"|format(segment.primary_match.speaker_info.centroid_quality or 0) }}</td>
+          </tr>
+        {% endif %}
+      </table>
+    </div>
+  {% endif %}
+  <!-- All Matches -->
+  <div class="card">
+    <div class="card-header">🏷️ All Matches ({{ segment.match_count }})</div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Label</th>
+            <th>Confidence</th>
+            <th>Match Type</th>
+            <th>Primary</th>
+            <th>Outlier</th>
+            <th>New Speaker</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for match in segment.matches %}
+            <tr style="{% if match.is_primary %}background: rgba(88,166,255,0.06);
+                       {% endif %}">
+              <td>{{ loop.index0 }}</td>
+              <td>
+                <strong>{{ match.label }}</strong>
+                {% if match.label.startswith('SPEAKER_') %}
+                  <a href="/speakers/metrics/speakers/{{ match.label }}"
+                     style="font-size: 12px;
+                            margin-left: 6px">→</a>
+                {% endif %}
+              </td>
+              <td>
+                <span style="color: {% if match.confidence >= 0.8 %}var(--accent-green) {% elif match.confidence >= 0.6 %}var(--accent-yellow) {% else %}var(--accent-red){% endif %};
+                             font-weight: 600">{{ "%.4f"|format(match.confidence) }}</span>
+              </td>
+              <td><span class="badge badge-blue">{{ match.match_type }}</span></td>
+              <td>{% if match.is_primary %}⭐{% endif %}</td>
+              <td>
+                {% if match.is_outlier %}<span class="badge badge-yellow">YES</span>{% endif %}
+              </td>
+              <td>
+                {% if match.is_new_speaker %}<span class="badge badge-green">NEW</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <!-- Adjacent Segments Context -->
+  <div class="two-col">
+    {% if segment.previous_segment %}
+      <div class="card">
+        <div class="card-header">⬅️ Previous Segment</div>
+        <table>
+          <tr>
+            <td style="width: 100px;">Index</td>
+            <td><a href="/speakers/metrics/segments/{{ segment.previous_segment.index }}">#{{ segment.previous_segment.index }}</a></td>
+          </tr>
+          <tr>
+            <td>Segment ID</td>
+            <td>
+              <code>{{ segment.previous_segment.segment_id[:24] }}
+                {% if segment.previous_segment.segment_id|length > 24 %}...{% endif %}
+              </code>
+            </td>
+          </tr>
+          <tr>
+            <td>Timestamp</td>
+            <td>{{ "%.2f"|format(segment.previous_segment.timestamp) }}s</td>
+          </tr>
+          <tr>
+            <td>Primary Label</td>
+            <td><strong>{{ segment.previous_segment.primary_label }}</strong></td>
+          </tr>
+        </table>
+      </div>
+    {% endif %}
+    {% if segment.next_segment %}
+      <div class="card">
+        <div class="card-header">➡️ Next Segment</div>
+        <table>
+          <tr>
+            <td style="width: 100px;">Index</td>
+            <td><a href="/speakers/metrics/segments/{{ segment.next_segment.index }}">#{{ segment.next_segment.index }}</a></td>
+          </tr>
+          <tr>
+            <td>Segment ID</td>
+            <td>
+              <code>{{ segment.next_segment.segment_id[:24] }}
+                {% if segment.next_segment.segment_id|length > 24 %}...{% endif %}
+              </code>
+            </td>
+          </tr>
+          <tr>
+            <td>Timestamp</td>
+            <td>{{ "%.2f"|format(segment.next_segment.timestamp) }}s</td>
+          </tr>
+          <tr>
+            <td>Primary Label</td>
+            <td><strong>{{ segment.next_segment.primary_label }}</strong></td>
+          </tr>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+  <div style="margin-top: 16px; display: flex; gap: 12px;">
+    <a href="/speakers/metrics/segments">← Back to Segments List</a>
+    <span style="color: var(--text-muted);">|</span>
+    <a href="/speakers/metrics/api/segments/{{ segment.segment_index }}">View JSON →</a>
+  </div>
+{% endblock %}
+{% block extra_scripts %}
+  <script>
+// ---- Segment Audio Player Logic ----
+// Based on demo2 partial.jinja implementation with enhanced buffer visibility
+(function() {
+  const audio = new Audio();
+  
+  // DOM Elements
+  const playBtn = document.getElementById('playBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const seekBar = document.getElementById('seekBar');
+  const bufferedBar = document.getElementById('bufferedBar');
+  const playedBar = document.getElementById('playedBar');
+  const posText = document.getElementById('posText');
+  const durText = document.getElementById('durText');
+  const stateText = document.getElementById('stateText');
+  const bufferIndicator = document.getElementById('bufferIndicator');
+  
+  const segmentId = '{{ segment.segment_id }}';
+  let isDragging = false;
+  let animationFrameId = null;
+  
+  // Utility functions
+  function formatTime(sec) {
+    if (!isFinite(sec) || sec < 0) return "0:00";
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  }
+  
+  function log(msg) {
+    console.log(`[Segment Player] ${msg}`);
+  }
+  
+  function updateBufferDisplay() {
+    if (audio.buffered.length > 0) {
+      const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+      const dur = audio.duration;
+      if (dur && isFinite(dur) && dur > 0) {
+        const bufferedPercent = (bufferedEnd / dur) * 100;
+        bufferedBar.style.width = bufferedPercent + "%";
+        bufferIndicator.textContent = `Buffer: ${bufferedPercent.toFixed(0)}%`;
+        log(`Buffer updated: ${bufferedPercent.toFixed(1)}% (${formatTime(bufferedEnd)} / ${formatTime(dur)})`);
+      }
+    }
+  }
+  
+  // Initialize audio source
+  function loadAudio() {
+    // Reset everything
+    audio.pause();
+    if (audio.src) {
+      audio.removeAttribute('src');
+      audio.load();
+    }
+    
+    audio.src = `/speakers/metrics/segment-audio?segment_id=${encodeURIComponent(segmentId)}`;
+    
+    // Reset UI
+    stateText.textContent = 'loading';
+    playBtn.disabled = true;
+    pauseBtn.disabled = true;
+    seekBar.value = 0;
+    posText.textContent = '0:00';
+    durText.textContent = '0:00';
+    bufferedBar.style.width = '0%';
+    playedBar.style.width = '0%';
+    bufferIndicator.textContent = 'Buffer: 0%';
+    playBtn.style.display = 'flex';
+    pauseBtn.style.display = 'none';
+  }
+  
+  // ---- Audio Events (from partial.jinja) ----
+  audio.addEventListener("loadstart", () => {
+    log("Audio load started — browser fetching metadata/initial data");
+    stateText.textContent = "loading";
+  });
+  
+  audio.addEventListener("loadedmetadata", () => {
+    const dur = audio.duration;
+    log(`Metadata loaded. Duration: ${formatTime(dur)} (${dur.toFixed(2)}s)`);
+    if (isFinite(dur)) {
+      durText.textContent = formatTime(dur);
+      stateText.textContent = "ready";
+      playBtn.disabled = false;
+      pauseBtn.disabled = false;
+    }
+  });
+  
+  audio.addEventListener("canplay", () => {
+    log("Audio can start playing — enough data buffered");
+    updateBufferDisplay(); // Force buffer update
+  });
+  
+  audio.addEventListener("canplaythrough", () => {
+    log("Audio can play through without buffering");
+    updateBufferDisplay(); // Force buffer update
+  });
+  
+  audio.addEventListener("play", () => {
+    log("Playback started");
+    stateText.textContent = "playing";
+    playBtn.style.display = 'none';
+    pauseBtn.style.display = 'flex';
+    updateProgress();
+  });
+  
+  audio.addEventListener("pause", () => {
+    log("Playback paused");
+    stateText.textContent = "paused";
+    playBtn.style.display = 'flex';
+    pauseBtn.style.display = 'none';
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+  });
+  
+  audio.addEventListener("ended", () => {
+    log("Playback ended");
+    stateText.textContent = "ended";
+    playBtn.style.display = 'flex';
+    pauseBtn.style.display = 'none';
+    playedBar.style.width = "0%";
+    seekBar.value = 0;
+    posText.textContent = "0:00";
+    // Keep buffer visible
+    updateBufferDisplay();
+  });
+  
+  audio.addEventListener("seeking", () => {
+    log(`Seeking started — browser issuing Range request...`);
+    stateText.textContent = "seeking";
+  });
+  
+  audio.addEventListener("seeked", () => {
+    log(`Seek complete — now at ${formatTime(audio.currentTime)}`);
+    stateText.textContent = audio.paused ? "paused" : "playing";
+    updateProgress();
+    updateBufferDisplay();
+  });
+  
+  audio.addEventListener("timeupdate", () => {
+    const pos = audio.currentTime;
+    const dur = audio.duration || 1;
+    posText.textContent = formatTime(pos);
+    if (!isDragging) {
+      seekBar.value = (pos / dur) * 100;
+    }
+    playedBar.style.width = (pos / dur) * 100 + "%";
+  });
+  
+  audio.addEventListener("error", (e) => {
+    const error = audio.error;
+    let errorMsg = 'Unknown error';
+    if (error) {
+      switch(error.code) {
+        case MediaError.MEDIA_ERR_ABORTED:
+          errorMsg = 'Playback aborted';
+          break;
+        case MediaError.MEDIA_ERR_NETWORK:
+          errorMsg = 'Network error - file may not exist';
+          break;
+        case MediaError.MEDIA_ERR_DECODE:
+          errorMsg = 'Decoding error - file may be corrupted';
+          break;
+        case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+          errorMsg = 'Format not supported or file not found';
+          break;
+      }
+    }
+    log(`Audio error: ${errorMsg} (code: ${error ? error.code : 'none'})`);
+    stateText.textContent = "error: " + errorMsg;
+    playBtn.disabled = true;
+    pauseBtn.disabled = true;
+    bufferIndicator.textContent = 'Buffer: error';
+  });
+  
+  audio.addEventListener("stalled", () => {
+    log("Audio stalled — waiting for data...");
+    stateText.textContent = "buffering";
+  });
+  
+  audio.addEventListener("waiting", () => {
+    log("Audio buffering — waiting for more data...");
+    stateText.textContent = "buffering";
+  });
+  
+  // CRITICAL: Progress event for buffer bar
+  audio.addEventListener("progress", () => {
+    updateBufferDisplay();
+  });
+  
+  // Also update buffer on suspend (when browser stops downloading)
+  audio.addEventListener("suspend", () => {
+    log("Audio download suspended");
+    updateBufferDisplay();
+  });
+  
+  // ---- Progress Update Loop ----
+  function updateProgress() {
+    const pos = audio.currentTime;
+    const dur = audio.duration || 1;
+    posText.textContent = formatTime(pos);
+    seekBar.value = (pos / dur) * 100;
+    playedBar.style.width = (pos / dur) * 100 + "%";
+    
+    if (!audio.paused) {
+      animationFrameId = requestAnimationFrame(updateProgress);
+    }
+  }
+  
+  // ---- Seek Function ----
+  function seekTo(fraction) {
+    const dur = audio.duration;
+    if (!dur || !isFinite(dur)) {
+      log("Seek requested before duration known — ignoring");
+      return;
+    }
+    const target = dur * fraction;
+    log(`Seeking to ${formatTime(target)} (${Math.round(fraction * 100)}%)`);
+    audio.currentTime = target;
+  }
+  
+  // ---- Control Event Handlers ----
+  playBtn.addEventListener("click", () => {
+    log("Play button clicked");
+    audio.play().catch((err) => {
+      log(`Play failed: ${err.message}`);
+      stateText.textContent = `Play failed: ${err.message}`;
+    });
+  });
+  
+  pauseBtn.addEventListener("click", () => {
+    log("Pause button clicked");
+    audio.pause();
+  });
+  
+  // Seek bar events
+  seekBar.addEventListener("mousedown", () => {
+    isDragging = true;
+  });
+  
+  seekBar.addEventListener("mouseup", () => {
+    if (isDragging) {
+      isDragging = false;
+      seekTo(seekBar.value / 100);
+    }
+  });
+  
+  seekBar.addEventListener("mouseleave", () => {
+    if (isDragging) {
+      isDragging = false;
+      seekTo(seekBar.value / 100);
+    }
+  });
+  
+  seekBar.addEventListener("input", () => {
+    if (isDragging) {
+      const dur = audio.duration || 1;
+      posText.textContent = formatTime((seekBar.value / 100) * dur);
+      playedBar.style.width = seekBar.value + "%";
+    }
+  });
+  
+  // Touch events for mobile
+  seekBar.addEventListener("touchstart", () => {
+    isDragging = true;
+  });
+  
+  seekBar.addEventListener("touchend", () => {
+    if (isDragging) {
+      isDragging = false;
+      seekTo(seekBar.value / 100);
+    }
+  });
+  
+  // Keyboard shortcuts
+  document.addEventListener("keydown", (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+    
+    switch(e.code) {
+      case 'Space':
+        e.preventDefault();
+        if (audio.paused) {
+          playBtn.click();
+        } else {
+          pauseBtn.click();
+        }
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        audio.currentTime = Math.max(0, audio.currentTime - 5);
+        log(`Rewound 5s to ${formatTime(audio.currentTime)}`);
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        if (audio.duration) {
+          audio.currentTime = Math.min(audio.duration, audio.currentTime + 5);
+          log(`Forward 5s to ${formatTime(audio.currentTime)}`);
+        }
+        break;
+    }
+  });
+  
+  // ---- Initialize ----
+  loadAudio();
+  log("Segment audio player initialized with enhanced buffer tracking");
+  
+  // Debug: Force buffer update after a delay (catches tiny files)
+  setTimeout(() => {
+    updateBufferDisplay();
+    log("Delayed buffer check complete");
+  }, 500);
+  
+  // Cleanup on page unload
+  window.addEventListener("beforeunload", () => {
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+    }
+    log("Audio element cleaned up");
+  });
+})();
+  </script>
+{% endblock %}

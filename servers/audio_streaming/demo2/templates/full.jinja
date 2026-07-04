@@ -1,0 +1,460 @@
+{% extends "base.jinja" %}
+{% block title %}Full Range Download & Decode{% endblock %}
+{% block page_name %}Full Range Web Audio API{% endblock %}
+{% block badge_style %}
+  .badge {
+  background: #faece7;
+  color: #993c1d;
+  }
+{% endblock %}
+{% block button_style %}
+  button {
+  background: #d85a30;
+  color: white;
+  }
+  button:hover { background: #b8431f; }
+  button.download-btn {
+  background: #28a745;
+  }
+  button.download-btn:hover {
+  background: #1e7e34;
+  }
+{% endblock %}
+{% block log_color %}
+  #log { color: #f0997b; }
+{% endblock %}
+{% block seek_bar_extra %}
+  /* Download progress bar */
+  #downloadBar {
+  width: 100%;
+  height: 20px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  margin: 0.5rem 0;
+  overflow: hidden;
+  position: relative;
+  }
+  #downloadFill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #d85a30, #e8784a);
+  transition: width 0.1s linear;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  }
+{% endblock %}
+{% block player_content %}
+  <div class="now-playing">
+    <span class="badge">FULL RANGE · Web Audio API</span>
+    <h3>Now Playing</h3>
+    <div class="track-name" id="currentTrack">No track selected</div>
+    <div style="color: #666;
+                font-size: 0.8rem;
+                margin-top: 0.25rem"
+         id="currentFile"></div>
+  </div>
+  <div class="controls-section">
+    <p class="info">
+      Uses native <strong>Web Audio API</strong> directly (no Howler.js). The
+      entire file is fetched in one request &mdash; no
+      <code>Range</code> header is sent &mdash; then decoded into an audio
+      buffer before playback can start. Seeking is sample-accurate, but only
+      available once the whole file has loaded.
+    </p>
+    <div class="controls">
+      <button id="loadBtn">⬇ Load into memory</button>
+      <button id="playBtn" disabled>▶ Play</button>
+      <button id="pauseBtn" disabled>⏸ Pause</button>
+      <button id="downloadBtn" class="download-btn">💾 Save to Downloads</button>
+    </div>
+    <div id="downloadBar">
+      <div id="downloadFill">0%</div>
+    </div>
+    <input type="range" id="seekBar" min="0" max="100" value="0" disabled />
+    <div class="status">
+      <div><strong>State:</strong> <span id="stateText">idle</span></div>
+      <div>
+        <strong>Position:</strong> <span id="posText">0:00</span> /
+        <span id="durText">0:00</span>
+      </div>
+      <div>
+        <strong>Mode:</strong>
+        <span id="modeText">Web Audio API (full fetch + decode, no Range)</span>
+      </div>
+    </div>
+    <div id="log"></div>
+  </div>
+{% endblock %}
+{% block extra_scripts %}
+  <script>
+  // ---- Full Range Web Audio API Logic ----
+  let audioContext = null;
+  let audioBuffer = null;
+  let sourceNode = null;
+  let startTime = 0;
+  let pauseOffset = 0;
+  let isPlaying = false;
+  let animationFrameId = null;
+  
+  const stateText = document.getElementById('stateText');
+  const posText = document.getElementById('posText');
+  const durText = document.getElementById('durText');
+  const seekBar = document.getElementById('seekBar');
+  const loadBtn = document.getElementById('loadBtn');
+  const playBtn = document.getElementById('playBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const downloadFill = document.getElementById('downloadFill');
+  
+  function getAudioContext() {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      log("AudioContext created");
+    }
+    return audioContext;
+  }
+  
+  function assembleArrayBuffer(chunks, totalBytes) {
+    log(`Assembling ${chunks.length} chunks into ${formatBytes(totalBytes)} buffer...`);
+    const buffer = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return buffer.buffer;
+  }
+  
+  async function decodeAndFinalize(arrayBuffer, ctx) {
+    log(`Decoding audio — ${formatBytes(arrayBuffer.byteLength)}...`);
+    stateText.textContent = "decoding";
+    const decodeStart = performance.now();
+    audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const decodeTime = ((performance.now() - decodeStart) / 1000).toFixed(2);
+    log(
+      `Decode complete in ${decodeTime}s — ` +
+      `Duration: ${formatTime(audioBuffer.duration)}, ` +
+      `Sample rate: ${audioBuffer.sampleRate}Hz, ` +
+      `Channels: ${audioBuffer.numberOfChannels}`
+    );
+    durText.textContent = formatTime(audioBuffer.duration);
+    stateText.textContent = "ready";
+    playBtn.disabled = false;
+    seekBar.disabled = false;
+    loadBtn.disabled = false;
+    downloadBtn.disabled = false;
+    downloadFill.textContent = "✓ Ready";
+  }
+  
+  async function loadAudioIntoMemory() {
+    if (!currentFile) {
+      log("No file selected");
+      return;
+    }
+    const ctx = getAudioContext();
+    log("Load clicked — starting full-file fetch (no Range header)");
+    loadBtn.disabled = true;
+    downloadBtn.disabled = true;
+    stateText.textContent = "connecting";
+    
+    try {
+      const response = await fetch(`/audio?file=${encodeURIComponent(currentFile.path)}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      
+      const contentLength = response.headers.get("Content-Length");
+      const totalBytes = contentLength ? parseInt(contentLength, 10) : null;
+      log(`Connected — status: ${response.status}, size: ${totalBytes ? formatBytes(totalBytes) : "unknown"}`);
+      
+      if (!response.body) {
+        const arrayBuffer = await response.arrayBuffer();
+        log(`Download complete — ${formatBytes(arrayBuffer.byteLength)} received`);
+        await decodeAndFinalize(arrayBuffer, ctx);
+        return;
+      }
+      
+      const reader = response.body.getReader();
+      const chunks = [];
+      let receivedBytes = 0;
+      let lastLogPercent = -1;
+      const downloadStartTime = performance.now();
+      stateText.textContent = "downloading";
+      log("Download started — streaming bytes...");
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          log("Stream complete — all chunks received");
+          break;
+        }
+        chunks.push(value);
+        receivedBytes += value.length;
+        
+        if (totalBytes) {
+          const percent = Math.round((receivedBytes / totalBytes) * 100);
+          downloadFill.style.width = percent + "%";
+          downloadFill.textContent = percent + "%";
+          if (percent - lastLogPercent >= 10) {
+            lastLogPercent = percent;
+            const elapsed = ((performance.now() - downloadStartTime) / 1000).toFixed(1);
+            log(`Download progress: ${percent}% (${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}) — ${elapsed}s`);
+          }
+        } else {
+          downloadFill.style.width = "100%";
+          downloadFill.textContent = formatBytes(receivedBytes);
+        }
+      }
+      
+      const totalTime = ((performance.now() - downloadStartTime) / 1000).toFixed(1);
+      const arrayBuffer = assembleArrayBuffer(chunks, receivedBytes);
+      log(`Download complete — ${formatBytes(receivedBytes)} in ${totalTime}s`);
+      downloadFill.style.width = "100%";
+      downloadFill.textContent = "Decoding...";
+      
+      await decodeAndFinalize(arrayBuffer, ctx);
+    } catch (err) {
+      log(`Load error: ${err.message}`);
+      stateText.textContent = "error";
+      loadBtn.disabled = false;
+      downloadBtn.disabled = false;
+      downloadFill.style.width = "0%";
+      downloadFill.textContent = "Error";
+    }
+  }
+  
+  async function downloadToDisk() {
+    if (!currentFile) {
+      log("No file selected");
+      return;
+    }
+    log("💾 Save to Downloads clicked");
+    downloadBtn.disabled = true;
+    stateText.textContent = "downloading";
+    
+    try {
+      const response = await fetch(`/audio?file=${encodeURIComponent(currentFile.path)}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      
+      const contentLength = response.headers.get("Content-Length");
+      const totalBytes = contentLength ? parseInt(contentLength, 10) : null;
+      log(`Download started — size: ${totalBytes ? formatBytes(totalBytes) : "unknown"}`);
+      
+      const reader = response.body.getReader();
+      const chunks = [];
+      let receivedBytes = 0;
+      let lastLogPercent = -1;
+      const downloadStartTime = performance.now();
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          log("Download stream complete");
+          break;
+        }
+        chunks.push(value);
+        receivedBytes += value.length;
+        
+        if (totalBytes) {
+          const percent = Math.round((receivedBytes / totalBytes) * 100);
+          downloadFill.style.width = percent + "%";
+          downloadFill.textContent = percent + "%";
+          if (percent - lastLogPercent >= 10) {
+            lastLogPercent = percent;
+            const elapsed = ((performance.now() - downloadStartTime) / 1000).toFixed(1);
+            log(`Download progress: ${percent}% (${formatBytes(receivedBytes)} / ${formatBytes(totalBytes)}) — ${elapsed}s`);
+          }
+        } else {
+          downloadFill.textContent = formatBytes(receivedBytes);
+        }
+      }
+      
+      const totalTime = ((performance.now() - downloadStartTime) / 1000).toFixed(1);
+      const arrayBuffer = assembleArrayBuffer(chunks, receivedBytes);
+      log(`Download complete — ${formatBytes(receivedBytes)} in ${totalTime}s`);
+      
+      const filename = currentFile.name.replace(/ \/ /g, '_') + currentFile.extension;
+      const blob = new Blob([arrayBuffer], { type: `audio/${currentFile.extension.slice(1)}` });
+      const url = URL.createObjectURL(blob);
+      log(`Created blob URL — saving as "${filename}" (${formatBytes(blob.size)})`);
+      
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        log("Blob URL revoked — memory freed");
+      }, 1000);
+      
+      downloadFill.style.width = "100%";
+      downloadFill.textContent = "✓ Saved";
+      stateText.textContent = "downloaded";
+      log(`✅ File saved to Downloads as "${filename}"`);
+    } catch (err) {
+      log(`Download error: ${err.message}`);
+      stateText.textContent = "error";
+      downloadFill.style.width = "0%";
+      downloadFill.textContent = "Error";
+    } finally {
+      downloadBtn.disabled = false;
+    }
+  }
+  
+  function play() {
+    if (!audioBuffer) {
+      log("Cannot play — no audio buffer loaded");
+      return;
+    }
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") {
+      ctx.resume();
+      log("AudioContext resumed");
+    }
+    stopSource();
+    sourceNode = ctx.createBufferSource();
+    sourceNode.buffer = audioBuffer;
+    sourceNode.connect(ctx.destination);
+    sourceNode.start(0, pauseOffset);
+    startTime = ctx.currentTime - pauseOffset;
+    isPlaying = true;
+    log(`Playback started from ${formatTime(pauseOffset)}`);
+    stateText.textContent = "playing";
+    playBtn.disabled = true;
+    pauseBtn.disabled = false;
+    
+    sourceNode.onended = () => {
+      if (isPlaying) {
+        const elapsed = ctx.currentTime - startTime;
+        if (elapsed >= audioBuffer.duration - 0.01) {
+          log("Playback ended naturally");
+          pauseOffset = 0;
+          isPlaying = false;
+          stateText.textContent = "ended";
+          playBtn.disabled = false;
+          pauseBtn.disabled = true;
+          updateProgressDisplay(0);
+        }
+      }
+    };
+    updateProgress();
+  }
+  
+  function pause() {
+    if (!isPlaying) return;
+    const ctx = getAudioContext();
+    pauseOffset = ctx.currentTime - startTime;
+    stopSource();
+    isPlaying = false;
+    log(`Playback paused at ${formatTime(pauseOffset)}`);
+    stateText.textContent = "paused";
+    playBtn.disabled = false;
+    pauseBtn.disabled = true;
+    cancelAnimationFrame(animationFrameId);
+  }
+  
+  function seek(targetTime) {
+    if (!audioBuffer) return;
+    const clampedTime = Math.max(0, Math.min(targetTime, audioBuffer.duration));
+    log(`Seeking to ${formatTime(clampedTime)}`);
+    if (isPlaying) {
+      pauseOffset = clampedTime;
+      const ctx = getAudioContext();
+      stopSource();
+      sourceNode = ctx.createBufferSource();
+      sourceNode.buffer = audioBuffer;
+      sourceNode.connect(ctx.destination);
+      sourceNode.start(0, pauseOffset);
+      startTime = ctx.currentTime - pauseOffset;
+      sourceNode.onended = () => {
+        if (isPlaying) {
+          const elapsed = ctx.currentTime - startTime;
+          if (elapsed >= audioBuffer.duration - 0.01) {
+            log("Playback ended naturally");
+            pauseOffset = 0;
+            isPlaying = false;
+            stateText.textContent = "ended";
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+            updateProgressDisplay(0);
+          }
+        }
+      };
+    } else {
+      pauseOffset = clampedTime;
+    }
+    updateProgressDisplay(clampedTime);
+  }
+  
+  function stopSource() {
+    if (sourceNode) {
+      try { sourceNode.stop(); } catch (e) { /* already stopped */ }
+      sourceNode.disconnect();
+      sourceNode = null;
+    }
+  }
+  
+  function updateProgress() {
+    if (!isPlaying || !audioBuffer) return;
+    const ctx = getAudioContext();
+    const currentTime = ctx.currentTime - startTime;
+    updateProgressDisplay(currentTime);
+    animationFrameId = requestAnimationFrame(updateProgress);
+  }
+  
+  function updateProgressDisplay(time) {
+    const duration = audioBuffer ? audioBuffer.duration : 0;
+    if (duration > 0) {
+      posText.textContent = formatTime(time);
+      seekBar.value = (time / duration) * 100;
+    }
+  }
+  
+  function onFileSelected(file) {
+    audioBuffer = null;
+    stopSource();
+    isPlaying = false;
+    pauseOffset = 0;
+    stateText.textContent = "idle";
+    playBtn.disabled = true;
+    pauseBtn.disabled = true;
+    seekBar.disabled = true;
+    seekBar.value = 0;
+    posText.textContent = "0:00";
+    durText.textContent = "0:00";
+    loadBtn.disabled = false;
+    downloadBtn.disabled = false;
+    downloadFill.style.width = "0%";
+    downloadFill.textContent = "0%";
+    log(`Ready to load: ${file.name}`);
+  }
+  
+  // ---- Event Listeners ----
+  loadBtn.addEventListener("click", loadAudioIntoMemory);
+  downloadBtn.addEventListener("click", downloadToDisk);
+  playBtn.addEventListener("click", () => { log("Play button clicked"); play(); });
+  pauseBtn.addEventListener("click", () => { log("Pause button clicked"); pause(); });
+  
+  seekBar.addEventListener("input", () => {
+    if (!audioBuffer) return;
+    const target = (seekBar.value / 100) * audioBuffer.duration;
+    seek(target);
+  });
+  
+  window.addEventListener("beforeunload", () => {
+    stopSource();
+    if (audioContext) {
+      audioContext.close();
+      log("AudioContext closed");
+    }
+  });
+  </script>
+{% endblock %}

@@ -56,13 +56,26 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_utils.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_config.py",
     r"",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\segment_types.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\speaker_types.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_metrics_mixin.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\helpers\speaker_metrics.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers_metrics.py",
+    r"",
+    # r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\translate_jp_en_llm_prefixed.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\translate_jp_en_llm_nsfw.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\audio_streaming\demo2",
+    r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\segment_types.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\speaker_types.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_metrics_mixin.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\helpers\speaker_metrics.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\config.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers_metrics.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\segment_detail.html",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\segments_list.html",
     r"",
 ]
 
@@ -86,11 +99,11 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Now given these criteria, write JSON and HTML endpoints that displays all metrics properly.
-Create the proper html templates and sub templates under "servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics".
-Write the SpeakerMetricsMixin class for the proper methods formatting the existing data available from SegmentSpeakerLabeler such as self._speakers, self._segment_groups, etc., whichever will contain the info covering all the criteria.
-Write modular, reusable and testable code for speaker_metrics.py
-You may write multiple html pages with detail pages for each speaker and segment. Try to have a base page with navigation.
+Review carefully how demo2 works fast for audio streaming.
+
+Now revise the ff live_subtitles_server2_with_en speakers_metrics endpoints and html for the ff features:
+- Implement reusable functions such as get_audio_files from demo2/routers/audio_router to segment_utils. Use SEGMENT_AUDIO_DIR as audio dir.
+- For segment_detail html, add a section at the top of primary match that shows simple audio player containing a single icon button switched as play or pause. And the trackbar. See demo2\templates\partial.jinja seek-container for the trackbar and other features.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
@@ -409,7 +422,11 @@ def count_tokens(
         encoding = tiktoken.get_encoding(encoding_name)
     else:
         encoding = tiktoken.encoding_for_model(model)
-    return len(encoding.encode(text))
+    # Disable special-token checks entirely — the input is arbitrary file
+    # content/prompt text, not something where special tokens should be
+    # interpreted as control tokens. This prevents ValueError crashes when
+    # source files happen to contain strings like "<|endoftext|>".
+    return len(encoding.encode(text, disallowed_special=()))
 
 
 if __name__ == "__main__":

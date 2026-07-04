@@ -1,0 +1,280 @@
+{% extends "base.jinja" %}
+{% block title %}Partial Range Streaming{% endblock %}
+{% block page_name %}Partial Range Streaming{% endblock %}
+{% block badge_style %}
+  .badge {
+  background: #e1f5ee;
+  color: #0f6e56;
+  }
+{% endblock %}
+{% block button_style %}
+  button {
+  background: #007bff;
+  color: white;
+  }
+  button:hover { background: #0062cc; }
+{% endblock %}
+{% block log_color %}
+  #log { color: #9fe1cb; }
+{% endblock %}
+{% block seek_bar_extra %}
+  /* Seek bar container with buffered/played layers */
+  .seek-container {
+  position: relative;
+  width: 100%;
+  margin: 0.5rem 0;
+  height: 6px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  overflow: visible;
+  }
+  .buffered-bar {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  width: 0%;
+  background: #c0c0c0;
+  border-radius: 3px;
+  z-index: 1;
+  transition: width 0.2s ease;
+  pointer-events: none;
+  }
+  .played-bar {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  width: 0%;
+  background: #007bff;
+  border-radius: 3px;
+  z-index: 2;
+  pointer-events: none;
+  }
+  #seekBar {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%;
+  margin: 0;
+  z-index: 3;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 6px;
+  cursor: pointer;
+  }
+  #seekBar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px; height: 16px;
+  background: #007bff;
+  border: 2px solid white;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  margin-top: -5px;
+  }
+  #seekBar::-moz-range-thumb {
+  width: 16px; height: 16px;
+  background: #007bff;
+  border: 2px solid white;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  #seekBar::-webkit-slider-runnable-track { background: transparent; height: 6px; }
+  #seekBar::-moz-range-track { background: transparent; height: 6px; }
+{% endblock %}
+{% block player_content %}
+  <div class="now-playing">
+    <span class="badge">PARTIAL RANGE · Native &lt;audio&gt;</span>
+    <h3>Now Playing</h3>
+    <div class="track-name" id="currentTrack">No track selected</div>
+    <div style="color: #666;
+                font-size: 0.8rem;
+                margin-top: 0.25rem"
+         id="currentFile"></div>
+  </div>
+  <div class="controls-section">
+    <p class="info">
+      Uses the browser's native <strong>&lt;audio&gt;</strong> element.
+      The browser issues real HTTP <code>Range</code> requests as you seek.
+      <br />
+      <strong>Track colors:</strong>
+      <span style="color:#e0e0e0">■</span> Unloaded &nbsp;
+      <span style="color:#c0c0c0">■</span> Buffered &nbsp;
+      <span style="color:#007bff">■</span> Played
+    </p>
+    <div class="controls">
+      <button id="playBtn" disabled>▶ Play</button>
+      <button id="pauseBtn" disabled>⏸ Pause</button>
+      <button id="seekStartBtn">⏮ 0%</button>
+      <button id="seekMidBtn">⏩ 50%</button>
+      <button id="seekEndBtn">⏭ 90%</button>
+    </div>
+    <div class="seek-container">
+      <div class="buffered-bar" id="bufferedBar"></div>
+      <div class="played-bar" id="playedBar"></div>
+      <input type="range" id="seekBar" min="0" max="100" value="0" />
+    </div>
+    <div class="status">
+      <div><strong>State:</strong> <span id="stateText">idle</span></div>
+      <div><strong>Position:</strong> <span id="posText">0:00</span> / <span id="durText">0:00</span></div>
+      <div><strong>Mode:</strong> <span id="modeText">Native &lt;audio&gt; (browser handles Range requests)</span></div>
+    </div>
+    <div id="log"></div>
+  </div>
+{% endblock %}
+{% block extra_scripts %}
+  <script>
+  // ---- Partial Range Player Logic ----
+  const audio = new Audio();
+  
+  const stateText = document.getElementById('stateText');
+  const posText = document.getElementById('posText');
+  const durText = document.getElementById('durText');
+  const seekBar = document.getElementById('seekBar');
+  const bufferedBar = document.getElementById('bufferedBar');
+  const playedBar = document.getElementById('playedBar');
+  const playBtn = document.getElementById('playBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  
+  function onFileSelected(file) {
+    audio.src = `/audio?file=${encodeURIComponent(file.path)}`;
+    audio.load();
+    stateText.textContent = 'loading';
+    playBtn.disabled = true;
+    pauseBtn.disabled = true;
+    seekBar.value = 0;
+    posText.textContent = '0:00';
+    durText.textContent = '0:00';
+    bufferedBar.style.width = '0%';
+    playedBar.style.width = '0%';
+  }
+  
+  // ---- Audio Events ----
+  audio.addEventListener("loadstart", () => {
+    log("Audio load started — browser fetching metadata/initial data");
+    stateText.textContent = "loading";
+  });
+  
+  audio.addEventListener("loadedmetadata", () => {
+    const dur = audio.duration;
+    log(`Metadata loaded. Duration: ${formatTime(dur)}`);
+    if (isFinite(dur)) durText.textContent = formatTime(dur);
+    stateText.textContent = "ready";
+    playBtn.disabled = false;
+  });
+  
+  audio.addEventListener("canplay", () => {
+    log("Audio can start playing — enough data buffered");
+  });
+  
+  audio.addEventListener("play", () => {
+    log("Playback started");
+    stateText.textContent = "playing";
+    playBtn.disabled = true;
+    pauseBtn.disabled = false;
+    updateProgress();
+  });
+  
+  audio.addEventListener("pause", () => {
+    log("Playback paused");
+    stateText.textContent = "paused";
+    playBtn.disabled = false;
+    pauseBtn.disabled = true;
+  });
+  
+  audio.addEventListener("ended", () => {
+    log("Playback ended");
+    stateText.textContent = "ended";
+    playBtn.disabled = false;
+    pauseBtn.disabled = true;
+    playedBar.style.width = "0%";
+    seekBar.value = 0;
+    posText.textContent = "0:00";
+  });
+  
+  audio.addEventListener("seeking", () => {
+    log(`Seeking started — browser issuing Range request...`);
+    stateText.textContent = "seeking";
+  });
+  
+  audio.addEventListener("seeked", () => {
+    log(`Seek complete — now at ${formatTime(audio.currentTime)}`);
+    stateText.textContent = audio.paused ? "paused" : "playing";
+    updateProgress();
+  });
+  
+  audio.addEventListener("timeupdate", () => {
+    const pos = audio.currentTime;
+    const dur = audio.duration || 1;
+    posText.textContent = formatTime(pos);
+    seekBar.value = (pos / dur) * 100;
+    playedBar.style.width = (pos / dur) * 100 + "%";
+  });
+  
+  audio.addEventListener("error", () => {
+    const error = audio.error;
+    const errorMsg = error ? `code=${error.code}, message=${error.message}` : "Unknown error";
+    log(`Audio error: ${errorMsg}`);
+    stateText.textContent = "error";
+  });
+  
+  audio.addEventListener("stalled", () => log("Audio stalled — waiting for data..."));
+  audio.addEventListener("waiting", () => log("Audio buffering — waiting for more data..."));
+  
+  audio.addEventListener("progress", () => {
+    if (audio.buffered.length > 0) {
+      const bufferedEnd = audio.buffered.end(audio.buffered.length - 1);
+      const dur = audio.duration;
+      if (dur && isFinite(dur) && dur > 0) {
+        bufferedBar.style.width = (bufferedEnd / dur) * 100 + "%";
+      }
+    }
+  });
+  
+  function updateProgress() {
+    const pos = audio.currentTime;
+    const dur = audio.duration || 1;
+    posText.textContent = formatTime(pos);
+    seekBar.value = (pos / dur) * 100;
+    playedBar.style.width = (pos / dur) * 100 + "%";
+    if (!audio.paused) requestAnimationFrame(updateProgress);
+  }
+  
+  function seekTo(fraction) {
+    const dur = audio.duration;
+    if (!dur || !isFinite(dur)) {
+      log("Seek requested before duration known — ignoring");
+      return;
+    }
+    const target = dur * fraction;
+    log(`Seeking to ${formatTime(target)} (${Math.round(fraction * 100)}%)`);
+    audio.currentTime = target;
+  }
+  
+  // ---- Controls ----
+  playBtn.addEventListener("click", () => {
+    log("Play button clicked");
+    audio.play().catch((err) => log(`Play failed: ${err.message}`));
+  });
+  
+  pauseBtn.addEventListener("click", () => {
+    log("Pause button clicked");
+    audio.pause();
+  });
+  
+  document.getElementById("seekStartBtn").addEventListener("click", () => seekTo(0));
+  document.getElementById("seekMidBtn").addEventListener("click", () => seekTo(0.5));
+  document.getElementById("seekEndBtn").addEventListener("click", () => seekTo(0.9));
+  
+  seekBar.addEventListener("input", () => {
+    seekTo(seekBar.value / 100);
+  });
+  
+  window.addEventListener("beforeunload", () => {
+    audio.pause();
+    audio.src = "";
+    log("Audio element cleaned up");
+  });
+  </script>
+{% endblock %}

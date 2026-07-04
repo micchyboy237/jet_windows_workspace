@@ -63,8 +63,7 @@ def compute_rms_delta(
 
 
 def compute_rms(samples: np.ndarray) -> float:
-    """
-    Compute Root Mean Square (RMS) of a signal.
+    """Compute Root Mean Square (RMS) of a signal.
 
     Description: Returns the overall energy/loudness of the entire audio array.
 
@@ -105,7 +104,7 @@ def compute_frame_rms(
 
 def compute_rms_per_frame(
     audio: np.ndarray,
-    hop_size: int,
+    hop_size: int = FRAME_SHIFT_SAMPLE,
     start_frame: Optional[int] = None,
     end_frame: Optional[int] = None,
 ) -> list[float]:
@@ -169,6 +168,13 @@ def has_sound(samples: np.ndarray) -> bool:
     )  # Note: >= so exactly SILENCE_MAX_THRESHOLD counts as sound
 
 
+def is_silent_frame(frame: np.ndarray) -> bool:
+    if len(frame) == 0:
+        return True
+    rms = compute_rms(frame)
+    return rms < SILENCE_MAX_THRESHOLD
+
+
 def rms_to_loudness_label(rms_value: float) -> str:
     """Return a human-readable loudness label based on RMS."""
     if rms_value < SILENCE_MAX_THRESHOLD:
@@ -230,13 +236,6 @@ def trim_silent(
             samples.copy() if has_sound(samples) else np.array([], dtype=samples.dtype)
         )
 
-    # Override has_sound temporarily with custom threshold if provided
-    def is_silent_frame(frame: np.ndarray) -> bool:
-        if len(frame) == 0:
-            return True
-        rms = compute_rms(frame)
-        return rms < SILENCE_MAX_THRESHOLD
-
     # Find start index (first non-silent frame)
     start = 0
     for i in range(0, len(samples) - frame_length + 1, hop_length):
@@ -258,6 +257,42 @@ def trim_silent(
 
     # Return trimmed copy (preserve original dtype)
     return samples[start:end].copy()
+
+
+def trim_silent_frames(
+    probs: list[float],
+    audio: Optional[np.ndarray],
+    *,
+    trim_left: bool = True,
+    trim_right: bool = True,
+    frame_shift_ms: float = FRAME_SHIFT_MS,
+    sample_rate: int = SAMPLE_RATE,
+    silence_threshold: float = SILENCE_MAX_THRESHOLD,
+) -> Tuple[list[float], Optional[np.ndarray]]:
+    """Strip leading/trailing silent frames from probs (and matching audio)."""
+    start = 0
+    end = len(probs)
+
+    if trim_left:
+        while start < end and probs[start] < silence_threshold:
+            start += 1
+
+    if trim_right:
+        while end > start and probs[end - 1] < silence_threshold:
+            end -= 1
+
+    trimmed_probs = probs[start:end]
+
+    if audio is not None:
+        spf = frame_shift_ms / 1000.0 * sample_rate  # samples per frame
+        sample_start = int(start * spf)
+        sample_end = int(end * spf)
+        sample_end = min(sample_end, len(audio))
+        trimmed_audio = audio[sample_start:sample_end]
+    else:
+        trimmed_audio = None
+
+    return trimmed_probs, trimmed_audio
 
 
 def normalize_energy(

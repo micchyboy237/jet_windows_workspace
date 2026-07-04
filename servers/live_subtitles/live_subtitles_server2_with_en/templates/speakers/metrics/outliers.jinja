@@ -1,0 +1,455 @@
+<!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/outliers.jinja -->
+{% extends "base.jinja" %}
+{% block title %}Outlier Pool - Metrics{% endblock %}
+{% block extra_head %}
+  <style>
+    .centroid-dist-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 4px 0;
+    }
+    .centroid-dist-bar .bar-bg {
+        flex: 1;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--bg-tertiary);
+        overflow: hidden;
+        min-width: 60px;
+    }
+    .centroid-dist-bar .bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+    }
+    .nearest-speaker-card {
+        background: var(--bg-tertiary);
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin: 4px 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .outlier-detail-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+    @media (max-width: 900px) {
+        .outlier-detail-grid { grid-template-columns: 1fr; }
+    }
+    .compact-table td {
+        padding: 6px 10px;
+        font-size: 13px;
+    }
+  </style>
+{% endblock %}
+{% block content %}
+  <div class="page-header">
+    <h1>📦 Outlier Pool</h1>
+    <p>
+      Segments that don't confidently match any speaker are buffered here.
+      When enough similar outliers accumulate, they're promoted to a new or existing speaker.
+    </p>
+  </div>
+  {% if not outlier_health.enabled %}
+    <div class="card">
+      <div class="card-header">ℹ️ Outlier Buffer Disabled</div>
+      <p style="color: var(--text-secondary);">
+        The outlier buffer is currently disabled. All uncertain segments immediately create new speakers.
+        Enable with <code>use_outlier_buffer=True</code> to reduce speaker fragmentation.
+      </p>
+    </div>
+  {% else %}
+    <!-- Summary Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value {% if outlier_health.active_outliers == 0 %}green {% elif outlier_health.active_outliers <= 3 %}blue {% elif outlier_health.active_outliers <= 10 %}yellow {% else %}red{% endif %}">
+          {{ outlier_health.active_outliers }}
+        </div>
+        <div class="stat-label">Active Outliers</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value green">{{ outlier_health.total_promotions }}</div>
+        <div class="stat-label">Total Promotions</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value blue">{{ "%.0f"|format(outlier_health.promotion_rate * 100) }}%</div>
+        <div class="stat-label">Promotion Rate</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value {% if outlier_health.old_outliers == 0 %}green {% else %}yellow{% endif %}">
+          {{ outlier_health.old_outliers }}
+        </div>
+        <div class="stat-label">Stale (>5 min)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value {% if outlier_health.status == 'healthy' %}green {% elif outlier_health.status == 'normal' %}blue {% elif outlier_health.status == 'elevated' %}yellow {% else %}red{% endif %}">
+          {{ outlier_health.status | upper }}
+        </div>
+        <div class="stat-label">Pool Status</div>
+      </div>
+      {% if outlier_health.max_capacity %}
+        <div class="stat-card">
+          <div class="stat-value purple">{{ outlier_health.max_capacity }}</div>
+          <div class="stat-label">Max Capacity</div>
+        </div>
+      {% endif %}
+    </div>
+    <!-- How It Works -->
+    <div class="card"
+         style="border-left: 3px solid var(--accent-purple);
+                margin-bottom: 24px">
+      <div class="card-header">🔄 Outlier Lifecycle</div>
+      <div style="display: grid;
+                  grid-template-columns: repeat(4, 1fr);
+                  gap: 12px;
+                  font-size: 13px">
+        <div style="text-align: center;
+                    padding: 12px;
+                    background: var(--bg-tertiary);
+                    border-radius: 6px">
+          <div style="font-size: 24px; margin-bottom: 4px;">🆕</div>
+          <strong>1. Arrival</strong>
+          <p style="color: var(--text-secondary); margin-top: 4px;">Segment doesn't match any speaker centroid above threshold</p>
+        </div>
+        <div style="text-align: center;
+                    padding: 12px;
+                    background: var(--bg-tertiary);
+                    border-radius: 6px">
+          <div style="font-size: 24px; margin-bottom: 4px;">📦</div>
+          <strong>2. Buffering</strong>
+          <p style="color: var(--text-secondary); margin-top: 4px;">Stored in outlier pool with embedding, waits for similar outliers</p>
+        </div>
+        <div style="text-align: center;
+                    padding: 12px;
+                    background: var(--bg-tertiary);
+                    border-radius: 6px">
+          <div style="font-size: 24px; margin-bottom: 4px;">🔍</div>
+          <strong>3. Accumulation</strong>
+          <p style="color: var(--text-secondary); margin-top: 4px;">When 2+ outliers are close to each other, promotion is triggered</p>
+        </div>
+        <div style="text-align: center;
+                    padding: 12px;
+                    background: var(--bg-tertiary);
+                    border-radius: 6px">
+          <div style="font-size: 24px; margin-bottom: 4px;">⬆️</div>
+          <strong>4. Promotion</strong>
+          <p style="color: var(--text-secondary); margin-top: 4px;">Creates new speaker or merges into nearest existing speaker</p>
+        </div>
+      </div>
+    </div>
+    <!-- ================================================================ -->
+    <!-- ACTIVE OUTLIERS WITH NEAREST CENTROIDS                            -->
+    <!-- ================================================================ -->
+    <div class="card">
+      <div class="card-header">
+        🔴 Active Outliers
+        <span style="font-weight: 400;
+                     color: var(--text-secondary);
+                     font-size: 13px;
+                     margin-left: 8px">
+          ({{ active_outlier_details|length if active_outlier_details else 0 }} active)
+        </span>
+      </div>
+      {% if active_outlier_details and active_outlier_details|length > 0 %}
+        <p style="color: var(--text-secondary);
+                  margin-bottom: 16px;
+                  font-size: 14px">
+          For each active outlier, showing the <strong>top 3 nearest speaker centroids</strong> by cosine distance.
+          A low distance to a speaker suggests the outlier may eventually be assigned to that speaker.
+          Outliers close to <strong>each other</strong> may trigger a new speaker creation.
+        </p>
+        {% for outlier in active_outlier_details %}
+          <!-- [Keep the existing per-outlier detail cards here - unchanged] -->
+          <div class="card"
+               style="margin-bottom: 16px;
+                      border: 1px solid var(--border-color)">
+            <!-- Outlier Header -->
+            <div style="display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 12px">
+              <div>
+                <strong style="font-size: 15px; font-family: monospace;">{{ outlier.label }}</strong>
+                <span style="color: var(--text-secondary);
+                             font-size: 12px;
+                             margin-left: 8px">arrived {{ "%.1f"|format(outlier.age_seconds) }}s ago</span>
+                {% if outlier.segment_id %}
+                  <code style="font-size: 11px; color: var(--text-muted); margin-left: 8px;">{{ outlier.segment_id }}</code>
+                {% endif %}
+                <span style="font-size: 11px; color: var(--text-muted); margin-left: 8px;">
+                  attempts: {{ outlier.match_attempts }}
+                </span>
+              </div>
+              <div>
+                {% if outlier.promotion_likelihood == 'high' %}
+                  <span class="badge badge-green">Likely to promote soon</span>
+                {% elif outlier.promotion_likelihood == 'medium' %}
+                  <span class="badge badge-yellow">Waiting for match</span>
+                {% else %}
+                  <span class="badge"
+                        style="background: rgba(110,118,129,0.15);
+                               color: var(--text-muted)">Isolated</span>
+                {% endif %}
+              </div>
+            </div>
+            <div class="outlier-detail-grid">
+              <!-- Nearest Speakers -->
+              <div>
+                <div style="font-size: 12px;
+                            color: var(--text-secondary);
+                            text-transform: uppercase;
+                            letter-spacing: 0.5px;
+                            margin-bottom: 8px">🎯 Nearest Speaker Centroids</div>
+                {% if outlier.nearest_speakers %}
+                  {% for sp in outlier.nearest_speakers[:3] %}
+                    <div class="nearest-speaker-card">
+                      <div style="flex: 1;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                          <strong>{{ sp.speaker_label }}</strong>
+                          <a href="/speakers/metrics/speakers/{{ sp.speaker_label }}"
+                             style="font-size: 11px">→</a>
+                          <span style="font-size: 11px; color: var(--text-secondary);">
+                            ({{ sp.speaker_segments }} seg, quality: {{ "%.2f"|format(sp.centroid_quality) }})
+                          </span>
+                        </div>
+                        <div class="centroid-dist-bar">
+                          <span style="font-size: 11px;
+                                       color: {% if sp.cosine_distance < 0.2 %}var(--accent-red) {% elif sp.cosine_distance < 0.4 %}var(--accent-yellow) {% else %}var(--accent-green){% endif %};
+                                       width: 85px;
+                                       text-align: right;
+                                       font-family: monospace">dist {{ "%.4f"|format(sp.cosine_distance) }}</span>
+                          <div class="bar-bg">
+                            <div class="bar-fill"
+                                 style="width: {{ (sp.cosine_distance * 50) | int }}%;
+                                        background: {% if sp.cosine_distance < 0.2 %}var(--accent-red) {% elif sp.cosine_distance < 0.4 %}var(--accent-yellow) {% else %}var(--accent-green){% endif %}">
+                            </div>
+                          </div>
+                          <span style="font-size: 10px;
+                                       color: var(--text-muted);
+                                       width: 55px;
+                                       font-family: monospace">sim {{ "%.3f"|format(sp.cosine_similarity) }}</span>
+                        </div>
+                      </div>
+                      <div style="margin-left: 12px; text-align: center;">
+                        <div style="font-size: 11px; color: var(--text-secondary);">Distance</div>
+                        <div style="font-size: 18px;
+                                    font-weight: 700;
+                                    color: {% if sp.cosine_distance < 0.2 %}var(--accent-red) {% elif sp.cosine_distance < 0.4 %}var(--accent-yellow) {% else %}var(--accent-green){% endif %}">
+                          {{ "%.3f"|format(sp.cosine_distance) }}
+                        </div>
+                      </div>
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <p style="color: var(--text-muted); font-size: 13px; padding: 12px;">
+                    No speakers with valid centroids available for comparison.
+                  </p>
+                {% endif %}
+                <!-- Decision Hint -->
+                {% if outlier.nearest_speakers and outlier.nearest_speakers[0].cosine_distance < 0.2 %}
+                  <div style="margin-top: 8px;
+                              padding: 8px 12px;
+                              background: rgba(248,81,73,0.08);
+                              border-radius: 6px;
+                              border-left: 3px solid var(--accent-red);
+                              font-size: 12px">
+                    <strong style="color: var(--accent-red);">⚠️ Very close to {{ outlier.nearest_speakers[0].speaker_label }}</strong>
+                    <span style="color: var(--text-secondary);"> — this outlier is nearly identical to an existing speaker and may be a duplicate segment. Check if speaker centroid needs refinement.</span>
+                  </div>
+                {% elif outlier.nearest_speakers and outlier.nearest_speakers[0].cosine_distance > 0.6 %}
+                  <div style="margin-top: 8px;
+                              padding: 8px 12px;
+                              background: rgba(63,185,80,0.08);
+                              border-radius: 6px;
+                              border-left: 3px solid var(--accent-green);
+                              font-size: 12px">
+                    <strong style="color: var(--accent-green);">🆕 Likely new speaker</strong>
+                    <span style="color: var(--text-secondary);"> — far from all existing centroids. If more similar outliers arrive, a new speaker will be created.</span>
+                  </div>
+                {% endif %}
+              </div>
+              <!-- Other Outliers Proximity -->
+              <div>
+                <div style="font-size: 12px;
+                            color: var(--text-secondary);
+                            text-transform: uppercase;
+                            letter-spacing: 0.5px;
+                            margin-bottom: 8px">👥 Nearest Other Outliers</div>
+                {% if outlier.nearest_outliers %}
+                  {% for ol in outlier.nearest_outliers[:3] %}
+                    <div class="nearest-speaker-card"
+                         style="border-left: 2px solid var(--accent-purple)">
+                      <div style="flex: 1;">
+                        <strong style="font-family: monospace; font-size: 13px;">{{ ol.label }}</strong>
+                        <div class="centroid-dist-bar">
+                          <span style="font-size: 11px;
+                                       color: {% if ol.cosine_distance < 0.15 %}var(--accent-green) {% else %}var(--text-secondary){% endif %};
+                                       width: 85px;
+                                       text-align: right;
+                                       font-family: monospace">dist {{ "%.4f"|format(ol.cosine_distance) }}</span>
+                          <div class="bar-bg">
+                            <div class="bar-fill"
+                                 style="width: {{ (ol.cosine_distance * 50) | int }}%;
+                                        background: {% if ol.cosine_distance < 0.15 %}var(--accent-purple) {% else %}var(--bg-tertiary){% endif %}">
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div style="margin-left: 12px; text-align: center;">
+                        <div style="font-size: 18px;
+                                    font-weight: 700;
+                                    color: {% if ol.cosine_distance < 0.15 %}var(--accent-purple) {% else %}var(--text-secondary){% endif %}">
+                          {{ "%.3f"|format(ol.cosine_distance) }}
+                        </div>
+                      </div>
+                    </div>
+                  {% endfor %}
+                  {% if outlier.nearest_outliers[0].cosine_distance < 0.15 %}
+                    <div style="margin-top: 8px;
+                                padding: 8px 12px;
+                                background: rgba(163,113,247,0.08);
+                                border-radius: 6px;
+                                border-left: 3px solid var(--accent-purple);
+                                font-size: 12px">
+                      <strong style="color: var(--accent-purple);">🔗 Outlier cluster forming!</strong>
+                      <span style="color: var(--text-secondary);">
+                        This outlier is close to {{ outlier.nearest_outliers[0].label }} (dist {{ "%.3f"|format(outlier.nearest_outliers[0].cosine_distance) }}).
+                        {% if outlier.nearest_outliers|length >= 2 %}
+                          Multiple nearby outliers detected — promotion to a new speaker is likely imminent.
+                        {% else %}
+                          One more similar outlier could trigger promotion.
+                        {% endif %}
+                      </span>
+                    </div>
+                  {% endif %}
+                {% else %}
+                  <p style="color: var(--text-muted); font-size: 13px; padding: 12px;">
+                    Only one active outlier — no other outliers to compare with.
+                  </p>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <!-- ALWAYS show this, even when empty -->
+        <div style="text-align: center; padding: 40px 20px;">
+          <div style="font-size: 48px; margin-bottom: 12px;">✅</div>
+          <p style="color: var(--accent-green); font-size: 16px; font-weight: 600">No active outliers</p>
+          <p style="color: var(--text-secondary);
+                    font-size: 14px;
+                    margin-bottom: 16px">
+            All segments have been confidently assigned to speakers. The outlier pool is empty.
+          </p>
+          <div style="font-size: 13px;
+                      color: var(--text-muted);
+                      background: var(--bg-tertiary);
+                      display: inline-block;
+                      padding: 8px 16px;
+                      border-radius: 6px">
+            💡 <strong>Tip:</strong> Outliers appear when a segment doesn't match any existing speaker above the threshold.
+            They act as a buffer to prevent premature speaker creation. When 2+ similar outliers accumulate,
+            they get promoted to a new speaker.
+          </div>
+        </div>
+      {% endif %}
+    </div>
+    <!-- ================================================================ -->
+    <!-- PROMOTION HISTORY                                                 -->
+    <!-- ================================================================ -->
+    {% if outlier_health.promotions %}
+      <div class="card">
+        <div class="card-header">📜 Promotion History <span style="font-weight: 400;
+              color: var(--text-secondary);
+              font-size: 13px">(last {{ outlier_health.promotions|length }})</span></div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Type</th>
+                <th>Outlier Labels</th>
+                <th>Target Speaker</th>
+                <th>Confidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for promo in outlier_health.promotions | reverse %}
+                <tr>
+                  <td style="color: var(--text-muted);">{{ loop.index }}</td>
+                  <td>
+                    {% if promo.type == 'new_speaker' %}
+                      <span class="badge badge-green">New Speaker</span>
+                    {% elif promo.type == 'merge_existing' %}
+                      <span class="badge badge-blue">Merged</span>
+                    {% else %}
+                      <span class="badge badge-purple">{{ promo.type }}</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% for label in promo.outlier_labels %}
+                      <code style="font-size: 12px;">{{ label }}</code>
+                      {% if not loop.last %}, {% endif %}
+                    {% endfor %}
+                  </td>
+                  <td><strong>{{ promo.target_speaker }}</strong></td>
+                  <td>{{ "%.3f"|format(promo.confidence) if promo.confidence else 'N/A' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+    <!-- ================================================================ -->
+    <!-- OUTLIER-TO-OUTLIER DISTANCE MATRIX                               -->
+    <!-- ================================================================ -->
+    {% if active_outlier_details and active_outlier_details|length >= 2 %}
+      <div class="card">
+        <div class="card-header">🔗 Outlier-to-Outlier Distance Matrix</div>
+        <p style="color: var(--text-secondary);
+                  margin-bottom: 16px;
+                  font-size: 14px">
+          Cosine distances between all active outlier embeddings.
+          <strong style="color: var(--accent-purple);">Low distances (purple)</strong> indicate outliers that are similar to each other
+          and may form a cluster for promotion to a new speaker.
+        </p>
+        <div class="table-container">
+          <table class="compact-table">
+            <thead>
+              <tr>
+                <th></th>
+                {% for ol in active_outlier_details %}<th style="text-align: center; font-size: 11px;">{{ ol.label }}</th>{% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row_ol in active_outlier_details %}
+                <tr>
+                  <td style="font-weight: 600; font-size: 12px; font-family: monospace;">{{ row_ol.label }}</td>
+                  {% for col_ol in active_outlier_details %}
+                    {% if row_ol.label == col_ol.label %}
+                      <td style="text-align: center; color: var(--text-muted);">—</td>
+                    {% else %}
+                      {% set dist = outlier_distance_matrix.get(row_ol.label, {}).get(col_ol.label) %}
+                      <td style="text-align: center;
+                                 {% if dist is not none and dist < 0.15 %}background: rgba(163,113,247,0.2);
+                                 font-weight: 700;
+                                 color: var(--accent-purple);
+                                 {% elif dist is not none and dist < 0.30 %}background: rgba(163,113,247,0.08);
+                                 color: var(--accent-purple);
+                                 {% else %}color: var(--text-secondary);
+                                 {% endif %}">{{ "%.3f"|format(dist) if dist is not none else '—' }}</td>
+                    {% endif %}
+                  {% endfor %}
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+  {% endif %}
+{% endblock %}
