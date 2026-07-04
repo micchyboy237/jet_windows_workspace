@@ -513,6 +513,7 @@ def _perform_speaker_labeling(
     segment_id: Optional[str] = None,
     min_label_duration: float = 2.0,
     max_label_duration: float = 7.0,
+    speech_threshold: float = 0.1,
 ) -> tuple:
     """Perform speaker labeling only on high-confidence speech segments.
     
@@ -581,6 +582,7 @@ def _perform_speaker_labeling(
                         tagger.extract_high_confidence_speech_segments(
                             audio=audio_float,
                             sample_rate=sample_rate,
+                            speech_threshold=speech_threshold,
                         )
                     )
                     extraction_info["segments_found"] = len(high_conf_audios)

@@ -1637,23 +1637,12 @@ class AudioTagger:
         """
         Get a comprehensive summary of audio tagging results.
         
-        Args:
-            audio: Audio input
-            sample_rate: Sample rate for raw audio data
-            audio_path: Identifier for the audio source
-        
-        Returns:
-            AudioTaggingSummary with complete analysis including speech_duration
-        
-        Debug logs trace:
-            - Audio loading time
-            - Tagging duration
-            - Speech probability calculation
-            - Final metrics
+        Now uses tag_audio_chunks internally to calculate accurate speech duration
+        instead of the previous binary all-or-nothing estimate.
         """
         start_time = time.time()
-        
         console.print(f"[dim]📊 Loading audio for summary: {audio_path}[/dim]")
+        
         try:
             waveform, actual_sr = load_audio(audio, sr=sample_rate or SAMPLE_RATE, mono=True)
             audio_duration = len(waveform) / actual_sr if actual_sr > 0 else 0
@@ -1664,19 +1653,27 @@ class AudioTagger:
             console.print(f"[red]❌ Failed to load audio: {e}[/red]")
             raise
         
-        console.print("[dim]🏷 Tagging audio...[/dim]")
-        results = self.tag_audio(audio, sample_rate=sample_rate)
-        console.print(f"[dim]   Got {len(results)} predictions[/dim]")
+        # Use chunk-based analysis for accurate speech duration
+        console.print("[dim]🔍 Analyzing audio chunks for speech duration...[/dim]")
+        chunk_summary = self.tag_audio_chunks(
+            audio=audio,
+            sample_rate=sample_rate,
+        )
         
-        console.print("[dim]🔍 Checking speech probability...[/dim]")
-        max_speech_prob = self.get_speech_probability(audio, sample_rate=sample_rate)
-        speech_detected = max_speech_prob >= self.speech_prob_threshold
-        speech_duration = audio_duration if speech_detected else 0.0
+        speech_detected = chunk_summary.get("speech_detected", False)
+        speech_duration = chunk_summary.get("speech_duration", 0.0)
+        max_speech_prob = chunk_summary.get("max_speech_probability", 0.0)
         
         console.print(
-            f"[dim]   Speech prob: {max_speech_prob:.4f}, "
-            f"detected: {speech_detected}[/dim]"
+            f"[dim]   Speech detected: {speech_detected} | "
+            f"Duration: {speech_duration:.3f}s / {audio_duration:.3f}s "
+            f"({speech_duration/audio_duration*100:.1f}%)[/dim]"
         )
+        
+        # Still get the overall tag results for top predictions
+        console.print("[dim]🏷 Getting overall tagging results...[/dim]")
+        results = self.tag_audio(audio, sample_rate=sample_rate)
+        console.print(f"[dim]   Got {len(results)} predictions[/dim]")
         
         elapsed = time.time() - start_time
         rtf = elapsed / audio_duration if audio_duration > 0 else float("inf")
@@ -1696,8 +1693,8 @@ class AudioTagger:
             "processing_time_seconds": elapsed,
             "real_time_factor": rtf,
             "speech_duration": speech_duration,
+            "speech_percentage": round(speech_duration / audio_duration * 100, 1) if audio_duration > 0 else 0.0,
         }
-        
         return summary
 
     def extract_speech_only(
