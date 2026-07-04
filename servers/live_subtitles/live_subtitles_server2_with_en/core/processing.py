@@ -511,7 +511,7 @@ def _perform_speaker_labeling(
     header: dict,
     full_word_segments_text: str,
     segment_id: Optional[str] = None,
-    min_label_duration: float = 2.0,
+    min_label_duration: float = 1.5,
     max_label_duration: float = 7.0,
 ) -> tuple:
     """Perform speaker labeling only on high-confidence speech segments.
