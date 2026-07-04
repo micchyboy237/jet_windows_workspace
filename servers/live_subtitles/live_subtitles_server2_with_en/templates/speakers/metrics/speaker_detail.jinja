@@ -13,14 +13,12 @@
         font-size: 12px;
         color: var(--text-secondary);
     }
-    
     .actions-cell {
         white-space: nowrap;
         display: flex;
         gap: 8px;
         align-items: center;
     }
-    
     .actions-cell a {
         font-size: 12px;
         padding: 4px 10px;
@@ -30,12 +28,10 @@
         text-decoration: none;
         transition: background 0.15s;
     }
-    
     .actions-cell a:hover {
         background: rgba(88,166,255,0.15);
         text-decoration: none;
     }
-    
     /* Timestamp column - fixed width for alignment */
     .timestamp-cell {
         white-space: nowrap;
@@ -43,18 +39,56 @@
         font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
         font-size: 13px;
     }
-    
     .duration-cell {
         font-variant-numeric: tabular-nums;
         font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
         font-size: 13px;
         text-align: right;
     }
-    
     .confidence-cell {
         font-variant-numeric: tabular-nums;
         font-weight: 600;
         text-align: center;
+    }
+    /* Play/Pause button styles */
+    .play-pause-cell {
+        text-align: center;
+        width: 60px;
+    }
+    .inline-play-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: 1.5px solid #007bff;
+        background: white;
+        color: #007bff;
+        font-size: 14px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s;
+        padding: 0;
+        line-height: 1;
+    }
+    .inline-play-btn:hover:not(:disabled) {
+        background: #007bff;
+        color: white;
+        transform: scale(1.1);
+    }
+    .inline-play-btn:active:not(:disabled) {
+        transform: scale(0.95);
+    }
+    .inline-play-btn.playing {
+        background: #007bff;
+        color: white;
+    }
+    .inline-play-btn:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+        transform: none;
+        border-color: #999;
+        color: #999;
     }
   </style>
 {% endblock %}
@@ -165,6 +199,7 @@
               <th style="width: 90px;">Duration</th>
               <th style="width: 100px;">Confidence</th>
               <th style="width: 160px;">Match Type</th>
+              <th style="width: 70px;">Play</th>
               <th style="width: 160px;">Actions</th>
             </tr>
           </thead>
@@ -183,6 +218,12 @@
                   </span>
                 </td>
                 <td><span class="badge badge-blue">{{ seg.match_type }}</span></td>
+                <td class="play-pause-cell">
+                  <button class="inline-play-btn"
+                          data-segment-id="{{ seg.segment_id }}"
+                          title="Play segment audio"
+                          onclick="toggleSegmentPlay(this, '{{ seg.segment_id }}')">▶</button>
+                </td>
                 <td>
                   <div class="actions-cell">
                     <a href="/speakers/metrics/segments/{{ seg.index }}"
@@ -214,4 +255,121 @@
     <span style="color: var(--text-muted); margin: 0 8px;">|</span>
     <a href="/speakers/metrics/api/speakers/{{ speaker.speaker_label }}">View JSON →</a>
   </div>
+{% endblock %}
+{% block extra_scripts %}
+  <script>
+// ---- Inline Segment Audio Player ----
+// Shared audio element for playing segment audio from the table
+(function() {
+  const audio = new Audio();
+  let currentPlayingBtn = null;
+  let currentSegmentId = null;
+
+  function log(msg) {
+    console.log(`[Speaker Segments Player] ${msg}`);
+  }
+
+  // Reset all buttons to play state
+  function resetAllButtons() {
+    document.querySelectorAll('.inline-play-btn').forEach(btn => {
+      btn.textContent = '▶';
+      btn.classList.remove('playing');
+    });
+  }
+
+  // Handle audio ended
+  audio.addEventListener('ended', () => {
+    log('Playback ended');
+    resetAllButtons();
+    currentPlayingBtn = null;
+    currentSegmentId = null;
+  });
+
+  // Handle audio errors
+  audio.addEventListener('error', () => {
+    const error = audio.error;
+    let errorMsg = 'Unknown error';
+    if (error) {
+      switch(error.code) {
+        case MediaError.MEDIA_ERR_ABORTED:
+          errorMsg = 'Playback aborted';
+          break;
+        case MediaError.MEDIA_ERR_NETWORK:
+          errorMsg = 'Network error';
+          break;
+        case MediaError.MEDIA_ERR_DECODE:
+          errorMsg = 'Decoding error';
+          break;
+        case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+          errorMsg = 'Format not supported';
+          break;
+      }
+    }
+    log(`Audio error: ${errorMsg}`);
+    resetAllButtons();
+    currentPlayingBtn = null;
+    currentSegmentId = null;
+  });
+
+  // Expose toggle function globally
+  window.toggleSegmentPlay = function(btn, segmentId) {
+    log(`Toggle play for segment: ${segmentId}`);
+
+    // If clicking the same button that's currently playing, pause it
+    if (currentSegmentId === segmentId && !audio.paused) {
+      log('Pausing current segment');
+      audio.pause();
+      resetAllButtons();
+      currentPlayingBtn = null;
+      currentSegmentId = null;
+      return;
+    }
+
+    // If a different segment is playing, stop it first
+    if (currentPlayingBtn && currentPlayingBtn !== btn) {
+      log('Stopping previous segment');
+      audio.pause();
+      resetAllButtons();
+    }
+
+    // If clicking the same paused segment, resume it
+    if (currentSegmentId === segmentId && audio.paused) {
+      log('Resuming segment');
+      audio.play().catch(err => {
+        log(`Play failed: ${err.message}`);
+      });
+      btn.textContent = '⏸';
+      btn.classList.add('playing');
+      currentPlayingBtn = btn;
+      return;
+    }
+
+    // Load and play new segment
+    log(`Loading new segment: ${segmentId}`);
+    audio.src = `/speakers/metrics/segment-audio?segment_id=${encodeURIComponent(segmentId)}`;
+    audio.play().then(() => {
+      btn.textContent = '⏸';
+      btn.classList.add('playing');
+      currentPlayingBtn = btn;
+      currentSegmentId = segmentId;
+      log('Playback started');
+    }).catch(err => {
+      log(`Play failed: ${err.message}`);
+      resetAllButtons();
+      currentPlayingBtn = null;
+      currentSegmentId = null;
+    });
+  };
+
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    log('Audio cleaned up');
+  });
+
+  log('Inline segment audio player initialized');
+})();
+  </script>
 {% endblock %}

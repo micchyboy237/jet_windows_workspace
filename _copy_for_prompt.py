@@ -65,8 +65,12 @@ include_files = [
    #  r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\generated\test_audio_tagger\speech_only\speech_only_meta.json",
    #  r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_audio_tagger.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_utils.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\config.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers_metrics.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\segments_list.jinja",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\speaker_detail.jinja",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\segment_detail.jinja",
     r"",
 ]
 
@@ -90,36 +94,11 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix
-│ C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_ser │
-│ ver2_with_en\services\audio_utils.py:134 in resolve_audio_paths                                  │
-│                                                                                                  │
-│   131 │   │   │   print(f"Path not found: {path}")                                               │
-│   132 │                                                                                          │
-│   133 │   if not resolved_paths:                                                                 │
-│ ❱ 134 │   │   raise ValueError("No valid audio files found from provided inputs.")               │
-│   135 │                                                                                          │
-│   136 │   # Return sorted list of absolute path strings                                          │
-│   137 │   return sorted(str(p) for p in resolved_paths)                                          │
-│                                                                                                  │
-│ ╭─────────────────────────────────────────── locals ───────────────────────────────────────────╮ │
-│ │   audio_inputs = [                                                                           │ │
-│ │                  │                                                                           │ │
-│ │                  'C:\\Users\\druiv\\.cache\\files\\audio\\sub_audio\\start_32s_recording_3_… │ │
-│ │                  ]                                                                           │ │
-│ │       includes = ['**/sound.wav']                                                            │ │
-│ │         inputs = [                                                                           │ │
-│ │                  │                                                                           │ │
-│ │                  'C:\\Users\\druiv\\.cache\\files\\audio\\sub_audio\\start_32s_recording_3_… │ │
-│ │                  ]                                                                           │ │
-│ │           item = 'C:\\Users\\druiv\\.cache\\files\\audio\\sub_audio\\start_32s_recording_3_… │ │
-│ │           path = WindowsPath('C:/Users/druiv/.cache/files/audio/sub_audio/start_32s_recordi… │ │
-│ │      recursive = True                                                                        │ │
-│ │ resolved_paths = []                                                                          │ │
-│ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-ValueError: No valid audio files found from provided inputs.
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py "C:\Users\druiv\.cache\files\audio\sub_audio\start_32s_recording_3_speakers.wav"
+I want to improve the play / pause icon buttons from segment list and speaker detail Segments table by having a single reusable jinja component for this.
+
+The improvement is how do I see the progress when the button as been played until it ends?
+
+You may check segment_detail.jinja for ideas but this is specific to circle icon button.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

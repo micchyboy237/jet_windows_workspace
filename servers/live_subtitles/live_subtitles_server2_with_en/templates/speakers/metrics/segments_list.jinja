@@ -1,11 +1,190 @@
 <!-- Jet_Windows_Workspace/servers/live_subtitles/live_subtitles_server2_with_en/templates/speakers/metrics/segments_list.jinja -->
 {% extends "base.jinja" %}
 {% block title %}Segments - Metrics{% endblock %}
+{% block extra_head %}
+  <style>
+    /* Tab Navigation */
+    .tab-nav {
+      display: flex;
+      gap: 0;
+      border-bottom: 2px solid var(--border-color, #dee2e6);
+      margin-bottom: 20px;
+    }
+    .tab-btn {
+      padding: 10px 20px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary, #666);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .tab-btn:hover {
+      color: var(--accent-blue, #007bff);
+      background: rgba(0,123,255,0.04);
+    }
+    .tab-btn.active {
+      color: var(--accent-blue, #007bff);
+      border-bottom-color: var(--accent-blue, #007bff);
+      font-weight: 600;
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    /* Speaker group styles */
+    .speaker-group {
+      margin-bottom: 16px;
+      border: 1px solid var(--border-color, #dee2e6);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .speaker-group-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 16px;
+      background: var(--bg-secondary, #f8f9fa);
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+    }
+    .speaker-group-header:hover {
+      background: var(--bg-tertiary, #e9ecef);
+    }
+    .speaker-group-header .speaker-label {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--accent-blue, #007bff);
+    }
+    .speaker-group-header .speaker-stats {
+      font-size: 12px;
+      color: var(--text-secondary, #666);
+    }
+    .speaker-group-header .collapse-icon {
+      font-size: 12px;
+      transition: transform 0.2s;
+      color: var(--text-secondary, #666);
+    }
+    .speaker-group-header.collapsed .collapse-icon {
+      transform: rotate(-90deg);
+    }
+    .speaker-group-body {
+      max-height: 2000px;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+    .speaker-group-body.collapsed {
+      max-height: 0;
+    }
+    .speaker-group-body table {
+      margin: 0;
+    }
+    .speaker-group-body .table-container {
+      margin: 0;
+      border-radius: 0;
+    }
+    /* Segment ID cell */
+    .segment-id-cell {
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    .timestamp-cell {
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 13px;
+    }
+    .duration-cell {
+      font-variant-numeric: tabular-nums;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      font-size: 13px;
+      text-align: right;
+    }
+    .confidence-cell {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      text-align: center;
+    }
+    /* Play/Pause button styles */
+    .play-pause-cell {
+      text-align: center;
+      width: 55px;
+    }
+    .inline-play-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      border: 1.5px solid #007bff;
+      background: white;
+      color: #007bff;
+      font-size: 13px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      padding: 0;
+      line-height: 1;
+    }
+    .inline-play-btn:hover:not(:disabled) {
+      background: #007bff;
+      color: white;
+      transform: scale(1.1);
+    }
+    .inline-play-btn:active:not(:disabled) {
+      transform: scale(0.95);
+    }
+    .inline-play-btn.playing {
+      background: #007bff;
+      color: white;
+    }
+    .inline-play-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+      transform: none;
+      border-color: #999;
+      color: #999;
+    }
+    /* Actions cell */
+    .actions-cell {
+      white-space: nowrap;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .actions-cell a {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--bg-tertiary);
+      color: var(--accent-blue);
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .actions-cell a:hover {
+      background: rgba(88,166,255,0.15);
+      text-decoration: none;
+    }
+  </style>
+{% endblock %}
 {% block content %}
   <div class="page-header">
     <h1>📋 Segment Group Health</h1>
     <p>Labeling quality and temporal consistency metrics</p>
   </div>
+  <!-- Summary Stats -->
   <div class="stats-grid">
     <div class="stat-card">
       <div class="stat-value blue">{{ health.total_segments }}</div>
@@ -28,74 +207,364 @@
       <div class="stat-label">Unresolved Outliers</div>
     </div>
   </div>
-  <!-- Confidence Distribution -->
-  <div class="card">
-    <div class="card-header">📊 Confidence Distribution</div>
-    <div style="display: flex;
-                gap: 8px;
-                align-items: flex-end;
-                height: 150px;
-                padding: 16px 0">
-      {% for range, count in health.confidence_distribution.items() %}
-        {% set max_count = health.confidence_distribution.values() | max %}
-        {% set height_pct = (count / max_count * 100) | int if max_count > 0 else 0 %}
-        <div style="flex: 1; text-align: center;">
-          <div style="height: {{ height_pct }}%;
-                      background: var(--accent-blue);
-                      border-radius: 4px 4px 0 0;
-                      min-height: 4px;
-                      transition: height 0.3s"
-               title="{{ range }}: {{ count }} segments"></div>
-          <div style="font-size: 11px;
-                      color: var(--text-secondary);
-                      margin-top: 4px">{{ range }}</div>
-          <div style="font-size: 12px; font-weight: 600;">{{ count }}</div>
-        </div>
-      {% endfor %}
+  <!-- Tab Navigation -->
+  <div class="tab-nav">
+    <button class="tab-btn active"
+            data-tab="tab-segments"
+            onclick="switchTab('tab-segments', this)">📋 Segments</button>
+    <button class="tab-btn"
+            data-tab="tab-confidence"
+            onclick="switchTab('tab-confidence', this)">📊 Confidence Distribution</button>
+    <button class="tab-btn"
+            data-tab="tab-match-types"
+            onclick="switchTab('tab-match-types', this)">🏷️ Match Type Distribution</button>
+    <button class="tab-btn"
+            data-tab="tab-label-sequence"
+            onclick="switchTab('tab-label-sequence', this)">🔤 Recent Label Sequence</button>
+  </div>
+  <!-- Tab: Segments (Default) -->
+  <div id="tab-segments" class="tab-content active">
+    <div class="card">
+      <div class="card-header">
+        📋 All Segments Grouped by Speaker
+        <span style="font-weight: normal;
+                     font-size: 13px;
+                     color: var(--text-secondary);
+                     margin-left: 12px">
+          ({{ segments_by_speaker | length if segments_by_speaker else 0 }} speakers)
+        </span>
+      </div>
+      {% if segments_by_speaker %}
+        {% for speaker_label, speaker_segments in segments_by_speaker.items() %}
+          <div class="speaker-group">
+            <div class="speaker-group-header"
+                 onclick="toggleSpeakerGroup(this)"
+                 title="Click to expand/collapse">
+              <span>
+                <span class="collapse-icon">▼</span>
+                <span class="speaker-label">{{ speaker_label }}</span>
+              </span>
+              <span class="speaker-stats">
+                {{ speaker_segments | length }} segment(s)
+                {% set conf_values = speaker_segments | map(attribute='primary_confidence') | select('defined') | list %}
+                {% if conf_values %}
+                  | Confidence: {{ "%.1f"|format(conf_values | average_or_0 * 100) }}%
+                {% endif %}
+              </span>
+            </div>
+            <div class="speaker-group-body">
+              <div class="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style="width: 45px;">#</th>
+                      <th>Segment ID</th>
+                      <th style="width: 95px;">Timestamp</th>
+                      <th style="width: 80px;">Duration</th>
+                      <th style="width: 90px;">Confidence</th>
+                      <th style="width: 130px;">Match Type</th>
+                      <th style="width: 55px;">Play</th>
+                      <th style="width: 130px;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for seg in speaker_segments %}
+                      <tr>
+                        <td>{{ seg.index }}</td>
+                        <td>
+                          <div class="segment-id-cell" title="{{ seg.segment_id }}">{{ seg.segment_id }}</div>
+                        </td>
+                        <td class="timestamp-cell">{{ "%.2f"|format(seg.timestamp) }}s</td>
+                        <td class="duration-cell">{{ "%.2f"|format(seg.audio_duration) }}s</td>
+                        <td class="confidence-cell">
+                          <span style="color: {% if seg.primary_confidence >= 0.8 %}var(--accent-green) {% elif seg.primary_confidence >= 0.6 %}var(--accent-yellow) {% else %}var(--accent-red){% endif %}">
+                            {{ "%.3f"|format(seg.primary_confidence) }}
+                          </span>
+                        </td>
+                        <td><span class="badge badge-blue">{{ seg.match_type }}</span></td>
+                        <td class="play-pause-cell">
+                          <button class="inline-play-btn"
+                                  data-segment-id="{{ seg.segment_id }}"
+                                  title="Play segment audio"
+                                  onclick="toggleSegmentPlay(this, '{{ seg.segment_id }}')">▶</button>
+                        </td>
+                        <td>
+                          <div class="actions-cell">
+                            <a href="/speakers/metrics/segments/{{ seg.index }}"
+                               title="View segment details">📋 Details</a>
+                            <a href="/speakers/metrics/api/segments/{{ seg.index }}"
+                               title="View JSON data">JSON</a>
+                          </div>
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p style="padding: 20px;
+                  color: var(--text-secondary);
+                  text-align: center">No segments available yet. Process some audio to populate segments.</p>
+      {% endif %}
     </div>
   </div>
-  <!-- Match Type Distribution -->
-  <div class="card">
-    <div class="card-header">🏷️ Match Type Distribution</div>
-    <div class="table-container">
-      <table>
-        <thead>
-          <tr>
-            <th>Match Type</th>
-            <th>Count</th>
-            <th>Percentage</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% set total_matches = health.match_type_distribution.values() | sum %}
-          {% for type, count in health.match_type_distribution.items() | sort(attribute='1', reverse=True) %}
-            <tr>
-              <td><span class="badge badge-blue">{{ type }}</span></td>
-              <td>{{ count }}</td>
-              <td>
-                {{ "%.1f"|format(count / total_matches * 100) if total_matches > 0 else 0 }}%
-                <div class="score-bar" style="width: 100px;">
-                  <div class="score-bar-fill green"
-                       style="width: {{ (count / total_matches * 100) | int if total_matches > 0 else 0 }}%"></div>
-                </div>
-              </td>
-            </tr>
+  <!-- Tab: Confidence Distribution -->
+  <div id="tab-confidence" class="tab-content">
+    <div class="card">
+      <div class="card-header">📊 Confidence Distribution</div>
+      <div style="display: flex;
+                  gap: 8px;
+                  align-items: flex-end;
+                  height: 200px;
+                  padding: 16px 0">
+        {% if health.confidence_distribution %}
+          {% set max_count = health.confidence_distribution.values() | max %}
+          {% for range, count in health.confidence_distribution.items() %}
+            {% set height_pct = (count / max_count * 100) | int if max_count > 0 else 0 %}
+            <div style="flex: 1; text-align: center;">
+              <div style="height: {{ height_pct }}%;
+                          background: linear-gradient(180deg, var(--accent-blue), rgba(88,166,255,0.4));
+                          border-radius: 4px 4px 0 0;
+                          min-height: 4px;
+                          transition: height 0.3s"
+                   title="{{ range }}: {{ count }} segments"></div>
+              <div style="font-size: 11px;
+                          color: var(--text-secondary);
+                          margin-top: 4px">{{ range }}</div>
+              <div style="font-size: 12px; font-weight: 600;">{{ count }}</div>
+            </div>
           {% endfor %}
-        </tbody>
-      </table>
+        {% else %}
+          <p style="color: var(--text-secondary); padding: 20px;">No confidence data available.</p>
+        {% endif %}
+      </div>
     </div>
   </div>
-  <!-- Recent Label Sequence -->
-  <div class="card">
-    <div class="card-header">🔤 Recent Primary Label Sequence</div>
-    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
-      {% for label in health.primary_label_sequence %}
-        <span style="padding: 4px 8px;
-                     background: var(--bg-tertiary);
-                     border-radius: 4px;
-                     font-size: 12px;
-                     font-family: monospace">{{ label }}</span>
-      {% endfor %}
+  <!-- Tab: Match Type Distribution -->
+  <div id="tab-match-types" class="tab-content">
+    <div class="card">
+      <div class="card-header">🏷️ Match Type Distribution</div>
+      {% if health.match_type_distribution %}
+        {% set total_matches = health.match_type_distribution.values() | sum %}
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Match Type</th>
+                <th>Count</th>
+                <th>Percentage</th>
+                <th>Distribution</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for type, count in health.match_type_distribution.items() | sort(attribute='1', reverse=True) %}
+                <tr>
+                  <td><span class="badge badge-blue">{{ type }}</span></td>
+                  <td>{{ count }}</td>
+                  <td>{{ "%.1f"|format(count / total_matches * 100) if total_matches > 0 else 0 }}%</td>
+                  <td>
+                    <div class="score-bar" style="width: 120px;">
+                      <div class="score-bar-fill green"
+                           style="width: {{ (count / total_matches * 100) | int if total_matches > 0 else 0 }}%"></div>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p style="padding: 20px;
+                  color: var(--text-secondary);
+                  text-align: center">No match type data available.</p>
+      {% endif %}
     </div>
   </div>
+  <!-- Tab: Recent Label Sequence -->
+  <div id="tab-label-sequence" class="tab-content">
+    <div class="card">
+      <div class="card-header">🔤 Recent Primary Label Sequence</div>
+      {% if health.primary_label_sequence %}
+        <div style="display: flex; flex-wrap: wrap; gap: 6px; padding: 16px;">
+          {% for label in health.primary_label_sequence %}
+            <span style="padding: 6px 12px;
+                         background: var(--bg-tertiary);
+                         border-radius: 4px;
+                         font-size: 12px;
+                         font-family: monospace;
+                         border: 1px solid var(--border-color)">{{ label }}</span>
+          {% endfor %}
+        </div>
+        <div style="padding: 0 16px 16px;
+                    color: var(--text-secondary);
+                    font-size: 12px">
+          Showing last {{ health.primary_label_sequence | length }} segments in chronological order
+        </div>
+      {% else %}
+        <p style="padding: 20px;
+                  color: var(--text-secondary);
+                  text-align: center">No label sequence data available.</p>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}
+{% block extra_scripts %}
+  <script>
+// ---- Tab Switching ----
+function switchTab(tabId, btn) {
+  console.log('[Segments] Switching to tab:', tabId);
+  
+  // Deactivate all tabs and buttons
+  document.querySelectorAll('.tab-content').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  
+  // Activate selected tab and button
+  const tab = document.getElementById(tabId);
+  if (tab) {
+    tab.classList.add('active');
+    console.log('[Segments] Tab activated:', tabId);
+  }
+  if (btn) {
+    btn.classList.add('active');
+  }
+}
+
+// ---- Speaker Group Collapse/Expand ----
+function toggleSpeakerGroup(header) {
+  const body = header.nextElementSibling;
+  const isCollapsed = header.classList.contains('collapsed');
+  
+  if (isCollapsed) {
+    header.classList.remove('collapsed');
+    body.classList.remove('collapsed');
+    console.log('[Segments] Expanded speaker group');
+  } else {
+    header.classList.add('collapsed');
+    body.classList.add('collapsed');
+    console.log('[Segments] Collapsed speaker group');
+  }
+}
+
+// ---- Inline Segment Audio Player ----
+(function() {
+  const audio = new Audio();
+  let currentPlayingBtn = null;
+  let currentSegmentId = null;
+
+  function log(msg) {
+    console.log(`[Segments Player] ${msg}`);
+  }
+
+  // Reset all buttons to play state
+  function resetAllButtons() {
+    document.querySelectorAll('.inline-play-btn').forEach(btn => {
+      btn.textContent = '▶';
+      btn.classList.remove('playing');
+    });
+  }
+
+  // Handle audio ended
+  audio.addEventListener('ended', () => {
+    log('Playback ended');
+    resetAllButtons();
+    currentPlayingBtn = null;
+    currentSegmentId = null;
+  });
+
+  // Handle audio errors
+  audio.addEventListener('error', () => {
+    const error = audio.error;
+    let errorMsg = 'Unknown error';
+    if (error) {
+      switch(error.code) {
+        case MediaError.MEDIA_ERR_ABORTED:
+          errorMsg = 'Playback aborted';
+          break;
+        case MediaError.MEDIA_ERR_NETWORK:
+          errorMsg = 'Network error';
+          break;
+        case MediaError.MEDIA_ERR_DECODE:
+          errorMsg = 'Decoding error';
+          break;
+        case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+          errorMsg = 'Format not supported';
+          break;
+      }
+    }
+    log(`Audio error: ${errorMsg}`);
+    resetAllButtons();
+    currentPlayingBtn = null;
+    currentSegmentId = null;
+  });
+
+  // Expose toggle function globally
+  window.toggleSegmentPlay = function(btn, segmentId) {
+    log(`Toggle play for segment: ${segmentId}`);
+
+    // If clicking the same button that's currently playing, pause it
+    if (currentSegmentId === segmentId && !audio.paused) {
+      log('Pausing current segment');
+      audio.pause();
+      resetAllButtons();
+      currentPlayingBtn = null;
+      currentSegmentId = null;
+      return;
+    }
+
+    // If a different segment is playing, stop it first
+    if (currentPlayingBtn && currentPlayingBtn !== btn) {
+      log('Stopping previous segment');
+      audio.pause();
+      resetAllButtons();
+    }
+
+    // If clicking the same paused segment, resume it
+    if (currentSegmentId === segmentId && audio.paused) {
+      log('Resuming segment');
+      audio.play().catch(err => {
+        log(`Play failed: ${err.message}`);
+      });
+      btn.textContent = '⏸';
+      btn.classList.add('playing');
+      currentPlayingBtn = btn;
+      return;
+    }
+
+    // Load and play new segment
+    log(`Loading new segment: ${segmentId}`);
+    audio.src = `/speakers/metrics/segment-audio?segment_id=${encodeURIComponent(segmentId)}`;
+    audio.play().then(() => {
+      btn.textContent = '⏸';
+      btn.classList.add('playing');
+      currentPlayingBtn = btn;
+      currentSegmentId = segmentId;
+      log('Playback started');
+    }).catch(err => {
+      log(`Play failed: ${err.message}`);
+      resetAllButtons();
+      currentPlayingBtn = null;
+      currentSegmentId = null;
+    });
+  };
+
+  // Cleanup on page unload
+  window.addEventListener('beforeunload', () => {
+    audio.pause();
+    audio.removeAttribute('src');
+    audio.load();
+    log('Audio cleaned up');
+  });
+
+  log('Inline segment audio player initialized');
+})();
+
+console.log('[Segments] Page initialized with tabs');
+  </script>
 {% endblock %}

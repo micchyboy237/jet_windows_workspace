@@ -30,13 +30,26 @@ router = APIRouter(prefix="/speakers/metrics", tags=["metrics"])
 _templates_dir = TEMPLATES_DIR / "speakers" / "metrics"
 _templates_dir.mkdir(parents=True, exist_ok=True)
 
-# Configure Jinja2 to use .jinja extension for autoescape
+console.print(f"[info]Speaker metrics templates directory: {_templates_dir}[/info]")
+
 _jinja_env = Environment(
     loader=FileSystemLoader(str(_templates_dir)),
     autoescape=select_autoescape(['html', 'xml', 'jinja', 'jinja2']),
     extensions=['jinja2.ext.debug', 'jinja2.ext.loopcontrols'],
 )
 console.print(f"[info]Speaker metrics templates directory: {_templates_dir}[/info]")
+
+# ADD THESE LINES RIGHT HERE:
+def average_or_0(values):
+    """Calculate average of a list of values, returning 0 if empty."""
+    values = [v for v in values if v is not None]
+    if not values:
+        return 0
+    return sum(values) / len(values)
+
+_jinja_env.filters['average_or_0'] = average_or_0
+
+console.print(f"[info]Registered custom Jinja filter: average_or_0[/info]")
 
 def get_template(name: str):
     """Get a Jinja2 template by name with caching."""
@@ -205,17 +218,36 @@ async def segments_list_html(request: Request):
     labeler = _check_labeler()
     try:
         health = labeler.get_segment_group_health()
-        console.print(f"[info]Rendering segments health page: {health.get('total_segments', 0)} segments[/]")
+        
+        # Build segments grouped by speaker
+        segments_by_speaker = {}
+        if hasattr(labeler, 'get_speaker_segment_list') and hasattr(labeler, '_speakers'):
+            for speaker_label in labeler._speakers.keys():
+                try:
+                    speaker_segs = labeler.get_speaker_segment_list(
+                        speaker_label=speaker_label,
+                        limit=500,  # Get up to 500 segments per speaker
+                        offset=0,
+                    )
+                    if speaker_segs and speaker_segs.get('segments'):
+                        segments_by_speaker[speaker_label] = speaker_segs['segments']
+                        console.print(f"[info]Speaker {speaker_label}: {len(speaker_segs['segments'])} segments[/]")
+                except Exception as e:
+                    console.print(f"[warning]Could not fetch segments for speaker {speaker_label}: {e}[/]")
+        
+        console.print(f"[info]Rendering segments health page: {health.get('total_segments', 0)} segments, "
+                      f"{len(segments_by_speaker)} speakers[/]")
         return render_template("segments_list.jinja", {
             "active_page": "segments",
             "health": health,
+            "segments_by_speaker": segments_by_speaker,
             "computed_at": health.get("computed_at", datetime.now().isoformat()),
             "request": request,
         })
     except Exception as e:
         console.print(f"[error]Error computing segment health: {e}[/]")
         raise HTTPException(status_code=500, detail=f"Failed to compute segment health: {e}")
-
+   
 @router.get("/segments/{segment_index}", response_class=HTMLResponse)
 async def segment_detail_html(request: Request, segment_index: int):
     """
