@@ -28,7 +28,6 @@ console = Console()
 def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
     """
     Extract detailed information about an audio input for debugging purposes.
-
     Analyzes audio files, arrays, or tensors to extract metadata and signal
     characteristics that can affect VAD performance, such as:
     - Sample rate and duration
@@ -37,15 +36,12 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
     - Signal statistics (RMS, peak, DC offset)
     - Silence ratio estimation
     - Potential issues (clipping, low amplitude, etc.)
-
     Args:
         audio: Audio input (file path, bytes, numpy array, or torch tensor)
         sr: Sample rate for array/tensor inputs. If None, defaults to SAMPLE_RATE.
            For file inputs, sr is detected automatically.
-
     Returns:
         Dictionary containing audio metadata and signal statistics
-
     Raises:
         TypeError: If audio input type is not supported
     """
@@ -69,26 +65,19 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         "warnings": [],
         "recommendations": [],
     }
-
-    # Load audio data if it's a file or bytes
     if isinstance(audio, (str, os.PathLike)):
         info["source"] = str(audio)
         try:
-            # Get metadata without loading full audio first
             info["sample_rate"] = librosa.get_samplerate(audio)
             info["duration_seconds"] = librosa.get_duration(path=audio)
-
-            # Load audio for detailed analysis
             y, native_sr = librosa.load(audio, sr=None, mono=False)
             audio_data = y
             if sr is None:
                 sr = native_sr
             info["sample_rate"] = native_sr
-
         except Exception as e:
             info["issues"].append(f"Failed to load audio file: {str(e)}")
             return info
-
     elif isinstance(audio, bytes):
         info["source"] = f"Bytes object ({len(audio)} bytes)"
         try:
@@ -98,7 +87,6 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
                 sr = native_sr
             info["sample_rate"] = native_sr
         except Exception:
-            # Try decoding as raw PCM
             if sr is None:
                 sr = SAMPLE_RATE
             try:
@@ -110,14 +98,12 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
             except Exception as e2:
                 info["issues"].append(f"Failed to decode audio bytes: {str(e2)}")
                 return info
-
     elif isinstance(audio, np.ndarray):
         info["source"] = f"NumPy array (shape: {audio.shape})"
         audio_data = audio
         if sr is None:
             sr = SAMPLE_RATE
         info["sample_rate"] = sr
-
     elif isinstance(audio, torch.Tensor):
         info["source"] = f"PyTorch tensor (shape: {audio.shape})"
         audio_data = audio.detach().cpu().numpy()
@@ -126,42 +112,39 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         info["sample_rate"] = sr
     else:
         raise TypeError(f"Unsupported audio input type: {type(audio)}")
-
-    # Convert to numpy array if not already
     if not isinstance(audio_data, np.ndarray):
         audio_data = np.array(audio_data)
-
-    # Determine shape and channels
     if audio_data.ndim == 1:
         info["num_channels"] = 1
         info["num_samples"] = len(audio_data)
     elif audio_data.ndim == 2:
-        # Could be (channels, samples) or (samples, channels)
         if audio_data.shape[0] < audio_data.shape[1]:
-            # (channels, samples)
             info["num_channels"] = audio_data.shape[0]
             info["num_samples"] = audio_data.shape[1]
         else:
-            # (samples, channels) - transpose for analysis
             info["num_channels"] = audio_data.shape[1]
             info["num_samples"] = audio_data.shape[0]
             audio_data = audio_data.T
     else:
         info["issues"].append(f"Unexpected audio dimensions: {audio_data.ndim}")
         return info
-
-    # Calculate duration
     if info["duration_seconds"] is None:
         info["duration_seconds"] = info["num_samples"] / sr
-
-    # Get dtype
     info["dtype"] = str(audio_data.dtype)
 
-    # Analyze signal characteristics per channel
+    # Normalize integer audio to [-1, 1] float64 for safe statistics.
+    # float64 prevents overflow when squaring large int values
+    # (e.g., 31128² summed over 100k samples exceeds int32 range).
+    # Original dtype is preserved for metadata display.
+    if np.issubdtype(audio_data.dtype, np.integer):
+        original_dtype = audio_data.dtype
+        dtype_max = np.iinfo(original_dtype).max
+        audio_data = audio_data.astype(np.float64) / dtype_max
+        info["dtype"] = str(original_dtype)
+
     channel_info = []
     for ch in range(info["num_channels"]):
         ch_data = audio_data[ch] if info["num_channels"] > 1 else audio_data
-
         ch_stats = {
             "rms": np.sqrt(np.mean(ch_data**2)),
             "peak": np.max(np.abs(ch_data)),
@@ -170,8 +153,6 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
             "dc_offset": np.mean(ch_data),
         }
         channel_info.append(ch_stats)
-
-    # Aggregate channel statistics
     info["rms_amplitude"] = float(np.mean([ch["rms"] for ch in channel_info]))
     info["peak_amplitude"] = float(np.max([ch["peak"] for ch in channel_info]))
     info["dc_offset"] = float(np.mean([ch["dc_offset"] for ch in channel_info]))
@@ -179,11 +160,7 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         float(np.min([ch["min"] for ch in channel_info])),
         float(np.max([ch["max"] for ch in channel_info])),
     ]
-
-    # Check if audio is normalized
     info["is_normalized"] = abs(info["peak_amplitude"] - 1.0) < 0.01
-
-    # Check for clipping
     clipping_threshold = 0.99
     if info["num_channels"] == 1:
         clipped_samples = np.sum(np.abs(audio_data) > clipping_threshold)
@@ -193,22 +170,15 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         )
     info["has_clipping"] = clipped_samples > 0
     info["clipping_percentage"] = float(100 * clipped_samples / info["num_samples"])
-
-    # Estimate silence ratio
-    silence_threshold = 0.01  # -40dB
+    silence_threshold = 0.01
     if info["num_channels"] == 1:
         is_silent = np.abs(audio_data) < silence_threshold
     else:
-        # Consider silent if all channels are below threshold
         is_silent = np.all(np.abs(audio_data) < silence_threshold, axis=0)
     info["silence_ratio"] = float(np.mean(is_silent))
-
-    # Estimate SNR (simple approach using signal vs silence regions)
     if info["silence_ratio"] < 0.95 and info["silence_ratio"] > 0.05:
-        # Separate signal and potential noise regions
         signal_mask = ~is_silent
         noise_mask = is_silent
-
         if info["num_channels"] == 1:
             signal_rms = (
                 np.sqrt(np.mean(audio_data[signal_mask] ** 2))
@@ -229,11 +199,8 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
             )
             signal_rms = np.sqrt(np.mean(signal_data**2))
             noise_rms = np.sqrt(np.mean(noise_data**2))
-
         if noise_rms > 0 and signal_rms > 0:
             info["estimated_snr"] = float(20 * np.log10(signal_rms / noise_rms))
-
-    # Generate warnings and recommendations
     if info["sample_rate"] != 16000:
         info["warnings"].append(
             f"Sample rate is {info['sample_rate']} Hz (VAD often expects 16000 Hz)"
@@ -241,13 +208,11 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         info["recommendations"].append(
             "Resample to 16000 Hz for optimal VAD performance"
         )
-
     if info["num_channels"] > 1:
         info["warnings"].append(
             f"Multi-channel audio ({info['num_channels']} channels)"
         )
         info["recommendations"].append("Consider converting to mono for VAD")
-
     if info["rms_amplitude"] < 0.01:
         info["warnings"].append(
             f"Very low amplitude (RMS: {info['rms_amplitude']:.6f})"
@@ -257,7 +222,6 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         )
     elif info["rms_amplitude"] > 0.5:
         info["warnings"].append(f"High amplitude (RMS: {info['rms_amplitude']:.3f})")
-
     if info["has_clipping"] and info["clipping_percentage"] > 1.0:
         info["warnings"].append(
             f"Clipping detected ({info['clipping_percentage']:.1f}% of samples)"
@@ -265,7 +229,6 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         info["recommendations"].append(
             "Clipping can degrade VAD accuracy - reduce input gain"
         )
-
     if info["silence_ratio"] > 0.9:
         info["warnings"].append(
             f"Mostly silent ({info['silence_ratio'] * 100:.1f}% silence)"
@@ -273,17 +236,14 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         info["recommendations"].append(
             "VAD may struggle with very sparse speech content"
         )
-
     if abs(info["dc_offset"]) > 0.01:
         info["warnings"].append(f"Significant DC offset ({info['dc_offset']:.4f})")
         info["recommendations"].append("Remove DC offset to improve signal quality")
-
     if info["estimated_snr"] is not None and info["estimated_snr"] < 10:
         info["warnings"].append(f"Low estimated SNR ({info['estimated_snr']:.1f} dB)")
         info["recommendations"].append(
             "High noise levels may cause VAD false positives"
         )
-
     return info
 
 
