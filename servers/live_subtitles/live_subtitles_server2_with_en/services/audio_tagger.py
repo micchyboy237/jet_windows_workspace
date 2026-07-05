@@ -2007,7 +2007,7 @@ class AudioTagger:
         self,
         audio: AudioInput,
         sample_rate: Optional[int] = None,
-        min_duration: float = 1.0,
+        min_duration: float = 0.25,
         require_confidence: Optional[List[str]] = None,
         chunk_duration: Optional[float] = None,
         overlap_duration: Optional[float] = None,
