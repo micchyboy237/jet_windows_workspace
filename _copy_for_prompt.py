@@ -73,9 +73,9 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\segment_detail.jinja",
     r"",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\norm_speech_loudness.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_info.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\dtype_conversion.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_audio_info.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_info.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\dtype_conversion.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_audio_info.py",
     r"",
 ]
 
@@ -99,9 +99,9 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update _main_audio_info with the ff:
-- Create new load_audio_from_file function
-- Add -n and -q args for normalize and quantize boolean args
+Can you confirm if my understanding is correct
+When "standard" is passed in max_peak_db, the target dbfs comes from LOUDNESS_PRESETS["standard"]["target_rms_db"]
+If the audio's original dbfs exceeds target, it will be reduced to match target and the returned audio will be quieter. If original dbfs is lower than target, it will increase to match target and the returned audio will be louder.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
