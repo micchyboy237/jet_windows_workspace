@@ -75,6 +75,7 @@ include_files = [
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\norm_speech_loudness.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_info.py",
     r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\dtype_conversion.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_audio_info.py",
     r"",
 ]
 
@@ -98,99 +99,9 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Now check what caused nan in RMS Amplitude
-
-
-With nan
-
-╭───────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  Audio Analysis for VAD Debugging                                                                     │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
-                          Audio Metadata
-╭──────────────────────┬──────────────────────────────────────────╮
-│ Property             │ Value                                    │
-├──────────────────────┼──────────────────────────────────────────┤
-│ Source               │ NumPy array (shape: (100800,))           │
-│ Input Type           │ ndarray                                  │
-│ Data Type            │ int16                                    │
-│ Sample Rate          │ 16000 Hz                                 │
-│ Channels             │ 1                                        │
-│ Samples              │ 100,800                                  │
-│ Duration             │ 6.300s (0:06.30)                         │
-╰──────────────────────┴──────────────────────────────────────────╯
-                                  Signal Statistics
-╭───────────────────────────┬─────────────────────────────────────┬─────────────────╮
-│ Metric                    │ Value                               │ Status          │
-├───────────────────────────┼─────────────────────────────────────┼─────────────────┤
-│ RMS Amplitude             │ nan (nan dB)                        │ ⚠               │
-│ Peak Amplitude            │ 31128.0000 (89.9 dB)                │ ⚠ Clipping      │
-│ DC Offset                 │ -0.008333                           │ ⚠ Offset        │
-│ Normalized                │ No                                  │ ⚠               │
-│ Clipping                  │ Yes (100.0% samples)                │ ⚠               │
-│ Silence Ratio             │ 0.0%                                │ ✓               │
-│ Est. SNR                  │ N/A                                 │                 │
-╰───────────────────────────┴─────────────────────────────────────┴─────────────────╯
-
-╭────────────────────────────────────────────── Warnings ───────────────────────────────────────────────╮
-│ ⚠ Clipping detected (100.0% of samples)                                                               │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─────────────────────────────────────── Recommendations for VAD ───────────────────────────────────────╮
-│ → Clipping can degrade VAD accuracy - reduce input gain                                               │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
-
-╭────────────────────────────────────── VAD Readiness Assessment ───────────────────────────────────────╮
-│ VAD Compatibility Score: 90/100                                                                       │
-│ Good - Audio is well-suited for VAD                                                                   │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
-
-
-
-
-
-Without nan
-
-╭───────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  Audio Analysis for VAD Debugging                                                                     │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
-                          Audio Metadata
-╭──────────────────────┬──────────────────────────────────────────╮
-│ Property             │ Value                                    │
-├──────────────────────┼──────────────────────────────────────────┤
-│ Source               │ NumPy array (shape: (109760,))           │
-│ Input Type           │ ndarray                                  │
-│ Data Type            │ int16                                    │
-│ Sample Rate          │ 16000 Hz                                 │
-│ Channels             │ 1                                        │
-│ Samples              │ 109,760                                  │
-│ Duration             │ 6.860s (0:06.86)                         │
-╰──────────────────────┴──────────────────────────────────────────╯
-                                  Signal Statistics
-╭───────────────────────────┬─────────────────────────────────────┬─────────────────╮
-│ Metric                    │ Value                               │ Status          │
-├───────────────────────────┼─────────────────────────────────────┼─────────────────┤
-│ RMS Amplitude             │ 11.6022 (21.3 dB)                   │ ⚠               │
-│ Peak Amplitude            │ 31128.0000 (89.9 dB)                │ ⚠ Clipping      │
-│ DC Offset                 │ -0.047941                           │ ⚠ Offset        │
-│ Normalized                │ No                                  │ ⚠               │
-│ Clipping                  │ Yes (99.9% samples)                 │ ⚠               │
-│ Silence Ratio             │ 0.1%                                │ ✓               │
-│ Est. SNR                  │ N/A                                 │                 │
-╰───────────────────────────┴─────────────────────────────────────┴─────────────────╯
-
-╭────────────────────────────────────────────── Warnings ───────────────────────────────────────────────╮
-│ ⚠ High amplitude (RMS: 11.602)                                                                        │
-│ ⚠ Clipping detected (99.9% of samples)                                                                │
-│ ⚠ Significant DC offset (-0.0479)                                                                     │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭─────────────────────────────────────── Recommendations for VAD ───────────────────────────────────────╮
-│ → Clipping can degrade VAD accuracy - reduce input gain                                               │
-│ → Remove DC offset to improve signal quality                                                          │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
-
-╭────────────────────────────────────── VAD Readiness Assessment ───────────────────────────────────────╮
-│ VAD Compatibility Score: 80/100                                                                       │
-│ Good - Audio is well-suited for VAD                                                                   │
-╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Update _main_audio_info with the ff:
+- Create new load_audio_from_file function
+- Add -n and -q args for normalize and quantize boolean args
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

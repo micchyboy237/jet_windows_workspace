@@ -2043,7 +2043,7 @@ class AudioTagger:
             >>> for seg, aud in zip(segments, audios):
             ...     print(f"{seg['start_time']:.1f}s-{seg['end_time']:.1f}s: {len(aud)} samples")
         """
-        display_audio_info(audio)
+        # display_audio_info(audio)
 
         overall_start = time.time()
         

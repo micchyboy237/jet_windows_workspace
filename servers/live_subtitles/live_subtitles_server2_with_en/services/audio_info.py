@@ -25,6 +25,56 @@ from rich.text import Text
 console = Console()
 
 
+def amplitude_to_dbfs(amplitude: float, eps: float = 1e-10) -> float:
+    """
+    Convert linear amplitude to dBFS (decibels relative to Full Scale).
+    
+    In digital audio, 0 dBFS is the maximum possible level (amplitude = 1.0).
+    Values above 0 dBFS indicate clipping. Each -6 dBFS represents half the amplitude.
+    
+    Args:
+        amplitude: Linear amplitude value (typically 0.0 to 1.0)
+        eps: Small value to prevent log(0)
+    
+    Returns:
+        dBFS value (negative for valid signals, 0 for maximum, positive for clipped)
+    
+    Examples:
+        >>> amplitude_to_dbfs(1.0)    # Full scale
+        0.0
+        >>> amplitude_to_dbfs(0.5)    # Half amplitude
+        -6.02
+        >>> amplitude_to_dbfs(0.1)    # Common RMS target for VAD
+        -20.0
+        >>> amplitude_to_dbfs(0.01)   # Very quiet
+        -40.0
+    """
+    return float(20 * np.log10(max(amplitude, eps)))
+
+
+def dbfs_to_amplitude(dbfs: float) -> float:
+    """
+    Convert dBFS to linear amplitude.
+    
+    Args:
+        dbfs: Level in dBFS (negative values typical, 0 = full scale)
+    
+    Returns:
+        Linear amplitude (0.0 to 1.0 for valid signals)
+    
+    Examples:
+        >>> dbfs_to_amplitude(0.0)     # Full scale
+        1.0
+        >>> dbfs_to_amplitude(-6.0)    # Half amplitude
+        0.501
+        >>> dbfs_to_amplitude(-20.0)   # Common VAD target
+        0.1
+        >>> dbfs_to_amplitude(-3.0)    # Safe peak limit
+        0.708
+    """
+    return float(10 ** (dbfs / 20.0))
+
+
 def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
     """
     Extract detailed information about an audio input for debugging purposes.
@@ -33,7 +83,7 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
     - Sample rate and duration
     - Number of channels and channel layout
     - Data type and value ranges
-    - Signal statistics (RMS, peak, DC offset)
+    - Signal statistics (RMS, peak, DC offset) in both linear and dBFS
     - Silence ratio estimation
     - Potential issues (clipping, low amplitude, etc.)
     Args:
@@ -53,10 +103,16 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         "num_channels": None,
         "num_samples": None,
         "duration_seconds": None,
+        # Linear values
         "rms_amplitude": None,
         "peak_amplitude": None,
         "dc_offset": None,
         "amplitude_range": None,
+        # dBFS values
+        "rms_dbfs": None,
+        "peak_dbfs": None,
+        "crest_factor_db": None,  # Peak - RMS (indicates dynamic range)
+        # Status flags
         "is_normalized": None,
         "has_clipping": None,
         "silence_ratio": None,
@@ -153,6 +209,8 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
             "dc_offset": np.mean(ch_data),
         }
         channel_info.append(ch_stats)
+    
+    # Linear amplitude values
     info["rms_amplitude"] = float(np.mean([ch["rms"] for ch in channel_info]))
     info["peak_amplitude"] = float(np.max([ch["peak"] for ch in channel_info]))
     info["dc_offset"] = float(np.mean([ch["dc_offset"] for ch in channel_info]))
@@ -160,6 +218,12 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         float(np.min([ch["min"] for ch in channel_info])),
         float(np.max([ch["max"] for ch in channel_info])),
     ]
+    
+    # dBFS values
+    info["rms_dbfs"] = amplitude_to_dbfs(info["rms_amplitude"])
+    info["peak_dbfs"] = amplitude_to_dbfs(info["peak_amplitude"])
+    info["crest_factor_db"] = info["peak_dbfs"] - info["rms_dbfs"]  # Dynamic range indicator
+    
     info["is_normalized"] = abs(info["peak_amplitude"] - 1.0) < 0.01
     clipping_threshold = 0.99
     if info["num_channels"] == 1:
@@ -213,15 +277,15 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
             f"Multi-channel audio ({info['num_channels']} channels)"
         )
         info["recommendations"].append("Consider converting to mono for VAD")
-    if info["rms_amplitude"] < 0.01:
+    if info["rms_dbfs"] < -40:
         info["warnings"].append(
-            f"Very low amplitude (RMS: {info['rms_amplitude']:.6f})"
+            f"Very low amplitude (RMS: {info['rms_dbfs']:.1f} dBFS)"
         )
         info["recommendations"].append(
             "Audio may be too quiet for reliable VAD - consider amplification"
         )
-    elif info["rms_amplitude"] > 0.5:
-        info["warnings"].append(f"High amplitude (RMS: {info['rms_amplitude']:.3f})")
+    elif info["rms_dbfs"] > -6:
+        info["warnings"].append(f"High amplitude (RMS: {info['rms_dbfs']:.1f} dBFS)")
     if info["has_clipping"] and info["clipping_percentage"] > 1.0:
         info["warnings"].append(
             f"Clipping detected ({info['clipping_percentage']:.1f}% of samples)"
@@ -243,6 +307,13 @@ def get_audio_info(audio: AudioInput, sr: Optional[int] = None) -> dict:
         info["warnings"].append(f"Low estimated SNR ({info['estimated_snr']:.1f} dB)")
         info["recommendations"].append(
             "High noise levels may cause VAD false positives"
+        )
+    if info["crest_factor_db"] is not None and info["crest_factor_db"] > 20:
+        info["warnings"].append(
+            f"High crest factor ({info['crest_factor_db']:.1f} dB) - large dynamic range"
+        )
+        info["recommendations"].append(
+            "Consider compression or limiting to reduce peak-to-RMS ratio"
         )
     return info
 
@@ -320,38 +391,66 @@ def display_audio_info(
         header_style="bold magenta",
     )
     stats_table.add_column("Metric", style="bold", width=25)
-    stats_table.add_column("Value", width=35)
+    stats_table.add_column("Linear", width=18)
+    stats_table.add_column("dBFS", width=18)
     stats_table.add_column("Status", width=15)
 
     # RMS amplitude
-    rms = info.get("rms_amplitude")
-    if rms is not None:
-        rms_db = 20 * np.log10(max(rms, 1e-10))
-        rms_status = "✓ Normal" if -30 <= rms_db <= -6 else "⚠"
-        stats_table.add_row("RMS Amplitude", f"{rms:.4f} ({rms_db:.1f} dB)", rms_status)
-    else:
-        stats_table.add_row("RMS Amplitude", "N/A", "")
-
-    # Peak amplitude
-    peak = info.get("peak_amplitude")
-    if peak is not None:
-        peak_db = 20 * np.log10(max(peak, 1e-10))
-        peak_status = "✓ Normal" if peak_db < 0 else "⚠ Clipping"
+    rms_linear = info.get("rms_amplitude")
+    rms_dbfs = info.get("rms_dbfs")
+    if rms_linear is not None and rms_dbfs is not None:
+        rms_status = "✓ Normal" if -30 <= rms_dbfs <= -6 else "⚠"
         stats_table.add_row(
-            "Peak Amplitude", f"{peak:.4f} ({peak_db:.1f} dB)", peak_status
+            "RMS Level",
+            f"{rms_linear:.4f}",
+            f"{rms_dbfs:.1f} dBFS",
+            rms_status,
         )
     else:
-        stats_table.add_row("Peak Amplitude", "N/A", "")
+        stats_table.add_row("RMS Level", "N/A", "N/A", "")
+
+    # Peak amplitude
+    peak_linear = info.get("peak_amplitude")
+    peak_dbfs = info.get("peak_dbfs")
+    if peak_linear is not None and peak_dbfs is not None:
+        peak_status = "✓ Normal" if peak_dbfs < 0 else "⚠ Clipping"
+        stats_table.add_row(
+            "Peak Level",
+            f"{peak_linear:.4f}",
+            f"{peak_dbfs:.1f} dBFS",
+            peak_status,
+        )
+    else:
+        stats_table.add_row("Peak Level", "N/A", "N/A", "")
+
+    # Crest factor (dynamic range indicator)
+    crest = info.get("crest_factor_db")
+    if crest is not None:
+        if crest < 10:
+            crest_status = "Compressed"
+        elif crest < 20:
+            crest_status = "Normal"
+        else:
+            crest_status = "Dynamic"
+        stats_table.add_row(
+            "Crest Factor (Peak-RMS)",
+            f"{10**(crest/20):.2f}x",
+            f"{crest:.1f} dB",
+            crest_status,
+        )
+    else:
+        stats_table.add_row("Crest Factor", "N/A", "N/A", "")
 
     # DC offset
     dc = info.get("dc_offset", 0)
     dc_status = "✓ OK" if abs(dc) < 0.001 else "⚠ Offset"
-    stats_table.add_row("DC Offset", f"{dc:.6f}", dc_status)
+    stats_table.add_row("DC Offset", f"{dc:.6f}", f"{amplitude_to_dbfs(abs(dc)):.1f} dBFS", dc_status)
 
     # Normalization
     stats_table.add_row(
-        "Normalized",
+        "Peak Normalized",
         "Yes" if info.get("is_normalized") else "No",
+        "0 dBFS" if info.get("is_normalized") else f"{peak_dbfs:.1f} dBFS" if peak_dbfs else "N/A",
         "✓" if info.get("is_normalized") else "⚠",
     )
 
@@ -360,29 +459,59 @@ def display_audio_info(
         clip_pct = info.get("clipping_percentage", 0)
         stats_table.add_row(
             "Clipping",
-            f"Yes ({clip_pct:.1f}% samples)",
+            f"Yes ({clip_pct:.1f}%)",
+            "> 0 dBFS",
             "⚠" if clip_pct > 0.5 else "⚠ Minor",
         )
     else:
-        stats_table.add_row("Clipping", "No", "✓")
+        stats_table.add_row("Clipping", "No", "< 0 dBFS", "✓")
 
     # Silence ratio
     silence = info.get("silence_ratio")
     if silence is not None:
         silence_status = "⚠" if silence > 0.5 else "✓"
-        stats_table.add_row("Silence Ratio", f"{silence * 100:.1f}%", silence_status)
+        stats_table.add_row(
+            "Silence Ratio",
+            f"{silence * 100:.1f}%",
+            f"{amplitude_to_dbfs(0.01):.0f} dBFS thresh",
+            silence_status,
+        )
     else:
-        stats_table.add_row("Silence Ratio", "N/A", "")
+        stats_table.add_row("Silence Ratio", "N/A", "", "")
 
     # SNR
     snr = info.get("estimated_snr")
     if snr is not None:
         snr_status = "✓ Good" if snr > 20 else "⚠ Low" if snr > 10 else "✗ Poor"
-        stats_table.add_row("Est. SNR", f"{snr:.1f} dB", snr_status)
+        stats_table.add_row("Est. SNR", f"{10**(snr/20):.1f}x", f"{snr:.1f} dB", snr_status)
     else:
-        stats_table.add_row("Est. SNR", "N/A", "")
+        stats_table.add_row("Est. SNR", "N/A", "", "")
 
     console.print(stats_table)
+
+    # dBFS Reference Guide
+    dbfs_guide = Table(
+        title="dBFS Quick Reference",
+        box=box.SIMPLE,
+        show_header=True,
+        header_style="bold cyan",
+    )
+    dbfs_guide.add_column("dBFS", width=10)
+    dbfs_guide.add_column("Linear", width=10)
+    dbfs_guide.add_column("Description", width=40)
+    
+    dbfs_guide.add_row("0.0", "1.000", "Full scale - clipping threshold")
+    dbfs_guide.add_row("-3.0", "0.708", "Safe peak limit (prevents intersample clipping)")
+    dbfs_guide.add_row("-6.0", "0.501", "Half amplitude")
+    dbfs_guide.add_row("-12.0", "0.251", "Quarter amplitude")
+    dbfs_guide.add_row("-20.0", "0.100", "Common RMS target for VAD")
+    dbfs_guide.add_row("-30.0", "0.032", "Very quiet speech")
+    dbfs_guide.add_row("-40.0", "0.010", "Near silence")
+    dbfs_guide.add_row("-60.0", "0.001", "Digital silence threshold")
+    dbfs_guide.add_row("-∞", "0.000", "Absolute silence")
+    
+    console.print(dbfs_guide)
+    console.print()
 
     # Waveform display (optional)
     if show_waveform and info.get("num_samples", 0) > 0:
@@ -428,7 +557,7 @@ def display_audio_info(
 
                 waveform_panel = Panel(
                     "\n".join(waveform_lines),
-                    title="Waveform Preview (Peak Normalized)",
+                    title=f"Waveform Preview (Peak Normalized, {info.get('peak_dbfs', 'N/A')} dBFS original)",
                     border_style="green",
                     padding=(0, 1),
                 )
@@ -472,8 +601,10 @@ def display_audio_info(
         vad_score -= 20
     if info.get("num_channels", 1) > 1:
         vad_score -= 10
-    if info.get("rms_amplitude", 0) < 0.005:
+    if info.get("rms_dbfs", 0) < -40:
         vad_score -= 20
+    elif info.get("rms_dbfs", 0) < -30:
+        vad_score -= 10
     if info.get("silence_ratio", 0) > 0.5:
         vad_score -= 15
     if info.get("has_clipping"):
