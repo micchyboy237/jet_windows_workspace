@@ -45,6 +45,9 @@ LOUDNESS_PRESETS = {
     },
 }
 
+# Default preset when neither target_rms_db nor max_peak_db is specified
+DEFAULT_PRESET = "standard"
+
 # Create Literal type from preset keys
 LoudnessPreset = Literal["very_quiet", "quiet", "standard", "loud", "very_loud", "brickwall"]
 
@@ -53,7 +56,7 @@ def normalize_audio_for_vad(
     y: Union[np.ndarray, torch.Tensor],
     sr: Optional[int] = None,
     method: str = "hybrid",
-    target_rms_db: float = -20.0,
+    target_rms_db: Optional[float] = None,
     max_peak: Optional[float] = None,
     max_peak_db: Optional[Union[float, LoudnessPreset]] = None,
     eps: float = 1e-8,
@@ -63,9 +66,10 @@ def normalize_audio_for_vad(
     """
     Normalize audio specifically for Voice Activity Detection (VAD).
 
-    Recommended for most pipelines: 'hybrid' method with target_rms_db=-20
-    (the "standard" preset). This provides consistent levels for energy-based,
-    WebRTC, Silero, and neural VADs.
+    Recommended for most pipelines: 'hybrid' method with default settings
+    (the "standard" preset: -20 dBFS RMS, -3 dBFS peak ceiling).
+    This provides consistent levels for energy-based, WebRTC, Silero, and
+    neural VADs.
 
     Args:
         y:               Input audio array (any dtype; converted to float32).
@@ -78,18 +82,21 @@ def normalize_audio_for_vad(
                            'rms'    – scale to target_rms_db; no peak limit.
                            'hybrid' – RMS target + peak ceiling (recommended).
         target_rms_db:   Desired RMS level in dBFS for 'rms' / 'hybrid'.
-                         When max_peak_db is a preset string, this overrides
-                         the preset's default target_rms_db.
+                         - If None and max_peak_db is a preset string:
+                           Uses the preset's target_rms_db.
+                         - If None and max_peak_db is a float or None:
+                           Uses the DEFAULT_PRESET ("standard") target_rms_db (-20 dBFS).
+                         - If set explicitly: Overrides any preset's target_rms_db.
         max_peak:        Peak ceiling as linear amplitude (0 < max_peak ≤ 1.0).
                          Mutually exclusive with max_peak_db.
                          Example: 0.95 = -0.45 dBFS, 0.708 = -3 dBFS.
         max_peak_db:     Peak ceiling specification. Can be:
-                         - float: Direct dBFS value (e.g., -3.0, -6.0)
+                         - None: Uses DEFAULT_PRESET ("standard") max_peak_db (-3 dBFS).
+                         - float: Direct dBFS value (e.g., -3.0, -6.0).
                          - str: Preset name - one of "very_quiet", "quiet",
-                           "standard", "loud", "very_loud", "brickwall"
+                           "standard", "loud", "very_loud", "brickwall".
                            When a preset is used, both max_peak_db and 
-                           target_rms_db (if not explicitly set) are taken 
-                           from the preset.
+                           target_rms_db (if None) are taken from the preset.
                          Mutually exclusive with max_peak.
         eps:             Small constant to guard log/division of silent frames.
         min_signal_db:   Signals whose RMS is below this threshold are treated
@@ -109,23 +116,30 @@ def normalize_audio_for_vad(
                     name is invalid.
 
     Examples:
-        # Using preset name
+        # Default (standard preset: -20 dBFS RMS, -3 dBFS peak)
+        >>> y_norm, info = normalize_audio_for_vad(y, sr=16000)
+        
+        # Preset name
         >>> y_norm, info = normalize_audio_for_vad(y, sr=16000, 
-        ...                                        max_peak_db="standard")
+        ...                                        max_peak_db="quiet")
         
         # Preset with custom RMS target
         >>> y_norm, info = normalize_audio_for_vad(y, sr=16000, 
-        ...                                        max_peak_db="quiet",
-        ...                                        target_rms_db=-24.0)
+        ...                                        max_peak_db="loud",
+        ...                                        target_rms_db=-18.0)
         
-        # Direct dBFS value
+        # Direct dBFS values (no preset)
         >>> y_norm, info = normalize_audio_for_vad(y, sr=16000, 
         ...                                        target_rms_db=-20.0,
         ...                                        max_peak_db=-3.0)
+        
+        # Peak normalization only
+        >>> y_norm, info = normalize_audio_for_vad(y, sr=16000, 
+        ...                                        method="peak")
     """
 
     # ─────────────────────────────────────────────────────────────
-    # 0. Resolve max_peak_db from string preset or numeric value
+    # 0. Resolve parameters from presets and defaults
     # ─────────────────────────────────────────────────────────────
     
     # Check mutual exclusivity
@@ -136,10 +150,9 @@ def normalize_audio_for_vad(
         )
     
     preset_name = None
-    user_target_rms_db = target_rms_db  # Remember if user explicitly set this
     
+    # ── Resolve preset if max_peak_db is a string ──
     if isinstance(max_peak_db, str):
-        # Resolve preset from string
         preset_name = max_peak_db.lower()
         
         if preset_name not in LOUDNESS_PRESETS:
@@ -150,41 +163,62 @@ def normalize_audio_for_vad(
             )
         
         preset_config = LOUDNESS_PRESETS[preset_name]
+        max_peak_db = preset_config["max_peak_db"]
         
-        # Use preset's max_peak_db
-        resolved_max_peak_db = preset_config["max_peak_db"]
-        
-        # Only override target_rms_db if user didn't explicitly set it
-        # (check against default value of -20.0)
-        if target_rms_db == -20.0:
+        # Use preset's target_rms_db only if user didn't set one
+        if target_rms_db is None:
             target_rms_db = preset_config["target_rms_db"]
             logger.debug(
-                f"Using preset '{preset_name}' target_rms_db: {target_rms_db:.1f}"
+                f"Using preset '{preset_name}': "
+                f"target_rms_db={target_rms_db:.1f}, "
+                f"max_peak_db={max_peak_db:.1f}"
             )
         else:
             logger.debug(
-                f"Using preset '{preset_name}' max_peak_db: {resolved_max_peak_db:.1f} "
-                f"with custom target_rms_db: {target_rms_db:.1f}"
+                f"Using preset '{preset_name}' peak limit ({max_peak_db:.1f} dBFS) "
+                f"with custom target_rms_db={target_rms_db:.1f} dBFS"
             )
-        
-        logger.info(
-            f"Preset '{preset_name}': {preset_config['description']} "
-            f"(RMS: {target_rms_db:.1f} dBFS, Peak: {resolved_max_peak_db:.1f} dBFS)"
-        )
-        
-        max_peak_db = resolved_max_peak_db
     
-    # Convert numeric max_peak_db to linear max_peak
-    if max_peak_db is not None:
-        max_peak = 10 ** (max_peak_db / 20.0)
+    # ── Fall back to DEFAULT_PRESET if nothing specified ──
+    if target_rms_db is None and max_peak_db is None:
+        preset_name = DEFAULT_PRESET
+        preset_config = LOUDNESS_PRESETS[preset_name]
+        target_rms_db = preset_config["target_rms_db"]
+        max_peak_db = preset_config["max_peak_db"]
         logger.debug(
-            f"Converted max_peak_db={max_peak_db:.2f} dBFS "
-            f"to max_peak={max_peak:.6f} linear"
+            f"No parameters specified, using default preset '{preset_name}': "
+            f"target_rms_db={target_rms_db:.1f}, "
+            f"max_peak_db={max_peak_db:.1f}"
         )
-    elif max_peak is None:
-        # Default peak ceiling if nothing specified
-        max_peak = 0.95
-        logger.debug(f"No peak limit specified, using default max_peak={max_peak}")
+    elif target_rms_db is None:
+        # max_peak_db is numeric, use default target_rms_db
+        preset_name = DEFAULT_PRESET
+        target_rms_db = LOUDNESS_PRESETS[DEFAULT_PRESET]["target_rms_db"]
+        logger.debug(
+            f"Using default target_rms_db={target_rms_db:.1f} dBFS "
+            f"with custom max_peak_db={max_peak_db:.1f} dBFS"
+        )
+    elif max_peak_db is None:
+        # target_rms_db set, use default max_peak_db
+        preset_name = DEFAULT_PRESET
+        max_peak_db = LOUDNESS_PRESETS[DEFAULT_PRESET]["max_peak_db"]
+        logger.debug(
+            f"Using custom target_rms_db={target_rms_db:.1f} dBFS "
+            f"with default max_peak_db={max_peak_db:.1f} dBFS"
+        )
+    
+    if preset_name:
+        logger.info(
+            f"Preset '{preset_name}': {LOUDNESS_PRESETS[preset_name]['description']} "
+            f"(RMS: {target_rms_db:.1f} dBFS, Peak: {max_peak_db:.1f} dBFS)"
+        )
+    
+    # ── Convert max_peak_db to linear ──
+    max_peak = 10 ** (max_peak_db / 20.0)
+    logger.debug(
+        f"Converted max_peak_db={max_peak_db:.2f} dBFS "
+        f"to max_peak={max_peak:.6f} linear"
+    )
     
     # Validate peak range
     if not 0 < max_peak <= 1.0:

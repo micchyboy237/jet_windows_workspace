@@ -205,12 +205,13 @@ def main():
         emoji = display["emoji"]
         description = display["description"]
         
-        # Apply normalization using preset string directly
+        # Apply normalization using preset string - no need for target_rms_db!
+        # The preset provides both RMS target and peak ceiling
         y_norm, info = normalize_audio_for_vad(
             y_original,
             sr=sr,
             method="hybrid",
-            max_peak_db=preset_name,  # ← Just pass the preset name!
+            max_peak_db=preset_name,  # ← Just the preset name, everything else from preset
             remove_dc=True,
         )
         
@@ -223,7 +224,7 @@ def main():
             f"[dim]({description})[/dim]"
         )
         console.print(
-            f"    Target: RMS={info['target_rms_db']:+.1f} dBFS, "
+            f"    Preset config: RMS target={info['target_rms_db']:+.1f} dBFS, "
             f"Peak limit={info['max_peak_db']:+.1f} dBFS"
         )
         
@@ -234,14 +235,18 @@ def main():
         
         # Display transformation details
         console.print(
-            f"    RMS: [cyan]{info['original_rms_db']:.2f}[/cyan] → "
+            f"    Original → Final RMS: [cyan]{info['original_rms_db']:.2f}[/cyan] → "
             f"[cyan]{info['final_rms_db']:.2f}[/cyan] dBFS "
             f"(Gain: [yellow]{info['applied_gain_db']:+.2f}[/yellow] dB)"
         )
         console.print(
-            f"    Peak: [cyan]{info['original_peak_db']:.2f}[/cyan] → "
+            f"    Original → Final Peak: [cyan]{info['original_peak_db']:.2f}[/cyan] → "
             f"[cyan]{info['final_peak_db']:.2f}[/cyan] dBFS"
         )
+        
+        # Check if peak limiting was actually applied
+        if info['final_peak_db'] == info['max_peak_db'] and info['original_peak_db'] > info['max_peak_db']:
+            console.print(f"    ⚡ [yellow]Peak limiting activated[/yellow]")
         
         # Check if normalization was skipped
         if info.get("skipped_reason"):
