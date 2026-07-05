@@ -64,6 +64,7 @@ try:
         AudioSegmentsResult,
     )
     from services.dtype_conversion import convert_audio_dtype
+    from services.audio_info import display_audio_info
 except ImportError:
     from audio_utils import AudioInput, load_audio
     from audio_config import (
@@ -115,6 +116,7 @@ except ImportError:
         AudioSegmentsResult,
     )
     from dtype_conversion import convert_audio_dtype
+    from audio_info import display_audio_info
 
 install_rich_traceback(show_locals=True)
 
@@ -2041,7 +2043,8 @@ class AudioTagger:
             >>> for seg, aud in zip(segments, audios):
             ...     print(f"{seg['start_time']:.1f}s-{seg['end_time']:.1f}s: {len(aud)} samples")
         """
-        import soundfile as sf
+        display_audio_info(audio)
+
         overall_start = time.time()
         
         # Auto-calculate min_silence_duration_sec if not explicitly set.

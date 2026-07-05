@@ -52,6 +52,7 @@ from services.audio_tagger import (
 )
 from services.audio_utils import get_audio_duration
 from services.audio_config import SAMPLE_RATE
+from services.norm_speech_loudness import normalize_audio_for_vad
 from services.dtype_conversion import convert_audio_dtype
 
 console = Console()
@@ -496,6 +497,7 @@ def _perform_speaker_labeling(
                 tagger = get_audio_tagger()
                 if tagger is not None:
                     # audio_np = audio_np.astype(np.float32) / 32768.0
+                    audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate)
                     audio_np = convert_audio_dtype(audio_np, "int16")
                     console.print(
                         f"[info]🎯 Attempting high-confidence speech extraction "
@@ -550,6 +552,7 @@ def _perform_speaker_labeling(
                             # seg_audio_int16 = (
                             #     np.clip(aud, -1.0, 1.0) * 32767.0
                             # ).astype(np.int16)
+                            aud, _ = normalize_audio_for_vad(aud, sample_rate)
                             seg_audio_int16 = convert_audio_dtype(aud, "int16")
                             sub_segment_id = f"{segment_id}_sub{i}" if segment_id else None
                             
@@ -1428,6 +1431,7 @@ def perform_audio_tagging(
 
         # Convert to float32 for the tagger
         # audio_np = audio_np.astype(np.float32) / 32768.0
+        audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate)
         audio_np = convert_audio_dtype(audio_np, "int16")
 
         console.print(
@@ -1583,7 +1587,11 @@ def save_segment_audio_for_playback(
         #         audio_int16 = audio_np.astype(np.int16)
         # else:
         #     audio_int16 = audio_np
-        audio_int16 = convert_audio_dtype(audio_np, "int16")
+        if audio_np.dtype != np.int16:
+            audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate)
+            audio_int16 = convert_audio_dtype(audio_np, "int16")
+        else:
+            audio_int16 = audio_np
         
         # Write WAV file
         with wave.open(str(audio_path), 'wb') as wf:
