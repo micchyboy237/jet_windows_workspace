@@ -497,7 +497,7 @@ def _perform_speaker_labeling(
                 tagger = get_audio_tagger()
                 if tagger is not None:
                     # audio_np = audio_np.astype(np.float32) / 32768.0
-                    audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate)
+                    audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate, max_rms_db=-16.0, target_rms_db=-16.0)
                     audio_np = convert_audio_dtype(audio_np, "int16")
                     console.print(
                         f"[info]🎯 Attempting high-confidence speech extraction "
@@ -552,7 +552,7 @@ def _perform_speaker_labeling(
                             # seg_audio_int16 = (
                             #     np.clip(aud, -1.0, 1.0) * 32767.0
                             # ).astype(np.int16)
-                            aud, _ = normalize_audio_for_vad(aud, sample_rate)
+                            aud, _ = normalize_audio_for_vad(aud, sample_rate, max_rms_db=-16.0, target_rms_db=-16.0)
                             seg_audio_int16 = convert_audio_dtype(aud, "int16")
                             sub_segment_id = f"{segment_id}_sub{i}" if segment_id else None
                             
@@ -1431,7 +1431,7 @@ def perform_audio_tagging(
 
         # Convert to float32 for the tagger
         # audio_np = audio_np.astype(np.float32) / 32768.0
-        audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate)
+        audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate, max_rms_db=-16.0, target_rms_db=-16.0)
         audio_np = convert_audio_dtype(audio_np, "int16")
 
         console.print(
@@ -1588,7 +1588,7 @@ def save_segment_audio_for_playback(
         # else:
         #     audio_int16 = audio_np
         if audio_np.dtype != np.int16:
-            audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate)
+            audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate, max_rms_db=-16.0, target_rms_db=-16.0)
             audio_int16 = convert_audio_dtype(audio_np, "int16")
         else:
             audio_int16 = audio_np

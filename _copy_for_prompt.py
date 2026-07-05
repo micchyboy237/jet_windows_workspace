@@ -70,7 +70,11 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\speakers_metrics.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\segments_list.jinja",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\speaker_detail.jinja",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\segment_detail.jinja",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\speakers\metrics\segment_detail.jinja",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\norm_speech_loudness.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_info.py",
+    r"",
     r"",
 ]
 
@@ -94,11 +98,92 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-I want to improve the play / pause icon buttons from segment list and speaker detail Segments table by having a single reusable jinja component for this.
+Does current normalize_audio_for_vad have the ff options:
+- setting a max RMS amplitude, so that succeeding calls on the same audio have the same RMS Amplitude
 
-The improvement is how do I see the progress when the button as been played until it ends?
+1st normalize_audio_for_vad call
 
-You may check segment_detail.jinja for ideas but this is specific to circle icon button.
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Audio Analysis for VAD Debugging                                                                     │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                          Audio Metadata
+╭──────────────────────┬──────────────────────────────────────────╮
+│ Property             │ Value                                    │
+├──────────────────────┼──────────────────────────────────────────┤
+│ Source               │ NumPy array (shape: (80640,))            │
+│ Input Type           │ ndarray                                  │
+│ Data Type            │ int16                                    │
+│ Sample Rate          │ 16000 Hz                                 │
+│ Channels             │ 1                                        │
+│ Samples              │ 80,640                                   │
+│ Duration             │ 5.040s (0:05.04)                         │
+╰──────────────────────┴──────────────────────────────────────────╯
+                                  Signal Statistics
+╭───────────────────────────┬─────────────────────────────────────┬─────────────────╮
+│ Metric                    │ Value                               │ Status          │
+├───────────────────────────┼─────────────────────────────────────┼─────────────────┤
+│ RMS Amplitude             │ 6.3223 (16.0 dB)                    │ ⚠               │
+│ Peak Amplitude            │ 25734.0000 (88.2 dB)                │ ⚠ Clipping      │
+│ DC Offset                 │ -0.033011                           │ ⚠ Offset        │
+│ Normalized                │ No                                  │ ⚠               │
+│ Clipping                  │ Yes (100.0% samples)                │ ⚠               │
+│ Silence Ratio             │ 0.0%                                │ ✓               │
+│ Est. SNR                  │ N/A                                 │                 │
+╰───────────────────────────┴─────────────────────────────────────┴─────────────────╯
+
+╭────────────────────────────────────────────── Warnings ───────────────────────────────────────────────╮
+│ ⚠ High amplitude (RMS: 6.322)                                                                         │
+│ ⚠ Clipping detected (100.0% of samples)                                                               │
+│ ⚠ Significant DC offset (-0.0330)                                                                     │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────── Recommendations for VAD ───────────────────────────────────────╮
+│ → Clipping can degrade VAD accuracy - reduce input gain                                               │
+│ → Remove DC offset to improve signal quality                                                          │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+2nd normalize_audio_for_vad call, way higher RMS amplitude
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Audio Analysis for VAD Debugging                                                                     │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                          Audio Metadata
+╭──────────────────────┬──────────────────────────────────────────╮
+│ Property             │ Value                                    │
+├──────────────────────┼──────────────────────────────────────────┤
+│ Source               │ NumPy array (shape: (46560,))            │
+│ Input Type           │ ndarray                                  │
+│ Data Type            │ int16                                    │
+│ Sample Rate          │ 16000 Hz                                 │
+│ Channels             │ 1                                        │
+│ Samples              │ 46,560                                   │
+│ Duration             │ 2.910s (0:02.91)                         │
+╰──────────────────────┴──────────────────────────────────────────╯
+                                  Signal Statistics
+╭───────────────────────────┬─────────────────────────────────────┬─────────────────╮
+│ Metric                    │ Value                               │ Status          │
+├───────────────────────────┼─────────────────────────────────────┼─────────────────┤
+│ RMS Amplitude             │ 16.8114 (24.5 dB)                   │ ⚠               │
+│ Peak Amplitude            │ 22157.0000 (86.9 dB)                │ ⚠ Clipping      │
+│ DC Offset                 │ 0.004038                            │ ⚠ Offset        │
+│ Normalized                │ No                                  │ ⚠               │
+│ Clipping                  │ Yes (100.0% samples)                │ ⚠               │
+│ Silence Ratio             │ 0.0%                                │ ✓               │
+│ Est. SNR                  │ N/A                                 │                 │
+╰───────────────────────────┴─────────────────────────────────────┴─────────────────╯
+
+╭────────────────────────────────────────────── Warnings ───────────────────────────────────────────────╮
+│ ⚠ High amplitude (RMS: 16.811)                                                                        │
+│ ⚠ Clipping detected (100.0% of samples)                                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─────────────────────────────────────── Recommendations for VAD ───────────────────────────────────────╮
+│ → Clipping can degrade VAD accuracy - reduce input gain                                               │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

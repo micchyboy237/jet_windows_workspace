@@ -16,6 +16,7 @@ def normalize_audio_for_vad(
     method: str = "hybrid",
     target_rms_db: float = -20.0,
     max_peak: float = 0.95,
+    max_rms_db: Optional[float] = None,
     eps: float = 1e-8,
     min_signal_db: float = -60.0,
     remove_dc: bool = True,
@@ -39,6 +40,11 @@ def normalize_audio_for_vad(
                            'hybrid' – RMS target + peak ceiling (recommended).
         target_rms_db:   Desired RMS level in dBFS for 'rms' / 'hybrid'.
         max_peak:        Peak ceiling for 'hybrid' (0 < max_peak ≤ 1.0).
+        max_rms_db:      Optional maximum RMS level in dBFS. If the final RMS
+                         exceeds this value (e.g., after peak ceiling forces
+                         a high peak-to-RMS ratio), the signal is attenuated.
+                         This ensures consistent RMS across different audio
+                         clips. Default: None (no limit).
         eps:             Small constant to guard log/division of silent frames.
         min_signal_db:   Signals whose RMS is below this threshold are treated
                          as silent and returned unchanged (avoids boosting pure
@@ -50,50 +56,30 @@ def normalize_audio_for_vad(
         y_norm:  Normalized float32 audio array (same type as input).
         info:    Diagnostic dict with original/final statistics.
     """
-
-    # Track input type for return conversion
     is_torch = isinstance(y, torch.Tensor)
 
-    # ------------------------------------------------------------------ #
-    # 0. Empty-array guard                                                 #
-    # ------------------------------------------------------------------ #
     if len(y) == 0:
+        empty_info = {
+            "method": method,
+            "original_rms_db": -np.inf,
+            "final_rms_db": -np.inf,
+            "original_peak": 0.0,
+            "final_peak": 0.0,
+            "applied_gain_db": 0.0,
+            "skipped_reason": "empty_input",
+        }
         if is_torch:
-            return torch.tensor([], dtype=torch.float32), {
-                "method": method,
-                "original_rms_db": -np.inf,
-                "final_rms_db": -np.inf,
-                "original_peak": 0.0,
-                "final_peak": 0.0,
-                "applied_gain_db": 0.0,
-                "skipped_reason": "empty_input",
-            }
+            return torch.tensor([], dtype=torch.float32), empty_info
         else:
-            return y.astype(np.float32), {
-                "method": method,
-                "original_rms_db": -np.inf,
-                "final_rms_db": -np.inf,
-                "original_peak": 0.0,
-                "final_peak": 0.0,
-                "applied_gain_db": 0.0,
-                "skipped_reason": "empty_input",
-            }
+            return np.array([], dtype=np.float32), empty_info
 
-    # ------------------------------------------------------------------ #
-    # 1. Convert to float32                                                #
-    # ------------------------------------------------------------------ #
     if is_torch:
         y_norm = y.float().clone()
-        # Convert to numpy for librosa operations, then back
         y_numpy = y_norm.numpy()
     else:
         y_norm = y.astype(np.float32).copy()
         y_numpy = y_norm
 
-    # ------------------------------------------------------------------ #
-    # 2. DC offset removal (before any level measurement)                  #
-    #    Eliminates bias that inflates RMS and confuses energy-based VADs. #
-    # ------------------------------------------------------------------ #
     if remove_dc:
         if is_torch:
             y_norm -= torch.mean(y_norm)
@@ -102,20 +88,12 @@ def normalize_audio_for_vad(
             y_norm -= np.mean(y_norm)
             y_numpy = y_norm
 
-    # ------------------------------------------------------------------ #
-    # 3. Original statistics                                               #
-    # ------------------------------------------------------------------ #
-    original_rms = np.sqrt(np.mean(y_numpy**2) + eps)
+    original_rms = np.sqrt(np.mean(y_numpy**2))
     original_peak = float(np.max(np.abs(y_numpy)))
     original_rms_db = (
         float(20 * np.log10(original_rms)) if original_rms > eps else -np.inf
     )
 
-    # ------------------------------------------------------------------ #
-    # 4. Silence guard                                                     #
-    #    Very quiet signals (< min_signal_db) are mostly noise; boosting  #
-    #    them by 50+ dB would make the noise floor dominate the VAD.      #
-    # ------------------------------------------------------------------ #
     if original_rms_db < min_signal_db:
         info = {
             "method": method,
@@ -128,13 +106,8 @@ def normalize_audio_for_vad(
         }
         return y_norm, info
 
-    # ------------------------------------------------------------------ #
-    # 5. Normalization                                                     #
-    # ------------------------------------------------------------------ #
     if method == "peak":
-        # Scale so the loudest sample reaches ±1.0.
         if is_torch:
-            # Manual peak normalization for torch
             max_abs = torch.max(torch.abs(y_norm))
             if max_abs > 0:
                 y_norm = y_norm / max_abs
@@ -142,26 +115,19 @@ def normalize_audio_for_vad(
         else:
             y_norm = librosa.util.normalize(y_norm, norm=np.inf)
             y_numpy = y_norm
-
-        # Re-measure: all-zeros edge case yields 0.0, not 1.0.
         final_peak = float(np.max(np.abs(y_numpy)))
 
     elif method in ("rms", "hybrid"):
         target_rms = 10 ** (target_rms_db / 20.0)
         scale = target_rms / (original_rms + eps)
-
         if is_torch:
             y_norm *= scale
             y_numpy = y_norm.numpy()
         else:
             y_norm *= scale
             y_numpy = y_norm
-
-        # Post-scale peak (this is the true current peak, not pre-scale).
         current_peak = float(np.max(np.abs(y_numpy)))
-
         if method == "hybrid" and current_peak > max_peak:
-            # current_peak > max_peak > 0, so division is safe without eps.
             if is_torch:
                 y_norm *= max_peak / current_peak
                 y_numpy = y_norm.numpy()
@@ -170,17 +136,35 @@ def normalize_audio_for_vad(
                 y_numpy = y_norm
             final_peak = max_peak
         else:
-            # 'rms' method, or 'hybrid' where peak is already within limit.
             final_peak = current_peak
 
+        # Apply max RMS ceiling if specified
+        if max_rms_db is not None:
+            current_rms = np.sqrt(np.mean(y_numpy**2) + eps)
+            current_rms_db = float(20 * np.log10(current_rms))
+            if current_rms_db > max_rms_db:
+                reduction_db = current_rms_db - max_rms_db
+                reduction_linear = 10 ** (-reduction_db / 20.0)
+                logger.debug(
+                    "Applying max RMS ceiling: current=%.2f dBFS -> target=%.2f dBFS "
+                    "(reduction=%.2f dB)",
+                    current_rms_db,
+                    max_rms_db,
+                    reduction_db,
+                )
+                if is_torch:
+                    y_norm *= reduction_linear
+                    y_numpy = y_norm.numpy()
+                else:
+                    y_norm *= reduction_linear
+                    y_numpy = y_norm
+                # Recalculate peak after RMS attenuation
+                final_peak = float(np.max(np.abs(y_numpy)))
     else:
         raise ValueError(
             f"Unknown method: '{method}'. Choose from 'peak', 'rms', or 'hybrid'."
         )
 
-    # ------------------------------------------------------------------ #
-    # 6. Final statistics                                                  #
-    # ------------------------------------------------------------------ #
     final_rms = np.sqrt(np.mean(y_numpy**2) + eps)
     final_rms_db = float(20 * np.log10(final_rms))
 
@@ -192,7 +176,6 @@ def normalize_audio_for_vad(
         "final_peak": round(final_peak, 4),
         "applied_gain_db": round(final_rms_db - original_rms_db, 2),
         "skipped_reason": None,
-        # sr preserved for downstream traceability
         "sr": sr,
     }
 
