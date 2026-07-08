@@ -111,6 +111,9 @@ $categories = @(
             @{ Num=4; Size="Small";  Name="Llama-3.2-3B uncensored"; Alias="llama-3.2-uncensored:3b";   File="nsfw\Llama-3.2-3B-Instruct-uncensored-Q4_K_M.gguf";                  Ctx=8192; Gpu=999; Jinja=$true;  Desc="Loosened 3B" }
             @{ Num=5; Size="Small";  Name="Impish_LLAMA_4B"; Alias="impish-llama:4b";                   File="nsfw\SicariusSicariiStuff_Impish_LLAMA_4B-Q4_K_M.gguf";              Ctx=8192; Gpu=999; Jinja=$true;  Desc="Spicy 4B variant" }
             @{ Num=6; Size="Medium"; Name="WizardLM-7B uncensored"; Alias="wizardlm-uncensored:7b";     File="nsfw\WizardLM-7B-uncensored.Q4_K_M.gguf";                             Ctx=8192; Gpu=40;  Jinja=$true;  Desc="Classic uncensored 7B" }
+            @{ Num=7; Size="Tiny";   Name="Gemma3-UNCENSORED-1B";              Alias="gemma3-uncensored:1b";        File="nsfw\Gemma3-UNCENSORED-1B.Q4_K_M.gguf";                              Ctx=8192;  Gpu=999; Jinja=$true; Desc="Blazing fast 1B, text-only"; Extra="--temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0" }
+            @{ Num=8; Size="Small";  Name="Qwen3.5-2B-Uncensored (HauhauCS)";  Alias="qwen3.5-uncensored:2b";       File="nsfw\Qwen3.5-2B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf";         Ctx=8192;  Gpu=999; Jinja=$true; Desc="~0 refusals, near-lossless 2B" }
+            @{ Num=9; Size="Small";  Name="Qwen3.5-4B-Uncensored (HauhauCS)";  Alias="qwen3.5-uncensored:4b";       File="nsfw\Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf";         Ctx=12288; Gpu=999; Jinja=$true; Desc="~0 refusals, near-lossless 4B" }
         )
     }
 )

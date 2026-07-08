@@ -106,15 +106,27 @@ If the audio's original dbfs exceeds target, it will be reduced to match target 
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
 General:
+
 - Browse when beneficial or requested.
-- Keep explanations simple and clear.
+- Always use easy to understand terms.
+- Dont use memory from previous artifacts.
+
+My device:
+
+- Mac M1 for coding work
+- Windows 11 for local servers with below specs:
+  - CPU: AMD Ryzen 5 3600
+  - GPU: GTX 1660
+  - RAM: 16GB dual sticks
 
 When coding:
+
 - Provide step-by-step analysis and explain the flow.
 - Use visuals, diagrams, or tables when helpful.
 - For new files, classes, methods, or functions: show the full code.
 - For updates to existing files: show only the changed sections with context. Never output the full file unless it's small.
 - Write smart, flexible, reusable, maintainable, optimal, robust, and minimal code.
+- Ask for clarifications before giving detailed answers if needed.
 - Always add logs for traceability and verification.
 """.strip()
 
@@ -269,6 +281,14 @@ def main():
         default=False,
         help="Enable compression of the clipboard content before copying (default: False)",
     )
+    parser.add_argument(
+        "-q",
+        "--query-only",
+        action="store_true",
+        default=False,
+        help="Include only the query message and files, omitting system and instructions",
+    )
+
     args = parser.parse_args()
     base_dir = args.base_dir
     include = args.include_files
@@ -283,6 +303,8 @@ def main():
     filenames_only = args.filenames_only
     show_file_length = not args.no_length
     compress_enabled = args.compress
+    query_only = args.query_only
+
     # Find all files matching the patterns in the base directory and its subdirectories
     print("\n")
     context_files = find_files(
@@ -348,14 +370,18 @@ def main():
         shorten_funcs=shorten_funcs,
         show_file_length=show_file_length,
     )
-    # Prepend system and query to the clipboard content then append instructions
+    # Build the clipboard content parts
     clipboard_content_parts = []
-    if system_message:
-        clipboard_content_parts.append(f"<system>\n{system_message}\n</system>")
+    if not query_only:
+        if system_message:
+            clipboard_content_parts.append(f"<system>\n{system_message}\n</system>")
     # Query should come before instructions
     clipboard_content_parts.append(f"<query>\n{query_message}\n</query>")
-    if instructions_message:
-        clipboard_content_parts.append(f"<instructions>\n{instructions_message}\n</instructions>")
+    if not query_only:
+        if instructions_message:
+            clipboard_content_parts.append(
+                f"<instructions>\n{instructions_message}\n</instructions>"
+            )
     if INCLUDE_FILE_STRUCTURE:
         clipboard_content_parts.append(f"Files Structure\n{files_structure}\n")
     if clipboard_content:
