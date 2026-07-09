@@ -1,16 +1,49 @@
-# Jet_Windows_Workspace/python_scripts/powershell/Start-LlamaServer-Llm.ps1
+<#
+Start-Llama-Server.ps1
+
+.SYNOPSIS
+    Interactive menu launcher for llama.cpp servers with pre-configured models.
+
+.EXAMPLES
+    # Basic launch with default port 8080, 8 threads, foreground (blocking)
+    .\Start-Llama-Server.ps1
+
+    # Custom port and thread count
+    .\Start-Llama-Server.ps1 -Port 9090 -Threads 4
+
+    # Launch in background (allows running multiple models simultaneously)
+    .\Start-Llama-Server.ps1 -Background
+
+    # Combined: custom port + threads + background
+    .\Start-Llama-Server.ps1 -Port 8080 -Threads 3 -Background
+
+    # Using aliases (shorter)
+    .\Start-Llama-Server.ps1 -p 8080 -t 2 -bg
+
+.DESCRIPTION
+    Presents a categorized menu of pre-configured GGUF models. Builds and launches
+    llama-server.exe with appropriate flags for each model type (chat, embedding,
+    reranker, vision/multimodal, translation).
+#>
 
 [CmdletBinding()]
 param(
     [Alias("p")]
     [Parameter(HelpMessage = "Port for llama-server to listen on (default: 8080)")]
     [ValidateRange(1, 65535)]
-    [int]$Port = 8080
-)
+    [int]$Port = 8080,
 
+    [Alias("t")]
+    [Parameter(HelpMessage = "CPU threads per instance (default: 4). Best for 2-3 models on Ryzen 5 3600")]
+    [ValidateRange(1, 32)]
+    [int]$Threads = 4,
+
+    [Alias("bg")]
+    [Parameter(HelpMessage = "Launch each server in its own background window instead of blocking, so you can return to this menu and start another model (e.g. LLM + embedding + reranker together)")]
+    [switch]$Background
+)
 Write-Host "`n  Llama.cpp Server Launcher  " -BackgroundColor DarkCyan -ForegroundColor Black
 Write-Host "  Ryzen 5 3600 • GTX 1660 6GB • 16 GB RAM`n" -ForegroundColor DarkGray
-
 function Show-Menu {
     param (
         [string]$Title,
@@ -27,9 +60,7 @@ function Show-Menu {
     $choice = Read-Host "$Prompt (1-$($Options.Count)) or 0 to go back"
     return $choice
 }
-
 $BaseModelDir = "C:\Users\druiv\.cache\llama.cpp"
-
 $categories = @(
     @{
         Name = "General Purpose / Chat"
@@ -44,12 +75,10 @@ $categories = @(
             @{ Num=8;  Size="Medium"; Name="Mistral-Nemo-Instruct-2407";  Alias="mistral-nemo:12b-ish";       File="Mistral-Nemo-Instruct-2407-Q4_K_M.gguf";               Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Excellent quality" }
             @{ Num=9;  Size="Medium"; Name="DeepSeek-R1-Distill-Qwen-7B"; Alias="deepseek-r1:7b";             File="DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf";              Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Strong reasoning distill" }
             @{ Num=10; Size="Medium"; Name="Meta-Llama-3.1-8B-Instruct";  Alias="llama-3.1:8b";               File="Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf";               Ctx=8192; Gpu=35;  Jinja=$true;  Desc="Classic capable 8B" }
-
             # --- Qwen3.5 Series ---
             @{ Num=11; Size="Tiny";   Name="Qwen3.5-0.8B-Instruct";  Alias="qwen3.5:0.8b"; File="Qwen3.5-0.8B-Q4_K_M.gguf"; Ctx=8192;  Gpu=999; Jinja=$true; Desc="Ultra fast tiny model" }
             @{ Num=12; Size="Small";  Name="Qwen3.5-2B-Instruct";    Alias="qwen3.5:2b";   File="Qwen3.5-2B-Q4_K_M.gguf";   Ctx=8192;  Gpu=999; Jinja=$true; Desc="Fast + good quality small model" }
             @{ Num=13; Size="Small";  Name="Qwen3.5-4B-Instruct";    Alias="qwen3.5:4b";   File="Qwen3.5-4B-Q4_K_M.gguf";   Ctx=12288; Gpu=999; Jinja=$true; Desc="Strong latest 4B Qwen" }
-
             # --- Ministral ---
             @{ Num=14; Size="Small";  Name="Ministral-3B-Instruct";  Alias="ministral:3b"; File="Ministral-3b-instruct.Q4_K_M.gguf"; Ctx=8192; Gpu=999; Jinja=$true; Desc="Mistral-style compact reasoning model" }
         )
@@ -83,10 +112,21 @@ $categories = @(
     @{
         Name = "Embeddings / RAG"
         Items = @(
-            @{ Num=1; Size="Small";  Name="nomic-embed-text-v1.5"; Alias="nomic-embed:1.5";         File="embed_models\nomic-embed-text-v1.5.Q4_K_M.gguf";                 Ctx=8192; Gpu=999; Jinja=$false; Desc="Very strong embedding" }
-            @{ Num=2; Size="Small";  Name="nomic-embed-text-v2-moe"; Alias="nomic-embed:2-moe";     File="embed_models\nomic-embed-text-v2-moe.Q4_K_M.gguf";               Ctx=8192; Gpu=999; Jinja=$false; Desc="Latest Nomic MoE" }
-            @{ Num=3; Size="Small";  Name="all-MiniLM-L12-v2 (q4)"; Alias="all-minilm:l12-q4";      File="embed_models\all-MiniLM-L12-v2-q4_0.gguf";                        Ctx=8192; Gpu=999; Jinja=$false; Desc="Classic fast compact" }
-            @{ Num=4; Size="Tiny";   Name="embedding-gemma-300M"; Alias="embedding-gemma:300m";     File="embed_models\embeddinggemma-300M-Q8_0.gguf";                      Ctx=8192; Gpu=999; Jinja=$false; Desc="Gemma-based embedding" }
+            @{ Num=1; Size="Small";  Name="nomic-embed-text-v1.5"; Alias="nomic-embed:1.5";         File="embed_models\nomic-embed-text-v1.5.Q4_K_M.gguf";                 Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Desc="Very strong embedding" }
+            @{ Num=2; Size="Small";  Name="nomic-embed-text-v2-moe"; Alias="nomic-embed:2-moe";     File="embed_models\nomic-embed-text-v2-moe.Q4_K_M.gguf";               Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Desc="Latest Nomic MoE" }
+            @{ Num=3; Size="Small";  Name="all-MiniLM-L12-v2 (q4)"; Alias="all-minilm:l12-q4";      File="embed_models\all-MiniLM-L12-v2-q4_0.gguf";                        Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Desc="Classic fast compact" }
+            @{ Num=4; Size="Tiny";   Name="embedding-gemma-300M"; Alias="embedding-gemma:300m";     File="embed_models\embeddinggemma-300M-Q8_0.gguf";                      Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Desc="Gemma-based embedding" }
+            @{ Num=5; Size="Medium"; Name="Qwen3-Embedding-4B (Q5_0)";    Alias="qwen3-embed:4b-q5_0"; File="embed_models\Qwen3-Embedding-4B-Q5_0.gguf";    Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="last"; FlashAttn="auto"; Desc="4B, 32K native ctx, top MTEB score (~2.8GB)" }
+            @{ Num=6; Size="Tiny";   Name="Qwen3-Embedding-0.6B"; Alias="qwen3-embed:0.6b"; File="embed_models\Qwen3-Embedding-0.6B-Q8_0.gguf"; Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="last"; FlashAttn="auto"; Desc="MTEB 64.33 (~5pt below 4B), ~640MB, best pick for running alongside a chat model" }
+        )
+    },
+    @{
+        Name = "Rerankers"
+        Items = @(
+            @{ Num=1; Size="Small"; Name="bge-reranker-v2-m3"; Alias="bge-rerank:v2-m3";  File="rerankers\bge-reranker-v2-m3-Q4_K_M.gguf";  Ctx=1024; Gpu=999; Jinja=$false; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Desc="568M multilingual, best all-round reranker" }
+            @{ Num=2; Size="Small"; Name="bge-reranker-large"; Alias="bge-rerank:large";  File="rerankers\bge-reranker-large-q4_k_m.gguf";  Ctx=512;  Gpu=999; Jinja=$false; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Desc="560M, 512-token hard limit" }
+            @{ Num=3; Size="Medium"; Name="Qwen3-Reranker-4B"; Alias="qwen3-rerank:4b"; File="rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf"; Ctx=4096; Gpu=999; Jinja=$false; Embedding=$true; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Desc="4B decoder-based, stronger/multilingual, needs verified GGUF (cls.output.weight)" }
+            @{ Num=4; Size="Tiny";   Name="Qwen3-Reranker-0.6B"; Alias="qwen3-rerank:0.6b"; File="rerankers\Qwen3-Reranker-0.6B-q4_k_m.gguf"; Ctx=2048; Gpu=999; Jinja=$false; Embedding=$true; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Desc="MTEB-R 65.80 (~4pt below 4B), ~640MB, best pick for running alongside a chat model" }
         )
     },
     @{
@@ -117,50 +157,40 @@ $categories = @(
         )
     }
 )
-
 while ($true) {
     $catOptions = $categories | ForEach-Object { $_.Name }
     $catOptions += "Exit"
     $catChoice = Show-Menu -Title "MAIN CATEGORIES" -Options $catOptions -Prompt "Choose category"
-    
     if ($catChoice -eq "0" -or $catChoice -eq "Exit") {
         Write-Host "`nGoodbye!`n" -ForegroundColor Cyan
         exit 0
     }
-    
     if (![int]::TryParse($catChoice, [ref]$null) -or $catChoice -lt 1 -or $catChoice -gt $categories.Count) {
         Write-Host "Invalid category selection." -ForegroundColor Red
         continue
     }
-
     $selectedCategory = $categories[$catChoice - 1]
     $modelOptions = $selectedCategory.Items | ForEach-Object {
         "{0,6} {1,-36} {2}" -f $_.Size, $_.Name, $_.Desc
     }
-
     $modelChoice = Show-Menu -Title $selectedCategory.Name -Options $modelOptions -Prompt "Select model"
     if ($modelChoice -eq "0") { continue }
-
     $model = $selectedCategory.Items | Where-Object { $_.Num -eq [int]$modelChoice } | Select-Object -First 1
     if (-not $model) {
         Write-Host "Invalid model selection." -ForegroundColor Red
         continue
     }
-
     # Improved path handling for long/folded filenames
     $modelPath = Join-Path $BaseModelDir $model.File
-
     if (-Not (Test-Path $modelPath)) {
         $found = Get-ChildItem -Path $BaseModelDir -Recurse -File -Filter "*.gguf" -ErrorAction SilentlyContinue |
                  Where-Object { $_.Name -eq $model.File -or $_.Name -like "*$($model.File -replace '\.gguf','')*" } |
                  Select-Object -First 1 -ExpandProperty FullName
-        
         if ($found) {
             $modelPath = $found
             Write-Host "  Found model at: $modelPath" -ForegroundColor Yellow
         }
     }
-
     if (-Not (Test-Path $modelPath)) {
         Write-Host "`nModel file not found!" -ForegroundColor Red
         Write-Host "  Expected : $modelPath" -ForegroundColor DarkGray
@@ -168,16 +198,16 @@ while ($true) {
         pause
         continue
     }
-
     # Build command
+    $flashAttnMode = if ($model.FlashAttn) { $model.FlashAttn } else { "on" }
     $cmd = "llama-server.exe " +
            "-m `"$modelPath`" " +
            "--host 0.0.0.0 --port $Port " +
            "--ctx-size $($model.Ctx) " +
            "--n-gpu-layers $($model.Gpu) " +
-           "--flash-attn on " +
+           "--flash-attn $flashAttnMode " +
            "--cache-type-k q8_0 --cache-type-v q8_0 " +
-           "--threads 8 --threads-batch 8 " +
+           "--threads $Threads --threads-batch $Threads " +
            "--mlock --no-mmap " +
            "--cont-batching " +
            "--log-file `"C:\Users\druiv\.cache\logs\llama.cpp\llm_logs`" " +
@@ -185,11 +215,14 @@ while ($true) {
            "--log-timestamps " +
            "--log-prefix " +
            "--verbose "
-
     if ($model.Jinja) { $cmd += "--jinja " }
-
-    $cmd += "--temp 0.75 --min-p 0.05 --top-k 40 --top-p 0.92 "
-
+    # Embedding / reranker models don't generate tokens, so sampling flags don't apply to them
+    if ($model.Embedding) { $cmd += "--embedding " }
+    if ($model.Rerank) { $cmd += "--rerank " }
+    if ($model.Pooling) { $cmd += "--pooling $($model.Pooling) " }
+    if (-not $model.Embedding -and -not $model.Rerank) {
+        $cmd += "--temp 0.75 --min-p 0.05 --top-k 40 --top-p 0.92 "
+    }
     # Multimodal
     if ($model.MmprojFile) {
         $mmprojPath = Join-Path $BaseModelDir $model.MmprojFile
@@ -199,9 +232,7 @@ while ($true) {
             Write-Host "  Warning: mmproj not found → vision disabled" -ForegroundColor Yellow
         }
     }
-
     if ($model.Extra) { $cmd += "$($model.Extra) " }
-
     # Summary
     Write-Host "`n  Starting server with:" -ForegroundColor Green
     Write-Host "  Model    : " -NoNewline; Write-Host $model.Name -ForegroundColor White
@@ -209,17 +240,22 @@ while ($true) {
     Write-Host "  Context  : " -NoNewline; Write-Host "$($model.Ctx) tokens" -ForegroundColor Yellow
     Write-Host "  GPU      : " -NoNewline; Write-Host "$($model.Gpu) layers" -ForegroundColor Magenta
     Write-Host "  Port     : " -NoNewline; Write-Host $Port -ForegroundColor Cyan
-
+    $modeLabel = if ($model.Rerank) { "Rerank" } elseif ($model.Embedding) { "Embedding" } else { "Chat" }
+    Write-Host "  Mode     : " -NoNewline; Write-Host $modeLabel -ForegroundColor Green
     Write-Host "`nCommand:" -ForegroundColor DarkGray
     Write-Host $cmd -ForegroundColor DarkGray
     Write-Host ""
-
     $confirm = Read-Host "Launch now? [Y/n]"
     if ($confirm -notin '', 'y', 'Y') { continue }
-
+    if ($Background) {
+        Write-Host "`nLaunching in background window on port $Port ...`n" -ForegroundColor Cyan
+        Start-Process powershell -ArgumentList "-NoExit", "-Command", $cmd | Out-Null
+        Write-Host "Started. Pick another model to run alongside it (port will auto-increment), or choose Exit when done." -ForegroundColor Green
+        $Port++
+        continue
+    }
     Write-Host "`nStarting llama-server ...`n" -ForegroundColor Cyan
     Invoke-Expression $cmd
-
     Write-Host "`nServer session ended. Press Enter to return to menu..." -ForegroundColor Cyan
     Read-Host
 }

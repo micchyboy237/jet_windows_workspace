@@ -2,6 +2,7 @@
 # CONFIGURATION
 # =========================
 $SSID = "estradadeco"
+# $SSID = "GlobeAtHome_cfa70_2.4"
 $LogFile = Join-Path $PSScriptRoot "wifi_reconnect.log"
 $CheckIntervalSeconds = 10
 

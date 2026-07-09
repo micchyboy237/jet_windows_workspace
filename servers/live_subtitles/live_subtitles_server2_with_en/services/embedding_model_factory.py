@@ -92,29 +92,29 @@ class EmbeddingThresholdProvider:
     """
 
     _THRESHOLDS: Dict[EmbeddingModelType, EmbeddingThresholds] = {
+        EmbeddingModelType.MODELSCOPE_ERES2NETV2: EmbeddingThresholds(
+            same=0.60,          # was 0.70 — intra=0.64, so 0.60 is reasonable
+            possible=0.45,      # was 0.55 — inter=0.27, possible should be ~0.45
+            new_speaker=0.30,   # was 0.35
+            promotion=0.50,     # was 0.55 — midpoint of possible→same
+        ),
         EmbeddingModelType.PYANNOTE: EmbeddingThresholds(
-            same=0.75,
-            possible=0.50,
-            new_speaker=0.30,
-            promotion=0.55,
+            same=0.22,          # was 0.75 — intra=0.274, this matches reality
+            possible=0.16,      # was 0.50 — inter=0.108, possible midpoint
+            new_speaker=0.10,   # was 0.30 — below inter-speaker noise floor
+            promotion=0.18,     # was 0.55 — between possible and same
         ),
         EmbeddingModelType.SPEECHBRAIN_ECAPA: EmbeddingThresholds(
-            same=0.65,
-            possible=0.40,
-            new_speaker=0.25,
-            promotion=0.55,
+            same=0.28,          # was 0.65 — intra=0.32, so 0.28 is realistic
+            possible=0.20,      # was 0.40 — inter=0.14, possible at 0.20
+            new_speaker=0.12,   # was 0.25
+            promotion=0.24,     # was 0.55 — midpoint of possible→same
         ),
         EmbeddingModelType.NEMO_TITANET: EmbeddingThresholds(
-            same=0.70,
-            possible=0.45,
-            new_speaker=0.25,
-            promotion=0.55,
-        ),
-        EmbeddingModelType.MODELSCOPE_ERES2NETV2: EmbeddingThresholds(
-            same=0.70,
-            possible=0.55,
-            new_speaker=0.35,
-            promotion=0.55,
+            same=0.55,          # was 0.70 — intra=0.62, 0.55 is conservative
+            possible=0.35,      # was 0.45 — inter=0.20, possible at 0.35
+            new_speaker=0.20,   # was 0.25
+            promotion=0.45,     # was 0.55 — midpoint of possible→same
         ),
     }
 
