@@ -53,6 +53,7 @@ from services.audio_tagger import (
 from services.audio_utils import get_audio_duration
 from services.audio_config import SAMPLE_RATE
 from services.norm_speech_loudness import normalize_audio_for_vad
+from services.quant import quantize_audio
 from services.dtype_conversion import convert_audio_dtype
 from services.audio_info import display_audio_info
 
@@ -498,8 +499,18 @@ def _perform_speaker_labeling(
                 tagger = get_audio_tagger()
                 if tagger is not None:
                     # audio_np = audio_np.astype(np.float32) / 32768.0
-                    audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate, max_peak_db="standard")
-                    audio_np = convert_audio_dtype(audio_np, "int16")
+
+                    # audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate, max_peak_db="standard")
+                    # audio_np = convert_audio_dtype(audio_np, "int16")
+
+                    audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate)
+                    audio_np, _ = quantize_audio(
+                        audio_np,
+                        target_dtype="int16",
+                        sr=sample_rate,
+                        verbose=False,
+                    )
+
                     console.print(
                         f"[info]🎯 Attempting high-confidence speech extraction "
                         f"(audio: {segment_duration:.2f}s, "
@@ -554,8 +565,18 @@ def _perform_speaker_labeling(
                             # seg_audio_int16 = (
                             #     np.clip(aud, -1.0, 1.0) * 32767.0
                             # ).astype(np.int16)
-                            aud, _ = normalize_audio_for_vad(aud, sample_rate, max_peak_db="standard")
-                            seg_audio_int16 = convert_audio_dtype(aud, "int16")
+
+                            # aud, _ = normalize_audio_for_vad(aud, sample_rate, max_peak_db="standard")
+                            # seg_audio_int16 = convert_audio_dtype(aud, "int16")
+
+                            aud, _ = normalize_audio_for_vad(aud, sample_rate)
+                            seg_audio_int16, _ = quantize_audio(
+                                aud,
+                                target_dtype="int16",
+                                sr=sample_rate,
+                                verbose=False,
+                            )
+
                             sub_segment_id = f"{segment_id}_sub{i}" if segment_id else None
                             
                             # Save sub-segment audio (truncated version for playback accuracy)
@@ -1433,8 +1454,17 @@ def perform_audio_tagging(
 
         # Convert to float32 for the tagger
         # audio_np = audio_np.astype(np.float32) / 32768.0
-        audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate, max_peak_db="standard")
-        audio_np = convert_audio_dtype(audio_np, "int16")
+
+        # audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate, max_peak_db="standard")
+        # audio_np = convert_audio_dtype(audio_np, "int16")
+
+        audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate)
+        audio_np, _ = quantize_audio(
+            audio_np,
+            target_dtype="int16",
+            sr=sample_rate,
+            verbose=False,
+        )
 
         console.print(
             f"[info]Using chunked processing "
@@ -1590,8 +1620,15 @@ def save_segment_audio_for_playback(
         # else:
         #     audio_int16 = audio_np
         if audio_np.dtype != np.int16:
-            audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate, max_peak_db="standard")
-            audio_int16 = convert_audio_dtype(audio_np, "int16")
+            # audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate, max_peak_db="standard")
+            # audio_int16 = convert_audio_dtype(audio_np, "int16")
+            audio_np, _ = normalize_audio_for_vad(audio_np, sample_rate)
+            audio_int16, _ = quantize_audio(
+                audio_np,
+                target_dtype="int16",
+                sr=sample_rate,
+                verbose=False,
+            )
         else:
             audio_int16 = audio_np
         

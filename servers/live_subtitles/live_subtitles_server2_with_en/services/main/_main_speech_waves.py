@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any, Union
 from audio_utils import load_audio
 from audio_config import SAMPLE_RATE
+from audio_info import display_audio_info
 from norm_speech_loudness import normalize_audio_for_vad
+from quant import quantize_audio
 from rich.console import Console
 from rich.table import Table, box
 from speech_waves import (
@@ -220,9 +222,19 @@ def main():
     console.print(f"[dim]Loaded audio: shape={audio_np.shape}, sr={sr}[/dim]")
 
     if args.normalize:
-        audio_np_norm, vad_stats = normalize_audio_for_vad(audio_np, sr)
-        audio_np = audio_np_norm
+        # audio_np_norm, vad_stats = normalize_audio_for_vad(audio_np, sr)
+        # audio_np = audio_np_norm
+
+        audio_np, vad_stats = normalize_audio_for_vad(audio_np, sr)
+        audio_np, _ = quantize_audio(
+            audio_np,
+            target_dtype="int16",
+            sr=SAMPLE_RATE,
+            verbose=False,
+        )
         console.print(f"[dim]Audio normalized. VAD stats: {vad_stats}[/dim]")
+
+    display_audio_info(audio_np)
 
     segments, scores = extract_speech_timestamps(
         audio=audio_np,
@@ -279,26 +291,34 @@ def main():
         box=box.ROUNDED,
         show_lines=False,
         header_style="bold cyan",
+        expand=True,  # Allow table to expand if possible
+        width=None,   # Auto-width
     )
-    table.add_column("#", style="dim", justify="right", no_wrap=True)
-    table.add_column("Dir", style="cyan", justify="left", no_wrap=True)
-    table.add_column("Start (s)", style="white", justify="right", no_wrap=True)
-    table.add_column("End (s)", style="white", justify="right", no_wrap=True)
-    table.add_column("Dur (s)", style="yellow", justify="right", no_wrap=True)
-    table.add_column("Prominence", style="magenta", justify="right", no_wrap=True)
-    table.add_column("Excursion", style="magenta", justify="right", no_wrap=True)
-    table.add_column("Composite", style="bright_cyan", justify="right", no_wrap=True)
-    table.add_column("Baseline", style="blue", justify="right", no_wrap=True)
-    table.add_column("Peak prob", style="green", justify="right", no_wrap=True)
-    table.add_column("Sound", style="bright_black", justify="left")
-
+    table.add_column("#", style="dim", justify="right", no_wrap=True, width=4)
+    table.add_column("Dir", style="cyan", justify="left", no_wrap=True, width=24)
+    table.add_column("Start", style="white", justify="right", no_wrap=True, width=7)
+    table.add_column("End", style="white", justify="right", no_wrap=True, width=7)
+    table.add_column("Dur", style="yellow", justify="right", no_wrap=True, width=7)
+    table.add_column("Prom.", style="magenta", justify="right", no_wrap=True, width=7)
+    table.add_column("Exc.", style="magenta", justify="right", no_wrap=True, width=7)
+    table.add_column("Comp.", style="bright_cyan", justify="right", no_wrap=True, width=8)
+    table.add_column("Base.", style="blue", justify="right", no_wrap=True, width=7)
+    table.add_column("Peak", style="green", justify="right", no_wrap=True, width=7)
+    table.add_column("▶️", style="bright_black", justify="center", no_wrap=True, width=6)
+    
     top5_dirs = {w["dir"] for w in top5}
     for r in rows:
         is_top5 = r["dir"] in top5_dirs
         row_style = "bold" if is_top5 else ""
         star = "★ " if is_top5 else "  "
-        dir_cell = f"[link=file://{r['plot_path']}]{r['dir']}[/link]"
+        
+        # Extract folder path from plot_path (remove the filename)
+        wave_folder = str(Path(r["plot_path"]).parent)
+        dir_cell = f"[link=file://{wave_folder}]{r['dir']}[/link]"
+        
+        # Create play button that will open the audio file
         sound_cell = f"[link=file://{r['sound_path']}]▶️[/link]"
+        
         table.add_row(
             f"{star}{r['wave']}",
             dir_cell,

@@ -112,21 +112,21 @@ $categories = @(
     @{
         Name = "Embeddings / RAG"
         Items = @(
-            @{ Num=1; Size="Small";  Name="nomic-embed-text-v1.5"; Alias="nomic-embed:1.5";         File="embed_models\nomic-embed-text-v1.5.Q4_K_M.gguf";                 Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Desc="Very strong embedding" }
-            @{ Num=2; Size="Small";  Name="nomic-embed-text-v2-moe"; Alias="nomic-embed:2-moe";     File="embed_models\nomic-embed-text-v2-moe.Q4_K_M.gguf";               Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Desc="Latest Nomic MoE" }
-            @{ Num=3; Size="Small";  Name="all-MiniLM-L12-v2 (q4)"; Alias="all-minilm:l12-q4";      File="embed_models\all-MiniLM-L12-v2-q4_0.gguf";                        Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Desc="Classic fast compact" }
-            @{ Num=4; Size="Tiny";   Name="embedding-gemma-300M"; Alias="embedding-gemma:300m";     File="embed_models\embeddinggemma-300M-Q8_0.gguf";                      Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Desc="Gemma-based embedding" }
-            @{ Num=5; Size="Medium"; Name="Qwen3-Embedding-4B (Q5_0)";    Alias="qwen3-embed:4b-q5_0"; File="embed_models\Qwen3-Embedding-4B-Q5_0.gguf";    Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="last"; FlashAttn="auto"; Desc="4B, 32K native ctx, top MTEB score (~2.8GB)" }
-            @{ Num=6; Size="Tiny";   Name="Qwen3-Embedding-0.6B"; Alias="qwen3-embed:0.6b"; File="embed_models\Qwen3-Embedding-0.6B-Q8_0.gguf"; Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="last"; FlashAttn="auto"; Desc="MTEB 64.33 (~5pt below 4B), ~640MB, best pick for running alongside a chat model" }
+            @{ Num=1; Size="Small";  Name="nomic-embed-text-v1.5"; Alias="nomic-embed:1.5";         File="embed_models\nomic-embed-text-v1.5.Q4_K_M.gguf";                 Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Batch=2048; UBatch=2048; Desc="Very strong embedding" }
+            @{ Num=2; Size="Small";  Name="nomic-embed-text-v2-moe"; Alias="nomic-embed:2-moe";     File="embed_models\nomic-embed-text-v2-moe.Q4_K_M.gguf";               Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Batch=2048; UBatch=2048; Desc="Latest Nomic MoE" }
+            @{ Num=3; Size="Small";  Name="all-MiniLM-L12-v2 (q4)"; Alias="all-minilm:l12-q4";      File="embed_models\all-MiniLM-L12-v2-q4_0.gguf";                        Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Batch=2048; UBatch=2048; Desc="Classic fast compact" }
+            @{ Num=4; Size="Tiny";   Name="embedding-gemma-300M"; Alias="embedding-gemma:300m";     File="embed_models\embeddinggemma-300M-Q8_0.gguf";                      Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="mean"; Batch=2048; UBatch=2048; Desc="Gemma-based embedding" }
+            @{ Num=5; Size="Medium"; Name="Qwen3-Embedding-4B (Q5_0)";    Alias="qwen3-embed:4b-q5_0"; File="embed_models\Qwen3-Embedding-4B-Q5_0.gguf";    Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="last"; FlashAttn="auto"; Batch=2048; UBatch=2048; Desc="4B, 32K native ctx, top MTEB score (~2.8GB)" }
+            @{ Num=6; Size="Tiny";   Name="Qwen3-Embedding-0.6B"; Alias="qwen3-embed:0.6b"; File="embed_models\Qwen3-Embedding-0.6B-Q8_0.gguf"; Ctx=8192; Gpu=999; Jinja=$false; Embedding=$true; Pooling="last"; FlashAttn="auto"; Batch=2048; UBatch=2048; Desc="MTEB 64.33 (~5pt below 4B), ~640MB, best pick for running alongside a chat model" }
         )
     },
     @{
         Name = "Rerankers"
         Items = @(
-            @{ Num=1; Size="Small"; Name="bge-reranker-v2-m3"; Alias="bge-rerank:v2-m3";  File="rerankers\bge-reranker-v2-m3-Q4_K_M.gguf";  Ctx=1024; Gpu=999; Jinja=$false; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Desc="568M multilingual, best all-round reranker" }
-            @{ Num=2; Size="Small"; Name="bge-reranker-large"; Alias="bge-rerank:large";  File="rerankers\bge-reranker-large-q4_k_m.gguf";  Ctx=512;  Gpu=999; Jinja=$false; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Desc="560M, 512-token hard limit" }
-            @{ Num=3; Size="Medium"; Name="Qwen3-Reranker-4B"; Alias="qwen3-rerank:4b"; File="rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf"; Ctx=4096; Gpu=999; Jinja=$false; Embedding=$true; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Desc="4B decoder-based, stronger/multilingual, needs verified GGUF (cls.output.weight)" }
-            @{ Num=4; Size="Tiny";   Name="Qwen3-Reranker-0.6B"; Alias="qwen3-rerank:0.6b"; File="rerankers\Qwen3-Reranker-0.6B-q4_k_m.gguf"; Ctx=2048; Gpu=999; Jinja=$false; Embedding=$true; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Desc="MTEB-R 65.80 (~4pt below 4B), ~640MB, best pick for running alongside a chat model" }
+            @{ Num=1; Size="Small"; Name="bge-reranker-v2-m3"; Alias="bge-rerank:v2-m3";  File="rerankers\bge-reranker-v2-m3-Q4_K_M.gguf";  Ctx=1024; Gpu=999; Jinja=$false; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Batch=1024; UBatch=1024; Desc="568M multilingual, best all-round reranker" }
+            @{ Num=2; Size="Small"; Name="bge-reranker-large"; Alias="bge-rerank:large";  File="rerankers\bge-reranker-large-q4_k_m.gguf";  Ctx=512;  Gpu=999; Jinja=$false; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Batch=512; UBatch=512; Desc="560M, 512-token hard limit" }
+            @{ Num=3; Size="Medium"; Name="Qwen3-Reranker-4B"; Alias="qwen3-rerank:4b"; File="rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf"; Ctx=4096; Gpu=999; Jinja=$false; Embedding=$true; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Batch=2048; UBatch=2048; Desc="4B decoder-based, stronger/multilingual, needs verified GGUF (cls.output.weight)" }
+            @{ Num=4; Size="Tiny";   Name="Qwen3-Reranker-0.6B"; Alias="qwen3-rerank:0.6b"; File="rerankers\Qwen3-Reranker-0.6B-q4_k_m.gguf"; Ctx=2048; Gpu=999; Jinja=$false; Embedding=$true; Rerank=$true; Pooling="rank"; FlashAttn="auto"; Batch=2048; UBatch=2048; Desc="MTEB-R 65.80 (~4pt below 4B), ~640MB, best pick for running alongside a chat model" }
         )
     },
     @{
@@ -200,6 +200,13 @@ while ($true) {
     }
     # Build command
     $flashAttnMode = if ($model.FlashAttn) { $model.FlashAttn } else { "on" }
+    # Batch / UBatch: default to llama.cpp's own defaults (2048 / 512) unless
+    # a model entry overrides them. Embedding/reranker models are given
+    # explicit larger values above so a single request full of long or many
+    # documents doesn't blow past the physical batch size (this is what
+    # caused "input (N tokens) is too large to process" errors previously).
+    $batchSize = if ($model.Batch) { $model.Batch } else { 2048 }
+    $ubatchSize = if ($model.UBatch) { $model.UBatch } else { 512 }
     $cmd = "llama-server.exe " +
            "-m `"$modelPath`" " +
            "--host 0.0.0.0 --port $Port " +
@@ -208,6 +215,7 @@ while ($true) {
            "--flash-attn $flashAttnMode " +
            "--cache-type-k q8_0 --cache-type-v q8_0 " +
            "--threads $Threads --threads-batch $Threads " +
+           "--batch-size $batchSize --ubatch-size $ubatchSize " +
            "--mlock --no-mmap " +
            "--cont-batching " +
            "--log-file `"C:\Users\druiv\.cache\logs\llama.cpp\llm_logs`" " +
@@ -238,6 +246,7 @@ while ($true) {
     Write-Host "  Model    : " -NoNewline; Write-Host $model.Name -ForegroundColor White
     Write-Host "  File     : " -NoNewline; Write-Host (Split-Path $modelPath -Leaf) -ForegroundColor DarkCyan
     Write-Host "  Context  : " -NoNewline; Write-Host "$($model.Ctx) tokens" -ForegroundColor Yellow
+    Write-Host "  Batch    : " -NoNewline; Write-Host "batch=$batchSize / ubatch=$ubatchSize" -ForegroundColor Yellow
     Write-Host "  GPU      : " -NoNewline; Write-Host "$($model.Gpu) layers" -ForegroundColor Magenta
     Write-Host "  Port     : " -NoNewline; Write-Host $Port -ForegroundColor Cyan
     $modeLabel = if ($model.Rerank) { "Rerank" } elseif ($model.Embedding) { "Embedding" } else { "Chat" }

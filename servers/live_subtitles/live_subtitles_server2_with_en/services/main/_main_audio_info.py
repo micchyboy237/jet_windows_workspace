@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from rich.console import Console
 
+from audio_config import SAMPLE_RATE
 from audio_info import display_audio_info
 from norm_speech_loudness import normalize_audio_for_vad
 from quant import quantize_audio
@@ -17,7 +18,7 @@ console = Console()
 
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 DEFAULT_AUDIO = str(
-    Path("~/.cache/files/audio/recording_3_speakers.wav").expanduser().resolve()
+    Path("~/.cache/files/audio/sub_audio/start_5s_recording_1_speaker.wav").expanduser().resolve()
 )
 
 
@@ -121,9 +122,16 @@ def main():
     # Apply normalization if requested
     if args.normalize:
         console.print("Normalizing audio for VAD...")
-        audio_np, norm_info = normalize_audio_for_vad(
-            audio_np, 
-            max_peak_db="standard",
+        # audio_np, norm_info = normalize_audio_for_vad(
+        #     audio_np, 
+        #     max_peak_db="standard",
+        # )
+        audio_np, norm_info = normalize_audio_for_vad(audio_np, SAMPLE_RATE)
+        audio_np, _ = quantize_audio(
+            audio_np,
+            target_dtype="int16",
+            sr=SAMPLE_RATE,
+            verbose=False,
         )
         console.print(
             f"Normalization complete: "

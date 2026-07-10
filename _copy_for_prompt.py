@@ -58,9 +58,8 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_cluster.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_evaluate_speaker_cluster.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speaker_labeler_utils\outlier_orchestrator.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\segment_speaker_labeler.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\powershell\Start-Llama-Server.ps1",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_speech_waves.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speech_waves.py",
     r"",
 ]
 
@@ -83,8 +82,8 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Add comments on top that shows command examples.
-Just keep it minimal with simple pairs of descriptions and python Start-Llama-Server.ps1 <options>
+-Improve the saved plots to also add a contrasting line for the baseline. Then add markers where it starts and ends.
+- In title convert duration from ms to second format
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

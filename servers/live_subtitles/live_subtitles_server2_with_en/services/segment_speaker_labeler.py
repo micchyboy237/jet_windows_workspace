@@ -65,6 +65,8 @@ try:
     from services.speaker_labeler_utils.speaker_labeler_serializer import SpeakerLabelerSerializer
     from services.speech_waves import extract_pure_speech_audio
     from services.dtype_conversion import convert_audio_dtype
+    from services.norm_speech_loudness import normalize_audio_for_vad
+    from services.quant import quantize_audio
 except ImportError:
     from audio_config import SAMPLE_RATE
     from embedding_model_factory import BaseEmbeddingModel, EmbeddingThresholdProvider
@@ -123,6 +125,8 @@ except ImportError:
     from speaker_labeler_utils.speaker_labeler_serializer import SpeakerLabelerSerializer
     from speech_waves import extract_pure_speech_audio
     from dtype_conversion import convert_audio_dtype
+    from norm_speech_loudness import normalize_audio_for_vad
+    from quant import quantize_audio
 
 console = Console()
 
@@ -1682,7 +1686,16 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         
         # Convert float32 [-1,1] back to int16 for VAD processing
         # audio_int16 = (waveform_np * 32768.0).astype(np.int16)
-        audio_int16 = convert_audio_dtype(waveform_np, "int16")
+
+        # audio_int16 = convert_audio_dtype(waveform_np, "int16")
+
+        waveform_np, _ = normalize_audio_for_vad(waveform_np, SAMPLE_RATE)
+        audio_int16, _ = quantize_audio(
+            waveform_np,
+            target_dtype="int16",
+            sr=SAMPLE_RATE,
+            verbose=False,
+        )
 
         if self.audio_tagger:
             pure_speech = self.audio_tagger.extract_speech_only(
