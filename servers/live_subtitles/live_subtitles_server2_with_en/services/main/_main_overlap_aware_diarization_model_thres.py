@@ -3,7 +3,7 @@ import shutil
 import torch
 from typing import List
 from pathlib import Path
-from overlap_aware_diarization import (
+from overlap_aware_diarization_model_thres import (
     DiarizationResult, logging, log, run_pipeline,
     EmbeddingModelType,
 )

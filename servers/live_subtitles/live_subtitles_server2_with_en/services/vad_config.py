@@ -22,7 +22,7 @@ DEFAULT_WITH_SCORES = False
 DEFAULT_INCLUDE_NON_SPEECH = False
 
 DEFAULT_SMOOTH_WINDOW_SIZE = 5
-DEFAULT_MAX_BUFFER_SEC = 1.2
+DEFAULT_MAX_BUFFER_SEC = 5.0  # Increased from 1.2 to 5.0 for worst-case VAD processing
 
 # ────────────────────────────────────────────────
 # Streaming Constants (aligned with FireRedVAD)
@@ -34,7 +34,6 @@ VAD_CONTEXT_WINDOW_SAMPLES = 9600  # 600 ms (60 frames)
 
 # Overlap must be multiple of FRAME_SHIFT_SAMPLE (160)
 BUFFER_OVERLAP_SAMPLES = 640  # 40 frames (~40 ms) — good trade-off
-# ────────────────────────────────────────────────
 
 
 # ────────────────────────────────────────────────
@@ -83,13 +82,38 @@ DEFAULT_HARD_LIMIT_MIN_TROUGH_OFFSET_S = 7.5
 
 # --- ShortSegmentAccumulator defaults ---
 DEFAULT_MIN_SEG_DURATION_SEC = 0.5
-DEFAULT_MAX_SEG_DURATION_SEC = 2.0
-DEFAULT_MAX_SEG_GAP_SEC = 0.8
-DEFAULT_ACC_MAX_DURATION_SEC = 3.0
-DEFAULT_MAX_SILENCE_BEFORE_FLUSH_SEC = 0.5
+DEFAULT_MAX_SEG_DURATION_SEC = 5.0  # Was 2.0
+DEFAULT_MAX_SEG_GAP_SEC = 1.5  # Was 0.8
+DEFAULT_ACC_MAX_DURATION_SEC = 8.0  # Was 3.0
+DEFAULT_MAX_SILENCE_BEFORE_FLUSH_SEC = 1.0  # Was 0.5
 
 # --- vad_firered_splitter defaults ---
-DEFAULT_MIN_SUB_SEG_DURATION_SEC = 0.8
+DEFAULT_MIN_SUB_SEG_DURATION_SEC = 0.3  # Was 0.8
 
 # --- vad probs defaults ---
 DEFAULT_USE_HYBRID = True
+
+# --- vad extractors defaults ---
+DEFAULT_SMOOTHING_WINDOW = 0
+# Maximum allowed probability for a trough (lower = deeper troughs required)
+DEFAULT_TROUGH_HEIGHT = None
+# Increasing means deeper, more pronounced dips required
+DEFAULT_TROUGH_PROMINENCE = 0.15
+# Increasing means larger trough gaps
+DEFAULT_TROUGH_DISTANCE = 100  # Was 200 (1 second vs 2 seconds)
+DEFAULT_VALLEY_THRESHOLD = None
+DEFAULT_MIN_VALLEY_DURATION = 0.25
+DEFAULT_MIN_VALLEY_FRAMES = None
+DEFAULT_FRAME_OFFSET = 0
+DEFAULT_MIN_TROUGH_OFFSET = 0.4
+
+# For higher speech probs and longer segments
+# DEFAULT_SMOOTHING_WINDOW = 0
+# DEFAULT_TROUGH_HEIGHT = 0.1
+# DEFAULT_TROUGH_PROMINENCE = 0.6
+# DEFAULT_TROUGH_DISTANCE = 200
+# DEFAULT_VALLEY_THRESHOLD = None
+# DEFAULT_MIN_VALLEY_DURATION = 0.25
+# DEFAULT_MIN_VALLEY_FRAMES = None
+# DEFAULT_FRAME_OFFSET = 0
+# DEFAULT_MIN_TROUGH_OFFSET = 1.0

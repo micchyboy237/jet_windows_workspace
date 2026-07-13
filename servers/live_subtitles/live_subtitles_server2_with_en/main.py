@@ -93,7 +93,7 @@ def initialize_labeler():
         list_available_models,
     )
 
-    MODEL_TYPE = EmbeddingModelType.MODELSCOPE_ERES2NETV2
+    MODEL_TYPE = EmbeddingModelType.NEMO_TITANET
 
     console.print(f"[bold]Available embedding models:[/bold]")
     for name, info in list_available_models().items():

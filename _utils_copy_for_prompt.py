@@ -497,7 +497,7 @@ def clean_content(
         content = strip_comments(content, remove_triple_quoted_definitions)
         if shorten_funcs:
             content = shorten_functions(content)
-    content = clean_logging(content)
+    # content = clean_logging(content)
     # content = clean_print(content)
     return content
 

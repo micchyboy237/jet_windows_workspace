@@ -67,6 +67,11 @@ try:
     from services.dtype_conversion import convert_audio_dtype
     from services.norm_speech_loudness import normalize_audio_for_vad
     from services.quant import quantize_audio
+    from services.overlap_aware_diarization_model_thres import (
+        THRESHOLDS,
+        get_model_aware_thresholds,
+        classify_similarity_with_thresholds,
+    )
 except ImportError:
     from audio_config import SAMPLE_RATE
     from embedding_model_factory import BaseEmbeddingModel, EmbeddingThresholdProvider
@@ -127,6 +132,11 @@ except ImportError:
     from dtype_conversion import convert_audio_dtype
     from norm_speech_loudness import normalize_audio_for_vad
     from quant import quantize_audio
+    from overlap_aware_diarization_model_thres import (
+        THRESHOLDS,
+        get_model_aware_thresholds,
+        classify_similarity_with_thresholds,
+    )
 
 console = Console()
 
@@ -171,6 +181,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         threshold_same: Optional[float] = DEFAULT_THRESHOLD_SAME,
         threshold_possible: Optional[float] = DEFAULT_THRESHOLD_POSSIBLE,
         threshold_new_speaker: Optional[float] = DEFAULT_THRESHOLD_NEW_SPEAKER,
+        condition: str = "noisy",  # NEW: acoustic condition
         min_segments_for_reference: int = DEFAULT_MIN_SEGMENTS_FOR_REFERENCE,
         mature_segment_count: int = DEFAULT_MATURE_SEGMENT_COUNT,
         young_segment_count: int = DEFAULT_YOUNG_SEGMENT_COUNT,
@@ -179,7 +190,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         top_k_speakers: int = DEFAULT_TOP_K_SPEAKERS,
         min_similarity_for_list: float = DEFAULT_MIN_SIMILARITY_FOR_LIST,
         consolidation_threshold: float = DEFAULT_CONSOLIDATION_THRESHOLD,
-        min_similarity_to_update: float = DEFAULT_MIN_SIMILARITY_TO_UPDATE,  # NEW
+        min_similarity_to_update: float = DEFAULT_MIN_SIMILARITY_TO_UPDATE,
         use_speech_wave_filtering: bool = DEFAULT_USE_SPEECH_WAVE_FILTERING,
         min_prominence: float = DEFAULT_MIN_PROMINENCE,
         min_excursion: float = DEFAULT_MIN_EXCURSION,
@@ -187,35 +198,47 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         min_frames: int = DEFAULT_MIN_FRAMES,
         min_duration_sec: float = DEFAULT_MIN_DURATION_SEC,
         baseline_threshold: float = DEFAULT_BASELINE_THRESHOLD,
-        young_merge_threshold: float = 0.65,  # Higher threshold for young merges
-        min_speaker_age_for_merge: float = 15.0,  # Min seconds before merging
-        audio_tagger: AudioTagger | None = None,  # NEW: Enable pure speech extraction
-
-        # NEW: Outlier management
+        young_merge_threshold: float = 0.65,
+        min_speaker_age_for_merge: float = 15.0,
+        audio_tagger: AudioTagger | None = None,
         use_outlier_buffer: bool = True,
-        outlier_pool: Optional[OutlierPool] = None,  # Can inject custom pool
-        # outlier_promotion_threshold: float = DEFAULT_OUTLIER_PROMOTION_THRESHOLD,
-        # outlier_ttl: float = DEFAULT_OUTLIER_TTL,
-
-        outlier_promotion_threshold: Optional[float] = None,  # None = use model default
-        outlier_max_count: int = DEFAULT_OUTLIER_MAX_COUNT,  # NEW: replaces TTL with max count
-
+        outlier_pool: Optional[OutlierPool] = None,
+        outlier_promotion_threshold: Optional[float] = None,
+        outlier_max_count: int = DEFAULT_OUTLIER_MAX_COUNT,
         debug: bool = False,
     ):
         self.embedding_model = embedding_model
+        self.condition = condition  # NEW: store condition
         
-        # Resolve thresholds (now includes promotion)
+        # NEW: Get model-aware thresholds from diarization module
+        model_aware = get_model_aware_thresholds(
+            condition=condition,
+            embedding_model_type=embedding_model.model_type.value,
+            threshold_same=threshold_same,
+            threshold_ambiguous_low=threshold_possible,
+        )
+        
+        # Use model-aware thresholds, falling back to provided values
+        self.threshold_same = model_aware.get("same", 
+            threshold_same if threshold_same is not None else DEFAULT_THRESHOLD_SAME)
+        self.threshold_possible = model_aware.get("ambiguous_low",
+            threshold_possible if threshold_possible is not None else DEFAULT_THRESHOLD_POSSIBLE)
+        self.threshold_new_speaker = model_aware.get("hard_reject",
+            threshold_new_speaker if threshold_new_speaker is not None else DEFAULT_THRESHOLD_NEW_SPEAKER)
+        
+        # NEW: Store additional thresholds from diarization module
+        self.threshold_hard_accept = model_aware.get("hard_accept", 0.90)
+        self.threshold_osd_gate = model_aware.get("osd_gate", 0.85)
+        
+        # Resolve promotion threshold separately (not from diarization module)
         resolved = EmbeddingThresholdProvider.resolve_thresholds(
             model_type=embedding_model.model_type,
             threshold_same=threshold_same,
             threshold_possible=threshold_possible,
             threshold_new_speaker=threshold_new_speaker,
-            threshold_promotion=outlier_promotion_threshold,  # NEW
+            threshold_promotion=outlier_promotion_threshold,
         )
-        self.threshold_same = resolved.same
-        self.threshold_possible = resolved.possible
-        self.threshold_new_speaker = resolved.new_speaker
-        self.threshold_promotion = resolved.promotion  # NEW
+        self.threshold_promotion = resolved.promotion
 
         self.min_segments_for_reference = min_segments_for_reference
         self.mature_segment_count = mature_segment_count
@@ -330,34 +353,41 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         self,
         embedding: np.ndarray,
     ) -> Tuple[Optional[str], float, Dict[str, float]]:
-        """Find the best matching speaker for an embedding."""
+        """Find the best matching speaker with three-way classification."""
         if not self._speakers:
             return None, 0.0, {}
-        
+
         speaker_labels = []
         centroids = []
         for label, ref in self._speakers.items():
             if ref.has_valid_centroid:
                 speaker_labels.append(label)
                 centroids.append(ref.centroid)
-        
+
         if not centroids:
             return None, 0.0, {}
-        
+
         centroids_array = np.vstack(centroids)
         distances = cdist(embedding, centroids_array, metric="cosine")
         similarities = 1.0 - distances.flatten()
-        
-        sim_dict = {
-            label: float(sim) for label, sim in zip(speaker_labels, similarities)
-        }
-        
+
         best_idx = np.argmax(similarities)
         best_label = speaker_labels[best_idx]
         best_score = float(similarities[best_idx])
-        
+
+        # NEW: Add decision classification
+        decision = self.classify_similarity(best_score)
+
+        sim_dict = {
+            label: float(sim) for label, sim in zip(speaker_labels, similarities)
+        }
+        # Add decision metadata
+        sim_dict["_decision"] = decision
+        sim_dict["_best_label"] = best_label
+        sim_dict["_best_score"] = best_score
+
         return best_label, best_score, sim_dict
-    
+
     def find_top_k_matches(self, embedding: np.ndarray, k: Optional[int] = None) -> List[TopKMatch]:
         """Find top-K matching speakers with ALL similarities included."""
         if k is None:
@@ -747,6 +777,22 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         """
         uuid_short = uuid.uuid4().hex[:8]
         return f"{prefix}_{uuid_short}"
+
+    def classify_similarity(self, score: float) -> str:
+        """Classify a similarity score using diarization module's three-way logic.
+        
+        Returns one of:
+            "same_speaker"      — above same threshold (strong match)
+            "ambiguous_overlap" — between ambiguous_low and same (possible match)
+            "different_speaker" — below ambiguous_low (new speaker likely)
+        """
+        thresholds = {
+            "same": self.threshold_same,
+            "ambiguous_low": self.threshold_possible,
+            "hard_accept": self.threshold_hard_accept,
+            "hard_reject": self.threshold_new_speaker,
+        }
+        return classify_similarity_with_thresholds(score, thresholds)
 
     def _get_speaker_categories(self) -> Dict[str, Dict]:
         return self._maintenance.get_speaker_categories()
@@ -1419,7 +1465,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         segment_id: str,
         audio_duration: float,
     ) -> List[SegmentMatch]:
-        """Build standard results list with update/rejection logic."""
+        """Build standard results list with three-way classification."""
         all_scores = {m["label"]: m["confidence"] for m in top_matches}
         results = []
         seen_labels = set()
@@ -1427,12 +1473,26 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
         for i, match in enumerate(top_matches):
             if match["label"] in seen_labels:
                 continue
-            
+
             label = match["label"]
             confidence = match["confidence"]
-            match_type = match["match_type"]
             is_primary = (i == 0)
-            
+
+            # Use three-way classification
+            decision = self.classify_similarity(confidence)
+
+            # Map three-way decision to match types
+            if decision == "same_speaker":
+                if confidence >= self.threshold_hard_accept:
+                    match_type = "strong_match"
+                else:
+                    match_type = "strong_match"  # Still above same threshold
+            elif decision == "ambiguous_overlap":
+                match_type = "possible_match"
+            else:
+                match_type = "weak_match"
+
+            # Temporal smoothing and context logic use the new match_type
             if is_primary and match_type == "possible_match":
                 smoothed_label = self.apply_temporal_smoothing(label, timestamp, confidence)
                 if smoothed_label != label and smoothed_label in all_scores:
@@ -1440,7 +1500,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                     if smoothed_confidence >= self.threshold_possible:
                         label = smoothed_label
                         confidence = smoothed_confidence
-            
+
             if is_primary and context and "previous_speaker" in context:
                 prev_speaker = context["previous_speaker"]
                 if (prev_speaker and prev_speaker in all_scores
@@ -1450,7 +1510,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                         label = prev_speaker
                         confidence = prev_sim
                         match_type = "context_match"
-            
+
             results.append({
                 "label": label,
                 "confidence": round(confidence, 4),
@@ -1462,12 +1522,12 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 "segment_id": segment_id,
             })
             seen_labels.add(label)
-            
+
             if len(results) >= self.top_k_speakers:
                 break
-        
+
         results = self._deduplicate_results(results)
-        
+
         # Handle primary match update/rejection
         primary_result = results[0]
         should_update, reason = self._should_update_reference(
@@ -1477,7 +1537,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
             timestamp=timestamp,
             embedding=embedding,
         )
-        
+
         if should_update:
             self.update_reference(
                 label=primary_result["label"],
@@ -1502,7 +1562,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 primary_result["is_new_speaker"] = False
                 primary_result["is_outlier"] = True
                 primary_result["segment_count"] = 1
-                
+
                 if self.debug:
                     console.print(
                         f"[yellow]📦 Rejected update → outlier: {outlier_label} "
@@ -1520,7 +1580,7 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 primary_result["match_type"] = "new_speaker"
                 primary_result["is_new_speaker"] = True
                 primary_result["segment_count"] = 1
-        
+
         return results
 
     def consolidate_speakers(self, threshold: Optional[float] = None, dry_run: bool = False) -> ConsolidationResult:
@@ -1785,4 +1845,5 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
 
 if __name__ == "__main__":
     from main._main_segment_speaker_labeler import main
+
     main()

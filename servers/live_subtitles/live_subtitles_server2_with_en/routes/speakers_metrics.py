@@ -22,6 +22,7 @@ from pathlib import Path
 from fastapi.responses import StreamingResponse
 from services.segment_utils import get_audio_files
 from services.config import SEGMENT_AUDIO_DIR
+from services.serialization_utils import serialize
 
 console = Console()
 router = APIRouter(prefix="/speakers/metrics", tags=["metrics"])
@@ -501,7 +502,7 @@ async def metrics_overview_json():
     try:
         metrics = labeler.get_speaker_metrics()
         console.print("[info]Returning metrics overview JSON[/]")
-        return JSONResponse(content=metrics)
+        return JSONResponse(content=serialize(metrics))
     except Exception as e:
         console.print(f"[error]Error in metrics_overview_json: {e}[/]")
         raise HTTPException(status_code=500, detail=str(e))
