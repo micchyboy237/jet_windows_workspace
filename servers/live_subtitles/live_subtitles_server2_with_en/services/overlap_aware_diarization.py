@@ -88,8 +88,8 @@ DEFAULT_MIN_SPK         = 2
 DEFAULT_MAX_SPK         = 8
 DEFAULT_HF_TOKEN        = None
 DEFAULT_RTTM_PATH       = None
-DEFAULT_SEG_DUR         = 1.5           # seconds
-DEFAULT_SEG_STEP        = 0.75          # seconds
+DEFAULT_SEG_DUR         = 2.0           # seconds
+DEFAULT_SEG_STEP        = 1.0           # seconds
 DEFAULT_MIN_TURN_DUR    = 0.3           # seconds
 DEFAULT_EMBEDDING_MODEL = "nemo_titanet"
 DEFAULT_DEVICE          = None          # auto-detect
@@ -347,11 +347,30 @@ def _eigengap_n_speakers(
     Finds the index with the largest eigenvalue drop (gap) in [min, max].
     """
     eigenvalues = np.sort(np.linalg.eigvalsh(affinity))[::-1]
-    max_idx = min(max_spk, len(eigenvalues) - 1)
-    gaps    = np.abs(np.diff(eigenvalues[min_spk - 1 : max_idx + 1]))
-    n       = int(np.argmax(gaps) + min_spk)
-    log.info(f"Eigengap auto-detected {n} speaker(s) "
-             f"(search range {min_spk}–{max_idx})")
+    n_eig = len(eigenvalues)
+
+    effective_min_spk = max(1, min(min_spk, n_eig))
+    effective_max_spk = min(max_spk, n_eig - 1)
+
+    if n_eig <= effective_min_spk or effective_max_spk < effective_min_spk:
+        n = effective_min_spk
+        log.warning(
+            f"Too few embeddings ({n_eig}) for eigengap search in range "
+            f"[{min_spk}, {max_spk}] — falling back to {n} speaker(s)"
+        )
+        return n
+
+    gaps = np.abs(np.diff(eigenvalues[effective_min_spk - 1 : effective_max_spk + 1]))
+    if gaps.size == 0:
+        n = effective_min_spk
+        log.warning(f"Empty eigengap search window (n_eig={n_eig}) — falling back to {n} speaker(s)")
+        return n
+
+    n = int(np.argmax(gaps) + effective_min_spk)
+    log.info(
+        f"Eigengap auto-detected {n} speaker(s) "
+        f"(search range {effective_min_spk}–{effective_max_spk})"
+    )
     return n
 
 
