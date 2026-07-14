@@ -1704,18 +1704,18 @@ class SegmentSpeakerLabeler(SpeakerMetricsMixin):
                 edges_only=True,
             )
         else:
-            # pure_speech = audio_int16
+            # Do not trim, keep as is
+            pure_speech = audio_int16
         
             # Call the self-contained extraction function
-            pure_speech = extract_pure_speech_audio(
-                audio=audio_int16,
-                sampling_rate=SAMPLE_RATE,  # assumed, could be parameterized
-            )
-            
-            if pure_speech.size == 0:
-                if self.debug:
-                    console.print("[warning]No pure speech extracted, using original[/warning]")
-                return waveform, False
+            # pure_speech = extract_pure_speech_audio(
+            #     audio=audio_int16,
+            #     sampling_rate=SAMPLE_RATE,  # assumed, could be parameterized
+            # )
+            # if pure_speech.size == 0:
+            #     if self.debug:
+            #         console.print("[warning]No pure speech extracted, using original[/warning]")
+            #     return waveform, False
         
         # Convert back to float32 tensor
         waveform_float = pure_speech.astype(np.float32) / 32768.0
