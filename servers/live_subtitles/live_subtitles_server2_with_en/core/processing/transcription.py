@@ -25,7 +25,7 @@ from core.processing.audio_tagging import perform_audio_tagging
 from core.processing.speaker_labeling import (
     perform_speaker_labeling,
     save_segment_audio_for_playback,
-    save_diarization_segments_async,
+    save_segmentation_tests_async,
 )
 from services.audio_config import SAMPLE_RATE
 from services.audio_utils import get_audio_duration
@@ -360,7 +360,7 @@ def _process_non_japanese(
         en_text=en_text,
         tagging_events=tagging_events,
     )
-    save_diarization_segments_async(
+    save_segmentation_tests_async(
         segment_dir=segment_dir,
         audio_np=full_audio_int16,
         sample_rate=sample_rate,
@@ -692,7 +692,7 @@ def _process_japanese(
         en_text=en_text,
         tagging_events=tagging_events,
     )
-    save_diarization_segments_async(
+    save_segmentation_tests_async(
         segment_dir=segment_dir,
         audio_np=full_audio_int16,
         sample_rate=sample_rate,

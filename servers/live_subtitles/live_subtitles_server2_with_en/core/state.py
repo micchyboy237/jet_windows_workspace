@@ -25,7 +25,7 @@ from services.live_subtitles_server_utils import load_segment_counter
 from concurrent.futures import ThreadPoolExecutor
 
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_worker")
-diarization_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="diarization_worker")  # <-- new
+segmentation_tests_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="segmentation_tests_worker")  # <-- new
 
 active_connections: dict[str, object] = {}
 
@@ -81,9 +81,9 @@ def get_executor() -> ThreadPoolExecutor:
     """Get the thread pool executor."""
     return executor
 
-def get_diarization_executor() -> ThreadPoolExecutor:
-    """Get the background diarization executor (non-blocking saves)."""
-    return diarization_executor
+def get_segmentation_tests_executor() -> ThreadPoolExecutor:
+    """Get the background segmentation tests executor (non-blocking saves)."""
+    return segmentation_tests_executor
 
 def get_context_buffer() -> AudioContextBuffer:
     """Get the audio context buffer."""

@@ -37,7 +37,7 @@ from rich.console import Console
 from rich.table import Table
 
 console = Console()
-DEFAULT_AUDIO = str(Path("~/.cache/files/audio/recording_3_speakers.wav").expanduser().resolve())
+DEFAULT_AUDIO = str(Path("~/.cache/files/audio/sub_audio/start_32s_recording_3_speakers.wav").expanduser().resolve())
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 
 # VAD silence threshold constant for edge trimming

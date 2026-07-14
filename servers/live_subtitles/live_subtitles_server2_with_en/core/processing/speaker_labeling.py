@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import numpy as np
 import torch
+import json
 from rich.console import Console
 
 from core.state import (
@@ -540,7 +541,6 @@ def save_segment_audio_for_playback(
     Save segment audio as WAV file permanently for playback in segment detail page.
     """
     import wave
-    import json
     from services.config import SEGMENT_AUDIO_DIR, SEGMENT_AUDIO_INDEX
     if audio_np.size == 0:
         console.print(f"[warning]Cannot save empty audio for segment {segment_id}[/]")
@@ -616,7 +616,7 @@ def save_diarization_segments(
     segment_dir: Path,
     audio_np: np.ndarray,
     sample_rate: int,
-    min_diarization_duration: float = 2.0,
+    min_duration: float,
     **diarize_kwargs: Any,
 ) -> Optional[Dict]:
     """
@@ -632,7 +632,6 @@ def save_diarization_segments(
     This is purely additive: any failure is caught, logged, and returns
     None without raising, so it never affects the rest of the pipeline.
     """
-    import json
     import scipy.io.wavfile as wavfile
     from core.state import get_embedding_model
     from services.overlap_aware_diarization import (
@@ -651,7 +650,7 @@ def save_diarization_segments(
     # against both up front so we skip cleanly instead of hitting a
     # RuntimeError deep inside extract_embeddings.
     seg_dur = diarize_kwargs.get("seg_dur", DEFAULT_SEG_DUR)
-    required_duration = max(min_diarization_duration, seg_dur, 1.0)
+    required_duration = max(min_duration, seg_dur, 1.0)
     if audio_duration < required_duration:
         console.print(
             f"[dim]🔇 Skipping diarization split — audio too short "
@@ -741,36 +740,100 @@ def save_diarization_segments(
         return None
 
 
-def save_diarization_segments_async(
+def save_trough_to_trough(
     segment_dir: Path,
     audio_np: np.ndarray,
     sample_rate: int,
-    min_diarization_duration: float = 2.0,
-    **diarize_kwargs: Any,
+    min_duration: float,
+) -> Optional[Dict]:
+    import soundfile as sf
+    from services.vad_extractors import extract_trough_to_trough
+
+    segments_with_audio, probs = extract_trough_to_trough(
+        probs_or_audio=audio_np,
+        with_audio=True,
+        with_scores=True,
+        min_duration_s=min_duration,
+    )
+
+    out_dir = segment_dir / "trough_to_trough"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    segs_out_dir = out_dir / "segments"
+    segs_out_dir.mkdir(parents=True, exist_ok=True)
+
+    for idx, (seg_meta, audio_slice) in enumerate(segments_with_audio):
+        seg_meta = seg_meta.copy()
+
+        seg_probs = seg_meta.pop("segment_probs")
+
+        prob_stats = seg_meta.pop("prob_stats")
+        scores = seg_meta.pop("scores")
+        final_score = seg_meta.pop("final_score")
+        enhanced_scores = {
+            "final_score": final_score,
+            "scores": scores,
+            "prob_stats": prob_stats,
+        }
+
+        trough_start = seg_meta.pop("trough_start")
+        trough_end = seg_meta.pop("trough_end")
+        enhanced_trough_to_trough = {
+            "trough_start": trough_start,
+            "trough_end": trough_end,
+        }
+
+        seg_dir = segs_out_dir / f"segment_{idx:03d}"
+        seg_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(seg_dir / "segment.json", "w", encoding="utf-8") as fh:
+            json.dump(seg_meta, fh, ensure_ascii=False, indent=2)    
+        with open(seg_dir / "probs.json", "w", encoding="utf-8") as fh:
+            json.dump(seg_probs, fh, ensure_ascii=False, indent=2)    
+        with open(seg_dir / "trough_to_trough.json", "w", encoding="utf-8") as fh:
+            json.dump(enhanced_trough_to_trough, fh, ensure_ascii=False, indent=2)    
+        with open(seg_dir / "scores.json", "w", encoding="utf-8") as fh:
+            json.dump(enhanced_scores, fh, ensure_ascii=False, indent=2)
+        sf.write(str(seg_dir / "sound.wav"), audio_slice, sample_rate)
+    
+
+def save_segmentation_tests_async(
+    segment_dir: Path,
+    audio_np: np.ndarray,
+    sample_rate: int,
+    min_duration: float = 2.0,
+    **kwargs: Any,
 ) -> None:
     """
-    Fire-and-forget wrapper around save_diarization_segments.
-    Submits the (potentially slow) diarization + save work to a background
+    Fire-and-forget wrapper around segmentation features.
+    Submits the (potentially slow) funtction calls + save work to a background
     thread pool so it never blocks the request/response path. Any error is
     logged from the background thread; nothing is raised here or there.
     """
-    from core.state import get_diarization_executor
+    from core.state import get_segmentation_tests_executor
+    
 
     def _run():
         try:
+            save_trough_to_trough(
+                segment_dir=segment_dir,
+                audio_np=audio_np,
+                sample_rate=sample_rate,
+                min_duration=min_duration,
+            )
+
             save_diarization_segments(
                 segment_dir=segment_dir,
                 audio_np=audio_np,
                 sample_rate=sample_rate,
-                min_diarization_duration=min_diarization_duration,
-                **diarize_kwargs,
+                min_duration=min_duration,
             )
         except Exception as e:
             console.print(f"[warning]⚠️ Background diarization save failed: {e}[/warning]")
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
-    get_diarization_executor().submit(_run)
+    get_segmentation_tests_executor().submit(_run)
     console.print("[dim]🗣️ Diarization split submitted to background executor (non-blocking)[/dim]")
 
 
@@ -799,7 +862,6 @@ def save_speech_extraction_details(
     """
     if segment_dir is None:
         return
-    import json
     import wave
     try:
         out_dir = Path(segment_dir) / "speech_extraction"
