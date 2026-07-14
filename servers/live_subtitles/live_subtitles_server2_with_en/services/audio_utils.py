@@ -72,73 +72,67 @@ def _collect_audio_files(
 
 
 def resolve_audio_paths(
-    audio_inputs: AudioPathsInput,
+    audio_inputs: AudioPathsInput, 
     recursive: bool = False,
     includes: Optional[list[str]] = None
 ) -> list[str]:
     """
     Resolve single file, list, or directory into a sorted list of absolute audio file paths as strings.
     
-    When a direct file path is provided (not a directory), it will be accepted if it's a valid
-    audio file, regardless of include patterns. Include patterns are primarily meant for
-    directory scanning.
-    
     Args:
         audio_inputs: Single file, list of files, or directory path
         recursive: Whether to recursively search directories (default: False)
         includes: Optional list of glob patterns to filter files (e.g., ['**/sound.wav', '*.mp3'])
-                  Patterns are relative to each input directory.
-                  Note: Direct file paths bypass include pattern filtering.
+                  Patterns are relative to each input directory
+    
     Returns:
         Sorted list of absolute path strings to valid audio files
+    
     Examples:
         # Get all WAV files recursively
         resolve_audio_paths("audio_dir/", recursive=True, includes=["**/*.wav"])
+        
         # Get specific files from any subdirectory
         resolve_audio_paths("audio_dir/", includes=["**/sound.wav", "**/music.mp3"])
+        
         # Get MP3 files only from top level
         resolve_audio_paths("audio_dir/", includes=["*.mp3"])
-        # Direct file paths always work, regardless of include patterns
-        resolve_audio_paths("specific_file.wav", includes=["**/sound.wav"])
+        
+        # Complex patterns
+        resolve_audio_paths("audio_dir/", includes=["recordings/**/voice*.wav"])
     """
     inputs = [audio_inputs] if isinstance(audio_inputs, (str, Path)) else audio_inputs
     resolved_paths: list[Path] = []
-    
+
     for item in inputs:
         path = Path(item)
-        
+
         if path.is_dir():
-            # For directories, apply include patterns
+            # Use the new collection method for directories
             matched_files = _collect_audio_files(path, recursive=recursive, includes=includes)
             resolved_paths.extend(p.resolve() for p in matched_files)
-            if not matched_files:
-                print(f"Warning: No matching audio files found in directory: {path}")
-                if includes:
-                    print(f"  Include patterns used: {includes}")
-                    
+            
         elif path.is_file():
-            # For direct file paths, check if it's a valid audio file
+            # For individual files, check if they match includes patterns (if any)
             if path.suffix.lower() in AUDIO_EXTENSIONS:
-                # Direct file paths bypass include patterns - they were explicitly specified
-                resolved_paths.append(path.resolve())
-                if includes:
-                    print(f"Note: Direct file path '{path.name}' accepted (bypasses include patterns)")
+                if not includes or any(
+                    path.match(pattern) or 
+                    path.match(f"**/{pattern}")  # Allow **/ matching for individual files too
+                    for pattern in includes
+                ):
+                    resolved_paths.append(path.resolve())
+                else:
+                    print(f"Skipping file not matching include patterns: {path}")
             else:
                 print(f"Skipping non-audio file: {path}")
-                
         elif path.exists():
-            print(f"Skipping non-file, non-directory path: {path}")
+            print(f"Skipping non-audio file: {path}")
         else:
             print(f"Path not found: {path}")
-    
+
     if not resolved_paths:
-        raise ValueError(
-            "No valid audio files found from provided inputs.\n"
-            f"  Inputs: {audio_inputs}\n"
-            f"  Includes filter: {includes if includes else 'None'}\n"
-            f"  Recursive: {recursive}"
-        )
-    
+        raise ValueError("No valid audio files found from provided inputs.")
+
     # Return sorted list of absolute path strings
     return sorted(str(p) for p in resolved_paths)
 
@@ -264,6 +258,59 @@ def resolve_audio_paths_as_tensor_list(
 
 
 def load_audio(
+    audio_path: Union[str, Path], 
+    sr: Optional[int] = None,
+    mono: bool = True,
+    normalize: bool = False,
+    return_as_tensor: bool = False
+) -> Tuple[Union[np.ndarray, torch.Tensor], int]:
+    """
+    Load any audio file with librosa, optionally resample and convert to mono.
+    
+    Args:
+        audio_path: Path to audio file (str or Path)
+        sr: Target sample rate. If None, keeps original sample rate.
+        mono: If True, convert to mono by averaging channels
+        normalize: If True, apply peak normalization
+        return_as_tensor: If True, return as PyTorch tensor, else numpy array
+    
+    Returns:
+        Tuple of (waveform, sample_rate)
+    """
+    # Convert Path to string if needed
+    audio_path = str(audio_path)
+    
+    # Load audio - keep original sample rate and channels
+    y, orig_sr = librosa.load(audio_path, sr=None, mono=False)
+    
+    # Convert to mono if requested
+    if mono and y.ndim > 1:
+        y = np.mean(y, axis=0)
+        # Prevent clipping from channel mixing
+        if np.max(np.abs(y)) > 1.0:
+            y = y / np.max(np.abs(y))
+    
+    # Resample only if sr is specified and different from original
+    if sr is not None and orig_sr != sr:
+        y = librosa.resample(y, orig_sr=orig_sr, target_sr=sr)
+        orig_sr = sr
+    
+    # Optional: Peak normalization
+    if normalize:
+        peak = np.max(np.abs(y))
+        if peak > 0:  # Avoid division by zero for silence
+            y = y / peak
+    
+    # Convert to tensor or keep as numpy
+    if return_as_tensor:
+        waveform = torch.from_numpy(y).unsqueeze(0).float()
+    else:
+        waveform = y
+    
+    return waveform, orig_sr
+
+
+def load_audio_orig(
     audio: AudioInput,
     sr: Optional[int] = SAMPLE_RATE,
     mono: bool = True,

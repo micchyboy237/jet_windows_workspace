@@ -1024,9 +1024,9 @@ Examples:
     parser.add_argument(
         "-m", "--model",
         dest="model_type",
-        default="modelscope_eres2netv2",
+        default="nemo_titanet",
         choices=[e.value for e in EmbeddingModelType],
-        help="Embedding model backend (default: modelscope_eres2netv2)",
+        help="Embedding model backend (default: nemo_titanet)",
     )
 
     # ---- Clustering knobs ----

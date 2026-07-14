@@ -1,18 +1,43 @@
 import argparse
 import shutil
 import torch
-from typing import List
+import numpy as np
+from typing import List, Tuple, Optional
 from pathlib import Path
 from overlap_aware_diarization import (
-    DiarizationResult, logging, log, run_pipeline,
+    DiarizationResult,
+    SegmentInfo,
+    logging,
+    log,
+    split_speaker_segments,
     EmbeddingModelType,
+    DEFAULT_STRATEGY,
+    DEFAULT_CONDITION,
+    DEFAULT_N_SPEAKERS,
+    DEFAULT_MIN_SPK,
+    DEFAULT_MAX_SPK,
+    DEFAULT_HF_TOKEN,
+    DEFAULT_RTTM_PATH,
+    DEFAULT_SEG_DUR,
+    DEFAULT_SEG_STEP,
+    DEFAULT_MIN_TURN_DUR,
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_DEVICE,
 )
 from embedding_model_factory import list_available_models
 
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
-shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DEFAULT_AUDIO = Path(r"C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav")
+
+
+class SavedSegmentInfo(SegmentInfo):
+    """
+    `SegmentInfo` plus the on-disk file paths, as produced once
+    `save_audio_segments` has written the segment to disk.
+    """
+    wav_path:    str
+    meta_path:   str
+    folder_path: str
 
 
 def make_clickable_link(uri: str, label: str = None) -> str:
@@ -40,17 +65,16 @@ def make_clickable_link(uri: str, label: str = None) -> str:
 
 
 def save_audio_segments(
-    result: DiarizationResult,
-    waveform: torch.Tensor,
+    segments: List[Tuple[SegmentInfo, np.ndarray]],
     sr: int,
     output_dir: Path,
-) -> List[dict]:
+) -> List[SavedSegmentInfo]:
     """
-    Extract and save ALL speaker turns as individual WAV files with metadata.
-    
-    All turns (clean and uncertain) are numbered sequentially as they appear
-    in the timeline, using 3-digit segment numbers (001-999).
-    
+    Write pre-extracted speaker-turn segments (from
+    overlap_aware_diarization.extract_speaker_segments, or the
+    `split_speaker_segments` orchestrator) to disk as individual WAV
+    files with metadata.
+
     Creates:
         output_dir/segments/segment_001/
                     ├── sound.wav
@@ -58,8 +82,9 @@ def save_audio_segments(
         output_dir/outliers/segment_003/
                     ├── sound.wav
                     └── meta.json
-    
-    Returns list of segment info dicts for display, ordered by start time.
+
+    Returns list of segment info dicts (with file paths added), ordered
+    by start time.
     """
     import json
     import soundfile as sf
@@ -69,91 +94,60 @@ def save_audio_segments(
     segments_dir.mkdir(parents=True, exist_ok=True)
     outliers_dir.mkdir(parents=True, exist_ok=True)
 
-    segment_info = []
-    
-    # Sort all turns by start time to maintain chronological order
-    all_turns_sorted = sorted(result.turns, key=lambda t: t.start)
-    
-    clean_count = sum(1 for t in all_turns_sorted if t.label == "speech")
-    outlier_count = sum(1 for t in all_turns_sorted if t.label != "speech")
-    
-    log.info(f"Extracting {len(all_turns_sorted)} total segments "
-             f"({clean_count} clean, {outlier_count} outlier) "
-             f"to {output_dir}")
-    
-    for idx, turn in enumerate(all_turns_sorted, 1):
-        # Sequential 3-digit numbering for ALL segments
-        seg_num = idx
-        seg_name = f"segment_{seg_num:03d}"
-        
-        # Determine target directory based on label
-        if turn.label == "speech":
-            seg_dir = segments_dir / seg_name
-            seg_type = "clean"
-        else:
-            seg_dir = outliers_dir / seg_name
-            seg_type = "outlier"
-        
-        seg_dir.mkdir(parents=True, exist_ok=True)
+    clean_count = sum(1 for info, _ in segments if info["type"] == "clean")
+    outlier_count = sum(1 for info, _ in segments if info["type"] == "outlier")
+    log.info(f"Saving {len(segments)} total segments "
+             f"({clean_count} clean, {outlier_count} outlier) to {output_dir}")
 
-        start_sample = int(turn.start * sr)
-        end_sample = int(turn.end * sr)
-        segment_audio = waveform[:, start_sample:end_sample].squeeze().numpy()
+    segment_info_out: List[dict] = []
+    for info, segment_audio in segments:
+        seg_name = info["segment_name"]
+        seg_dir = (segments_dir if info["type"] == "clean" else outliers_dir) / seg_name
+        seg_dir.mkdir(parents=True, exist_ok=True)
 
         wav_path = seg_dir / "sound.wav"
         sf.write(str(wav_path), segment_audio, sr)
 
         meta = {
-            "segment_id": seg_num,
+            "segment_id": info["segment_num"],
             "segment_name": seg_name,
-            "speaker": turn.speaker,
-            "start_time": round(turn.start, 3),
-            "end_time": round(turn.end, 3),
-            "duration": round(turn.duration, 3),
-            "confidence_score": round(turn.score, 3) if turn.score > 0 else None,
-            "label": turn.label,
+            "speaker": info["speaker"],
+            "start_time": round(info["start"], 3),
+            "end_time": round(info["end"], 3),
+            "duration": round(info["duration"], 3),
+            "confidence_score": round(info["score"], 3) if info["score"] > 0 else None,
+            "label": info["label"],
             "audio_file": str(wav_path),
             "sample_rate": sr,
-            "num_samples": len(segment_audio),
-            "type": seg_type,
-            "global_order": idx,
+            "num_samples": int(np.asarray(segment_audio).shape[-1]),
+            "type": info["type"],
+            "global_order": info["global_order"],
         }
-        
         meta_path = seg_dir / "meta.json"
         with open(meta_path, 'w', encoding='utf-8') as f:
             json.dump(meta, f, indent=2)
 
-        segment_info.append({
-            "segment_num": seg_num,
-            "segment_name": seg_name,
-            "speaker": turn.speaker,
-            "start": turn.start,
-            "end": turn.end,
-            "duration": turn.duration,
-            "score": turn.score,
-            "label": turn.label,
+        segment_info_out.append({
+            **info,
             "wav_path": str(wav_path),
             "meta_path": str(meta_path),
             "folder_path": str(seg_dir),
-            "type": seg_type,
-            "global_order": idx,
         })
-        
-        type_tag = "[outlier]" if seg_type == "outlier" else "[clean]  "
-        log.debug(f"  ✓ {seg_name} {type_tag}: {turn.speaker} "
-                  f"{turn.start:.2f}s-{turn.end:.2f}s "
-                  f"({turn.duration:.2f}s, {len(segment_audio)} samples)")
 
-    clean_saved = len([s for s in segment_info if s['type'] == 'clean'])
-    outlier_saved = len([s for s in segment_info if s['type'] == 'outlier'])
+        type_tag = "[outlier]" if info["type"] == "outlier" else "[clean]  "
+        log.debug(f"  ✓ {seg_name} {type_tag}: {info['speaker']} "
+                  f"{info['start']:.2f}s-{info['end']:.2f}s ({info['duration']:.2f}s)")
+
+    clean_saved = len([s for s in segment_info_out if s['type'] == 'clean'])
+    outlier_saved = len([s for s in segment_info_out if s['type'] == 'outlier'])
     log.info(f"✓ Saved {clean_saved} clean segments to {segments_dir}")
     log.info(f"✓ Saved {outlier_saved} outlier segments to {outliers_dir}")
-    
-    return segment_info
+    return segment_info_out
 
 
-def save_results(result, output_dir: Path, audio_path: str, strategy: str, condition: str,
-                 waveform=None, sr=None):
+def save_results(result: DiarizationResult, output_dir: Path, audio_path: str, strategy: str, condition: str,
+                 segments: Optional[List[Tuple[SegmentInfo, np.ndarray]]] = None,
+                 sr: Optional[int] = None) -> List[SavedSegmentInfo]:
     """
     Save diarization results to separate files in the output directory.
     
@@ -176,9 +170,9 @@ def save_results(result, output_dir: Path, audio_path: str, strategy: str, condi
     log.info(f"Saving results to: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    segment_info = []
-    if waveform is not None and sr is not None:
-        segment_info = save_audio_segments(result, waveform, sr, output_dir)
+    segment_info: List[SavedSegmentInfo] = []
+    if segments is not None and sr is not None:
+        segment_info = save_audio_segments(segments, sr, output_dir)
 
     # Summary file
     summary_file = output_dir / "summary.txt"
@@ -337,7 +331,7 @@ def save_results(result, output_dir: Path, audio_path: str, strategy: str, condi
     return segment_info
 
 
-def display_results_table(result, segment_info):
+def display_results_table(result: DiarizationResult, segment_info: List[SavedSegmentInfo]):
     """
     Display results table with clickable segment numbers and play buttons.
     
@@ -400,89 +394,6 @@ def display_results_table(result, segment_info):
     print(f"{bar}\n")
 
 
-def print_result(result: DiarizationResult, segment_info: List[dict] = None):
-    """Pretty-print diarization result to stdout with clickable segment links."""
-    bar = "─" * 100 if segment_info else "─" * 68
-    
-    print(f"\n{bar}")
-    print(f"  File            : {result.audio_path}")
-    print(f"  Speakers        : {result.n_speakers}")
-    print(f"  Strategy        : {result.strategy}")
-    print(f"  Condition       : {result.condition}")
-    print(f"  Embedding Model : {result.embedding_model}")
-    print(f"  Thresholds      : same>{result.thresholds.get('same', '?')}  "
-          f"ambiguous>{result.thresholds.get('ambiguous_low', '?')}  "
-          f"osd_gate={result.thresholds.get('osd_gate', '?')}")
-    if segment_info:
-        clean_count = len([s for s in segment_info if s['type'] == 'clean'])
-        outlier_count = len([s for s in segment_info if s['type'] == 'outlier'])
-        print(f"  Segments        : {clean_count} clean + {outlier_count} outlier saved")
-    print(bar)
-    
-    if segment_info:
-        print(f"  {'SEG#':>5}  {'START':>8}   {'END':>8}   {'DUR':>6}   {'SCORE':>6}   "
-              f"{'LABEL':<12}  {'SPEAKER':<12}  {'PLAY':>6}")
-        print(bar)
-        
-        # Sort by global_order for chronological display
-        sorted_segments = sorted(segment_info, key=lambda s: s.get('global_order', s['segment_num']))
-        
-        for seg in sorted_segments:
-            score_str = f"{seg['score']:.3f}" if seg['score'] > 0 else "  —  "
-            tag = f"[{seg['label']}]" if seg['label'] != "speech" else ""
-            
-            folder_path = seg['folder_path']
-            wav_path = seg['wav_path']
-            seg_num = seg['segment_num']
-            
-            # Create clickable segment number that opens the folder
-            folder_uri = f"file:///{folder_path.replace(chr(92), '/')}"
-            seg_num_display = make_clickable_link(folder_uri, f"{seg_num:03d}")
-            
-            # Create clickable play button that opens the wav file
-            wav_uri = f"file:///{wav_path.replace(chr(92), '/')}"
-            play_btn_display = make_clickable_link(wav_uri, "▶️")
-            
-            # Determine display prefix based on segment type
-            seg_prefix = " " if seg['type'] == 'clean' else "*"
-            
-            print(f"  {seg_prefix}{seg_num_display}  "
-                  f"{seg['start']:>7.2f}s  {seg['end']:>7.2f}s  "
-                  f"{seg['duration']:>5.2f}s  {score_str:>6}  "
-                  f"{tag:<12}  {seg['speaker']:<12}  {play_btn_display:>6}")
-    else:
-        print(f"  {'START':>8}   {'END':>8}   {'DUR':>6}   {'SCORE':>6}   "
-              f"{'LABEL':<12}  SPEAKER")
-        print(bar)
-        for i, t in enumerate(result.turns, 1):
-            score_str = f"{t.score:.3f}" if t.score > 0 else "  —  "
-            tag = f"[{t.label}]" if t.label != "speech" else ""
-            print(f"  {t.start:>7.2f}s  {t.end:>7.2f}s  "
-                  f"{t.duration:>5.2f}s  {score_str:>6}  "
-                  f"{tag:<12}  {t.speaker}")
-    
-    print(bar)
-    
-    total_overlap = sum(t.duration for t in result.turns if t.label == "overlap")
-    total_uncertain = sum(t.duration for t in result.turns if t.label == "uncertain")
-    
-    print(f"  Turns       : {len(result.turns)} total  |  "
-          f"{len(result.clean_turns())} clean  |  "
-          f"{len(result.overlap_turns())} overlap  |  "
-          f"{len(result.uncertain_turns())} uncertain")
-    print(f"  Overlap dur : {total_overlap:.2f}s")
-    print(f"  Uncertain   : {total_uncertain:.2f}s")
-    
-    if segment_info:
-        clean_count = len([s for s in segment_info if s['type'] == 'clean'])
-        outlier_count = len([s for s in segment_info if s['type'] == 'outlier'])
-        print(f"  Segments    : {clean_count} clean + {outlier_count} outlier "
-              f"saved to segments/ & outliers/")
-        print(f"  💡 Ctrl+Click SEG# → open folder  |  Ctrl+Click ▶️ → play audio  |  * = outlier")
-    
-    print(f"{bar}\n")
-
-
 def get_args():
     parser = argparse.ArgumentParser(
         description="Overlap-aware speaker diarization with selectable embedding models",
@@ -502,42 +413,42 @@ Examples:
     parser.add_argument("audio", type=str, nargs="?",
                         default=DEFAULT_AUDIO,
                         help="Path to audio file (.wav / .flac / .mp3)")
-    parser.add_argument("-s", "--strategy", default="resegment",
+    parser.add_argument("-s", "--strategy", default=DEFAULT_STRATEGY,
                         choices=["nn", "resegment", "separate"],
-                        help="Overlap handling strategy (default: resegment)")
-    parser.add_argument("-c", "--condition", default="noisy",
+                        help=f"Overlap handling strategy (default: {DEFAULT_STRATEGY})")
+    parser.add_argument("-c", "--condition", default=DEFAULT_CONDITION,
                         choices=["clean", "noisy", "phone", "forensic"],
-                        help="Acoustic condition for threshold selection (default: noisy)")
-    parser.add_argument("-n", "--speakers", type=int, default=None,
+                        help=f"Acoustic condition for threshold selection (default: {DEFAULT_CONDITION})")
+    parser.add_argument("-n", "--speakers", type=int, default=DEFAULT_N_SPEAKERS,
                         dest="n_speakers",
                         help="Fix number of speakers (default: auto-detect)")
-    parser.add_argument("-mn", "--min-spk", type=int, default=2,
-                        help="Min speakers for auto-detection (default: 2)")
-    parser.add_argument("-mx", "--max-spk", type=int, default=8,
-                        help="Max speakers for auto-detection (default: 8)")
-    parser.add_argument("-t", "--token", default=None,
+    parser.add_argument("-mn", "--min-spk", type=int, default=DEFAULT_MIN_SPK,
+                        help=f"Min speakers for auto-detection (default: {DEFAULT_MIN_SPK})")
+    parser.add_argument("-mx", "--max-spk", type=int, default=DEFAULT_MAX_SPK,
+                        help=f"Max speakers for auto-detection (default: {DEFAULT_MAX_SPK})")
+    parser.add_argument("-t", "--token", default=DEFAULT_HF_TOKEN,
                         help="HuggingFace token for pyannote OSD (optional)")
     parser.add_argument("-o", "--output", default=str(OUTPUT_DIR),
                         help=f"Output directory for results (default: {OUTPUT_DIR})")
-    parser.add_argument("-r", "--rttm", default=None,
+    parser.add_argument("-r", "--rttm", default=DEFAULT_RTTM_PATH,
                         help="Output RTTM file path (optional)")
-    parser.add_argument("-sd", "--seg-dur", type=float, default=1.5,
-                        help="Sliding window duration in seconds (default: 1.5)")
-    parser.add_argument("-ss", "--seg-step", type=float, default=0.75,
-                        help="Sliding window hop in seconds (default: 0.75)")
-    parser.add_argument("-mt", "--min-turn", type=float, default=0.3,
-                        help="Minimum turn duration to keep in seconds (default: 0.3)")
-    parser.add_argument("--debug", action="store_true",
-                        help="Enable debug logging")
-    parser.add_argument("-emb", "--embedding-model", type=str, default="speechbrain_ecapa",
+    parser.add_argument("-sd", "--seg-dur", type=float, default=DEFAULT_SEG_DUR,
+                        help=f"Sliding window duration in seconds (default: {DEFAULT_SEG_DUR})")
+    parser.add_argument("-ss", "--seg-step", type=float, default=DEFAULT_SEG_STEP,
+                        help=f"Sliding window hop in seconds (default: {DEFAULT_SEG_STEP})")
+    parser.add_argument("-mt", "--min-turn", type=float, default=DEFAULT_MIN_TURN_DUR,
+                        help=f"Minimum turn duration to keep in seconds (default: {DEFAULT_MIN_TURN_DUR})")
+    parser.add_argument("-emb", "--embedding-model", type=str, default=DEFAULT_EMBEDDING_MODEL,
                         choices=[e.value for e in EmbeddingModelType],
                         dest="embedding_model",
-                        help="Speaker embedding model to use (default: speechbrain_ecapa)")
-    parser.add_argument("-d", "--device", type=str, default=None,
+                        help=f"Speaker embedding model to use (default: {DEFAULT_EMBEDDING_MODEL})")
+    parser.add_argument("-d", "--device", type=str, default=DEFAULT_DEVICE,
                         help="Torch device, e.g. 'cuda' or 'cpu'")
     parser.add_argument("--list-models", action="store_true",
                         dest="list_models",
                         help="List available embedding models and exit")
+    parser.add_argument("--debug", action="store_true",
+                        help="Enable debug logging")
     
     args = parser.parse_args()
     
@@ -559,16 +470,18 @@ Examples:
 
 def main():
     args = get_args()
-    
+
     if args.debug:
         log.setLevel(logging.DEBUG)
-    
+
     output_dir = Path(args.output)
+    shutil.rmtree(output_dir, ignore_errors=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     log.info(f"Output directory set to: {output_dir}")
-    
+
     device = torch.device(args.device) if args.device else None
-    
-    result, waveform, sr = run_pipeline(
+    result, segments = split_speaker_segments(
         audio_path=args.audio,
         strategy=args.strategy,
         condition=args.condition,
@@ -583,12 +496,10 @@ def main():
         embedding_model=args.embedding_model,
         device=device,
     )
-    
     segment_info = save_results(
         result, output_dir, args.audio, args.strategy, args.condition,
-        waveform=waveform, sr=sr
+        segments=segments, sr=16000
     )
-    
     display_results_table(result, segment_info)
 
 

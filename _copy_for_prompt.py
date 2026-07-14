@@ -58,8 +58,9 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_cluster.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_evaluate_speaker_cluster.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_speech_waves.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\speech_waves.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_overlap_aware_diarization.py",
     r"",
 ]
 
@@ -82,8 +83,10 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
--Improve the saved plots to also add a contrasting line for the baseline. Then add markers where it starts and ends.
-- In title convert duration from ms to second format
+- Rename split_speaker_segments to diarize_multi_speakers then update return type as just DiarizationResult. Also update audio_path type to also allow Path and numpy
+- save_audio_segments has some logic that I want to encapsulate in overlap_aware_diarization as its own function
+- The new split_speaker_segments should call diarize_multi_speakers and the new function, and should return a tuple of DiarizationResult and list of tuples of segment data and numpy audio
+- Adjust _main_overlap_aware_diarization to reuse this
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

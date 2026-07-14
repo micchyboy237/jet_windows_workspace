@@ -26,17 +26,26 @@ import numpy as np
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple, Union
+from typing import List, Optional, Dict, Tuple, Union, TypedDict
 from sklearn.cluster import SpectralClustering
 from sklearn.preprocessing import normalize
 from scipy.signal import medfilt
 
 # Import the embedding model factory
-from embedding_model_factory import (
-    BaseEmbeddingModel,
-    EmbeddingModelType,
-    create_embedding_model,
-)
+try:
+    from services.embedding_model_factory import (
+        BaseEmbeddingModel,
+        EmbeddingModelType,
+        create_embedding_model,
+    )
+    from services.audio_utils import load_audio
+except ImportError:
+    from embedding_model_factory import (
+        BaseEmbeddingModel,
+        EmbeddingModelType,
+        create_embedding_model,
+    )
+    from audio_utils import load_audio
 
 log = logging.getLogger("diarization")
 log.setLevel(logging.INFO)
@@ -49,45 +58,44 @@ if not log.handlers:
     ch.setFormatter(formatter)
     log.addHandler(ch)
 
+# ── Types ──
 
-@dataclass
-class Turn:
-    """A single speaker turn, possibly overlapping with another."""
-    start:    float
-    end:      float
-    speaker:  str
-    score:    float = 0.0
-    label:    str   = "speech"
-    
-    @property
-    def duration(self) -> float:
-        return self.end - self.start
-    
-    def __repr__(self):
-        return (f"Turn({self.speaker}  {self.start:.2f}s→{self.end:.2f}s  "
-                f"sim={self.score:.3f}  [{self.label}])")
+class SegmentInfo(TypedDict):
+    """
+    Metadata for a single extracted speaker-turn segment, as produced by
+    `extract_speaker_segments` (pre-save, no file paths yet).
+    """
+    segment_num:  int
+    segment_name: str
+    speaker:      str
+    start:        float
+    end:          float
+    duration:     float
+    score:        float
+    label:        str
+    type:         str   # "clean" | "outlier"
+    global_order: int
 
 
-@dataclass
-class DiarizationResult:
-    """Container for the full pipeline output."""
-    turns:       List[Turn]
-    n_speakers:  int
-    audio_path:  str
-    strategy:    str
-    condition:   str
-    thresholds:  Dict[str, float] = field(default_factory=dict)
-    embedding_model: str = "speechbrain_ecapa"
-    
-    def clean_turns(self) -> List[Turn]:
-        return [t for t in self.turns if t.label == "speech"]
-    
-    def overlap_turns(self) -> List[Turn]:
-        return [t for t in self.turns if t.label == "overlap"]
-    
-    def uncertain_turns(self) -> List[Turn]:
-        return [t for t in self.turns if t.label == "uncertain"]
+# ── Default pipeline parameters ──
+# These defaults are shared between the module and any CLI wrappers.
+# They reflect the same values used in split_speaker_segments() and _main_*.py get_args().
 
+DEFAULT_STRATEGY        = "resegment"
+DEFAULT_CONDITION       = "noisy"
+DEFAULT_N_SPEAKERS      = None          # auto-detect
+DEFAULT_MIN_SPK         = 2
+DEFAULT_MAX_SPK         = 8
+DEFAULT_HF_TOKEN        = None
+DEFAULT_RTTM_PATH       = None
+DEFAULT_SEG_DUR         = 1.5           # seconds
+DEFAULT_SEG_STEP        = 0.75          # seconds
+DEFAULT_MIN_TURN_DUR    = 0.3           # seconds
+DEFAULT_EMBEDDING_MODEL = "nemo_titanet"
+DEFAULT_DEVICE          = None          # auto-detect
+
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 THRESHOLDS: Dict[str, Dict[str, float]] = {
     "clean": {
@@ -121,6 +129,45 @@ THRESHOLDS: Dict[str, Dict[str, float]] = {
 }
 
 
+@dataclass
+class Turn:
+    """A single speaker turn, possibly overlapping with another."""
+    start:    float
+    end:      float
+    speaker:  str
+    score:    float = 0.0
+    label:    str   = "speech"
+    
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
+    
+    def __repr__(self):
+        return (f"Turn({self.speaker}  {self.start:.2f}s→{self.end:.2f}s  "
+                f"sim={self.score:.3f}  [{self.label}])")
+
+
+@dataclass
+class DiarizationResult:
+    """Container for the full pipeline output."""
+    turns:       List[Turn]
+    n_speakers:  int
+    audio_path:  str
+    strategy:    str
+    condition:   str
+    thresholds:  Dict[str, float] = field(default_factory=dict)
+    embedding_model: str = "nemo_titanet"
+    
+    def clean_turns(self) -> List[Turn]:
+        return [t for t in self.turns if t.label == "speech"]
+    
+    def overlap_turns(self) -> List[Turn]:
+        return [t for t in self.turns if t.label == "overlap"]
+    
+    def uncertain_turns(self) -> List[Turn]:
+        return [t for t in self.turns if t.label == "uncertain"]
+
+
 def classify_similarity(score: float, condition: str = "noisy") -> str:
     """
     Map a cosine similarity score to a decision label.
@@ -139,26 +186,6 @@ def classify_similarity(score: float, condition: str = "noisy") -> str:
     return "different_speaker"
 
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def load_audio(path: str, target_sr: int = 16000) -> Tuple[torch.Tensor, int]:
-    """
-    Load any audio file with librosa, resample to 16 kHz mono.
-    Handles multi-channel by averaging channels.
-    """
-    log.info(f"Loading audio: {path}")
-    y, sr = librosa.load(path, sr=None, mono=False)
-    if y.ndim > 1:
-        y = np.mean(y, axis=0)
-    if sr != target_sr:
-        y = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
-    waveform = torch.from_numpy(y).unsqueeze(0).float()
-    duration = waveform.shape[1] / target_sr
-    log.info(f"Audio: {duration:.1f}s  |  {target_sr} Hz  |  mono")
-    return waveform, target_sr
-
-
 def validate_audio(waveform: torch.Tensor, sr: int, min_duration: float = 1.0):
     """Raise if audio is too short to diarize meaningfully."""
     duration = waveform.shape[1] / sr
@@ -169,7 +196,7 @@ def validate_audio(waveform: torch.Tensor, sr: int, min_duration: float = 1.0):
 
 
 def load_embedding_model(
-    model_type: str = "speechbrain_ecapa",
+    model_type: str = "nemo_titanet",
     device: Optional[torch.device] = None,
 ) -> BaseEmbeddingModel:
     """
@@ -452,40 +479,6 @@ def merge_short_turns(turns: List[Turn], min_dur: float = 0.5) -> List[Turn]:
         merged = result
     
     return merged
-
-
-def detect_overlaps_pyannote(
-    audio_path: str,
-    hf_token:   str,
-    min_overlap_dur: float = 0.3,
-) -> List[Tuple[float, float]]:
-    """
-    Use pyannote's neural OSD to detect regions where ≥2 speakers overlap.
-    Requires a HuggingFace token with access to pyannote/overlapped-speech-detection.
-    
-    Returns list of (start_sec, end_sec) overlap regions.
-    """
-    try:
-        from pyannote.audio.pipelines import OverlappedSpeechDetection
-    except ImportError:
-        log.warning("pyannote.audio not installed — skipping OSD. "
-                    "pip install pyannote.audio")
-        return []
-    
-    log.info("Running pyannote Overlapped Speech Detection …")
-    osd = OverlappedSpeechDetection.from_pretrained(
-        "pyannote/overlapped-speech-detection",
-        use_auth_token=hf_token,
-    )
-    osd_output = osd(audio_path)
-    
-    regions = []
-    for segment, _, label in osd_output.itertracks(yield_label=True):
-        if label == "OVERLAP" and segment.duration >= min_overlap_dur:
-            regions.append((segment.start, segment.end))
-    
-    log.info(f"OSD found {len(regions)} overlap region(s)")
-    return regions
 
 
 def detect_overlaps_embedding(
@@ -887,27 +880,28 @@ def export_rttm(result: DiarizationResult, path: str):
     log.info(f"RTTM written → {path}")
 
 
-def run_pipeline(
-    audio_path:     str,
-    strategy:       str            = "resegment",
-    condition:      str            = "noisy",
-    n_speakers:     Optional[int]  = None,
-    min_spk:        int            = 2,
-    max_spk:        int            = 8,
-    hf_token:       Optional[str]  = None,
-    rttm_path:      Optional[str]  = None,
-    seg_dur:        float          = 1.5,
-    seg_step:       float          = 0.75,
-    min_turn_dur:   float          = 0.3,
-    embedding_model: str           = "speechbrain_ecapa",
-    device:         Optional[torch.device] = None,
-) -> Tuple[DiarizationResult, torch.Tensor, int]:
+def diarize_multi_speakers(
+    audio_path:     Union[str, Path, np.ndarray],
+    strategy:       str            = DEFAULT_STRATEGY,
+    condition:      str            = DEFAULT_CONDITION,
+    n_speakers:     Optional[int]  = DEFAULT_N_SPEAKERS,
+    min_spk:        int            = DEFAULT_MIN_SPK,
+    max_spk:        int            = DEFAULT_MAX_SPK,
+    hf_token:       Optional[str]  = DEFAULT_HF_TOKEN,
+    rttm_path:      Optional[str]  = DEFAULT_RTTM_PATH,
+    seg_dur:        float          = DEFAULT_SEG_DUR,
+    seg_step:       float          = DEFAULT_SEG_STEP,
+    min_turn_dur:   float          = DEFAULT_MIN_TURN_DUR,
+    embedding_model: str           = DEFAULT_EMBEDDING_MODEL,
+    device:         Optional[torch.device] = DEFAULT_DEVICE,
+) -> DiarizationResult:
     """
     Full robust overlap-aware speaker diarization pipeline.
-    
+
     Parameters
     ----------
-    audio_path      : path to .wav / .flac / .mp3 file
+    audio_path      : path to .wav / .flac / .mp3 file, or a pre-loaded
+                      mono/multi-channel numpy waveform (assumed 16kHz)
     strategy        : overlap handling — "nn" | "resegment" | "separate"
     condition       : acoustic condition for threshold selection
                       "clean" | "noisy" | "phone" | "forensic"
@@ -918,39 +912,44 @@ def run_pipeline(
     seg_dur         : sliding window length in seconds
     seg_step        : sliding window hop in seconds
     min_turn_dur    : discard turns shorter than this (seconds)
-    embedding_model : embedding model type string (default: speechbrain_ecapa)
+    embedding_model : embedding model type string (default: nemo_titanet)
     device          : torch device (auto-detected if None)
-    
+
     Returns
     -------
-    DiarizationResult with all turns, scores, and metadata
+    DiarizationResult with all turns, scores, and metadata.
+    (Use `split_speaker_segments` instead if you also need per-turn audio.)
     """
     log.info(f"{'='*60}")
     log.info(f"  Speaker Diarization")
     log.info(f"  strategy={strategy}  |  condition={condition}")
     log.info(f"  embedding_model={embedding_model}")
     log.info(f"{'='*60}")
-    
+
     thresholds = THRESHOLDS[condition]
-    
-    # Load audio
-    waveform, sr = load_audio(audio_path)
+
+    if isinstance(audio_path, np.ndarray):
+        waveform = torch.from_numpy(audio_path).float()
+        if waveform.dim() == 1:
+            waveform = waveform.unsqueeze(0)
+        sr = 16000
+        audio_path_label = "<numpy_array>"
+        log.info(f"Using pre-loaded numpy waveform, assuming sr={sr}Hz")
+    else:
+        waveform, sr = load_audio(audio_path, sr=16000, return_as_tensor=True)
+        audio_path_label = str(audio_path)
+
     validate_audio(waveform, sr)
-    
-    # Load embedding model via factory
+
     model = load_embedding_model(
         model_type=embedding_model,
         device=device,
     )
-    
-    # Extract embeddings
     segments, embeddings = extract_embeddings(
         model, waveform, sr,
         seg_dur=seg_dur,
         seg_step=seg_step,
     )
-    
-    # Cluster speakers
     labels, n_spk = cluster_speakers(
         embeddings,
         n_speakers=n_speakers,
@@ -958,31 +957,21 @@ def run_pipeline(
         max_spk=max_spk,
         smooth_labels=True,
     )
-    
-    # Build initial turns
     turns = build_turns(segments, labels, min_dur=min_turn_dur)
     turns = merge_short_turns(turns, min_dur=min_turn_dur)
-    
-    # Detect overlaps
-    if hf_token:
-        overlap_regions = detect_overlaps_pyannote(
-            audio_path, hf_token, min_overlap_dur=0.3
+
+    try:
+        bootstrap_centroids = build_speaker_centroids(
+            model, waveform, sr, turns, overlap_regions=[], min_chunk_sec=0.3
         )
-    else:
-        log.info("No HF token — using embedding-based OSD (no pyannote needed)")
-        try:
-            bootstrap_centroids = build_speaker_centroids(
-                model, waveform, sr, turns, overlap_regions=[], min_chunk_sec=0.3
-            )
-            overlap_regions = detect_overlaps_embedding(
-                model, waveform, sr, turns,
-                bootstrap_centroids, condition=condition,
-            )
-        except RuntimeError:
-            log.warning("Could not build bootstrap centroids — no OSD applied")
-            overlap_regions = []
-    
-    # Build centroids from clean turns
+        overlap_regions = detect_overlaps_embedding(
+            model, waveform, sr, turns,
+            bootstrap_centroids, condition=condition,
+        )
+    except RuntimeError:
+        log.warning("Could not build bootstrap centroids — no OSD applied")
+        overlap_regions = []
+
     try:
         centroids = build_speaker_centroids(
             model, waveform, sr, turns, overlap_regions
@@ -992,13 +981,11 @@ def run_pipeline(
         centroids = build_speaker_centroids(
             model, waveform, sr, turns, overlap_regions=[]
         )
-    
-    # Score turns
+
     turns = score_turns_against_centroids(
         model, waveform, sr, turns, centroids, condition
     )
-    
-    # Apply overlap strategy
+
     if not overlap_regions:
         log.info("No overlap regions found — returning standard diarization")
         final_turns = turns
@@ -1018,21 +1005,147 @@ def run_pipeline(
         raise ValueError(
             f"Unknown strategy {strategy!r}. Choose: nn | resegment | separate"
         )
-    
+
     result = DiarizationResult(
         turns=final_turns,
         n_speakers=n_spk,
-        audio_path=audio_path,
+        audio_path=audio_path_label,
         strategy=strategy,
         condition=condition,
         thresholds=thresholds,
         embedding_model=embedding_model,
     )
-    
+
     if rttm_path:
         export_rttm(result, rttm_path)
-    
-    return result, waveform, sr
+
+    log.info(f"diarize_multi_speakers complete — {len(final_turns)} turn(s), "
+             f"{n_spk} speaker(s)")
+    return result
+
+
+def extract_speaker_segments(
+    result:   DiarizationResult,
+    waveform: Union[torch.Tensor, np.ndarray],
+    sr:       int,
+) -> List[Tuple[SegmentInfo, np.ndarray]]:
+    """
+    Slice per-turn audio out of the full waveform and build metadata for
+    each turn — pure in-memory logic, no disk writes.
+
+    All turns (clean and uncertain) are numbered sequentially by start
+    time, using 3-digit segment numbers (001-999). "speech" turns are
+    tagged type="clean"; everything else (overlap/uncertain) is tagged
+    type="outlier".
+
+    Args:
+        result:   Diarization result containing all speaker turns.
+        waveform: Full audio waveform, shape (channels, samples),
+                  (samples,), or a torch.Tensor of either shape.
+        sr:       Sample rate of the waveform.
+
+    Returns:
+        List of (segment_info, segment_audio) tuples ordered by start time.
+        segment_info keys: segment_num, segment_name, speaker, start, end,
+        duration, score, label, type, global_order.
+    """
+    if isinstance(waveform, torch.Tensor):
+        waveform_np = waveform.detach().cpu().numpy()
+    else:
+        waveform_np = np.asarray(waveform)
+    if waveform_np.ndim == 1:
+        waveform_np = waveform_np[None, :]
+
+    all_turns_sorted = sorted(result.turns, key=lambda t: t.start)
+    clean_count = sum(1 for t in all_turns_sorted if t.label == "speech")
+    outlier_count = len(all_turns_sorted) - clean_count
+    log.info(f"Extracting {len(all_turns_sorted)} segment(s) "
+             f"({clean_count} clean, {outlier_count} outlier)")
+
+    extracted: List[Tuple[dict, np.ndarray]] = []
+    for idx, turn in enumerate(all_turns_sorted, 1):
+        seg_type = "clean" if turn.label == "speech" else "outlier"
+        start_sample = int(turn.start * sr)
+        end_sample = int(turn.end * sr)
+        segment_audio = waveform_np[:, start_sample:end_sample].squeeze()
+
+        segment_info: SegmentInfo = {
+            "segment_num": idx,
+            "segment_name": f"segment_{idx:03d}",
+            "speaker": turn.speaker,
+            "start": turn.start,
+            "end": turn.end,
+            "duration": turn.duration,
+            "score": turn.score,
+            "label": turn.label,
+            "type": seg_type,
+            "global_order": idx,
+        }
+        extracted.append((segment_info, segment_audio))
+        log.debug(f"  ✓ {segment_info['segment_name']} [{seg_type}]: "
+                  f"{turn.speaker} {turn.start:.2f}s-{turn.end:.2f}s "
+                  f"({turn.duration:.2f}s, {segment_audio.shape[-1]} samples)")
+
+    return extracted
+
+
+def split_speaker_segments(
+    audio_path:     Union[str, Path, np.ndarray],
+    strategy:       str            = DEFAULT_STRATEGY,
+    condition:      str            = DEFAULT_CONDITION,
+    n_speakers:     Optional[int]  = DEFAULT_N_SPEAKERS,
+    min_spk:        int            = DEFAULT_MIN_SPK,
+    max_spk:        int            = DEFAULT_MAX_SPK,
+    hf_token:       Optional[str]  = DEFAULT_HF_TOKEN,
+    rttm_path:      Optional[str]  = DEFAULT_RTTM_PATH,
+    seg_dur:        float          = DEFAULT_SEG_DUR,
+    seg_step:       float          = DEFAULT_SEG_STEP,
+    min_turn_dur:   float          = DEFAULT_MIN_TURN_DUR,
+    embedding_model: str           = DEFAULT_EMBEDDING_MODEL,
+    device:         Optional[torch.device] = DEFAULT_DEVICE,
+) -> Tuple[DiarizationResult, List[Tuple[SegmentInfo, np.ndarray]]]:
+    """
+    Run full diarization and extract per-turn audio segments in one call.
+
+    Loads the audio once (unless already a numpy array), runs
+    `diarize_multi_speakers` on the in-memory waveform (avoiding a second
+    file read), then slices out each turn's audio via
+    `extract_speaker_segments`.
+
+    Returns
+    -------
+    (DiarizationResult, list of (segment_info, segment_audio) tuples)
+    """
+    if isinstance(audio_path, np.ndarray):
+        waveform_np = audio_path
+        sr = 16000
+        log.info("split_speaker_segments: using pre-loaded numpy waveform")
+    else:
+        waveform, sr = load_audio(audio_path, sr=16000, return_as_tensor=True)
+        waveform_np = waveform.squeeze(0).numpy()
+
+    result = diarize_multi_speakers(
+        audio_path=waveform_np,
+        strategy=strategy,
+        condition=condition,
+        n_speakers=n_speakers,
+        min_spk=min_spk,
+        max_spk=max_spk,
+        hf_token=hf_token,
+        rttm_path=rttm_path,
+        seg_dur=seg_dur,
+        seg_step=seg_step,
+        min_turn_dur=min_turn_dur,
+        embedding_model=embedding_model,
+        device=device,
+    )
+    # Preserve the original path label for reporting/RTTM naming purposes.
+    if not isinstance(audio_path, np.ndarray):
+        result.audio_path = str(audio_path)
+
+    segments = extract_speaker_segments(result, waveform_np, sr)
+    log.info(f"split_speaker_segments complete — {len(segments)} segment(s) extracted")
+    return result, segments
 
 
 if __name__ == "__main__":

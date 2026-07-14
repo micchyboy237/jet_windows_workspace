@@ -553,7 +553,7 @@ def main():
     parser.add_argument(
         "-emb", "--embedding-model",
         type=str,
-        default="modelscope_eres2netv2",
+        default="nemo_titanet",
         choices=[e.value for e in EmbeddingModelType],
         help="Speaker embedding model backend.",
     )

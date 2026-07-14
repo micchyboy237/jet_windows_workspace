@@ -53,13 +53,7 @@ include_files = [
 
     # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\segment_speaker_labeler.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_segment_speaker_labeler.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\combine_audio_segments.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\extract_audio_segment.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\audio_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing.py",
     r"",
 ]
 
@@ -85,6 +79,8 @@ TOKEN_BUDGET = 8000
 DEFAULT_QUERY_MESSAGE = r"""
 Refactor the code below. Break it down where needed — large files into modules, large classes into smaller ones, and long methods/functions into focused helpers.
 Be surgical: show only diffs, moved blocks, and new files. Do NOT reproduce existing files in full under any circumstances.
+
+Create a processing dir instead of the existing processing.py file
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
