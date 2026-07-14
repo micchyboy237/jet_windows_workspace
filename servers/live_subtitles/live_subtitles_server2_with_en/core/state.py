@@ -22,11 +22,11 @@ from services.config import (
 from services.segment_speaker_labeler import SegmentSpeakerLabeler
 from services.audio_language_detector import AudioLanguageDetector
 from services.live_subtitles_server_utils import load_segment_counter
-
-
-
 from concurrent.futures import ThreadPoolExecutor
+
 executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="transcribe_worker")
+diarization_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="diarization_worker")  # <-- new
+
 active_connections: dict[str, object] = {}
 
 from services.audio_context_buffer import AudioContextBuffer
@@ -36,18 +36,15 @@ prev_end_sec: Optional[float] = None
 prev_vad_reason = None
 
 _speaker_labeler: Optional[SegmentSpeakerLabeler] = None
-_embedding_model: Optional[Model] = None
-_embedding_inference: Optional[Inference] = None
+_embedding_model: Optional[object] = None  # CHANGED: Store BaseEmbeddingModel instance
+_embedding_inference: Optional[Inference] = None  # Legacy pyannote inference
 _current_speaker: Optional[str] = None
 _last_speaker_change_time: float = 0.0
 
 audio_language_detector = None
-_audio_tagger = None  # AudioTagger instance
+_audio_tagger = None
 _segment_counter: Optional[int] = None
 
-# ============================================================================
-# Segment Counter
-# ============================================================================
 
 def get_segment_counter() -> int:
     """Get or initialize the segment counter."""
@@ -80,13 +77,13 @@ def get_speaker_state_path() -> Path:
     """Get the speaker state file path."""
     return SPEAKER_STATE_PATH
 
-# ============================================================================
-# Executor and Connections
-# ============================================================================
-
 def get_executor() -> ThreadPoolExecutor:
     """Get the thread pool executor."""
     return executor
+
+def get_diarization_executor() -> ThreadPoolExecutor:
+    """Get the background diarization executor (non-blocking saves)."""
+    return diarization_executor
 
 def get_context_buffer() -> AudioContextBuffer:
     """Get the audio context buffer."""
@@ -95,10 +92,6 @@ def get_context_buffer() -> AudioContextBuffer:
 def get_active_connections() -> dict:
     """Get active WebSocket connections."""
     return active_connections
-
-# ============================================================================
-# VAD State
-# ============================================================================
 
 def get_prev_state() -> tuple:
     """Get previous VAD state."""
@@ -109,10 +102,6 @@ def set_prev_state(end_sec: Optional[float], vad_reason) -> None:
     global prev_end_sec, prev_vad_reason
     prev_end_sec = end_sec
     prev_vad_reason = vad_reason
-
-# ============================================================================
-# Speaker State
-# ============================================================================
 
 def get_current_speaker() -> Optional[str]:
     """Get current speaker label."""
@@ -141,12 +130,39 @@ def set_speaker_labeler(labeler: SegmentSpeakerLabeler) -> None:
     global _speaker_labeler
     _speaker_labeler = labeler
 
+# ============================================================================
+# NEW: Embedding model accessors (for the factory-based BaseEmbeddingModel)
+# ============================================================================
+def get_embedding_model() -> Optional[object]:
+    """
+    Get the shared speaker embedding model instance (BaseEmbeddingModel).
+    
+    This is the factory-created model (e.g., NeMoTitaNetEmbeddingModel)
+    that can be passed to split_speaker_segments, diarize_multi_speakers,
+    and other functions that accept a BaseEmbeddingModel.
+    
+    Returns:
+        BaseEmbeddingModel instance or None if not yet initialized
+    """
+    return _embedding_model
+
+def set_embedding_model(model: object) -> None:
+    """
+    Set the shared speaker embedding model instance.
+    
+    Args:
+        model: BaseEmbeddingModel instance from embedding_model_factory
+    """
+    global _embedding_model
+    _embedding_model = model
+
+# Legacy pyannote Inference accessors (kept for backward compatibility)
 def get_embedding_inference() -> Optional[Inference]:
-    """Get the embedding inference instance."""
+    """Get the legacy pyannote embedding inference instance."""
     return _embedding_inference
 
 def set_embedding_inference(inference: Inference) -> None:
-    """Set the embedding inference instance."""
+    """Set the legacy pyannote embedding inference instance."""
     global _embedding_inference
     _embedding_inference = inference
 
@@ -161,7 +177,6 @@ def get_speaker_diarization() -> Dict:
             "speakers_info": {},
             "total_segments_processed": 0,
         }
-
     all_info = labeler.get_all_speakers_info()
     sorted_speakers = sorted(
         all_info.items(),
@@ -188,10 +203,6 @@ def save_speaker_state() -> None:
     except Exception:
         pass
 
-# ============================================================================
-# Audio Language Detector
-# ============================================================================
-
 def get_audio_language_detector():
     """Get the audio language detector."""
     return audio_language_detector
@@ -201,25 +212,11 @@ def set_audio_language_detector(detector) -> None:
     global audio_language_detector
     audio_language_detector = detector
 
-# ============================================================================
-# Audio Tagger (NEW)
-# ============================================================================
-
 def get_audio_tagger():
-    """
-    Get the audio tagger instance.
-    
-    Returns:
-        AudioTagger instance or None if not initialized
-    """
+    """Get the audio tagger instance."""
     return _audio_tagger
 
 def set_audio_tagger(tagger) -> None:
-    """
-    Set the audio tagger instance.
-    
-    Args:
-        tagger: AudioTagger instance
-    """
+    """Set the audio tagger instance."""
     global _audio_tagger
     _audio_tagger = tagger

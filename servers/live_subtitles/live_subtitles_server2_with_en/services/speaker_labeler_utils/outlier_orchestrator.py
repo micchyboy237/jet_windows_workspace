@@ -3,13 +3,16 @@
 Extracted from SegmentSpeakerLabeler to keep the main class focused on
 core labeling logic. Handles outlier-aware labeling flows.
 """
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 from rich.console import Console
 
-if TYPE_CHECKING:
-    from segment_speaker_labeler import SegmentSpeakerLabeler
-    from outlier_pool import OutlierMatch
+try:
+    from services.speaker_labeler_utils.outlier_pool import OutlierMatch
+    # from services.segment_speaker_labeler import SegmentSpeakerLabeler
+except ImportError:
+    from speaker_labeler_utils.outlier_pool import OutlierMatch
+    # from segment_speaker_labeler import SegmentSpeakerLabeler
 
 console = Console()
 
@@ -17,7 +20,8 @@ console = Console()
 class OutlierOrchestrator:
     """Orchestrates the outlier buffer labeling flow."""
 
-    def __init__(self, labeler: "SegmentSpeakerLabeler", debug: bool = False):
+    # def __init__(self, labeler: "SegmentSpeakerLabeler", debug: bool = False):
+    def __init__(self, labeler, debug: bool = False):
         self._labeler = labeler
         self.debug = debug
 

@@ -258,63 +258,11 @@ def resolve_audio_paths_as_tensor_list(
 
 
 def load_audio(
-    audio_path: Union[str, Path], 
-    sr: Optional[int] = None,
-    mono: bool = True,
-    normalize: bool = False,
-    return_as_tensor: bool = False
-) -> Tuple[Union[np.ndarray, torch.Tensor], int]:
-    """
-    Load any audio file with librosa, optionally resample and convert to mono.
-    
-    Args:
-        audio_path: Path to audio file (str or Path)
-        sr: Target sample rate. If None, keeps original sample rate.
-        mono: If True, convert to mono by averaging channels
-        normalize: If True, apply peak normalization
-        return_as_tensor: If True, return as PyTorch tensor, else numpy array
-    
-    Returns:
-        Tuple of (waveform, sample_rate)
-    """
-    # Convert Path to string if needed
-    audio_path = str(audio_path)
-    
-    # Load audio - keep original sample rate and channels
-    y, orig_sr = librosa.load(audio_path, sr=None, mono=False)
-    
-    # Convert to mono if requested
-    if mono and y.ndim > 1:
-        y = np.mean(y, axis=0)
-        # Prevent clipping from channel mixing
-        if np.max(np.abs(y)) > 1.0:
-            y = y / np.max(np.abs(y))
-    
-    # Resample only if sr is specified and different from original
-    if sr is not None and orig_sr != sr:
-        y = librosa.resample(y, orig_sr=orig_sr, target_sr=sr)
-        orig_sr = sr
-    
-    # Optional: Peak normalization
-    if normalize:
-        peak = np.max(np.abs(y))
-        if peak > 0:  # Avoid division by zero for silence
-            y = y / peak
-    
-    # Convert to tensor or keep as numpy
-    if return_as_tensor:
-        waveform = torch.from_numpy(y).unsqueeze(0).float()
-    else:
-        waveform = y
-    
-    return waveform, orig_sr
-
-
-def load_audio_orig(
     audio: AudioInput,
     sr: Optional[int] = SAMPLE_RATE,
     mono: bool = True,
-) -> tuple[np.ndarray, int]:
+    return_as_tensor: bool = False,
+) -> Union[Tuple[np.ndarray, int], Tuple[torch.Tensor, int]]:
     """
     Robust audio loader for ASR pipelines.
     Handles:
@@ -327,9 +275,12 @@ def load_audio_orig(
         sr: Target sample rate after loading. Pass None to keep the file's
             native sample rate (file/bytes inputs only). Arrays and tensors
             have no embedded rate and will use SAMPLE_RATE as fallback.
+        mono: Whether to convert multi-channel audio to mono.
+        return_as_tensor: If True, return audio as a torch.Tensor instead of
+            numpy array.
 
     Returns:
-        (audio: np.ndarray [samples], sr: int)
+        (audio: np.ndarray or torch.Tensor [samples], sr: int)
     """
     def _decode_raw_pcm(
         data: bytes,
@@ -418,7 +369,13 @@ def load_audio_orig(
         y = librosa.resample(y, orig_sr=effective_sr, target_sr=target_sr)
         effective_sr = target_sr
 
-    return y.squeeze().astype(np.float32), effective_sr
+    # ─────── Final output format ───────
+    audio_array = y.squeeze().astype(np.float32)
+    
+    if return_as_tensor:
+        return torch.from_numpy(audio_array), effective_sr
+    else:
+        return audio_array, effective_sr
 
 
 def resample_audio(

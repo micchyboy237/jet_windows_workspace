@@ -66,6 +66,7 @@ app.include_router(translate_router)
 app.include_router(tagger_router)
 app.include_router(global_reset_router)
 
+
 def initialize_detector():
     """Initialize the audio language detector."""
     from core.state import set_audio_language_detector
@@ -76,13 +77,15 @@ def initialize_detector():
     set_audio_language_detector(detector)
     console.print("Detector initialized successfully!\n")
 
+
 def initialize_labeler():
     import json
     from core.state import (
         get_speaker_labeler,
         get_audio_tagger,
         get_speaker_state_path,
-        set_embedding_inference,
+        set_embedding_inference,     # legacy
+        set_embedding_model,          # NEW: store factory model
         set_speaker_labeler,
     )
     from pyannote.audio import Inference, Model
@@ -92,31 +95,43 @@ def initialize_labeler():
         create_embedding_model,
         list_available_models,
     )
-
+    
     MODEL_TYPE = EmbeddingModelType.NEMO_TITANET
-
+    
     console.print(f"[bold]Available embedding models:[/bold]")
     for name, info in list_available_models().items():
         console.print(f"  • {name} (dim={info['embedding_dim']})")
-
+    
     with console.status(
         f"[bold green]Loading embedding model '{MODEL_TYPE.value}'...[/bold green]",
         spinner="dots",
     ):
-        embedding_inference = create_embedding_model(MODEL_TYPE)
-
-    set_embedding_inference(embedding_inference)
-
+        embedding_model = create_embedding_model(MODEL_TYPE)
+    
+    # ========================================================================
+    # NEW: Store the factory embedding model in global state
+    # This makes it accessible to split_speaker_segments and other functions
+    # that accept a BaseEmbeddingModel instance
+    # ========================================================================
+    set_embedding_model(embedding_model)
+    console.print(
+        f"[success]Embedding model stored in state: {embedding_model}[/success]"
+    )
+    
+    # Also set the legacy pyannote inference for backward compatibility
+    # (SegmentSpeakerLabeler may still use it)
+    if hasattr(embedding_model, '_inference') and embedding_model._inference is not None:
+        set_embedding_inference(embedding_model._inference)
+        console.print("[success]Legacy pyannote inference also stored[/success]")
+    
     speaker_state_path = get_speaker_state_path()
-    # tagger = get_audio_tagger()
     if speaker_state_path.exists():
         try:
             with open(speaker_state_path, "r") as f:
                 state = json.load(f)
             labeler = SegmentSpeakerLabeler.from_dict(
                 state,
-                embedding_model=embedding_inference,
-                # audio_tagger=tagger,
+                embedding_model=embedding_model,  # Pass the factory model
             )
             set_speaker_labeler(labeler)
             console.print(
@@ -129,15 +144,13 @@ def initialize_labeler():
             console.print(
                 f"[warning]Could not restore speaker state: {e}[/warning]"
             )
-
+    
     labeler = SegmentSpeakerLabeler(
-        embedding_model=embedding_inference,
-        # audio_tagger=tagger,
+        embedding_model=embedding_model,  # Pass the factory model
         debug=True,
     )
     set_speaker_labeler(labeler)
     console.print("[success]Speaker labeler initialized[/success]")
-
     return labeler
 
 
@@ -162,6 +175,7 @@ def initialize_tagger():
     except Exception as e:
         console.print(f"[warning]Could not initialize AudioTagger: {e}[/warning]")
         console.print("[warning]Audio tagging endpoints will initialize on first request.[/warning]\n")
+
 
 def cleanup_on_shutdown():
     """
@@ -189,6 +203,7 @@ def cleanup_on_shutdown():
             console.print(f"[warning]Error resetting AudioTagger: {e}[/warning]")
     
     console.print("[success]Cleanup complete.[/success]")
+
 
 import atexit
 atexit.register(cleanup_on_shutdown)

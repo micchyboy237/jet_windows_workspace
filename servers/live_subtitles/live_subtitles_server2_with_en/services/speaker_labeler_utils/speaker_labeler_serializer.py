@@ -2,14 +2,15 @@
 
 Extracted to keep the main class focused on core labeling logic.
 """
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional
 import numpy as np
 from scipy.spatial.distance import cdist
 from rich.console import Console
 
-if TYPE_CHECKING:
-    from segment_speaker_labeler import SegmentSpeakerLabeler
-    from speaker_reference import SpeakerReference
+# try:
+#     from services.segment_speaker_labeler import SegmentSpeakerLabeler
+# except ImportError:
+#     from segment_speaker_labeler import SegmentSpeakerLabeler
 
 console = Console()
 
@@ -17,7 +18,8 @@ console = Console()
 class SpeakerLabelerSerializer:
     """Handles serialization, health reports, centroid stats, and similarity matrix."""
 
-    def __init__(self, labeler: "SegmentSpeakerLabeler"):
+    # def __init__(self, labeler: "SegmentSpeakerLabeler"):
+    def __init__(self, labeler):
         self._labeler = labeler
 
     # ------------------------------------------------------------------
@@ -267,7 +269,7 @@ class SpeakerLabelerSerializer:
         audio_tagger=None,
     ) -> "SegmentSpeakerLabeler":
         """Create a labeler from serialized state."""
-        from speaker_reference import SpeakerReference
+        from speaker_labeler_utils.speaker_types import SpeakerReference
         from segment_speaker_labeler_defaults import (
             DEFAULT_THRESHOLD_SAME,
             DEFAULT_THRESHOLD_POSSIBLE,

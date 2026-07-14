@@ -80,7 +80,7 @@ DEFAULT_QUERY_MESSAGE = r"""
 Refactor the code below. Break it down where needed — large files into modules, large classes into smaller ones, and long methods/functions into focused helpers.
 Be surgical: show only diffs, moved blocks, and new files. Do NOT reproduce existing files in full under any circumstances.
 
-Create a processing dir instead of the existing processing.py file
+Create a processing dir instead of the existing processing.py file.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

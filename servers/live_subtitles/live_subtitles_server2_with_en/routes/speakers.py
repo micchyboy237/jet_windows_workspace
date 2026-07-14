@@ -21,8 +21,8 @@ from core.state import (
     save_speaker_state,
     get_speaker_state_path,
     get_last_n_segments_dir,
+    get_speaker_diarization,
 )
-from core.processing import get_speaker_diarization
 from services.audio_utils import get_audio_duration
 from services.audio_config import SAMPLE_RATE
 from services.config import TEMPLATES_DIR

@@ -196,23 +196,32 @@ def validate_audio(waveform: torch.Tensor, sr: int, min_duration: float = 1.0):
 
 
 def load_embedding_model(
-    model_type: str = "nemo_titanet",
+    model_type: Union[str, BaseEmbeddingModel] = "nemo_titanet",
     device: Optional[torch.device] = None,
 ) -> BaseEmbeddingModel:
     """
-    Load a speaker embedding model via the factory.
-    
+    Load a speaker embedding model via the factory, or reuse one if
+    an already-instantiated BaseEmbeddingModel is passed in.
+
     Parameters
     ----------
-    model_type : str
-        One of: pyannote, speechbrain_ecapa, speechbrain_xvect, 
-        nemo_titanet, modelscope_eres2netv2
+    model_type : str or BaseEmbeddingModel
+        Either a model type string (e.g. "nemo_titanet") to load fresh,
+        or an existing BaseEmbeddingModel instance to reuse as-is
+        (skips loading entirely).
     device : torch.device, optional
-    
+
     Returns
     -------
     BaseEmbeddingModel instance ready for encoding
     """
+    if isinstance(model_type, BaseEmbeddingModel):
+        log.info(
+            f"Reusing already-loaded embedding model instance: {model_type} "
+            f"(skipping load_embedding_model / create_embedding_model)"
+        )
+        return model_type
+
     log.info(f"Loading embedding model: {model_type}")
     model = create_embedding_model(
         model_type=model_type,
@@ -892,7 +901,7 @@ def diarize_multi_speakers(
     seg_dur:        float          = DEFAULT_SEG_DUR,
     seg_step:       float          = DEFAULT_SEG_STEP,
     min_turn_dur:   float          = DEFAULT_MIN_TURN_DUR,
-    embedding_model: str           = DEFAULT_EMBEDDING_MODEL,
+    embedding_model: Union[str, BaseEmbeddingModel] = DEFAULT_EMBEDDING_MODEL,
     device:         Optional[torch.device] = DEFAULT_DEVICE,
 ) -> DiarizationResult:
     """
@@ -912,7 +921,7 @@ def diarize_multi_speakers(
     seg_dur         : sliding window length in seconds
     seg_step        : sliding window hop in seconds
     min_turn_dur    : discard turns shorter than this (seconds)
-    embedding_model : embedding model type string (default: nemo_titanet)
+    embedding_model : string or embedding model type (default: nemo_titanet)
     device          : torch device (auto-detected if None)
 
     Returns
@@ -920,10 +929,16 @@ def diarize_multi_speakers(
     DiarizationResult with all turns, scores, and metadata.
     (Use `split_speaker_segments` instead if you also need per-turn audio.)
     """
+    embedding_model_name = (
+        embedding_model.model_type.value
+        if isinstance(embedding_model, BaseEmbeddingModel)
+        else embedding_model
+    )
     log.info(f"{'='*60}")
     log.info(f"  Speaker Diarization")
     log.info(f"  strategy={strategy}  |  condition={condition}")
-    log.info(f"  embedding_model={embedding_model}")
+    log.info(f"  embedding_model={embedding_model_name}"
+             f"{' (reused instance)' if isinstance(embedding_model, BaseEmbeddingModel) else ''}")
     log.info(f"{'='*60}")
 
     thresholds = THRESHOLDS[condition]
@@ -1101,7 +1116,7 @@ def split_speaker_segments(
     seg_dur:        float          = DEFAULT_SEG_DUR,
     seg_step:       float          = DEFAULT_SEG_STEP,
     min_turn_dur:   float          = DEFAULT_MIN_TURN_DUR,
-    embedding_model: str           = DEFAULT_EMBEDDING_MODEL,
+    embedding_model: Union[str, BaseEmbeddingModel] = DEFAULT_EMBEDDING_MODEL,
     device:         Optional[torch.device] = DEFAULT_DEVICE,
 ) -> Tuple[DiarizationResult, List[Tuple[SegmentInfo, np.ndarray]]]:
     """
