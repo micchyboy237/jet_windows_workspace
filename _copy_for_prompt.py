@@ -97,7 +97,13 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Now browse for this model "ModelScope ERes2NetV2: iic/speech_eres2netv2_sv_zh-cn_16k-common" then create temp3.py
+Update _main_nemo_titanet with a new function that does the ff:
+- Save each "{OUTPUT_DIR}/segments/seg_<num:03d>/" subdir containing sound.wav, all other segment related info in separate files
+- Save a summarized global segments.json directly under OUTPUT_DIR. Include a plot as well.
+
+Update nemo_titanet:
+- Create the typed dicts
+- You may update detect_multi_speakers return type if its incomplete
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

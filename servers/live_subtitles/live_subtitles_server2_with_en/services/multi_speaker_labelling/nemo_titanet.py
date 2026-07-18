@@ -1,6 +1,5 @@
 """
 Automatic multi-speaker labeling using NVIDIA NeMo TitaNet-Large embeddings.
-
 Difference from the pyannote/embedding version (temp1.py):
   - Embeddings come from NeMo's `EncDecSpeakerLabelModel` (titanet_large) instead of
     pyannote's `Model` + `Inference`.
@@ -8,37 +7,64 @@ Difference from the pyannote/embedding version (temp1.py):
     windowing is done manually (load audio once, slice in memory, batch through the model).
   - Similarity thresholds are re-tuned for TitaNet's score range (NVIDIA's own default
     "same speaker" verification threshold is 0.70 cosine similarity).
-
 Clustering / merging / timeline logic is unchanged from temp1.py - it only depends on
 embedding vectors, not on which model produced them.
 """
-
 import logging
 import numpy as np
 import torch
 import torchaudio
-from typing import Literal
+from typing import Literal, TypedDict
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.metrics import silhouette_score
 
-# ---------------------------------------------------------------------------
-# Logging setup (temp1.py had a broken `logger = ` line with nothing assigned,
-# which is a SyntaxError - fixed here with a real, traceable logger).
-# ---------------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
-    datefmt="%H:%M:%S",
-)
-logger = logging.getLogger("speaker_labeler_titanet")
+logger = logging.getLogger(__name__)
 
+
+# ──────────────────────────────────────────────
+# TypedDicts for structured return types
+# ──────────────────────────────────────────────
+
+class SpeakerStats(TypedDict):
+    """Per-speaker statistics computed from clustered embeddings."""
+    n_frames: int
+    duration: float
+    avg_similarity: float
+    std_similarity: float
+    quality: str           # 'good' or 'poor'
+    frames_percent: float
+
+
+class TimelineSegment(TypedDict):
+    """A contiguous speaker segment in the timeline."""
+    start: float
+    end: float
+    duration: float
+    speaker_id: int
+    speaker_label: str     # Human-readable label like "Speaker A"
+
+
+class MultiSpeakerResult(TypedDict):
+    """Complete return type for detect_multi_speakers."""
+    embeddings: np.ndarray                             # (n_windows, embedding_dim)
+    timestamps: list[tuple[float, float]]              # [(start, end), ...]
+    labels: np.ndarray                                 # (n_windows,) int labels
+    centroids: dict[int, np.ndarray]                   # speaker_id -> centroid vector
+    speaker_stats: dict[int, SpeakerStats]             # speaker_id -> stats
+    timeline: list[TimelineSegment]                    # final speaker segments
+    confidences: np.ndarray                            # (n_windows,) confidence scores
+    n_speakers: int                                    # detected speaker count
+
+
+# ──────────────────────────────────────────────
+# SpeakerAutoLabelerTitaNet
+# ──────────────────────────────────────────────
 
 class SpeakerAutoLabelerTitaNet:
     """
     Automatic speaker labeling and centroid extraction using NeMo TitaNet-Large embeddings.
     Fully automatic with intelligent cluster merging (same pipeline as the pyannote version).
     """
-
     def __init__(
         self,
         model_name: str = "titanet_large",
@@ -50,7 +76,6 @@ class SpeakerAutoLabelerTitaNet:
     ):
         """
         Initialize speaker labeler with a NeMo TitaNet model.
-
         Args:
             model_name: Pretrained NeMo speaker embedding model ("titanet_large").
             duration: Sliding window duration in seconds. TitaNet is trained/used on
@@ -67,21 +92,17 @@ class SpeakerAutoLabelerTitaNet:
                 get embedded and drag cluster quality down.
             device: "cuda" or "cpu". Auto-detected if not given.
         """
-        # Imported here so the rest of this module (clustering/merging logic) can be
-        # unit-tested or reused even in environments without nemo_toolkit installed.
         from nemo.collections.asr.models import EncDecSpeakerLabelModel
-
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Loading NeMo model: {model_name} (device={self.device})")
         self.model = EncDecSpeakerLabelModel.from_pretrained(model_name=model_name)
         self.model = self.model.to(self.device)
         self.model.eval()
-
         self.duration = duration
         self.step = step
         self.batch_size = batch_size
         self.min_energy_percentile = min_energy_percentile
-        self.sample_rate = 16000  # TitaNet expects 16kHz mono input
+        self.sample_rate = 16000
         logger.info(
             f"Model loaded. Window: {duration}s, Step: {step}s, Batch size: {batch_size}, "
             f"Silence filter: bottom {min_energy_percentile:.0f}% energy skipped"
@@ -98,7 +119,7 @@ class SpeakerAutoLabelerTitaNet:
             resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)
             waveform = resampler(waveform)
             logger.info(f"Resampled audio from {sr}Hz to {self.sample_rate}Hz")
-        return waveform.squeeze(0)  # shape: (num_samples,)
+        return waveform.squeeze(0)
 
     @torch.no_grad()
     def extract_embeddings(self, audio_path: str):
@@ -107,24 +128,14 @@ class SpeakerAutoLabelerTitaNet:
         total_samples = waveform.shape[0]
         window_samples = int(self.duration * self.sample_rate)
         step_samples = int(self.step * self.sample_rate)
-
         if total_samples < window_samples:
             raise ValueError(
                 f"Audio is shorter ({total_samples / self.sample_rate:.2f}s) than one "
                 f"window ({self.duration}s). Reduce --duration or use a longer clip."
             )
-
-        # Build window start indices
         all_starts = list(range(0, total_samples - window_samples + 1, step_samples))
         logger.info(f"Extracting embeddings from: {audio_path}")
         logger.info(f"Total windows (before silence filtering): {len(all_starts)}")
-
-        # --- Silence / pause filtering ---------------------------------------------
-        # Windows with very low energy are almost certainly silence, breath, or room
-        # noise between turns. Left in, they get embedded like real speech and drag
-        # cluster consistency down (this is what caused the "POOR" quality ratings and
-        # the over-split speaker count on the first run). We filter relative to this
-        # file's own energy distribution so it adapts to quiet/loud recordings.
         if self.min_energy_percentile > 0:
             energies = np.array([
                 torch.sqrt(torch.mean(waveform[s: s + window_samples] ** 2)).item()
@@ -139,7 +150,6 @@ class SpeakerAutoLabelerTitaNet:
         else:
             starts = all_starts
         logger.info(f"Total windows (after silence filtering): {len(starts)}")
-
         embeddings = []
         timestamps = []
         for batch_start in range(0, len(starts), self.batch_size):
@@ -150,32 +160,21 @@ class SpeakerAutoLabelerTitaNet:
             batch_lengths = torch.tensor(
                 [window_samples] * len(batch_starts), device=self.device
             )
-
-            # forward() returns (logits, embeddings) - we only need the embeddings
             _, batch_embs = self.model.forward(
                 input_signal=batch_signals, input_signal_length=batch_lengths
             )
             embeddings.append(batch_embs.cpu().numpy())
-
             for s in batch_starts:
                 start_sec = s / self.sample_rate
                 end_sec = (s + window_samples) / self.sample_rate
                 timestamps.append((start_sec, end_sec))
-
             logger.info(f"  Processed windows {batch_start + 1}-{batch_start + len(batch_starts)} / {len(starts)}")
-
         embeddings = np.concatenate(embeddings, axis=0)
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
         embeddings = embeddings / (norms + 1e-8)
         logger.info(f"Extracted {embeddings.shape[0]} normalized embeddings of dimension {embeddings.shape[1]}")
         logger.info(f"Time range: {timestamps[0][0]:.1f}s to {timestamps[-1][1]:.1f}s")
         return embeddings, timestamps
-
-    # -----------------------------------------------------------------------
-    # Everything below is unchanged from temp1.py - clustering, merging, and
-    # timeline generation only operate on embedding vectors, so they work the
-    # same way regardless of which model produced the embeddings.
-    # -----------------------------------------------------------------------
 
     def auto_detect_speakers(self, embeddings, max_speakers=8, min_speakers=1):
         """Automatically detect the optimal number of speakers using multiple metrics."""
@@ -314,16 +313,14 @@ class SpeakerAutoLabelerTitaNet:
                 sim = np.dot(emb_norm, centroid)
                 similarities.append(sim)
             centroids[label] = centroid
-            speaker_stats[label] = {
-                'n_frames': len(speaker_embeddings),
-                'duration': len(speaker_embeddings) * self.step,
-                'avg_similarity': np.mean(similarities),
-                'std_similarity': np.std(similarities),
-                # Recalibrated from 0.75 (clean VoxCeleb benchmark) down to 0.60, based on
-                # observed real-recording intra-speaker similarity (avg ~0.56-0.68 in testing)
-                'quality': 'good' if np.mean(similarities) > 0.60 else 'poor',
-                'frames_percent': len(speaker_embeddings) / len(embeddings) * 100
-            }
+            speaker_stats[label] = SpeakerStats(
+                n_frames=len(speaker_embeddings),
+                duration=len(speaker_embeddings) * self.step,
+                avg_similarity=np.mean(similarities),
+                std_similarity=np.std(similarities),
+                quality='good' if np.mean(similarities) > 0.60 else 'poor',
+                frames_percent=len(speaker_embeddings) / len(embeddings) * 100
+            )
         return centroids, speaker_stats
 
     def assign_speaker_labels(self, embeddings, centroids, threshold=0.55):
@@ -350,25 +347,52 @@ class SpeakerAutoLabelerTitaNet:
                 confidences.append(max_sim)
         return np.array(speaker_ids), np.array(confidences)
 
-    def generate_timeline(self, timestamps, labels, min_segment_duration=1.0):
-        """Generate speaker timeline with segments."""
-        timeline = []
+    def generate_timeline(
+        self,
+        timestamps: list[tuple[float, float]],
+        labels: np.ndarray,
+        min_segment_duration: float = 1.0,
+    ) -> list[TimelineSegment]:
+        """Generate speaker timeline with segments as typed dicts."""
+        timeline: list[TimelineSegment] = []
+        if len(timestamps) == 0 or len(labels) == 0:
+            logger.warning("No timestamps or labels available for timeline generation")
+            return timeline
+
         current_speaker = labels[0]
         segment_start = timestamps[0][0]
         for i, (timestamp, label) in enumerate(zip(timestamps, labels)):
             if label != current_speaker:
-                segment_end = timestamps[i-1][1] if i > 0 else timestamp[0]
+                segment_end = timestamps[i - 1][1] if i > 0 else timestamp[0]
                 duration = segment_end - segment_start
                 if duration >= min_segment_duration and current_speaker != -1:
-                    timeline.append((segment_start, segment_end, current_speaker))
+                    timeline.append(TimelineSegment(
+                        start=round(segment_start, 3),
+                        end=round(segment_end, 3),
+                        duration=round(duration, 3),
+                        speaker_id=int(current_speaker),
+                        speaker_label=f"Speaker {chr(65 + int(current_speaker))}",
+                    ))
                 segment_start = timestamp[0]
                 current_speaker = label
+
         segment_end = timestamps[-1][1]
         duration = segment_end - segment_start
         if duration >= min_segment_duration and current_speaker != -1:
-            timeline.append((segment_start, segment_end, current_speaker))
+            timeline.append(TimelineSegment(
+                start=round(segment_start, 3),
+                end=round(segment_end, 3),
+                duration=round(duration, 3),
+                speaker_id=int(current_speaker),
+                speaker_label=f"Speaker {chr(65 + int(current_speaker))}",
+            ))
+        logger.info(f"Generated timeline with {len(timeline)} segments (min_duration={min_segment_duration}s)")
         return timeline
 
+
+# ──────────────────────────────────────────────
+# Main entry point
+# ──────────────────────────────────────────────
 
 def detect_multi_speakers(
     audio_path: str,
@@ -381,7 +405,7 @@ def detect_multi_speakers(
     method: Literal["agglomerative", "spectral"] = "agglomerative",
     merge_threshold: float = 0.55,
     assign_threshold: float = 0.55,
-):
+) -> MultiSpeakerResult:
     """Main execution flow - FULLY AUTOMATIC WITH SMART MERGING (TitaNet-Large version)."""
     logger.info("=" * 60)
     logger.info("AUTO SPEAKER LABELING WITH TITANET-LARGE + INTELLIGENT MERGING")
@@ -395,87 +419,33 @@ def detect_multi_speakers(
         model_name=model_name, duration=duration, step=step, batch_size=batch_size,
         min_energy_percentile=min_energy_percentile,
     )
+
     embeddings, timestamps = labeler.extract_embeddings(audio_path)
+
     labels, n_speakers = labeler.cluster_speakers(
         embeddings, method=method, merge_threshold=merge_threshold
     )
+
     centroids, speaker_stats = labeler.compute_speaker_centroids(embeddings, labels)
+
     refined_labels, confidences = labeler.assign_speaker_labels(
         embeddings, centroids, threshold=assign_threshold
     )
+
     timeline = labeler.generate_timeline(timestamps, refined_labels, min_segment_duration=min_segment_duration)
 
-    print("\n" + "="*60)
-    print(f"✅ FINAL RESULT: {n_speakers} SPEAKERS DETECTED")
-    print("="*60)
-    print("\n📊 SPEAKER STATISTICS:")
-    print("-" * 60)
-    sorted_speakers = sorted(speaker_stats.items(), key=lambda x: x[1]['duration'], reverse=True)
-    for i, (speaker_id, stats) in enumerate(sorted_speakers):
-        quality_emoji = "✅" if stats['quality'] == 'good' else "⚠️"
-        speaker_label = chr(65 + i)
-        print(f"\n{quality_emoji} Speaker {speaker_label} (ID {speaker_id}):")
-        print(f"   ├─ Duration: {stats['duration']:.1f}s ({stats['frames_percent']:.1f}%)")
-        print(f"   ├─ Frames: {stats['n_frames']}")
-        print(f"   ├─ Consistency: {stats['avg_similarity']:.3f} ± {stats['std_similarity']:.3f}")
-        print(f"   └─ Quality: {stats['quality'].upper()}")
-
-    print("\n\n📅 SPEAKER TIMELINE:")
-    print("-" * 60)
-    speaker_to_letter = {}
-    for i, (speaker_id, _) in enumerate(sorted_speakers):
-        speaker_to_letter[speaker_id] = chr(65 + i)
-    for start, end, speaker in timeline:
-        duration = end - start
-        bar_length = int(duration / 32 * 40)
-        bar = "█" * bar_length + "░" * (40 - bar_length)
-        letter = speaker_to_letter.get(speaker, str(speaker))
-        print(f"   {start:5.1f}s → {end:5.1f}s  |  Speaker {letter}  |  {duration:4.1f}s  {bar}")
-
-    if len(centroids) >= 2:
-        print("\n\n🔍 SPEAKER SEPARATION QUALITY:")
-        print("-" * 60)
-        speaker_list = list(centroids.keys())
-        between_sims = []
-        for i, sp1 in enumerate(speaker_list):
-            for sp2 in speaker_list[i+1:]:
-                sim = np.dot(centroids[sp1], centroids[sp2])
-                between_sims.append(sim)
-        avg_between = np.mean(between_sims) if between_sims else 0
-        avg_intra = np.mean([stats['avg_similarity'] for stats in speaker_stats.values()])
-        print(f"   Average intra-speaker similarity: {avg_intra:.3f}")
-        print(f"   Average between-speaker similarity: {avg_between:.3f}")
-        print(f"   Separation margin: {avg_intra - avg_between:.3f}")
-        if avg_intra - avg_between > 0.3:
-            print("   ✅ EXCELLENT separation - speakers are very distinct")
-        elif avg_intra - avg_between > 0.2:
-            print("   ✅ GOOD separation - speakers are distinguishable")
-        elif avg_intra - avg_between > 0.1:
-            print("   ⚠️  MODERATE separation - some confusion possible")
-        else:
-            print("   ❌ POOR separation - speakers sound similar")
-
-    print("\n\n💡 FINAL ASSESSMENT:")
-    print("-" * 60)
-    print(f"📊 Detected {n_speakers} speakers")
-    at_threshold_pct = np.sum(confidences >= assign_threshold) / len(confidences) * 100
-    strict_pct = np.sum(confidences > 0.7) / len(confidences) * 100
-    print(f"\n   Frame assignment: {at_threshold_pct:.1f}% met the assignment threshold (>={assign_threshold})")
-    print(f"   Frame assignment: {strict_pct:.1f}% were strict high-confidence (>0.7)")
-
-    return {
-        'embeddings': embeddings,
-        'timestamps': timestamps,
-        'labels': refined_labels,
-        'centroids': centroids,
-        'speaker_stats': speaker_stats,
-        'timeline': timeline,
-        'confidences': confidences,
-        'n_speakers': n_speakers
-    }
+    return MultiSpeakerResult(
+        embeddings=embeddings,
+        timestamps=timestamps,
+        labels=refined_labels,
+        centroids=centroids,
+        speaker_stats=speaker_stats,
+        timeline=timeline,
+        confidences=confidences,
+        n_speakers=n_speakers,
+    )
 
 
 if __name__ == "__main__":
     from main._main_nemo_titanet import main
-
     main()
