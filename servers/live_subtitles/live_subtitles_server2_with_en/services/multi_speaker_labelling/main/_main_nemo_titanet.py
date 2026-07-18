@@ -1,9 +1,14 @@
+import argparse
+import json
+import shutil
+from pathlib import Path
 from nemo_titanet import detect_multi_speakers
 
-def get_args():
-    import argparse
+DEFAULT_AUDIO = str(Path(r"~\.cache\files\audio\recording_3_speakers.wav").expanduser().resolve())
+OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 
-    DEFAULT_AUDIO = r"C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav"
+
+def get_args():
     parser = argparse.ArgumentParser(
         description="Automatic speaker labeling with NeMo TitaNet-Large embeddings",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -15,6 +20,13 @@ def get_args():
     parser.add_argument(
         "--model-name", type=str, default="titanet_large",
         help="NeMo pretrained speaker embedding model name"
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        default=str(OUTPUT_DIR),
+        type=Path,
+        help=f"output directory (default: '{OUTPUT_DIR}')",
     )
     parser.add_argument(
         "-d", "--duration", type=float, default=2.0,
@@ -49,6 +61,10 @@ def get_args():
         help="Minimum similarity threshold for assigning a frame to a speaker (recalibrated from real-audio testing, NVIDIA's clean-benchmark default of 0.70 was too strict)"
     )
     args = parser.parse_args()
+
+    shutil.rmtree(args.output_dir, ignore_errors=True)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+
     return args
 
 
