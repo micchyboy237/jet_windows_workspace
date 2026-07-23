@@ -123,7 +123,7 @@ My device:
 
 When coding:
 
-- Provide step-by-step analysis and explain the flow.
+- Provide step-by-step analysis and trace the flows first.
 - Use visuals, diagrams, or tables when helpful.
 - For new files, classes, methods, or functions: show the full code.
 - For updates to existing files: show only the changed sections with context. Never output the full file unless it's small.
