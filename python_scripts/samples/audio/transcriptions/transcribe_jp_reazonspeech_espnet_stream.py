@@ -1,5 +1,5 @@
 import argparse
-from reazonspeech.nemo.asr import load_model, transcribe, audio_from_path
+from reazonspeech.espnet.asr import load_model, transcribe_stream, audio_from_path
 
 def main():
     parser = argparse.ArgumentParser(description="Transcribe an audio file using reazonspeech ASR.")
@@ -10,13 +10,15 @@ def main():
         help="Path to the audio file (wav/mp3/etc.)."
     )
     args = parser.parse_args()
-
-    audio = audio_from_path(args.audio_path)  # supports wav/mp3/etc. (auto-resamples)
-    model = load_model()  # loads reazonspeech-k2-v2 by default
-    ret = transcribe(model, audio)
-
-    print("Result")
-    print(ret)
+    
+    audio = audio_from_path(args.audio_path)
+    model = load_model()
+    
+    print("Starting streaming transcription...")
+    for segment in transcribe_stream(model, audio):
+        print(segment)
+    
+    print("Transcription complete!")
 
 if __name__ == "__main__":
     main()

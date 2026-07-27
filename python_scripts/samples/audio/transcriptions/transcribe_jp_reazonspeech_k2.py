@@ -6,7 +6,7 @@ def main():
     parser.add_argument(
         "audio_path",
         nargs="?",
-        default=r"C:\Users\druiv\Desktop\Jet_Files\Mac_M1_Files\recording_spyx_3_speakers.wav",
+        default=r"C:\Users\druiv\.cache\files\audio\recording_3_speakers.wav",
         help="Path to the audio file (wav/mp3/etc.)."
     )
     args = parser.parse_args()
