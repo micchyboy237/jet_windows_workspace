@@ -46,6 +46,7 @@ from services.sentence_matcher_ja import (
 from services.sentence_utils import split_sentences_ja
 from services.transcribe_funasr import transcribe_audio
 from services.translate_jp_en_llm_prefixed import translate_japanese_to_english
+# from services.translate_jp_en_openai import translate_japanese_to_english
 
 console = Console()
 SPACELESS_LANGUAGES = {"ja", "jpn", "zh", "chi", "zho", "ko", "kor", "th", "tha"}

@@ -269,8 +269,8 @@ class SpeakerLabelerSerializer:
         audio_tagger=None,
     ) -> "SegmentSpeakerLabeler":
         """Create a labeler from serialized state."""
-        from speaker_labeler_utils.speaker_types import SpeakerReference
-        from segment_speaker_labeler_defaults import (
+        from services.speaker_labeler_utils.speaker_types import SpeakerReference
+        from services.speaker_labeler_utils.segment_speaker_labeler_defaults import (
             DEFAULT_THRESHOLD_SAME,
             DEFAULT_THRESHOLD_POSSIBLE,
             DEFAULT_THRESHOLD_NEW_SPEAKER,
@@ -279,7 +279,7 @@ class SpeakerLabelerSerializer:
             DEFAULT_TOP_K_SPEAKERS,
             DEFAULT_CONSOLIDATION_THRESHOLD,
         )
-        from outlier_pool import OutlierPool
+        from services.speaker_labeler_utils.outlier_pool import OutlierPool
 
         labeler = cls(
             embedding_model=embedding_model,

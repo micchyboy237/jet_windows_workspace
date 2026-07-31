@@ -1,0 +1,1 @@
+llama-server --models-preset C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\models.rerankers.ini --models-max 1 --host 0.0.0.0 --port 8082

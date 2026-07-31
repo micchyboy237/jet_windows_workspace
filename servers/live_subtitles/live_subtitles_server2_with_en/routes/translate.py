@@ -4,6 +4,7 @@ Translation route for Japanese-to-English text translation.
 from fastapi import APIRouter, HTTPException
 from models.schemas import TranslateRequest, TranslateResponse
 from services.translate_jp_en_llm_prefixed import translate_japanese_to_english
+# from services.translate_jp_en_openai import translate_japanese_to_english
 from rich.console import Console
 
 console = Console()
