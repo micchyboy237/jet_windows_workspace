@@ -17,11 +17,21 @@ from nemo_titanet_with_outliers import (
     detect_multi_speakers,
     MultiSpeakerResult,
     TimelineSegment,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_DURATION,
+    DEFAULT_STEP,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MIN_ENERGY_PERCENTILE,
+    DEFAULT_MIN_SEGMENT_DURATION,
+    DEFAULT_CLUSTERING_METHOD,
+    DEFAULT_MERGE_THRESHOLD,
+    DEFAULT_ASSIGN_THRESHOLD,
+    DEFAULT_OUTLIER_METHOD,
+    DEFAULT_OUTLIER_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
 console = Console()
-
 DEFAULT_AUDIO = str(Path(r"~\.cache\files\audio\recording_3_speakers.wav").expanduser().resolve())
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
 SPEAKER_COLORS = [
@@ -34,6 +44,7 @@ RICH_SPEAKER_COLORS = [
 ]
 BAR_WIDTH = 25
 
+
 def get_args():
     parser = argparse.ArgumentParser(
         description="Automatic speaker labeling with NeMo TitaNet-Large embeddings",
@@ -44,7 +55,7 @@ def get_args():
         help="Path to input audio file"
     )
     parser.add_argument(
-        "--model-name", type=str, default="titanet_large",
+        "--model-name", type=str, default=DEFAULT_MODEL_NAME,
         help="NeMo pretrained speaker embedding model name"
     )
     parser.add_argument(
@@ -52,54 +63,55 @@ def get_args():
         help=f"output directory (default: '{OUTPUT_DIR}')",
     )
     parser.add_argument(
-        "-d", "--duration", type=float, default=3.0,
+        "-d", "--duration", type=float, default=DEFAULT_DURATION,
         help="Window duration in seconds for embedding extraction"
     )
     parser.add_argument(
-        "-s", "--step", type=float, default=1.5,
+        "-s", "--step", type=float, default=DEFAULT_STEP,
         help="Window step in seconds for sliding window"
     )
     parser.add_argument(
-        "-b", "--batch-size", type=int, default=16,
+        "-b", "--batch-size", type=int, default=DEFAULT_BATCH_SIZE,
         help="Number of windows embedded per forward pass"
     )
     parser.add_argument(
-        "-e", "--min-energy-percentile", type=float, default=10.0,
+        "-e", "--min-energy-percentile", type=float, default=DEFAULT_MIN_ENERGY_PERCENTILE,
         help="Skip the quietest N%% of windows before embedding. 0 disables."
     )
     parser.add_argument(
-        "-m", "--min-segment-duration", type=float, default=1.5,
+        "-m", "--min-segment-duration", type=float, default=DEFAULT_MIN_SEGMENT_DURATION,
         help="Minimum duration in seconds for a speaker segment"
     )
     parser.add_argument(
         "-c", "--clustering-method", type=str, choices=["agglomerative", "spectral"],
-        default="spectral", help="Clustering method for speaker grouping"
+        default=DEFAULT_CLUSTERING_METHOD, help="Clustering method for speaker grouping"
     )
     parser.add_argument(
-        "-t", "--merge-threshold", type=float, default=0.60,
+        "-t", "--merge-threshold", type=float, default=DEFAULT_MERGE_THRESHOLD,
         help="Similarity threshold for merging speaker clusters"
     )
     parser.add_argument(
-        "-a", "--assign-threshold", type=float, default=0.60,
+        "-a", "--assign-threshold", type=float, default=DEFAULT_ASSIGN_THRESHOLD,
         help="Minimum similarity threshold for assigning a frame to a speaker"
     )
     parser.add_argument(
         "--outlier-method",
         type=str,
         choices=["mahalanobis", "zscore", "isolation_forest", "dbscan"],
-        default="mahalanobis",
+        default=DEFAULT_OUTLIER_METHOD,
         help="Method for outlier detection (default: mahalanobis)",
     )
     parser.add_argument(
         "--outlier-threshold",
         type=float,
-        default=0.90,
+        default=DEFAULT_OUTLIER_THRESHOLD,
         help="Threshold for outlier detection (default: 0.90)",
     )
     args = parser.parse_args()
     shutil.rmtree(args.output_dir, ignore_errors=True)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     return args
+
 
 def print_results(results: MultiSpeakerResult, output_dir: Path, assign_threshold: float = 0.55) -> None:
     """Pretty-print a MultiSpeakerResult using Rich console with clickable file:// links."""
@@ -109,16 +121,13 @@ def print_results(results: MultiSpeakerResult, output_dir: Path, assign_threshol
     confidences = results["confidences"]
     timeline = results["timeline"]
     outlier_mask = results.get("outlier_mask", None)
-
     console.print()
     console.rule("[bold green]✅ FINAL RESULT")
     console.print(f"[bold]{n_speakers} SPEAKERS DETECTED[/bold]")
     console.rule()
-
     if outlier_mask is not None:
         console.print(f"\n[bold]🚨 OUTLIER DETECTION[/bold]")
         console.print(f"Outliers detected: {np.sum(outlier_mask)} / {len(outlier_mask)} windows")
-
     console.print("\n[bold]📊 SPEAKER STATISTICS[/bold]")
     stats_table = Table(box=box.SIMPLE_HEAVY, show_header=True, header_style="bold")
     stats_table.add_column("Speaker", style="bold", width=12)
@@ -126,7 +135,6 @@ def print_results(results: MultiSpeakerResult, output_dir: Path, assign_threshol
     stats_table.add_column("Frames", justify="right", width=8)
     stats_table.add_column("Consistency", justify="right", width=16)
     stats_table.add_column("Quality", width=10)
-
     sorted_speakers = sorted(speaker_stats.items(), key=lambda x: x[1]['duration'], reverse=True)
     for i, (speaker_id, stats) in enumerate(sorted_speakers):
         quality_emoji = "✅" if stats['quality'] == 'good' else "⚠️"
@@ -140,7 +148,6 @@ def print_results(results: MultiSpeakerResult, output_dir: Path, assign_threshol
             f"{quality_emoji} {stats['quality'].upper()}",
         )
     console.print(stats_table)
-
     console.print("\n[bold]📅 SPEAKER TIMELINE[/bold]")
     console.print("[dim]Ctrl+Click ▶️ to play audio  |  Ctrl+Click 📁 to open segment folder[/dim]\n")
     tl_table = Table(box=box.SIMPLE_HEAVY, show_header=True, header_style="bold")
@@ -150,7 +157,6 @@ def print_results(results: MultiSpeakerResult, output_dir: Path, assign_threshol
     tl_table.add_column("Dur", justify="right", width=6)
     tl_table.add_column("Bar", width=BAR_WIDTH + 2)
     tl_table.add_column("", width=8)
-
     for idx, seg in enumerate(timeline):
         bar_fill = int(seg['duration'] / 32 * BAR_WIDTH)
         bar_full = min(bar_fill, BAR_WIDTH)
@@ -176,7 +182,6 @@ def print_results(results: MultiSpeakerResult, output_dir: Path, assign_threshol
             icons,
         )
     console.print(tl_table)
-
     if len(centroids) >= 2:
         console.print("\n[bold]🔍 SPEAKER SEPARATION QUALITY[/bold]")
         speaker_list = list(centroids.keys())
@@ -203,7 +208,6 @@ def print_results(results: MultiSpeakerResult, output_dir: Path, assign_threshol
             console.print("   ⚠️  [yellow]MODERATE separation[/yellow] - some confusion possible")
         else:
             console.print("   ❌ [red]POOR separation[/red] - speakers sound similar")
-
     console.print("\n[bold]💡 FINAL ASSESSMENT[/bold]")
     at_threshold_pct = np.sum(confidences >= assign_threshold) / len(confidences) * 100
     strict_pct = np.sum(confidences > 0.7) / len(confidences) * 100
@@ -221,15 +225,14 @@ def print_results(results: MultiSpeakerResult, output_dir: Path, assign_threshol
     )
     console.print(assess_table)
 
+
 def save_outputs(results: MultiSpeakerResult, audio_path: str, output_dir: Path) -> None:
     """Save speaker labeling results to structured output."""
     segments_dir = output_dir / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
     timeline = results["timeline"]
     outlier_mask = results.get("outlier_mask", None)
-
     logger.info(f"Saving {len(timeline)} segments to {segments_dir}")
-
     if outlier_mask is not None:
         outlier_dir = output_dir / "outliers"
         outlier_dir.mkdir(parents=True, exist_ok=True)
@@ -242,7 +245,6 @@ def save_outputs(results: MultiSpeakerResult, audio_path: str, output_dir: Path)
         outlier_path = outlier_dir / "outliers.json"
         outlier_path.write_text(json.dumps(outlier_info, indent=2))
         logger.info(f"Saved outlier info: {outlier_path}")
-
     ffmpeg_available = shutil.which("ffmpeg") is not None
     if not ffmpeg_available:
         logger.warning(
@@ -284,7 +286,6 @@ def save_outputs(results: MultiSpeakerResult, audio_path: str, output_dir: Path)
         info_path = seg_dir / "segment_info.json"
         info_path.write_text(json.dumps(segment_info, indent=2))
         logger.debug(f"  Saved {info_path}")
-
     global_summary = {
         "audio_source": str(audio_path),
         "n_speakers": results["n_speakers"],
@@ -302,14 +303,13 @@ def save_outputs(results: MultiSpeakerResult, audio_path: str, output_dir: Path)
     summary_path = output_dir / "segments.json"
     summary_path.write_text(json.dumps(global_summary, indent=2, default=str))
     logger.info(f"Saved global summary: {summary_path}")
-
     plot_path = output_dir / "segments_plot.png"
     _plot_timeline(timeline, results["n_speakers"], plot_path)
     logger.info(f"Saved timeline plot: {plot_path}")
-
     html_path = output_dir / "segments_timeline.html"
     _save_html_timeline(timeline, results["n_speakers"], output_dir, html_path)
     logger.info(f"Saved HTML timeline: {html_path}")
+
 
 def _plot_timeline(
     timeline: list[TimelineSegment],
@@ -363,6 +363,7 @@ def _plot_timeline(
     fig.tight_layout()
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
+
 
 def _save_html_timeline(
     timeline: list[TimelineSegment],
@@ -578,6 +579,7 @@ def _save_html_timeline(
     save_path.write_text(html, encoding="utf-8")
     logger.info(f"Saved HTML timeline: {save_path}")
 
+
 def main():
     args = get_args()
     logger.info(f"Processing: {args.audio_path}")
@@ -598,6 +600,7 @@ def main():
     print_results(results, output_dir=args.output_dir, assign_threshold=args.assign_threshold)
     save_outputs(results, audio_path=args.audio_path, output_dir=args.output_dir)
     logger.info("Done.")
+
 
 if __name__ == "__main__":
     main()
