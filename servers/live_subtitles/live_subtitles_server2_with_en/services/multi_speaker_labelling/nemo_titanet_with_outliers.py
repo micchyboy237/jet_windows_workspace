@@ -22,6 +22,11 @@ from scipy.stats import chi2
 from sklearn.ensemble import IsolationForest
 from sklearn.cluster import DBSCAN
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
 
 class SpeakerStats(TypedDict):
@@ -63,6 +68,7 @@ def detect_outliers_mahalanobis(embeddings: np.ndarray, threshold: float = 0.99)
     Returns:
         Boolean mask where `True` indicates an outlier.
     """
+    logger.info("Detecting outliers using Mahalanobis distance...")
     mean = np.mean(embeddings, axis=0)
     cov = np.cov(embeddings, rowvar=False)
     inv_cov = np.linalg.pinv(cov)  # Use pseudo-inverse for numerical stability
@@ -71,7 +77,9 @@ def detect_outliers_mahalanobis(embeddings: np.ndarray, threshold: float = 0.99)
         mahalanobis(emb, mean, inv_cov) for emb in embeddings
     ])
     p_values = 1 - chi2.cdf(distances, df=embeddings.shape[1])
-    return p_values < (1 - threshold)
+    outlier_mask = p_values < (1 - threshold)
+    logger.info(f"Mahalanobis outlier detection: {np.sum(outlier_mask)} outliers detected.")
+    return outlier_mask
 
 def detect_outliers_zscore(embeddings: np.ndarray, threshold: float = 3.0) -> np.ndarray:
     """
@@ -82,10 +90,13 @@ def detect_outliers_zscore(embeddings: np.ndarray, threshold: float = 3.0) -> np
     Returns:
         Boolean mask where `True` indicates an outlier.
     """
+    logger.info("Detecting outliers using Z-score...")
     mean = np.mean(embeddings, axis=0)
     std = np.std(embeddings, axis=0)
     z_scores = np.abs((embeddings - mean) / (std + 1e-8))
-    return np.any(z_scores > threshold, axis=1)
+    outlier_mask = np.any(z_scores > threshold, axis=1)
+    logger.info(f"Z-score outlier detection: {np.sum(outlier_mask)} outliers detected.")
+    return outlier_mask
 
 def detect_outliers_isolation_forest(embeddings: np.ndarray, contamination: float = 0.01) -> np.ndarray:
     """
@@ -96,8 +107,11 @@ def detect_outliers_isolation_forest(embeddings: np.ndarray, contamination: floa
     Returns:
         Boolean mask where `True` indicates an outlier.
     """
+    logger.info("Detecting outliers using Isolation Forest...")
     clf = IsolationForest(contamination=contamination, random_state=42)
-    return clf.fit_predict(embeddings) == -1
+    outlier_mask = clf.fit_predict(embeddings) == -1
+    logger.info(f"Isolation Forest outlier detection: {np.sum(outlier_mask)} outliers detected.")
+    return outlier_mask
 
 def detect_outliers_dbscan(embeddings: np.ndarray, eps: float = 0.5, min_samples: int = 5) -> np.ndarray:
     """
@@ -109,9 +123,12 @@ def detect_outliers_dbscan(embeddings: np.ndarray, eps: float = 0.5, min_samples
     Returns:
         Boolean mask where `True` indicates an outlier.
     """
+    logger.info("Detecting outliers using DBSCAN...")
     dbscan = DBSCAN(eps=eps, min_samples=min_samples)
     labels = dbscan.fit_predict(embeddings)
-    return labels == -1
+    outlier_mask = labels == -1
+    logger.info(f"DBSCAN outlier detection: {np.sum(outlier_mask)} outliers detected.")
+    return outlier_mask
 
 class SpeakerAutoLabelerTitaNet:
     """
@@ -148,32 +165,43 @@ class SpeakerAutoLabelerTitaNet:
         """
         from nemo.collections.asr.models import EncDecSpeakerLabelModel
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Loading NeMo model: {model_name} (device={self.device})")
+        logger.info(f"Initializing SpeakerAutoLabelerTitaNet with model: {model_name}")
+        logger.info(f"Device: {self.device}")
+
+        logger.info(f"Loading NeMo model: {model_name}...")
         self.model = EncDecSpeakerLabelModel.from_pretrained(model_name=model_name)
         self.model = self.model.to(self.device)
         self.model.eval()
+        logger.info(f"Model loaded successfully.")
+
         self.duration = duration
         self.step = step
         self.batch_size = batch_size
         self.min_energy_percentile = min_energy_percentile
         self.sample_rate = 16000
         logger.info(
-            f"Model loaded. Window: {duration}s, Step: {step}s, Batch size: {batch_size}, "
+            f"Configuration: Window={duration}s, Step={step}s, Batch size={batch_size}, "
             f"Silence filter: bottom {min_energy_percentile:.0f}% energy skipped"
         )
 
     def _load_audio(self, audio_path: str) -> torch.Tensor:
         """Load audio, resample to 16kHz, and force mono."""
-        logger.info(f"Loading audio: {audio_path}")
+        logger.info(f"Loading audio file: {audio_path}")
         waveform, sr = torchaudio.load(audio_path)
+        logger.info(f"Original waveform shape: {waveform.shape}, sample rate: {sr}Hz")
+
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
-            logger.info("Downmixed stereo/multi-channel audio to mono")
+            logger.info("Downmixed stereo/multi-channel audio to mono.")
+
         if sr != self.sample_rate:
             resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.sample_rate)
             waveform = resampler(waveform)
-            logger.info(f"Resampled audio from {sr}Hz to {self.sample_rate}Hz")
-        return waveform.squeeze(0)
+            logger.info(f"Resampled audio from {sr}Hz to {self.sample_rate}Hz.")
+
+        waveform = waveform.squeeze(0)
+        logger.info(f"Final waveform shape: {waveform.shape}")
+        return waveform
 
     @torch.no_grad()
     def extract_embeddings(
@@ -193,6 +221,7 @@ class SpeakerAutoLabelerTitaNet:
             timestamps: Corresponding timestamps.
             outlier_mask: Boolean mask indicating outliers.
         """
+        logger.info("Starting embedding extraction...")
         waveform = self._load_audio(audio_path)
         total_samples = waveform.shape[0]
         window_samples = int(self.duration * self.sample_rate)
@@ -205,10 +234,10 @@ class SpeakerAutoLabelerTitaNet:
             )
 
         all_starts = list(range(0, total_samples - window_samples + 1, step_samples))
-        logger.info(f"Extracting embeddings from: {audio_path}")
         logger.info(f"Total windows (before silence filtering): {len(all_starts)}")
 
         if self.min_energy_percentile > 0:
+            logger.info("Applying silence filter...")
             energies = np.array([
                 torch.sqrt(torch.mean(waveform[s: s + window_samples] ** 2)).item()
                 for s in all_starts
@@ -234,6 +263,7 @@ class SpeakerAutoLabelerTitaNet:
             batch_lengths = torch.tensor(
                 [window_samples] * len(batch_starts), device=self.device
             )
+            logger.info(f"Processing batch {batch_start + 1}-{batch_start + len(batch_starts)} / {len(starts)}")
             _, batch_embs = self.model.forward(
                 input_signal=batch_signals, input_signal_length=batch_lengths
             )
@@ -242,15 +272,16 @@ class SpeakerAutoLabelerTitaNet:
                 start_sec = s / self.sample_rate
                 end_sec = (s + window_samples) / self.sample_rate
                 timestamps.append((start_sec, end_sec))
-            logger.info(f"  Processed windows {batch_start + 1}-{batch_start + len(batch_starts)} / {len(starts)}")
 
         embeddings = np.concatenate(embeddings, axis=0)
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
         embeddings = embeddings / (norms + 1e-8)
+        logger.info(f"Extracted {embeddings.shape[0]} normalized embeddings of dimension {embeddings.shape[1]}")
 
         # Outlier detection
         outlier_mask = np.zeros(len(embeddings), dtype=bool)
         if outlier_method:
+            logger.info(f"Applying outlier detection method: {outlier_method} (threshold={outlier_threshold})")
             if outlier_method == "mahalanobis":
                 outlier_mask = detect_outliers_mahalanobis(embeddings, outlier_threshold)
             elif outlier_method == "zscore":
@@ -263,13 +294,16 @@ class SpeakerAutoLabelerTitaNet:
                 logger.warning(f"Unknown outlier method: {outlier_method}. Skipping outlier detection.")
 
             # Filter embeddings and timestamps
-            embeddings = embeddings[~outlier_mask]
-            timestamps = [ts for ts, is_outlier in zip(timestamps, outlier_mask) if not is_outlier]
-            logger.info(f"Filtered {np.sum(outlier_mask)} outlier windows. Remaining: {len(embeddings)}")
+            if np.sum(outlier_mask) > 0:
+                embeddings = embeddings[~outlier_mask]
+                timestamps = [ts for ts, is_outlier in zip(timestamps, outlier_mask) if not is_outlier]
+                logger.info(f"Filtered {np.sum(outlier_mask)} outlier windows. Remaining: {len(embeddings)}")
+            else:
+                logger.info("No outliers detected.")
+        else:
+            logger.info("Outlier detection disabled.")
 
-        logger.info(f"Extracted {embeddings.shape[0]} normalized embeddings of dimension {embeddings.shape[1]}")
         logger.info(f"Time range: {timestamps[0][0]:.1f}s to {timestamps[-1][1]:.1f}s")
-
         return embeddings, timestamps, outlier_mask
 
     def auto_detect_speakers(self, embeddings, max_speakers=8, min_speakers=1):
@@ -278,7 +312,9 @@ class SpeakerAutoLabelerTitaNet:
         n_samples = len(embeddings)
         max_possible = min(max_speakers, n_samples - 1)
         if max_possible <= min_speakers:
+            logger.info(f"Only {n_samples} samples available. Defaulting to {min_speakers} speaker.")
             return min_speakers
+
         candidates = []
         for n_clusters in range(min_speakers, max_possible + 1):
             clustering = AgglomerativeClustering(n_clusters=n_clusters)
@@ -286,58 +322,68 @@ class SpeakerAutoLabelerTitaNet:
             if len(set(labels)) > 1:
                 sil_score = silhouette_score(embeddings, labels)
                 candidates.append((n_clusters, sil_score, 'silhouette'))
+                logger.debug(f"Silhouette score for {n_clusters} clusters: {sil_score:.3f}")
+
         if candidates:
             best_silhouette = max(candidates, key=lambda x: x[1])
             optimal_n = best_silhouette[0]
-            logger.info(f"  Silhouette optimal: {optimal_n} speakers (score: {best_silhouette[1]:.3f})")
+            logger.info(f"Silhouette optimal: {optimal_n} speakers (score: {best_silhouette[1]:.3f})")
         else:
             optimal_n = 2
+            logger.info("No valid silhouette scores. Defaulting to 2 speakers.")
+
         if optimal_n >= 5:
+            logger.info("Applying elbow method for further validation...")
             inertias = []
             for n in range(min_speakers, min(max_possible, 10)):
                 kmeans = KMeans(n_clusters=n, random_state=42, n_init=10)
                 kmeans.fit(embeddings)
                 inertias.append(kmeans.inertia_)
+                logger.debug(f"Inertia for {n} clusters: {kmeans.inertia_:.3f}")
+
             if len(inertias) > 2:
                 diffs = np.diff(inertias)
                 diffs2 = np.diff(diffs)
                 elbow_idx = np.argmax(diffs2) + 1
                 elbow_n = elbow_idx + min_speakers
                 if elbow_n < optimal_n:
-                    logger.info(f"  Elbow suggests {elbow_n} speakers (vs silhouette's {optimal_n}) - using elbow")
+                    logger.info(f"Elbow suggests {elbow_n} speakers (vs silhouette's {optimal_n}) - using elbow")
                     optimal_n = elbow_n
+                else:
+                    logger.info(f"Elbow method confirms {optimal_n} speakers.")
         return optimal_n
 
     def merge_similar_clusters(self, embeddings, labels, similarity_threshold=0.55):
         """
         Merge clusters that are too similar (likely same speaker).
-        NOTE: 0.70-0.72 (NVIDIA's clean VoxCeleb verification threshold) was tried first
-        and over-split real conversational audio into too many low-quality clusters -
-        short in-the-wild windows just don't reach that similarity range. 0.55 is
-        recalibrated from actually observed same-speaker similarity on real recordings.
-        Use --diagnose (see cluster_speakers) to check where your own audio lands.
         """
         unique_labels = [l for l in set(labels) if l != -1]
+        logger.info(f"Merging similar clusters (threshold={similarity_threshold})...")
         if len(unique_labels) <= 1:
+            logger.info("Only one cluster. No merging needed.")
             return labels, {}
+
         centroids = {}
         for label in unique_labels:
             cluster_embs = embeddings[labels == label]
             centroid = np.mean(cluster_embs, axis=0)
             centroid = centroid / (np.linalg.norm(centroid) + 1e-8)
             centroids[label] = centroid
+
         n_clusters = len(unique_labels)
         similarity_matrix = np.zeros((n_clusters, n_clusters))
         for i, l1 in enumerate(unique_labels):
             for j, l2 in enumerate(unique_labels):
                 similarity_matrix[i, j] = np.dot(centroids[l1], centroids[l2])
+
         off_diag = similarity_matrix[~np.eye(n_clusters, dtype=bool)]
         if len(off_diag) > 0:
             logger.info(
-                f"  Inter-cluster similarity spread: min={off_diag.min():.3f}, "
+                f"Inter-cluster similarity spread: min={off_diag.min():.3f}, "
                 f"median={np.median(off_diag):.3f}, max={off_diag.max():.3f} "
                 f"(threshold={similarity_threshold})"
             )
+
         merged_groups = []
         used = set()
         for i, l1 in enumerate(unique_labels):
@@ -350,20 +396,24 @@ class SpeakerAutoLabelerTitaNet:
                     group.append(l2)
                     used.add(l2)
             merged_groups.append(group)
+
         merge_map = {}
         for new_id, group in enumerate(merged_groups):
             for old_label in group:
                 merge_map[old_label] = new_id
+
         merged_labels = np.array([merge_map.get(l, -1) if l != -1 else -1 for l in labels])
-        logger.info(f"Merged {len(unique_labels)} clusters into {len(merged_groups)} speakers (threshold={similarity_threshold})")
+        logger.info(f"Merged {len(unique_labels)} clusters into {len(merged_groups)} speakers.")
         return merged_labels, merge_map
 
     def cluster_speakers(self, embeddings, method='agglomerative', merge_threshold=0.55):
         """Cluster embeddings into speaker groups with auto-detection and auto-merging."""
+        logger.info(f"Starting speaker clustering (method={method})...")
         initial_n = self.auto_detect_speakers(embeddings)
         logger.info(f"Initial auto-detection: {initial_n} speakers")
-        logger.info(f"Initial clustering into {initial_n} groups using {method}")
+
         if method == 'spectral':
+            logger.info("Using Spectral Clustering...")
             from sklearn.cluster import SpectralClustering
             clustering = SpectralClustering(
                 n_clusters=initial_n,
@@ -373,29 +423,34 @@ class SpeakerAutoLabelerTitaNet:
             )
             labels = clustering.fit_predict(embeddings)
         else:
+            logger.info("Using Agglomerative Clustering...")
             clustering = AgglomerativeClustering(n_clusters=initial_n)
             labels = clustering.fit_predict(embeddings)
+
         merged_labels, merge_map = self.merge_similar_clusters(
             embeddings, labels, similarity_threshold=merge_threshold
         )
         n_speakers = len(set(merged_labels)) - (1 if -1 in merged_labels else 0)
         logger.info(f"After merging (threshold={merge_threshold}): {n_speakers} speakers")
+
         if n_speakers > 4:
+            logger.info("Applying aggressive merging...")
             aggressive_threshold = merge_threshold - 0.05
-            logger.info(f"Still have {n_speakers} speakers, trying more aggressive merging (threshold={aggressive_threshold})")
             merged_labels, merge_map = self.merge_similar_clusters(
                 embeddings, labels, similarity_threshold=aggressive_threshold
             )
             n_speakers = len(set(merged_labels)) - (1 if -1 in merged_labels else 0)
-            logger.info(f"After aggressive merging: {n_speakers} speakers")
+            logger.info(f"After aggressive merging (threshold={aggressive_threshold}): {n_speakers} speakers")
+
         unique, counts = np.unique(merged_labels, return_counts=True)
         for speaker, count in zip(unique, counts):
             if speaker != -1:
-                logger.info(f"  Final Speaker {speaker}: {count} frames ({count * self.step:.1f}s)")
+                logger.info(f"Final Speaker {speaker}: {count} frames ({count * self.step:.1f}s)")
         return merged_labels, n_speakers
 
     def compute_speaker_centroids(self, embeddings, labels):
         """Compute centroid for each speaker cluster."""
+        logger.info("Computing speaker centroids...")
         unique_labels = [l for l in set(labels) if l != -1]
         centroids = {}
         speaker_stats = {}
@@ -417,15 +472,14 @@ class SpeakerAutoLabelerTitaNet:
                 quality='good' if np.mean(similarities) > 0.60 else 'poor',
                 frames_percent=len(speaker_embeddings) / len(embeddings) * 100
             )
+            logger.debug(f"Speaker {label}: centroid computed, avg_similarity={np.mean(similarities):.3f}")
         return centroids, speaker_stats
 
     def assign_speaker_labels(self, embeddings, centroids, threshold=0.55):
         """
         Assign speaker labels based on nearest centroid with confidence.
-        NOTE: 0.70 (NVIDIA's clean verification default) discarded ~77% of windows as
-        "unassigned" on real conversational audio in testing. 0.55 is recalibrated from
-        the actual similarity range observed for correctly-matched speaker windows.
         """
+        logger.info(f"Assigning speaker labels (threshold={threshold})...")
         speaker_ids = []
         confidences = []
         speaker_list = list(centroids.keys())
@@ -441,6 +495,7 @@ class SpeakerAutoLabelerTitaNet:
             else:
                 speaker_ids.append(-1)
                 confidences.append(max_sim)
+        logger.info(f"Assigned {len(speaker_ids)} labels with {np.sum(np.array(confidences) >= threshold)} high-confidence assignments.")
         return np.array(speaker_ids), np.array(confidences)
 
     def generate_timeline(
@@ -450,13 +505,16 @@ class SpeakerAutoLabelerTitaNet:
         min_segment_duration: float = 1.0,
     ) -> list[TimelineSegment]:
         """Generate speaker timeline with segments, merging consecutive same-speaker segments."""
+        logger.info("Generating speaker timeline...")
         timeline: list[TimelineSegment] = []
         if len(timestamps) == 0 or len(labels) == 0:
-            logger.warning("No timestamps or labels available for timeline generation")
+            logger.warning("No timestamps or labels available for timeline generation.")
             return timeline
+
         raw_segments: list[TimelineSegment] = []
         current_speaker = labels[0]
         segment_start = timestamps[0][0]
+
         for i, (timestamp, label) in enumerate(zip(timestamps, labels)):
             if label != current_speaker:
                 segment_end = timestamps[i - 1][1] if i > 0 else timestamp[0]
@@ -471,6 +529,7 @@ class SpeakerAutoLabelerTitaNet:
                     ))
                 segment_start = timestamp[0]
                 current_speaker = label
+
         segment_end = timestamps[-1][1]
         duration = segment_end - segment_start
         if duration >= min_segment_duration and current_speaker != -1:
@@ -481,9 +540,12 @@ class SpeakerAutoLabelerTitaNet:
                 speaker_id=int(current_speaker),
                 speaker_label=f"Speaker {chr(65 + int(current_speaker))}",
             ))
+
         logger.info(f"Raw segments before merging: {len(raw_segments)}")
+
         if not raw_segments:
             return timeline
+
         merged_segments: list[TimelineSegment] = [raw_segments[0]]
         for seg in raw_segments[1:]:
             prev = merged_segments[-1]
@@ -491,24 +553,21 @@ class SpeakerAutoLabelerTitaNet:
                 prev["end"] = max(prev["end"], seg["end"])
                 prev["duration"] = round(prev["end"] - prev["start"], 3)
                 logger.debug(
-                    f"  Merged: {seg['speaker_label']} "
+                    f"Merged: {seg['speaker_label']} "
                     f"({seg['start']:.1f}s→{seg['end']:.1f}s) "
                     f"into ({prev['start']:.1f}s→{prev['end']:.1f}s)"
                 )
             else:
                 merged_segments.append(seg)
+
         timeline = [
             seg for seg in merged_segments
             if seg["duration"] >= min_segment_duration
         ]
         merge_count = len(raw_segments) - len(timeline)
         if merge_count > 0:
-            logger.info(
-                f"Merged {merge_count} consecutive same-speaker segments. "
-                f"Final timeline: {len(timeline)} segments"
-            )
-        else:
-            logger.info(f"No segments to merge. Timeline: {len(timeline)} segments")
+            logger.info(f"Merged {merge_count} consecutive same-speaker segments.")
+        logger.info(f"Final timeline: {len(timeline)} segments")
         return timeline
 
 def detect_multi_speakers(
@@ -530,29 +589,42 @@ def detect_multi_speakers(
     logger.info("AUTO SPEAKER LABELING WITH TITANET-LARGE + OUTLIER DETECTION")
     logger.info("=" * 60)
     logger.info(f"Model: {model_name}")
+    logger.info(f"Window duration: {duration}s, Step: {step}s")
+    logger.info(f"Batch size: {batch_size}")
+    logger.info(f"Silence filter percentile: {min_energy_percentile}%")
+    logger.info(f"Min segment duration: {min_segment_duration}s")
+    logger.info(f"Clustering method: {method}")
     logger.info(f"Merge threshold: {merge_threshold}")
     logger.info(f"Assignment threshold: {assign_threshold}")
-    logger.info(f"Outlier method: {outlier_method}")
-    logger.info(f"Silence filter percentile: {min_energy_percentile}")
+    logger.info(f"Outlier method: {outlier_method}, threshold: {outlier_threshold}")
 
     labeler = SpeakerAutoLabelerTitaNet(
         model_name=model_name, duration=duration, step=step, batch_size=batch_size,
         min_energy_percentile=min_energy_percentile,
     )
 
+    logger.info("Extracting embeddings...")
     embeddings, timestamps, outlier_mask = labeler.extract_embeddings(
         audio_path, outlier_method=outlier_method, outlier_threshold=outlier_threshold
     )
 
+    logger.info("Clustering speakers...")
     labels, n_speakers = labeler.cluster_speakers(
         embeddings, method=method, merge_threshold=merge_threshold
     )
+
+    logger.info("Computing speaker centroids...")
     centroids, speaker_stats = labeler.compute_speaker_centroids(embeddings, labels)
+
+    logger.info("Assigning speaker labels...")
     refined_labels, confidences = labeler.assign_speaker_labels(
         embeddings, centroids, threshold=assign_threshold
     )
+
+    logger.info("Generating timeline...")
     timeline = labeler.generate_timeline(timestamps, refined_labels, min_segment_duration=min_segment_duration)
 
+    logger.info("Compiling results...")
     return MultiSpeakerResult(
         embeddings=embeddings,
         timestamps=timestamps,
