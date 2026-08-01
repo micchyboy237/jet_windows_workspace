@@ -106,31 +106,9 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Implement Outlier Detection in nemo_titanet given the recommendations below. Browse how to apply the statistical methods.
-
-Based on my search of the official NeMo TitaNet Large documentation, TitaNet Large does not have a built-in mechanism for labeling audio segments as outliers.
-Here's what I found:
-What TitaNet Large Actually Does
-TitaNet Large is designed as a speaker embedding extractor that:
-Extracts fixed-length speaker embeddings (t-vectors) from variable-length utterances 
-huggingface.co
-Uses 1D depth-wise separable convolutions with Squeeze-and-Excitation layers and statistics pooling 
-docs.nvidia.com
-Generates one label/embedding for the entire provided audio stream 
-colab.research.google.com
-Is used primarily for speaker verification and diarization tasks 
-catalog.ngc.nvidia.com
-Key Limitations
-The official documentation from NVIDIA NGC Catalog, Hugging Face, and NeMo Framework User Guide does not mention any outlier detection or confidence scoring mechanisms for individual audio segments 
-catalog.ngc.nvidia.com
-huggingface.co
-docs.nvidia.com
-.
-If You Need Outlier Detection
-You would need to implement this yourself by:
-Extracting embeddings using TitaNet Large
-Applying statistical methods (e.g., Mahalanobis distance, clustering-based approaches) to identify outlier embeddings
-Using cosine similarity thresholds for speaker verification confidence
+Given the defaults in _main_nemo_titanet get_args args, write DEFAULT_* variables on top of nemo_titanet then apply.
+Then update _main_nemo_titanet to import these DEFAULT_* variables
+Show full updated files
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

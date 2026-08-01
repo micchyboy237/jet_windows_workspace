@@ -52,11 +52,11 @@ def get_args():
         help=f"output directory (default: '{OUTPUT_DIR}')",
     )
     parser.add_argument(
-        "-d", "--duration", type=float, default=2.0,
+        "-d", "--duration", type=float, default=3.0,
         help="Window duration in seconds for embedding extraction"
     )
     parser.add_argument(
-        "-s", "--step", type=float, default=0.75,
+        "-s", "--step", type=float, default=1.5,
         help="Window step in seconds for sliding window"
     )
     parser.add_argument(
@@ -64,37 +64,37 @@ def get_args():
         help="Number of windows embedded per forward pass"
     )
     parser.add_argument(
-        "-e", "--min-energy-percentile", type=float, default=15.0,
+        "-e", "--min-energy-percentile", type=float, default=10.0,
         help="Skip the quietest N%% of windows before embedding. 0 disables."
     )
     parser.add_argument(
-        "-m", "--min-segment-duration", type=float, default=1.0,
+        "-m", "--min-segment-duration", type=float, default=1.5,
         help="Minimum duration in seconds for a speaker segment"
     )
     parser.add_argument(
         "-c", "--clustering-method", type=str, choices=["agglomerative", "spectral"],
-        default="agglomerative", help="Clustering method for speaker grouping"
+        default="spectral", help="Clustering method for speaker grouping"
     )
     parser.add_argument(
-        "-t", "--merge-threshold", type=float, default=0.55,
+        "-t", "--merge-threshold", type=float, default=0.60,
         help="Similarity threshold for merging speaker clusters"
     )
     parser.add_argument(
-        "-a", "--assign-threshold", type=float, default=0.55,
+        "-a", "--assign-threshold", type=float, default=0.60,
         help="Minimum similarity threshold for assigning a frame to a speaker"
     )
     parser.add_argument(
         "--outlier-method",
         type=str,
         choices=["mahalanobis", "zscore", "isolation_forest", "dbscan"],
-        default=None,
-        help="Method for outlier detection (default: None)",
+        default="mahalanobis",
+        help="Method for outlier detection (default: mahalanobis)",
     )
     parser.add_argument(
         "--outlier-threshold",
         type=float,
-        default=0.99,
-        help="Threshold for outlier detection (default: 0.99)",
+        default=0.90,
+        help="Threshold for outlier detection (default: 0.90)",
     )
     args = parser.parse_args()
     shutil.rmtree(args.output_dir, ignore_errors=True)
