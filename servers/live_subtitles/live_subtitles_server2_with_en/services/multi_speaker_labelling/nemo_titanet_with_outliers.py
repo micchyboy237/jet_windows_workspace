@@ -17,13 +17,12 @@ import torchaudio
 from typing import Literal, TypedDict
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.metrics import silhouette_score
+from scipy.spatial.distance import mahalanobis
+from scipy.stats import chi2
+from sklearn.ensemble import IsolationForest
+from sklearn.cluster import DBSCAN
 
 logger = logging.getLogger(__name__)
-
-
-# ──────────────────────────────────────────────
-# TypedDicts for structured return types
-# ──────────────────────────────────────────────
 
 class SpeakerStats(TypedDict):
     """Per-speaker statistics computed from clustered embeddings."""
@@ -31,9 +30,8 @@ class SpeakerStats(TypedDict):
     duration: float
     avg_similarity: float
     std_similarity: float
-    quality: str           # 'good' or 'poor'
+    quality: str
     frames_percent: float
-
 
 class TimelineSegment(TypedDict):
     """A contiguous speaker segment in the timeline."""
@@ -41,30 +39,86 @@ class TimelineSegment(TypedDict):
     end: float
     duration: float
     speaker_id: int
-    speaker_label: str     # Human-readable label like "Speaker A"
-
+    speaker_label: str
 
 class MultiSpeakerResult(TypedDict):
     """Complete return type for detect_multi_speakers."""
-    embeddings: np.ndarray                             # (n_windows, embedding_dim)
-    timestamps: list[tuple[float, float]]              # [(start, end), ...]
-    labels: np.ndarray                                 # (n_windows,) int labels
-    centroids: dict[int, np.ndarray]                   # speaker_id -> centroid vector
-    speaker_stats: dict[int, SpeakerStats]             # speaker_id -> stats
-    timeline: list[TimelineSegment]                    # final speaker segments
-    confidences: np.ndarray                            # (n_windows,) confidence scores
-    n_speakers: int                                    # detected speaker count
+    embeddings: np.ndarray
+    timestamps: list[tuple[float, float]]
+    labels: np.ndarray
+    centroids: dict[int, np.ndarray]
+    speaker_stats: dict[int, SpeakerStats]
+    timeline: list[TimelineSegment]
+    confidences: np.ndarray
+    n_speakers: int
+    outlier_mask: np.ndarray
 
+# Outlier detection functions
+def detect_outliers_mahalanobis(embeddings: np.ndarray, threshold: float = 0.99) -> np.ndarray:
+    """
+    Detect outliers using Mahalanobis distance.
+    Args:
+        embeddings: Normalized embeddings (shape: [n_samples, n_features]).
+        threshold: Confidence threshold (e.g., 0.99 for 99% confidence).
+    Returns:
+        Boolean mask where `True` indicates an outlier.
+    """
+    mean = np.mean(embeddings, axis=0)
+    cov = np.cov(embeddings, rowvar=False)
+    inv_cov = np.linalg.pinv(cov)  # Use pseudo-inverse for numerical stability
 
-# ──────────────────────────────────────────────
-# SpeakerAutoLabelerTitaNet
-# ──────────────────────────────────────────────
+    distances = np.array([
+        mahalanobis(emb, mean, inv_cov) for emb in embeddings
+    ])
+    p_values = 1 - chi2.cdf(distances, df=embeddings.shape[1])
+    return p_values < (1 - threshold)
+
+def detect_outliers_zscore(embeddings: np.ndarray, threshold: float = 3.0) -> np.ndarray:
+    """
+    Detect outliers using Z-score.
+    Args:
+        embeddings: Normalized embeddings.
+        threshold: Number of standard deviations to consider as outlier.
+    Returns:
+        Boolean mask where `True` indicates an outlier.
+    """
+    mean = np.mean(embeddings, axis=0)
+    std = np.std(embeddings, axis=0)
+    z_scores = np.abs((embeddings - mean) / (std + 1e-8))
+    return np.any(z_scores > threshold, axis=1)
+
+def detect_outliers_isolation_forest(embeddings: np.ndarray, contamination: float = 0.01) -> np.ndarray:
+    """
+    Detect outliers using Isolation Forest.
+    Args:
+        embeddings: Normalized embeddings.
+        contamination: Expected proportion of outliers.
+    Returns:
+        Boolean mask where `True` indicates an outlier.
+    """
+    clf = IsolationForest(contamination=contamination, random_state=42)
+    return clf.fit_predict(embeddings) == -1
+
+def detect_outliers_dbscan(embeddings: np.ndarray, eps: float = 0.5, min_samples: int = 5) -> np.ndarray:
+    """
+    Detect outliers using DBSCAN.
+    Args:
+        embeddings: Normalized embeddings.
+        eps: Maximum distance between two samples for one to be considered in the neighborhood of the other.
+        min_samples: Number of samples in a neighborhood for a point to be considered a core point.
+    Returns:
+        Boolean mask where `True` indicates an outlier.
+    """
+    dbscan = DBSCAN(eps=eps, min_samples=min_samples)
+    labels = dbscan.fit_predict(embeddings)
+    return labels == -1
 
 class SpeakerAutoLabelerTitaNet:
     """
     Automatic speaker labeling and centroid extraction using NeMo TitaNet-Large embeddings.
     Fully automatic with intelligent cluster merging (same pipeline as the pyannote version).
     """
+
     def __init__(
         self,
         model_name: str = "titanet_large",
@@ -122,20 +176,38 @@ class SpeakerAutoLabelerTitaNet:
         return waveform.squeeze(0)
 
     @torch.no_grad()
-    def extract_embeddings(self, audio_path: str):
-        """Slice audio into sliding windows and extract a TitaNet embedding per window."""
+    def extract_embeddings(
+        self,
+        audio_path: str,
+        outlier_method: str = None,
+        outlier_threshold: float = 0.99,
+    ) -> tuple[np.ndarray, list[tuple[float, float]], np.ndarray]:
+        """
+        Extract embeddings and optionally filter outliers.
+        Args:
+            audio_path: Path to audio file.
+            outlier_method: One of ["mahalanobis", "zscore", "isolation_forest", "dbscan"].
+            outlier_threshold: Threshold for outlier detection.
+        Returns:
+            embeddings: Filtered embeddings.
+            timestamps: Corresponding timestamps.
+            outlier_mask: Boolean mask indicating outliers.
+        """
         waveform = self._load_audio(audio_path)
         total_samples = waveform.shape[0]
         window_samples = int(self.duration * self.sample_rate)
         step_samples = int(self.step * self.sample_rate)
+
         if total_samples < window_samples:
             raise ValueError(
                 f"Audio is shorter ({total_samples / self.sample_rate:.2f}s) than one "
                 f"window ({self.duration}s). Reduce --duration or use a longer clip."
             )
+
         all_starts = list(range(0, total_samples - window_samples + 1, step_samples))
         logger.info(f"Extracting embeddings from: {audio_path}")
         logger.info(f"Total windows (before silence filtering): {len(all_starts)}")
+
         if self.min_energy_percentile > 0:
             energies = np.array([
                 torch.sqrt(torch.mean(waveform[s: s + window_samples] ** 2)).item()
@@ -149,7 +221,9 @@ class SpeakerAutoLabelerTitaNet:
             )
         else:
             starts = all_starts
+
         logger.info(f"Total windows (after silence filtering): {len(starts)}")
+
         embeddings = []
         timestamps = []
         for batch_start in range(0, len(starts), self.batch_size):
@@ -169,12 +243,34 @@ class SpeakerAutoLabelerTitaNet:
                 end_sec = (s + window_samples) / self.sample_rate
                 timestamps.append((start_sec, end_sec))
             logger.info(f"  Processed windows {batch_start + 1}-{batch_start + len(batch_starts)} / {len(starts)}")
+
         embeddings = np.concatenate(embeddings, axis=0)
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
         embeddings = embeddings / (norms + 1e-8)
+
+        # Outlier detection
+        outlier_mask = np.zeros(len(embeddings), dtype=bool)
+        if outlier_method:
+            if outlier_method == "mahalanobis":
+                outlier_mask = detect_outliers_mahalanobis(embeddings, outlier_threshold)
+            elif outlier_method == "zscore":
+                outlier_mask = detect_outliers_zscore(embeddings, outlier_threshold)
+            elif outlier_method == "isolation_forest":
+                outlier_mask = detect_outliers_isolation_forest(embeddings, outlier_threshold)
+            elif outlier_method == "dbscan":
+                outlier_mask = detect_outliers_dbscan(embeddings)
+            else:
+                logger.warning(f"Unknown outlier method: {outlier_method}. Skipping outlier detection.")
+
+            # Filter embeddings and timestamps
+            embeddings = embeddings[~outlier_mask]
+            timestamps = [ts for ts, is_outlier in zip(timestamps, outlier_mask) if not is_outlier]
+            logger.info(f"Filtered {np.sum(outlier_mask)} outlier windows. Remaining: {len(embeddings)}")
+
         logger.info(f"Extracted {embeddings.shape[0]} normalized embeddings of dimension {embeddings.shape[1]}")
         logger.info(f"Time range: {timestamps[0][0]:.1f}s to {timestamps[-1][1]:.1f}s")
-        return embeddings, timestamps
+
+        return embeddings, timestamps, outlier_mask
 
     def auto_detect_speakers(self, embeddings, max_speakers=8, min_speakers=1):
         """Automatically detect the optimal number of speakers using multiple metrics."""
@@ -358,12 +454,9 @@ class SpeakerAutoLabelerTitaNet:
         if len(timestamps) == 0 or len(labels) == 0:
             logger.warning("No timestamps or labels available for timeline generation")
             return timeline
-        
-        # --- Step 1: Build raw segments (same as before) ---
         raw_segments: list[TimelineSegment] = []
         current_speaker = labels[0]
         segment_start = timestamps[0][0]
-        
         for i, (timestamp, label) in enumerate(zip(timestamps, labels)):
             if label != current_speaker:
                 segment_end = timestamps[i - 1][1] if i > 0 else timestamp[0]
@@ -378,8 +471,6 @@ class SpeakerAutoLabelerTitaNet:
                     ))
                 segment_start = timestamp[0]
                 current_speaker = label
-        
-        # Last segment
         segment_end = timestamps[-1][1]
         duration = segment_end - segment_start
         if duration >= min_segment_duration and current_speaker != -1:
@@ -390,21 +481,13 @@ class SpeakerAutoLabelerTitaNet:
                 speaker_id=int(current_speaker),
                 speaker_label=f"Speaker {chr(65 + int(current_speaker))}",
             ))
-        
         logger.info(f"Raw segments before merging: {len(raw_segments)}")
-        
-        # --- Step 2: Merge consecutive segments with the same speaker ---
         if not raw_segments:
             return timeline
-        
         merged_segments: list[TimelineSegment] = [raw_segments[0]]
-        
         for seg in raw_segments[1:]:
             prev = merged_segments[-1]
-            
-            # Check if same speaker and overlapping or adjacent in time
             if seg["speaker_id"] == prev["speaker_id"] and seg["start"] <= prev["end"] + self.step:
-                # Merge: extend the previous segment
                 prev["end"] = max(prev["end"], seg["end"])
                 prev["duration"] = round(prev["end"] - prev["start"], 3)
                 logger.debug(
@@ -413,15 +496,11 @@ class SpeakerAutoLabelerTitaNet:
                     f"into ({prev['start']:.1f}s→{prev['end']:.1f}s)"
                 )
             else:
-                # New segment (different speaker or large gap)
                 merged_segments.append(seg)
-        
-        # Re-filter by min_segment_duration after merging (merging may have extended some)
         timeline = [
             seg for seg in merged_segments
             if seg["duration"] >= min_segment_duration
         ]
-        
         merge_count = len(raw_segments) - len(timeline)
         if merge_count > 0:
             logger.info(
@@ -430,13 +509,7 @@ class SpeakerAutoLabelerTitaNet:
             )
         else:
             logger.info(f"No segments to merge. Timeline: {len(timeline)} segments")
-        
         return timeline
-
-
-# ──────────────────────────────────────────────
-# Main entry point
-# ──────────────────────────────────────────────
 
 def detect_multi_speakers(
     audio_path: str,
@@ -449,14 +522,17 @@ def detect_multi_speakers(
     method: Literal["agglomerative", "spectral"] = "agglomerative",
     merge_threshold: float = 0.55,
     assign_threshold: float = 0.55,
+    outlier_method: str = None,
+    outlier_threshold: float = 0.99,
 ) -> MultiSpeakerResult:
     """Main execution flow - FULLY AUTOMATIC WITH SMART MERGING (TitaNet-Large version)."""
     logger.info("=" * 60)
-    logger.info("AUTO SPEAKER LABELING WITH TITANET-LARGE + INTELLIGENT MERGING")
+    logger.info("AUTO SPEAKER LABELING WITH TITANET-LARGE + OUTLIER DETECTION")
     logger.info("=" * 60)
     logger.info(f"Model: {model_name}")
     logger.info(f"Merge threshold: {merge_threshold}")
     logger.info(f"Assignment threshold: {assign_threshold}")
+    logger.info(f"Outlier method: {outlier_method}")
     logger.info(f"Silence filter percentile: {min_energy_percentile}")
 
     labeler = SpeakerAutoLabelerTitaNet(
@@ -464,18 +540,17 @@ def detect_multi_speakers(
         min_energy_percentile=min_energy_percentile,
     )
 
-    embeddings, timestamps = labeler.extract_embeddings(audio_path)
+    embeddings, timestamps, outlier_mask = labeler.extract_embeddings(
+        audio_path, outlier_method=outlier_method, outlier_threshold=outlier_threshold
+    )
 
     labels, n_speakers = labeler.cluster_speakers(
         embeddings, method=method, merge_threshold=merge_threshold
     )
-
     centroids, speaker_stats = labeler.compute_speaker_centroids(embeddings, labels)
-
     refined_labels, confidences = labeler.assign_speaker_labels(
         embeddings, centroids, threshold=assign_threshold
     )
-
     timeline = labeler.generate_timeline(timestamps, refined_labels, min_segment_duration=min_segment_duration)
 
     return MultiSpeakerResult(
@@ -487,9 +562,9 @@ def detect_multi_speakers(
         timeline=timeline,
         confidences=confidences,
         n_speakers=n_speakers,
+        outlier_mask=outlier_mask,
     )
 
-
 if __name__ == "__main__":
-    from main._main_nemo_titanet import main
+    from main._main_nemo_titanet_with_outliers import main
     main()

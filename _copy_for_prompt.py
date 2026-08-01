@@ -76,7 +76,14 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\nemo_titanet.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\ReazonSpeech\pkg\espnet-asr\src",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\vad_extractors.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\vad_types.py",
+    # # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough_double_check.py",
+    # r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\nemo_titanet.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\main\_main_nemo_titanet.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough_labeled.py",
     r"",
 ]
 
@@ -99,9 +106,31 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Browse how to add context for reazonspeech espnet
+Implement Outlier Detection in nemo_titanet given the recommendations below. Browse how to apply the statistical methods.
 
-Analyze how to incorporate context when transcribing
+Based on my search of the official NeMo TitaNet Large documentation, TitaNet Large does not have a built-in mechanism for labeling audio segments as outliers.
+Here's what I found:
+What TitaNet Large Actually Does
+TitaNet Large is designed as a speaker embedding extractor that:
+Extracts fixed-length speaker embeddings (t-vectors) from variable-length utterances 
+huggingface.co
+Uses 1D depth-wise separable convolutions with Squeeze-and-Excitation layers and statistics pooling 
+docs.nvidia.com
+Generates one label/embedding for the entire provided audio stream 
+colab.research.google.com
+Is used primarily for speaker verification and diarization tasks 
+catalog.ngc.nvidia.com
+Key Limitations
+The official documentation from NVIDIA NGC Catalog, Hugging Face, and NeMo Framework User Guide does not mention any outlier detection or confidence scoring mechanisms for individual audio segments 
+catalog.ngc.nvidia.com
+huggingface.co
+docs.nvidia.com
+.
+If You Need Outlier Detection
+You would need to implement this yourself by:
+Extracting embeddings using TitaNet Large
+Applying statistical methods (e.g., Mahalanobis distance, clustering-based approaches) to identify outlier embeddings
+Using cosine similarity thresholds for speaker verification confidence
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

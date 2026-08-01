@@ -7,6 +7,7 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import find_peaks
 from rich.console import Console
+from rich.table import Table
 
 try:
     from services.audio_config import FRAME_SHIFT_MS, SAMPLE_RATE, SILENCE_MAX_THRESHOLD
@@ -1224,6 +1225,236 @@ def extract_valley_troughs_from_np_audio(
             pass
 
 
+def _double_check_long_segments(
+    segments: List[TroughToTroughSegment],
+    audio_slices: List[np.ndarray],
+    probs: List[float],
+    audio_np: Optional[np.ndarray],
+    total_audio_samples: int,
+    *,
+    double_check_min_duration_s: float,
+    with_audio: bool,
+    with_scores: bool,
+    frame_shift_ms: float,
+    sample_rate: int,
+    min_duration_s: float,
+    smoothing_window: int,
+    trough_height: Optional[float],
+    trough_prominence: float,
+    trough_distance: int,
+    valley_threshold: Optional[float],
+    min_valley_duration_s: float,
+    min_valley_frames: Optional[int],
+) -> Tuple[List[TroughToTroughSegment], List[np.ndarray]]:
+    """
+    Re-analyze segments that exceed double_check_min_duration_s by calling
+    extract_trough_to_trough on each one individually with the same
+    min_duration_s as the main call. If the sub-call produces segments,
+    they replace the original (even a single segment may have refined boundaries).
+    If the sub-call produces 0 segments, the original is kept.
+
+    Args:
+        segments: Original segments from the first pass.
+        audio_slices: Corresponding audio slices (may be empty if with_audio=False).
+        probs: Full VAD probability list for the original audio.
+        audio_np: Full audio numpy array (may be None).
+        total_audio_samples: Total number of samples in audio_np.
+        double_check_min_duration_s: Duration threshold — segments >= this
+            value will be re-analyzed.
+        min_duration_s: Original min_duration_s from the main call, used for
+            sub-calls to maintain consistent filtering.
+        with_audio: Whether audio slices should be tracked.
+        with_scores: Whether scores are being computed.
+        (remaining args): Forwarded to the recursive extract_trough_to_trough call.
+    Returns:
+        Tuple of (refined_segments, refined_audio_slices).
+    """
+    console.print(
+        f"[bold cyan]═══ Double-checking segments with duration >= "
+        f"{double_check_min_duration_s:.3f}s ═══[/bold cyan]"
+    )
+    refined_segments: List[TroughToTroughSegment] = []
+    refined_audio_slices: List[np.ndarray] = []
+    double_check_count = 0
+    split_count = 0
+    kept_original_count = 0
+
+    for seg_idx, segment in enumerate(segments):
+        seg_duration = segment["duration_s"]
+
+        if seg_duration < double_check_min_duration_s:
+            refined_segments.append(segment)
+            if with_audio and seg_idx < len(audio_slices):
+                refined_audio_slices.append(audio_slices[seg_idx])
+            continue
+
+        double_check_count += 1
+        console.print(
+            f"[cyan]  Double-checking segment {seg_idx}: "
+            f"[{segment['start_s']:.3f}s - {segment['end_s']:.3f}s] "
+            f"duration={seg_duration:.3f}s[/cyan]"
+        )
+
+        segment_start_s = segment["start_s"]
+        segment_start_frame = segment["start_frame"]
+
+        if with_audio and audio_np is not None and seg_idx < len(audio_slices):
+            sub_input = audio_slices[seg_idx]
+            console.print(f"[dim]    Using audio slice for re-analysis[/dim]")
+        else:
+            start_frame = segment["start_frame"]
+            end_frame = segment["end_frame"]
+            sub_input = probs[start_frame:end_frame + 1]
+            console.print(f"[dim]    Using probs slice for re-analysis[/dim]")
+
+        try:
+            sub_result = extract_trough_to_trough(
+                probs_or_audio=sub_input,
+                frame_shift_ms=frame_shift_ms,
+                sample_rate=sample_rate,
+                with_audio=False,
+                with_scores=with_scores,
+                min_duration_s=min_duration_s,
+                double_check_min_duration_s=None,
+                smoothing_window=smoothing_window,
+                trough_height=trough_height,
+                trough_prominence=trough_prominence,
+                trough_distance=trough_distance,
+                valley_threshold=valley_threshold,
+                min_valley_duration_s=min_valley_duration_s,
+                min_valley_frames=min_valley_frames,
+                frame_offset=0,
+                min_trough_offset_s=0.0,
+            )
+
+            if with_scores:
+                sub_segments, _ = sub_result
+            else:
+                sub_segments = sub_result
+
+            console.print(
+                f"[dim]    Sub-call returned {len(sub_segments)} segment(s) "
+                f"(local coords, min_duration_s={min_duration_s:.3f}s)[/dim]"
+            )
+
+            if len(sub_segments) > 0:
+                # Use ALL sub-segments (even a single one may have refined boundaries)
+                split_count += 1
+                local_ranges = [
+                    f"[{s['start_s']:.3f}s-{s['end_s']:.3f}s]"
+                    for s in sub_segments
+                ]
+                console.print(
+                    f"[green]    ↳ Replacing with {len(sub_segments)} refined sub-segment(s) "
+                    f"(local): {local_ranges}[/green]"
+                )
+
+                sub_table = Table(
+                    title=f"Sub-Call Results for Segment {seg_idx} "
+                          f"(original: {seg_duration:.3f}s)",
+                    header_style="bold white",
+                    border_style="bright_black",
+                    show_lines=False,
+                )
+                sub_table.add_column("Sub#", style="dim", width=5, justify="right")
+                sub_table.add_column("Local Start", width=10, justify="right")
+                sub_table.add_column("Local End", width=10, justify="right")
+                sub_table.add_column("Local Dur", width=9, justify="right")
+                sub_table.add_column("Global Start", width=11, justify="right")
+                sub_table.add_column("Global End", width=11, justify="right")
+                sub_table.add_column("Global Dur", width=10, justify="right")
+
+                for sub_idx, sub_seg in enumerate(sub_segments):
+                    adjusted_seg = dict(sub_seg)
+                    adjusted_seg["start_s"] = round(
+                        sub_seg["start_s"] + segment_start_s, 4
+                    )
+                    adjusted_seg["end_s"] = round(
+                        sub_seg["end_s"] + segment_start_s, 4
+                    )
+                    adjusted_seg["duration_s"] = round(
+                        adjusted_seg["end_s"] - adjusted_seg["start_s"], 4
+                    )
+                    adjusted_seg["start_frame"] = (
+                        sub_seg.get("start_frame", 0) + segment_start_frame
+                    )
+                    adjusted_seg["end_frame"] = (
+                        sub_seg.get("end_frame", 0) + segment_start_frame
+                    )
+
+                    sub_table.add_row(
+                        str(sub_idx),
+                        f"{sub_seg['start_s']:.3f}s",
+                        f"{sub_seg['end_s']:.3f}s",
+                        f"{sub_seg['duration_s']:.3f}s",
+                        f"{adjusted_seg['start_s']:.3f}s",
+                        f"{adjusted_seg['end_s']:.3f}s",
+                        f"{adjusted_seg['duration_s']:.3f}s",
+                    )
+
+                    if sub_seg.get("trough_start") is not None:
+                        adjusted_seg["trough_start"] = dict(sub_seg["trough_start"])
+                        if "global_time_s" in adjusted_seg["trough_start"]:
+                            adjusted_seg["trough_start"]["global_time_s"] = (
+                                adjusted_seg["trough_start"]["global_time_s"]
+                                + segment_start_s
+                            )
+                    if sub_seg.get("trough_end") is not None:
+                        adjusted_seg["trough_end"] = dict(sub_seg["trough_end"])
+                        if "global_time_s" in adjusted_seg["trough_end"]:
+                            adjusted_seg["trough_end"]["global_time_s"] = (
+                                adjusted_seg["trough_end"]["global_time_s"]
+                                + segment_start_s
+                            )
+
+                    console.print(
+                        f"[dim]      Local [{sub_seg['start_s']:.3f}s-{sub_seg['end_s']:.3f}s] "
+                        f"→ Global [{adjusted_seg['start_s']:.3f}s-{adjusted_seg['end_s']:.3f}s]"
+                        f"[/dim]"
+                    )
+
+                    refined_segments.append(adjusted_seg)
+
+                    if with_audio and audio_np is not None:
+                        sub_start_sample = int(adjusted_seg["start_s"] * sample_rate)
+                        sub_end_sample = int(adjusted_seg["end_s"] * sample_rate)
+                        sub_start_sample = max(0, sub_start_sample)
+                        sub_end_sample = min(total_audio_samples, sub_end_sample)
+                        refined_audio_slices.append(
+                            audio_np[sub_start_sample:sub_end_sample]
+                        )
+
+                console.print(sub_table)
+
+            else:
+                console.print(
+                    f"[yellow]    ↳ No sub-segments found, keeping original segment[/yellow]"
+                )
+                refined_segments.append(segment)
+                if with_audio and seg_idx < len(audio_slices):
+                    refined_audio_slices.append(audio_slices[seg_idx])
+                    kept_original_count += 1
+
+        except Exception as e:
+            console.print(
+                f"[red]    Error double-checking segment {seg_idx}: {e}. "
+                f"Keeping original segment.[/red]"
+            )
+            import traceback
+            console.print(f"[red dim]{traceback.format_exc()}[/red dim]")
+            refined_segments.append(segment)
+            if with_audio and seg_idx < len(audio_slices):
+                refined_audio_slices.append(audio_slices[seg_idx])
+
+    console.print(
+        f"[bold cyan]═══ Double-check complete: checked {double_check_count} "
+        f"segment(s), refined {split_count} segment(s), "
+        f"kept {kept_original_count} unchanged. "
+        f"Final count: {len(refined_segments)} segment(s). ═══[/bold cyan]"
+    )
+    return refined_segments, refined_audio_slices
+
+
 def extract_trough_to_trough(
     probs_or_audio: List[float] | AudioInput,
     frame_shift_ms: float = FRAME_SHIFT_MS,
@@ -1231,6 +1462,7 @@ def extract_trough_to_trough(
     with_audio: bool = False,
     with_scores: bool = False,
     min_duration_s: float = 0.0,
+    double_check_min_duration_s: Optional[float] = None,
     smoothing_window: int = 0,
     trough_height: Optional[float] = None,
     trough_prominence: float = 0.15,
@@ -1248,13 +1480,17 @@ def extract_trough_to_trough(
 ]:
     """
     Create segments spanning from one valley trough to the next.
-
     This function automatically:
     1. Loads/resolves VAD probabilities from the input.
     2. Extracts valley troughs using provided or default parameters.
     3. Creates segments between consecutive troughs (including start-to-first
        and last-to-end).
     4. Scores every segment via score_trough_to_trough_segments().
+    5. If double_check_min_duration_s is set, re-analyzes long segments
+       by calling _double_check_long_segments which runs extract_trough_to_trough
+       recursively on each segment's audio/probs, with min_duration_s set to
+       double_check_min_duration_s. If the sub-call produces multiple segments,
+       they replace the original; otherwise the original is kept.
 
     For N valley_troughs, this produces N+1 segments:
         segment_0: t=0          → trough[0]
@@ -1275,6 +1511,13 @@ def extract_trough_to_trough(
         with_audio: If True, return list of (segment, audio_slice) tuples.
         with_scores: If True, include per-segment VAD probability scores.
         min_duration_s: Minimum segment duration in seconds.
+        double_check_min_duration_s: If set, segments with duration >= this
+            value will be re-analyzed by calling extract_trough_to_trough
+            recursively on just that segment's audio/probs, with
+            min_duration_s set to this value. If the sub-call produces
+            multiple segments, they replace the original. If it produces
+            0 or 1 segment, the original is kept. Set to None to disable
+            (default: None).
         smoothing_window: Smoothing window size for trough/valley detection.
             Set to 0 or 1 to disable. Does NOT affect segment scoring.
         trough_height: Min trough height (None = auto-computed).
@@ -1292,10 +1535,10 @@ def extract_trough_to_trough(
         ``final_score`` fields from score_trough_to_trough_segments().
 
     Logs:
-        Logs number of troughs, segments created, and any filtering.
+        Logs number of troughs, segments created, any filtering, and
+        double-check results if enabled.
     """
     probs, audio_np = load_probs(probs_or_audio)
-
     if not probs:
         console.print(
             "[yellow]extract_trough_to_trough: no probabilities extracted, "
@@ -1305,7 +1548,6 @@ def extract_trough_to_trough(
             return ([], probs) if not with_audio else (([], []), probs)
         return [] if not with_audio else []
 
-    # ── Extract valley troughs ──
     valley_troughs = extract_valley_troughs(
         probs_or_audio=probs,
         sample_rate=sample_rate,
@@ -1341,7 +1583,6 @@ def extract_trough_to_trough(
     end_time_s = n_frames * frame_duration_s
     end_frame = n_frames - 1
 
-    # ── Build sentinel boundaries for first/last segments ──
     sentinel_start: ValleyTrough = {
         "frame": 0,
         "global_frame": 0,
@@ -1367,7 +1608,6 @@ def extract_trough_to_trough(
         [sentinel_start] + list(valley_troughs) + [sentinel_end]
     )
 
-    # ── Create segments ──
     segments: List[TroughToTroughSegment] = []
     audio_slices: List[np.ndarray] = []
     total_audio_samples = len(audio_np) if audio_np is not None else 0
@@ -1377,6 +1617,7 @@ def extract_trough_to_trough(
     for idx in range(len(anchors) - 1):
         vt_start = anchors[idx]
         vt_end = anchors[idx + 1]
+
         is_first = idx == 0
         is_last = idx == len(anchors) - 2
 
@@ -1387,7 +1628,6 @@ def extract_trough_to_trough(
         start_frame: int = int(vt_start["global_frame"])
         end_frame_seg: int = int(vt_end["global_frame"])
 
-        # ── Duration filter ──
         if min_duration_s > 0 and duration_s < min_duration_s:
             filtered_count += 1
             filtered_durations.append(duration_s)
@@ -1398,7 +1638,6 @@ def extract_trough_to_trough(
             )
             continue
 
-        # ── Probability statistics for this segment ──
         segment_probs: Optional[List[float]] = None
         prob_stats: Optional[Dict[str, float]] = None
 
@@ -1423,7 +1662,6 @@ def extract_trough_to_trough(
                 f"frames={prob_stats['num_frames']}[/blue]"
             )
 
-        # ── Build segment ──
         segment: TroughToTroughSegment = {
             "start_s": start_s,
             "end_s": end_s,
@@ -1437,7 +1675,6 @@ def extract_trough_to_trough(
         }
         segments.append(segment)
 
-        # ── Extract audio slice if requested ──
         if with_audio and audio_np is not None:
             start_sample = int(start_s * sample_rate)
             end_sample = int(end_s * sample_rate)
@@ -1452,7 +1689,6 @@ def extract_trough_to_trough(
                 f"[/magenta]"
             )
 
-    # ── Duration filter summary ──
     if min_duration_s > 0:
         console.print(
             f"[yellow]extract_trough_to_trough: Filtered {filtered_count} segment(s) "
@@ -1465,8 +1701,31 @@ def extract_trough_to_trough(
             + f". Kept {len(segments)} segment(s).[/yellow]"
         )
 
-    # ── Score all segments (always, uses internal fixed smoothing) ──
     segments = score_trough_to_trough_segments(segments)
+
+    # ===== Double-check long segments =====
+    if double_check_min_duration_s is not None and double_check_min_duration_s > 0:
+        segments, audio_slices = _double_check_long_segments(
+            segments=segments,
+            audio_slices=audio_slices,
+            probs=probs,
+            audio_np=audio_np,
+            total_audio_samples=total_audio_samples,
+            double_check_min_duration_s=double_check_min_duration_s,
+            with_audio=with_audio,
+            with_scores=with_scores,
+            frame_shift_ms=frame_shift_ms,
+            sample_rate=sample_rate,
+            min_duration_s=min_duration_s,  # ADDED: pass original min_duration_s
+            smoothing_window=smoothing_window,
+            trough_height=trough_height,
+            trough_prominence=trough_prominence,
+            trough_distance=trough_distance,
+            valley_threshold=valley_threshold,
+            min_valley_duration_s=min_valley_duration_s,
+            min_valley_frames=min_valley_frames,
+        )
+    # ===== END: Double-check long segments =====
 
     console.print(
         f"[green]extract_trough_to_trough: Created {len(segments)} segments "
@@ -1474,6 +1733,11 @@ def extract_trough_to_trough(
         + (" with audio slices" if with_audio else "")
         + (" with probability scores" if with_scores else "")
         + (f" (min_duration_s={min_duration_s:.3f}s)" if min_duration_s > 0 else "")
+        + (
+            f" (double_check_min_duration_s={double_check_min_duration_s:.3f}s)"
+            if double_check_min_duration_s is not None and double_check_min_duration_s > 0
+            else ""
+        )
         + ".[/green]"
     )
 
@@ -1482,8 +1746,10 @@ def extract_trough_to_trough(
         if with_scores:
             return segments_with_audio, probs
         return segments_with_audio
+
     if with_scores:
         return segments, probs
+
     return segments
 
 

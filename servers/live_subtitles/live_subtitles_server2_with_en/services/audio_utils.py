@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Union, Sequence, Generator, Tuple, Optional
+from typing import Union, Sequence, Generator, Tuple, NamedTuple, Optional
 from pathlib import Path
 
 import io
@@ -30,6 +30,17 @@ AUDIO_EXTENSIONS = {
 }
 
 AudioPathsInput = Union[str, Path, Sequence[Union[str, Path]]]
+
+
+class SegmentInfo(NamedTuple):
+    """Metadata about a single audio segment in the combined output."""
+    index: int
+    start_sample: int
+    end_sample: int       # exclusive
+    start_time: float
+    end_time: float
+    duration: float
+    source: str           # file path stem, or type name for non-file inputs
 
 
 def _collect_audio_files(
@@ -255,6 +266,157 @@ def resolve_audio_paths_as_tensor_list(
         raise ValueError("No audio data could be loaded from the provided inputs.")
     
     return audio_tensor_list
+
+
+def combine_audio_paths(
+    audio_inputs: list[AudioInput],
+    gap: float = 0.5,
+    sr: Optional[int] = SAMPLE_RATE,
+    mono: bool = True,
+    return_segments: bool = False,
+) -> Union[np.ndarray, Tuple[np.ndarray, list[SegmentInfo]]]:
+    """
+    Combine multiple audio inputs into a single numpy array with configurable silence gap.
+
+    This function handles various audio input types (file paths, bytes, numpy arrays,
+    torch tensors) and concatenates them with a silence gap between each segment.
+
+    Args:
+        audio_inputs: List of audio inputs to combine. Each element can be:
+            - File path (str or PathLike)
+            - Raw audio bytes
+            - Numpy array (floating or integer)
+            - Torch tensor
+        gap: Duration of silence in seconds to insert between audio segments (default: 0.5)
+        sr: Target sample rate for all audio segments (default: SAMPLE_RATE, typically 16000)
+        mono: Whether to convert all audio to mono before combining (default: True)
+        return_segments: If True, returns a tuple (combined_audio, segments_info).
+            segments_info is a list of SegmentInfo namedtuples with start/end times.
+            (default: False for backward compatibility)
+
+    Returns:
+        If return_segments is False:
+            Single numpy array containing all audio segments concatenated with silence gaps.
+            Shape: (total_samples,) for mono, (channels, total_samples) for multi-channel.
+        If return_segments is True:
+            Tuple of (combined_audio, segments_info) where segments_info is a list of
+            SegmentInfo namedtuples.
+
+    Raises:
+        ValueError: If audio_inputs list is empty
+        TypeError: If any audio input type is not supported
+        RuntimeError: If any audio segment fails to load
+
+    Examples:
+        # Backward compatible (just audio)
+        combined = combine_audio_paths(["intro.wav", "main.wav"], gap=0.5)
+
+        # With segment info
+        combined, segments = combine_audio_paths(
+            ["intro.wav", "main.wav"], gap=0.5, return_segments=True
+        )
+        for seg in segments:
+            print(f"{seg.source}: {seg.start_time:.2f}s - {seg.end_time:.2f}s ({seg.duration:.2f}s)")
+    """
+    if not audio_inputs:
+        raise ValueError("audio_inputs list cannot be empty")
+
+    if gap < 0:
+        raise ValueError(f"gap must be non-negative, got {gap}")
+
+    effective_sr = sr if sr is not None else SAMPLE_RATE
+    gap_samples = int(gap * effective_sr)
+
+    loaded_segments: list[np.ndarray] = []
+    failed_inputs: list[tuple[int, str, str]] = []
+    sources: list[str] = []  # Track source identifiers
+
+    # Load all audio inputs and resolve source names
+    for idx, audio_input in enumerate(audio_inputs):
+        # Determine source identifier
+        if isinstance(audio_input, (str, os.PathLike)):
+            source = Path(audio_input).stem
+        elif isinstance(audio_input, bytes):
+            source = f"bytes_input_{idx}"
+        elif isinstance(audio_input, np.ndarray):
+            source = f"numpy_array_{idx}"
+        elif isinstance(audio_input, torch.Tensor):
+            source = f"tensor_{idx}"
+        else:
+            source = f"unknown_{idx}"
+
+        try:
+            audio_array, actual_sr = load_audio(
+                audio=audio_input,
+                sr=sr,
+                mono=mono,
+                return_as_tensor=False,
+            )
+            loaded_segments.append(audio_array)
+            sources.append(source)
+        except Exception as e:
+            failed_inputs.append((idx, type(audio_input).__name__, str(e)))
+
+    if failed_inputs:
+        error_msg = f"Failed to load {len(failed_inputs)} audio input(s):\n"
+        for idx, input_type, error in failed_inputs:
+            error_msg += f"  - Input {idx} ({input_type}): {error}\n"
+        raise RuntimeError(error_msg)
+
+    if not loaded_segments:
+        raise RuntimeError("No audio segments were successfully loaded")
+
+    is_multichannel = loaded_segments[0].ndim > 1
+
+    # Pre-compute segment info while we know individual lengths
+    segment_infos: list[SegmentInfo] = []
+    current_sample = 0
+
+    for i, segment in enumerate(loaded_segments):
+        # Get sample count along time axis
+        num_samples = segment.shape[-1] if is_multichannel else len(segment)
+        duration = num_samples / effective_sr
+
+        start_sample = current_sample
+        end_sample = start_sample + num_samples
+
+        segment_infos.append(SegmentInfo(
+            index=i,
+            start_sample=start_sample,
+            end_sample=end_sample,
+            start_time=start_sample / effective_sr,
+            end_time=end_sample / effective_sr,
+            duration=duration,
+            source=sources[i],
+        ))
+
+        # Advance: segment + optional gap
+        current_sample = end_sample + (gap_samples if i < len(loaded_segments) - 1 else 0)
+
+    # Build combined audio
+    if gap_samples > 0:
+        if is_multichannel:
+            num_channels = loaded_segments[0].shape[0]
+            silence = np.zeros((num_channels, gap_samples), dtype=np.float32)
+        else:
+            silence = np.zeros(gap_samples, dtype=np.float32)
+
+    combined_segments = []
+    for i, segment in enumerate(loaded_segments):
+        combined_segments.append(segment)
+        if i < len(loaded_segments) - 1 and gap_samples > 0:
+            combined_segments.append(silence.copy())
+
+    if is_multichannel:
+        combined_audio = np.concatenate(combined_segments, axis=1)
+    else:
+        combined_audio = np.concatenate(combined_segments, axis=0)
+
+    result = combined_audio.astype(np.float32)
+
+    if return_segments:
+        return result, segment_infos
+    return result
 
 
 def load_audio(

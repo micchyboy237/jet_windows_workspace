@@ -74,11 +74,11 @@ parser.add_argument(
     "--double-check-min-duration",
     "-dd",
     type=float,
-    default=None,
+    default=4.0,
     help="If set, segments with duration >= this value will be re-analyzed "
     "by calling extract_trough_to_trough on each, with min_duration_s set "
     "to this value. If sub-results contain multiple segments, they replace "
-    "the original. (default: None = disabled)",
+    "the original. (default: 4.0, set to None to disable)",
 )
 parser.add_argument(
     "--max-duration",
