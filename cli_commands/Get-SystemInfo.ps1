@@ -71,6 +71,20 @@ foreach ($letter in $targetDrives) {
     $disk = Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object { $_.DeviceID -eq $letter -and $_.DriveType -eq 3 }
     
     if ($disk) {
+        # Detect Drive Type (SSD vs HDD)
+        $driveLetter = $letter -replace ':', ''
+        $mediaType = "Unknown"
+        try {
+            # Map logical drive to physical disk to check MediaType
+            $part = Get-Partition -DriveLetter $driveLetter -ErrorAction Stop | Select-Object -First 1
+            $physDisk = Get-PhysicalDisk -DeviceNumber $part.DiskNumber -ErrorAction Stop
+            $mediaType = if ($physDisk.MediaType) { $physDisk.MediaType } else { "Unknown" }
+        } catch {
+            # Fallback to your note if the Storage module fails (e.g., in some VMs or older OS)
+            if ($driveLetter -eq 'C') { $mediaType = 'SSD' }
+            elseif ($driveLetter -eq 'D') { $mediaType = 'HDD' }
+        }
+
         $totalGB = "{0:N2}" -f ($disk.Size / 1GB)
         $freeGB = "{0:N2}" -f ($disk.FreeSpace / 1GB)
         $usedGB = "{0:N2}" -f (($disk.Size - $disk.FreeSpace) / 1GB)
@@ -84,12 +98,14 @@ foreach ($letter in $targetDrives) {
         }
         
         $diskInfo = "$totalGB GB Total | $usedGB GB Used ($usedPct%) | $freeGB GB Free ($freePct%)"
-        $label = "Drive $letter"
         
-        # PadRight(14) ensures the colon aligns perfectly with the rest of the script's output
+        # "Drive C: (SSD)" and "Drive D: (HDD)" are exactly 14 characters long!
+        # This keeps the colon perfectly aligned with the rest of the script's output.
+        $label = "Drive $letter ($mediaType)"
+        
         Write-Host "$($label.PadRight(14)) : $diskInfo"
     } else {
-        $label = "Drive $letter"
+        $label = "Drive $letter (N/A)"
         Write-Host "$($label.PadRight(14)) : Not found or not a local disk"
     }
 }
