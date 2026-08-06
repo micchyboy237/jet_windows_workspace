@@ -6,7 +6,7 @@ llama-server `
   --pooling mean `
   -c 8192 `
   -b 8192 `
-  -ub 512 `
+  -ub 2048 `
   -np 8 `
   -ngl 99 `
   --rope-scaling yarn `
