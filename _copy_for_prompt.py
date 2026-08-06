@@ -81,9 +81,12 @@ include_files = [
     # # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough_double_check.py",
     # r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\nemo_titanet_with_outliers.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\main\_main_nemo_titanet_with_outliers.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\nemo_titanet_with_outliers.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\main\_main_nemo_titanet_with_outliers.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough_labeled.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\cli_commands\Get-SystemInfo.ps1",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\cli_commands\Run-NvidiaSmiInfo.ps1",
     r"",
 ]
 
@@ -106,9 +109,29 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Given the defaults in _main_nemo_titanet get_args args, write DEFAULT_* variables on top of nemo_titanet then apply.
-Then update _main_nemo_titanet to import these DEFAULT_* variables
-Show full updated files
+I want to see the total, used and free info for the GPU VRAM.
+Analyze Run-NvidiaSmiInfo.ps1 first on how the GPU VRAM info is accessed before updating Get-SystemInfo.ps1.
+
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> . C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\cli_commands\Run-NvidiaSmiInfo.ps1
+index, name, utilization.gpu [%], memory.used [MiB], memory.total [MiB]
+0, NVIDIA GeForce GTX 1660, 5 %, 1033 MiB, 6144 MiB
+0, NVIDIA GeForce GTX 1660, 4 %, 1033 MiB, 6144 MiB
+0, NVIDIA GeForce GTX 1660, 2 %, 1033 MiB, 6144 MiB
+0, NVIDIA GeForce GTX 1660, 2 %, 1033 MiB, 6144 MiB
+0, NVIDIA GeForce GTX 1660, 2 %, 1033 MiB, 6144 MiB
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> . C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\cli_commands\Get-SystemInfo.ps1
+=== System Information ===
+PC Model       : Micro-Star International Co., Ltd To be filled by O.E.M.
+Processor      : AMD Ryzen 5 3600 6-Core Processor @ 3.6 GHz (3.6 GHz)
+Installed RAM  : 16.00 GB (15.95 GB usable)
+System Type    : 64-bit operating system, x64-based processor
+Graphics Cards :
+  - Microsoft Remote Display Adapter (Shared)
+  - NVIDIA GeForce GTX 1660
+
+=== Storage Information ===
+Drive C: (SSD) : 475.99 GB Total | 401.56 GB Used (84.4%) | 74.43 GB Free (15.6%)
+Drive D: (N/A) : Not found or not a local disk
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
