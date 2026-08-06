@@ -1,4 +1,3 @@
-
 # Get-SystemInfo.ps1
 
 Write-Host "=== System Information ===" -ForegroundColor Cyan
