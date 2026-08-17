@@ -127,17 +127,17 @@ My device:
 - Windows 11 for local servers with below specs:
   - CPU: AMD Ryzen 5 3600
   - GPU: GTX 1660
-  - RAM: 16GB dual sticks
+  - RAM: 16GB
 
 When coding:
 
-- Provide step-by-step analysis and trace the flows first.
-- Use visuals, diagrams, or tables when helpful.
+- First provide step-by-step analysis with summarized flows as separate lists and workflow diagrams.
 - For new files, classes, methods, or functions: show the full code.
 - For updates to existing files: show only the changed sections with context. Never output the full file unless it's small.
-- Write smart, flexible, reusable, maintainable, optimal, robust, and minimal code.
-- Ask for clarifications before giving detailed answers if needed.
-- Always add logs for traceability and verification.
+- Write smart, reusable, maintainable, optimal, robust, and minimal code.
+- If possible, avoid business specific logic to keep code generic.
+- Ask for clarifications before giving detailed answers if something is confusing or need confirmation.
+- Include logs that cover all steps.
 """.strip()
 
 DEFAULT_SYSTEM_MESSAGE = """
