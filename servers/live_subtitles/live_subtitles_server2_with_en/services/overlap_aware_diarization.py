@@ -384,26 +384,33 @@ def cluster_speakers(
 ) -> Tuple[np.ndarray, int]:
     """
     Spectral clustering on L2-normalised embeddings (cosine affinity).
-    
     Steps:
       1. L2-normalise all embeddings
       2. Build cosine affinity matrix, clip to [0, 1]
       3. Eigengap heuristic if n_speakers is None
       4. SpectralClustering with precomputed affinity
       5. Optional median-filter smoothing on labels to remove flicker
-    
     Returns:
         labels      : int array of shape (N,) — speaker index per window
         n_speakers  : final number of speakers used
     """
+    # --- NEW: Early exit for single embedding (too short for clustering) ---
+    if len(embeddings) <= 1:
+        log.warning(
+            f"Only {len(embeddings)} embedding(s) available — "
+            f"clustering requires >= 2. Assigning all to SPEAKER_00."
+        )
+        return np.zeros(len(embeddings), dtype=int), 1
+    # ---------------------------------------------------------------------
+
     emb_norm = normalize(embeddings, norm="l2")
     affinity = np.clip(emb_norm @ emb_norm.T, 0.0, 1.0)
-    
+
     if n_speakers is None:
         n_speakers = _eigengap_n_speakers(affinity, min_spk, max_spk)
-    
+
     n_speakers = min(n_speakers, len(embeddings))
-    
+
     sc = SpectralClustering(
         n_clusters=n_speakers,
         affinity="precomputed",
@@ -412,10 +419,10 @@ def cluster_speakers(
         n_init=10,
     )
     labels = sc.fit_predict(affinity)
-    
+
     if smooth_labels and len(labels) >= median_k:
         labels = medfilt(labels.astype(float), kernel_size=median_k).astype(int)
-    
+
     log.info(f"Clustered into {n_speakers} speaker(s) "
              f"({'auto' if n_speakers is None else 'fixed'})")
     return labels, n_speakers

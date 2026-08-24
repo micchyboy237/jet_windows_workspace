@@ -85,8 +85,12 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\main\_main_nemo_titanet_with_outliers.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough_labeled.py",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\powershell\Start-Llama-Server-Embedder.ps1",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\models.embedders.ini",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\speaker_labeling.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\transcription.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\websocket.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\__init__.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
     r"",
 ]
 
@@ -109,9 +113,93 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze the model and settings used in Start-Llama-Server-Embedder.ps1
-Update the same model in models.embedders.ini with exact the same settings
-Browse models.ini config syntax on latest llama.cpp version
+Fix
+[08/25/26 05:25:38] INFO     detect_full_hybrid: blended 201 frames → 1 speech segments                           vad_firered.py:336
+Neg threshold: 0.1, Min speech: 25 frames, Min silence: 25 frames
+Segment: frames 4-148 (145 frames, 1.45s)
+Raw segments with trailing frames: 1
+After min_speech filter: 1
+Final segments: 1
+Speech start: frame 4 (prob=0.1500)
+Speech end: frame 148 (prob=0.0240)
+extract_troughs: auto-computed height=0.3223 via otsu
+extract_troughs: len=201, height=0.322265625, distance=5, prominence=0.15
+extract_troughs: found 0 troughs at indices []
+extract_troughs: returning 0 trough segment(s)
+extract_valley_troughs: extracted 0 trough(s)
+extract_valleys: auto-computed threshold=0.3223 via otsu
+extract_valleys: returning 2 valley segment(s)
+extract_valley_troughs: extracted 2 valley(s)
+filter_short_segments: removed 1 short segment(s), kept 1
+extract_valley_troughs: 1 valley(s) after duration filter
+extract_valley_troughs: 0 valley(s) with exactly one trough and duration >= 0.25s
+extract_valley_troughs: returning 0 valley trough(s)
+extract_trough_to_trough: no valley_troughs found, returning empty list.
+🗣️ Running full speaker diarization split (2.03s audio)...
+2026-08-25 05:25:38,055 - diarization - INFO - split_speaker_segments: using pre-loaded numpy waveform
+                    INFO     split_speaker_segments: using pre-loaded numpy waveform               overlap_aware_diarization.py:1156
+2026-08-25 05:25:38,056 - diarization - INFO - ============================================================
+                    INFO     ============================================================           overlap_aware_diarization.py:956
+2026-08-25 05:25:38,057 - diarization - INFO -   Speaker Diarization
+                    INFO       Speaker Diarization                                                  overlap_aware_diarization.py:957
+2026-08-25 05:25:38,058 - diarization - INFO -   strategy=resegment  |  condition=noisy
+                    INFO       strategy=resegment  |  condition=noisy                               overlap_aware_diarization.py:958
+2026-08-25 05:25:38,059 - diarization - INFO -   embedding_model=nemo_titanet (reused instance)
+                    INFO       embedding_model=nemo_titanet (reused instance)                       overlap_aware_diarization.py:959
+2026-08-25 05:25:38,059 - diarization - INFO - ============================================================
+                    INFO     ============================================================           overlap_aware_diarization.py:961
+2026-08-25 05:25:38,060 - diarization - INFO - Using pre-loaded numpy waveform, assuming sr=16000Hz
+                    INFO     Using pre-loaded numpy waveform, assuming sr=16000Hz                   overlap_aware_diarization.py:971
+2026-08-25 05:25:38,062 - diarization - INFO - Reusing already-loaded embedding model instance: NeMoTitaNetEmbeddingModel(type=nemo_titanet, dim=192) (skipping load_embedding_model / create_embedding_model)
+                    INFO     Reusing already-loaded embedding model instance:                       overlap_aware_diarization.py:219
+                             NeMoTitaNetEmbeddingModel(type=nemo_titanet, dim=192) (skipping
+                             load_embedding_model / create_embedding_model)
+2026-08-25 05:25:38,080 - diarization - INFO - Extracted 1 embeddings (window=2.0s, hop=1.0s, dim=192)
+                    INFO     Extracted 1 embeddings (window=2.0s, hop=1.0s, dim=192)                overlap_aware_diarization.py:335
+2026-08-25 05:25:38,082 - diarization - WARNING - Too few embeddings (1) for eigengap search in range [2, 8] — falling back to 1 speaker(s)
+                    WARNING  Too few embeddings (1) for eigengap search in range [2, 8] — falling   overlap_aware_diarization.py:357
+                             back to 1 speaker(s)
+⚠️ Speaker diarization split failed: Found array with 1 sample(s) (shape=(1, 1)) while a minimum of 2 is required by
+SpectralClustering.
+Traceback (most recent call last):
+  File
+"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\speake
+r_labeling.py", line 677, in save_diarization_segments
+    result, segments = split_speaker_segments(
+                       ^^^^^^^^^^^^^^^^^^^^^^^
+  File
+"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware
+_diarization.py", line 1161, in split_speaker_segments
+    result = diarize_multi_speakers(
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File
+"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware
+_diarization.py", line 987, in diarize_multi_speakers
+    labels, n_spk = cluster_speakers(
+                    ^^^^^^^^^^^^^^^^^
+  File
+"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware
+_diarization.py", line 414, in cluster_speakers
+    labels = sc.fit_predict(affinity)
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\cluster\_spectral.py", line 796, in fit_predict
+    return super().fit_predict(X, y)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\base.py", line 695, in fit_predict
+    self.fit(X, **kwargs)
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\base.py", line 1365, in wrapper
+    return fit_method(estimator, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\cluster\_spectral.py", line 694, in fit
+    X = validate_data(
+        ^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\utils\validation.py", line 2954, in validate_data
+    out = check_array(X, input_name="X", **check_params)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\utils\validation.py", line 1128, in check_array
+    raise ValueError(
+ValueError: Found array with 1 sample(s) (shape=(1, 1)) while a minimum of 2 is required by SpectralClustering.
+
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
