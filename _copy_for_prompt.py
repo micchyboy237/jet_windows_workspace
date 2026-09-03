@@ -218,7 +218,7 @@ My device:
 
 When coding:
 
-- First provide step-by-step analysis with summarized flows as separate lists and workflow diagrams.
+- First provide step-by-step analysis with summarized flows as separate lists and flow diagrams.
 - For new files, classes, methods, or functions: show the full code.
 - For updates to existing files: show only the changed sections with context. Never output the full file unless it's small.
 - Write smart, reusable, maintainable, optimal, robust, and minimal code.
