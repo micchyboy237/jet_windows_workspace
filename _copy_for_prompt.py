@@ -205,8 +205,8 @@ ValueError: Found array with 1 sample(s) (shape=(1, 1)) while a minimum of 2 is 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
 General:
 
-- Browse when beneficial or requested.
-- Always use easy to understand terms.
+- Always browse the internet first when beneficial, especially when requested.
+- Use easy to understand terms.
 
 My device:
 
