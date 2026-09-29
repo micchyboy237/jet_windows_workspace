@@ -1,28 +1,27 @@
-import os
-import fnmatch
 import argparse
-import subprocess
 import json
+import os
+
 import tiktoken
 from rich.console import Console
 from tqdm import tqdm
+
 from _utils_copy_for_prompt import (
+    clean_content,
+    clean_newlines,
+    copy_to_clipboard,
     find_files,
     format_file_structure,
-    clean_newlines,
-    clean_content,
     remove_parent_paths,
-    copy_to_clipboard,
 )
-from headroom import compress
 
-logger = Console()
+# Initialize Rich Console
+console = Console()
 
 exclude_files = [
     "**/.git/",
     "**/.gitignore",
     "**/.DS_Store",
-    "**/*.pyc",
     "**/_copy*.py",
     "**/__pycache__/",
     "**/.pytest_cache/",
@@ -31,181 +30,186 @@ exclude_files = [
     "**/*.lock",
     "**/public/",
     "**/mocks/",
-    "**/.venv/",
     "**/dream/",
     "**/jupyter/",
     "**/*.png",
+    "**/*.wav",
     "**/*.svg",
-    # "**/_*",
-    # "**/.cache/",
+    "**/*.pyc",
     "**/_git_stats.json",
     "**/stats_results/",
-    # "**/generated/",
+    # "**/_*",
+    # "**/.cache/",
+    # "**/.venv/",
+    "**/generated/",
+    "**/.env",
     # "**/.*",
-
     # Custom
     # "**/*.sh"
     # "**/__init__.py",
-    # "*.md",
+    # "**/*.md",
+    # "**/tests/",
+    # "**/pretrained_models/",
+    "**/hls.min.js",
 ]
 include_files = [
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Examples\.vscode\launch.json",
-
-    # r"C:\Users\druiv\Desktop\Jet_Files\Cloned_Repos\WhisperJAV\whisperjav\main.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_embeddings.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_evaluate_speaker_embeddings.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\evaluate_speaker_cluster.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_evaluate_speaker_cluster.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_overlap_aware_diarization.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\state.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\speaker_labeling.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\transcription.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\save_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\config.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\main\_main_nemo_titanet.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\nemo_titanet.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\embedding_model_factory.py",
-    r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\vad_extractors.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\vad_types.py",
-    # # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough_double_check.py",
-    # r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\nemo_titanet_with_outliers.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\multi_speaker_labelling\main\_main_nemo_titanet_with_outliers.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\test_extract_trough_to_trough_labeled.py",
-    r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\speaker_labeling.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\main.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\transcription.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\routes\websocket.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\__init__.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware_diarization.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors\demo_opensearch_neural_sparse.py",
+    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\sparse_encoder\model.py",
     r"",
 ]
 
 structure_include = [
-    r"",
-    # r"C:\Users\druiv\.cache\files\audio\speakers",
+    # "/Users/jethroestrada/Desktop/External_Projects/AI/repo-libs/unstructured/example-docs",
 ]
 structure_exclude = []
 
-include_content = [
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\templates\tagger",
-]
+include_content = []
 exclude_content = []
 
 # Args defaults
-SHORTEN_FUNCTS = False 
+SHORTEN_FUNCTS = False
 INCLUDE_FILE_STRUCTURE = False
 
 COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Fix
-[08/25/26 05:25:38] INFO     detect_full_hybrid: blended 201 frames → 1 speech segments                           vad_firered.py:336
-Neg threshold: 0.1, Min speech: 25 frames, Min silence: 25 frames
-Segment: frames 4-148 (145 frames, 1.45s)
-Raw segments with trailing frames: 1
-After min_speech filter: 1
-Final segments: 1
-Speech start: frame 4 (prob=0.1500)
-Speech end: frame 148 (prob=0.0240)
-extract_troughs: auto-computed height=0.3223 via otsu
-extract_troughs: len=201, height=0.322265625, distance=5, prominence=0.15
-extract_troughs: found 0 troughs at indices []
-extract_troughs: returning 0 trough segment(s)
-extract_valley_troughs: extracted 0 trough(s)
-extract_valleys: auto-computed threshold=0.3223 via otsu
-extract_valleys: returning 2 valley segment(s)
-extract_valley_troughs: extracted 2 valley(s)
-filter_short_segments: removed 1 short segment(s), kept 1
-extract_valley_troughs: 1 valley(s) after duration filter
-extract_valley_troughs: 0 valley(s) with exactly one trough and duration >= 0.25s
-extract_valley_troughs: returning 0 valley trough(s)
-extract_trough_to_trough: no valley_troughs found, returning empty list.
-🗣️ Running full speaker diarization split (2.03s audio)...
-2026-08-25 05:25:38,055 - diarization - INFO - split_speaker_segments: using pre-loaded numpy waveform
-                    INFO     split_speaker_segments: using pre-loaded numpy waveform               overlap_aware_diarization.py:1156
-2026-08-25 05:25:38,056 - diarization - INFO - ============================================================
-                    INFO     ============================================================           overlap_aware_diarization.py:956
-2026-08-25 05:25:38,057 - diarization - INFO -   Speaker Diarization
-                    INFO       Speaker Diarization                                                  overlap_aware_diarization.py:957
-2026-08-25 05:25:38,058 - diarization - INFO -   strategy=resegment  |  condition=noisy
-                    INFO       strategy=resegment  |  condition=noisy                               overlap_aware_diarization.py:958
-2026-08-25 05:25:38,059 - diarization - INFO -   embedding_model=nemo_titanet (reused instance)
-                    INFO       embedding_model=nemo_titanet (reused instance)                       overlap_aware_diarization.py:959
-2026-08-25 05:25:38,059 - diarization - INFO - ============================================================
-                    INFO     ============================================================           overlap_aware_diarization.py:961
-2026-08-25 05:25:38,060 - diarization - INFO - Using pre-loaded numpy waveform, assuming sr=16000Hz
-                    INFO     Using pre-loaded numpy waveform, assuming sr=16000Hz                   overlap_aware_diarization.py:971
-2026-08-25 05:25:38,062 - diarization - INFO - Reusing already-loaded embedding model instance: NeMoTitaNetEmbeddingModel(type=nemo_titanet, dim=192) (skipping load_embedding_model / create_embedding_model)
-                    INFO     Reusing already-loaded embedding model instance:                       overlap_aware_diarization.py:219
-                             NeMoTitaNetEmbeddingModel(type=nemo_titanet, dim=192) (skipping
-                             load_embedding_model / create_embedding_model)
-2026-08-25 05:25:38,080 - diarization - INFO - Extracted 1 embeddings (window=2.0s, hop=1.0s, dim=192)
-                    INFO     Extracted 1 embeddings (window=2.0s, hop=1.0s, dim=192)                overlap_aware_diarization.py:335
-2026-08-25 05:25:38,082 - diarization - WARNING - Too few embeddings (1) for eigengap search in range [2, 8] — falling back to 1 speaker(s)
-                    WARNING  Too few embeddings (1) for eigengap search in range [2, 8] — falling   overlap_aware_diarization.py:357
-                             back to 1 speaker(s)
-⚠️ Speaker diarization split failed: Found array with 1 sample(s) (shape=(1, 1)) while a minimum of 2 is required by
-SpectralClustering.
-Traceback (most recent call last):
-  File
-"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\core\processing\speake
-r_labeling.py", line 677, in save_diarization_segments
-    result, segments = split_speaker_segments(
-                       ^^^^^^^^^^^^^^^^^^^^^^^
-  File
-"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware
-_diarization.py", line 1161, in split_speaker_segments
-    result = diarize_multi_speakers(
-             ^^^^^^^^^^^^^^^^^^^^^^^
-  File
-"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware
-_diarization.py", line 987, in diarize_multi_speakers
-    labels, n_spk = cluster_speakers(
-                    ^^^^^^^^^^^^^^^^^
-  File
-"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\overlap_aware
-_diarization.py", line 414, in cluster_speakers
-    labels = sc.fit_predict(affinity)
-             ^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\cluster\_spectral.py", line 796, in fit_predict
-    return super().fit_predict(X, y)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\base.py", line 695, in fit_predict
-    self.fit(X, **kwargs)
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\base.py", line 1365, in wrapper
-    return fit_method(estimator, *args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\cluster\_spectral.py", line 694, in fit
-    X = validate_data(
-        ^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\utils\validation.py", line 2954, in validate_data
-    out = check_array(X, input_name="X", **check_params)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sklearn\utils\validation.py", line 1128, in check_array
-    raise ValueError(
-ValueError: Found array with 1 sample(s) (shape=(1, 1)) while a minimum of 2 is required by SpectralClustering.
+Search the web for code exaxmples for "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte".
+Analyze the issues below then search the web for forums on how to resolve.
 
+python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors\demo_opensearch_neural_sparse.py
+Loading weights: 100%|██████████████████████████████████████████████████████████████████████████| 140/140 [00:01<00:00, 138.48it/s]
+[transformers] NewForMaskedLM LOAD REPORT from: opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte
+Key                    | Status  |
+-----------------------+---------+-
+lm_head.decoder.weight | MISSING |
+
+Notes:
+- MISSING:      those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [0,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [1,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [2,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [3,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [4,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [5,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [6,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [7,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [8,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [9,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [10,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [11,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [12,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [13,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [14,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [15,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [16,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [17,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [18,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [19,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [20,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [21,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [22,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [23,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [24,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [25,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [26,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [27,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [28,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [29,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [30,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [31,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
+Traceback (most recent call last):
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors\demo_opensearch_neural_sparse.py", line 51, in <module>
+    main()
+  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors\demo_opensearch_neural_sparse.py", line 25, in main
+    doc_tensor = model.encode_document(doc_text)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\util\decorators.py", line 46, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\sparse_encoder\model.py", line 486, in encode_document
+    return self.encode(
+           ^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\util\decorators.py", line 46, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\sparse_encoder\model.py", line 763, in encode
+    embeddings = self(features, **forward_kwargs)["sentence_embedding"]
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\base\model.py", line 569, in forward
+    input = module(input, **module_kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\base\modules\router.py", line 504, in forward
+    features = module(features, **module_kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1650, in forward
+    model_output = model_method(**filtered_kwargs)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\huggingface\modules\transformers_modules\Alibaba_hyphen_NLP\new_hyphen_impl\40ced75c3017eb27626c9d4ea981bde21a2662f4\modeling.py", line 1039, in forward
+    outputs = self.new(
+              ^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\huggingface\modules\transformers_modules\Alibaba_hyphen_NLP\new_hyphen_impl\40ced75c3017eb27626c9d4ea981bde21a2662f4\modeling.py", line 901, in forward
+    (embedding_output, attention_mask, rope_embeds, length) = self.embeddings(
+                                                              ^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\huggingface\modules\transformers_modules\Alibaba_hyphen_NLP\new_hyphen_impl\40ced75c3017eb27626c9d4ea981bde21a2662f4\modeling.py", line 415, in forward
+    embeddings = self.LayerNorm(embeddings)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\normalization.py", line 229, in forward
+    return F.layer_norm(
+           ^^^^^^^^^^^^^
+  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\functional.py", line 2935, in layer_norm
+    return torch.layer_norm(
+           ^^^^^^^^^^^^^^^^^
+torch.AcceleratorError: CUDA error: device-side assert triggered
+Search for `cudaErrorAssert' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
 General:
 
-- Always browse the internet first when beneficial, especially when requested.
+- Always search the web first when requested or if it's beneficial.
 - Use easy to understand terms.
 
 My device:
@@ -287,7 +291,7 @@ def get_language_from_extension(filename: str) -> str:
 
 def main():
     global exclude_files, include_files, include_content, exclude_content
-    print("Running _copy_for_prompt.py")
+    console.print("[bold green]Running _copy_for_prompt.py[/bold green]")
     # Parse command-line options
     parser = argparse.ArgumentParser(
         description="Generate clipboard content from specified files."
@@ -403,26 +407,29 @@ def main():
     query_only = args.query_only
 
     # Find all files matching the patterns in the base directory and its subdirectories
-    print("\n")
+    console.print()
     context_files = find_files(
         base_dir, include, exclude, include_content, exclude_content, case_sensitive
     )
-    print("\n")
-    print(f"Include patterns: {include}")
-    print(f"Exclude patterns: {exclude}")
-    print(f"Include content patterns: {include_content}")
-    print(f"Exclude content patterns: {exclude_content}")
-    print(f"Case sensitive: {case_sensitive}")
-    print(f"Filenames only: {filenames_only}")
-    print(f"Compress enabled: {compress_enabled}")
-    print(
-        f"\nFound files ({len(context_files)}):\n{json.dumps(context_files, indent=2)}"
+    console.print()
+    console.print(f"[bold]Include patterns:[/bold] {include}")
+    console.print(f"[bold]Exclude patterns:[/bold] {exclude}")
+    console.print(f"[bold]Include content patterns:[/bold] {include_content}")
+    console.print(f"[bold]Exclude content patterns:[/bold] {exclude_content}")
+    console.print(f"[bold]Case sensitive:[/bold] {case_sensitive}")
+    console.print(f"[bold]Filenames only:[/bold] {filenames_only}")
+    console.print(f"[bold]Compress enabled:[/bold] {compress_enabled}")
+    console.print(
+        f"\n[bold]Found files ({len(context_files)}):[/bold]\n{json.dumps(context_files, indent=2)}"
     )
-    print("\n")
+    console.print()
+
     # Initialize the clipboard content
     clipboard_content = ""
     if not context_files:
-        print("No context files found matching the given patterns.")
+        console.print(
+            "[yellow]No context files found matching the given patterns.[/yellow]"
+        )
     else:
         # Append relative filenames to the clipboard content
         for file in tqdm(
@@ -450,6 +457,7 @@ def main():
                 else:
                     clipboard_content += f"{prefix}\n"
         clipboard_content = clean_newlines(clipboard_content).strip()
+
     # Generate and format the file structure
     structure_include_files = structure_include
     if include:
@@ -467,6 +475,7 @@ def main():
         shorten_funcs=shorten_funcs,
         show_file_length=show_file_length,
     )
+
     # Build the clipboard content parts
     clipboard_content_parts = []
     if not query_only:
@@ -486,8 +495,11 @@ def main():
             f"Existing Files Contents\n{clipboard_content}\n"
         )
     clipboard_content = "\n\n".join(clipboard_content_parts)
+
     # Compress to reduce tokens (optional)
     if compress_enabled:
+        from headroom import compress
+
         messages = [{"role": "user", "content": clipboard_content}]
         result = compress(
             messages,
@@ -500,26 +512,28 @@ def main():
             protect_analysis_context=False,  # do not protect code from compression
             # kompress_model="disabled",
         )
-        # Log compression stats using logger.log for each result.*
-        logger.log("Tokens before:", f"{result.tokens_before:,}")
-        logger.log("Tokens after:", f"{result.tokens_after:,}")
-        logger.log(
-            "Tokens saved:",
-            f"{result.tokens_saved:,} ({result.compression_ratio:.1%})",
+        # Log compression stats using rich console
+        console.print(f"[bold cyan]Tokens before:[/bold cyan] {result.tokens_before:,}")
+        console.print(f"[bold cyan]Tokens after:[/bold cyan] {result.tokens_after:,}")
+        console.print(
+            f"[bold green]Tokens saved:[/bold green] {result.tokens_saved:,} ({result.compression_ratio:.1%})"
         )
-        logger.log(
-            "Transforms applied:",
-            str(result.transforms_applied),
+        console.print(
+            f"[bold magenta]Transforms applied:[/bold magenta] {result.transforms_applied}"
         )
     else:
-        logger.log("Compression skipped (use -c or --compress to enable)")
+        console.print("[dim]Compression skipped (use -c or --compress to enable)[/dim]")
+
     # Copy the content to the clipboard
     copy_to_clipboard(clipboard_content)
+
     # Print the copied content character count
-    logger.log("Prompt Char Count:", len(clipboard_content))
-    logger.log("Tokens Count (gpt-4o):", count_tokens(clipboard_content))
+    console.print(f"[bold blue]Prompt Char Count:[/bold blue] {len(clipboard_content)}")
+    console.print(
+        f"[bold blue]Tokens Count (gpt-4o):[/bold blue] {count_tokens(clipboard_content)}"
+    )
     # Newline
-    print("\n")
+    console.print()
 
 
 def count_tokens(
