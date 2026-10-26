@@ -56,8 +56,10 @@ include_files = [
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors\demo_opensearch_neural_sparse.py",
-    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\sparse_encoder\model.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp1.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp2.py",
+    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py",
+    r"",
     r"",
 ]
 
@@ -77,133 +79,84 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Search the web for code exaxmples for "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte".
-Analyze the issues below then search the web for forums on how to resolve.
+Check as it still seems to start with <think>
 
-python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors\demo_opensearch_neural_sparse.py
-Loading weights: 100%|██████████████████████████████████████████████████████████████████████████| 140/140 [00:01<00:00, 138.48it/s]
-[transformers] NewForMaskedLM LOAD REPORT from: opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte
-Key                    | Status  |
------------------------+---------+-
-lm_head.decoder.weight | MISSING |
+python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp1.py
+Loading model from: C:\Users\druiv\.cache\llama.cpp\nsfw\Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf
+Testing 5 entities...
 
-Notes:
-- MISSING:      those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [0,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [1,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [2,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [3,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [4,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [5,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [6,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [7,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [8,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [9,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [10,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [11,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [12,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [13,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [14,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [15,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [16,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [17,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [18,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [19,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [20,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [21,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [22,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [23,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [24,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [25,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [26,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [27,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [28,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [29,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [30,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\cuda\IndexKernelUtils.cu:16: block: [0,0,0], thread: [31,0,0] Assertion `ind >=0 && ind < ind_dim_size && "vectorized gather kernel index out of bounds"` failed.
-Traceback (most recent call last):
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors\demo_opensearch_neural_sparse.py", line 51, in <module>
-    main()
-  File "C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors\demo_opensearch_neural_sparse.py", line 25, in main
-    doc_tensor = model.encode_document(doc_text)
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\util\decorators.py", line 46, in wrapper
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\sparse_encoder\model.py", line 486, in encode_document
-    return self.encode(
-           ^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\util\decorators.py", line 46, in wrapper
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\sparse_encoder\model.py", line 763, in encode
-    embeddings = self(features, **forward_kwargs)["sentence_embedding"]
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\base\model.py", line 569, in forward
-    input = module(input, **module_kwargs)
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\base\modules\router.py", line 504, in forward
-    features = module(features, **module_kwargs)
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\sentence_transformers\base\modules\transformer.py", line 1650, in forward
-    model_output = model_method(**filtered_kwargs)
-                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\huggingface\modules\transformers_modules\Alibaba_hyphen_NLP\new_hyphen_impl\40ced75c3017eb27626c9d4ea981bde21a2662f4\modeling.py", line 1039, in forward
-    outputs = self.new(
-              ^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\huggingface\modules\transformers_modules\Alibaba_hyphen_NLP\new_hyphen_impl\40ced75c3017eb27626c9d4ea981bde21a2662f4\modeling.py", line 901, in forward
-    (embedding_output, attention_mask, rope_embeds, length) = self.embeddings(
-                                                              ^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\huggingface\modules\transformers_modules\Alibaba_hyphen_NLP\new_hyphen_impl\40ced75c3017eb27626c9d4ea981bde21a2662f4\modeling.py", line 415, in forward
-    embeddings = self.LayerNorm(embeddings)
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1779, in _wrapped_call_impl
-    return self._call_impl(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\module.py", line 1790, in _call_impl
-    return forward_call(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\modules\normalization.py", line 229, in forward
-    return F.layer_norm(
-           ^^^^^^^^^^^^^
-  File "C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\torch\nn\functional.py", line 2935, in layer_norm
-    return torch.layer_norm(
-           ^^^^^^^^^^^^^^^^^
-torch.AcceleratorError: CUDA error: device-side assert triggered
-Search for `cudaErrorAssert' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
-CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
-For debugging consider passing CUDA_LAUNCH_BLOCKING=1
-Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+--- Starting Evaluation ---
+Entity: Python               | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+Entity: Paris                | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+Entity: Elon Musk            | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+Entity: Quantum Computing    | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+Entity: The Great Gatsby     | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+
+--- Evaluation Summary ---
+Total Entities Tested: 5
+Entities Recognized: 0
+Familiarity Accuracy: 0.00%
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
+
+
+
+
+python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp2.py
+Loading model for custom evaluation from: C:\Users\druiv\.cache\llama.cpp\nsfw\Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf
+Testing 5 entities...
+
+--- Starting Custom Entity Evaluation ---
+Entity: Python               | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+Entity: Paris                | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+Entity: Elon Musk            | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+Entity: Quantum Computing    | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+Entity: The Great Gatsby     | ❌ Not Familiar | Response: <think>
+Thinking Process:
+
+1.  **Analyze the Request:**
+    ...
+
+--- Custom Evaluation Summary ---
+Total Entities Tested: 5
+Entities Recognized: 0
+Familiarity Accuracy: 0.00%
+(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
@@ -231,13 +184,10 @@ When coding:
 - Include logs that cover all steps.
 """.strip()
 
-DEFAULT_SYSTEM_MESSAGE = """
-""".strip()
-
 # For existing projects
 # DEFAULT_INSTRUCTIONS_MESSAGE += (
 # "\n- Only respond with parts of the code that have been added or updated to keep it short and concise."
-# )z
+# )
 # For creating projects
 # DEFAULT_INSTRUCTIONS_MESSAGE += (
 # "\n- At the end, display the updated file structure and instructions for running the code."
@@ -345,12 +295,6 @@ def main():
         help="Shorten function and class definitions",
     )
     parser.add_argument(
-        "-s",
-        "--system",
-        default=DEFAULT_SYSTEM_MESSAGE,
-        help="Message to include in the clipboard content",
-    )
-    parser.add_argument(
         "-m",
         "--message",
         default=DEFAULT_QUERY_MESSAGE,
@@ -387,7 +331,7 @@ def main():
         "--query-only",
         action="store_true",
         default=False,
-        help="Include only the query message and files, omitting system and instructions",
+        help="Include only the query message and files, omitting instructions",
     )
 
     args = parser.parse_args()
@@ -399,7 +343,6 @@ def main():
     case_sensitive = args.case_sensitive
     shorten_funcs = args.shorten_funcs
     query_message = args.message
-    system_message = args.system
     instructions_message = args.instructions
     filenames_only = args.filenames_only
     show_file_length = not args.no_length
@@ -478,11 +421,11 @@ def main():
 
     # Build the clipboard content parts
     clipboard_content_parts = []
-    if not query_only:
-        if system_message:
-            clipboard_content_parts.append(f"<system>\n{system_message}\n</system>")
-    # Query should come before instructions
-    clipboard_content_parts.append(f"<query>\n{query_message}\n</query>")
+
+    # Query comes first, without wrapper tags
+    if query_message:
+        clipboard_content_parts.append(query_message)
+
     if not query_only:
         if instructions_message:
             clipboard_content_parts.append(
