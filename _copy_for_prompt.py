@@ -56,9 +56,14 @@ include_files = [
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp1.py",
-    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py",
-    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama_types.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\models.ini",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\powershell\Start-Llama-Server-Dynamic.ps1",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\models.llm.ini",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\powershell\Start-Llama-Server-Llm.ps1",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\models.embedders.ini",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\powershell\Start-Llama-Server-Embedder.ps1",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\models.rerankers.ini",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\powershell\Start-Llama-Server-Reranker.ps1",
     r"",
 ]
 
@@ -78,7 +83,14 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Update json_schema to replace is_familiar with score float
+Update models.ini to copy these models
+
+[qwen3.5-2b-uncensored]
+[qwen3.5-4b-uncensored]
+[nomic-embed-1.5]
+[nomic-embed-2-moe]
+[bge-rerank-v2-m3]
+
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
