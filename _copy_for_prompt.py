@@ -56,10 +56,9 @@ include_files = [
     r"",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\jet_apps\sparse_vectors",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp1.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp2.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp1.py",
     r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama.py",
-    r"",
+    r"C:\Users\druiv\.cache\venv\servers\jet_venv\Lib\site-packages\llama_cpp\llama_types.py",
     r"",
 ]
 
@@ -79,84 +78,7 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Check as it still seems to start with <think>
-
-python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp1.py
-Loading model from: C:\Users\druiv\.cache\llama.cpp\nsfw\Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf
-Testing 5 entities...
-
---- Starting Evaluation ---
-Entity: Python               | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-Entity: Paris                | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-Entity: Elon Musk            | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-Entity: Quantum Computing    | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-Entity: The Great Gatsby     | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-
---- Evaluation Summary ---
-Total Entities Tested: 5
-Entities Recognized: 0
-Familiarity Accuracy: 0.00%
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
-
-
-
-
-python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp2.py
-Loading model for custom evaluation from: C:\Users\druiv\.cache\llama.cpp\nsfw\Qwen3.5-4B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf
-Testing 5 entities...
-
---- Starting Custom Entity Evaluation ---
-Entity: Python               | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-Entity: Paris                | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-Entity: Elon Musk            | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-Entity: Quantum Computing    | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-Entity: The Great Gatsby     | ❌ Not Familiar | Response: <think>
-Thinking Process:
-
-1.  **Analyze the Request:**
-    ...
-
---- Custom Evaluation Summary ---
-Total Entities Tested: 5
-Entities Recognized: 0
-Familiarity Accuracy: 0.00%
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
+Update json_schema to replace is_familiar with score float
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
