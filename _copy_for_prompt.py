@@ -33,7 +33,7 @@ exclude_files = [
     "**/dream/",
     "**/jupyter/",
     "**/*.png",
-    "**/*.wav",
+    # "**/*.wav",
     "**/*.svg",
     "**/*.pyc",
     "**/_git_stats.json",
@@ -54,22 +54,22 @@ exclude_files = [
 ]
 include_files = [
     r"",
-    # r"C:\Users\druiv\.cache\pretrained_models\sherpa-onnx\sherpa-onnx-zipformer-audio-tagging-2024-04-09\class_labels_indices.csv",
-    # r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger_defaults.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger_types.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_utils.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger.py",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_audio_tagger.py",
+    r"C:\Users\druiv\.cache\pretrained_models\sherpa-onnx\sherpa-onnx-zipformer-audio-tagging-2024-04-09\class_labels_indices.csv",
     r"",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\tag_audio.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\generated\tag_audio\segments.json",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\generated\tag_audio\summary.json",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger_defaults.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger_types.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_utils.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_audio_tagger.py",
+    r"",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\audio_tagger.py",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\generated\tag_audio\segments.json",
+    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\generated\tag_audio\summary.json",
     r"",
 ]
 
 structure_include = [
-    # r"C:\Users\druiv\.cache\pretrained_models\sherpa-onnx\sherpa-onnx-zipformer-audio-tagging-2024-04-09",
+    r"",
 ]
 structure_exclude = []
 
@@ -84,7 +84,7 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-
+Analyze carefully these overlaps and how to properly handle in audio tagger?
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
