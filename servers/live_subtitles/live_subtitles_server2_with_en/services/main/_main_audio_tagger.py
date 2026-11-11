@@ -1576,6 +1576,96 @@ def _save_segment_plots(
         console.print(f"[yellow]   ⚠️ Failed to save gender chart: {e}[/yellow]")
 
 
+def save_overall_gender_analysis(
+    summary: AudioChunksTaggingSummary,
+    output_dir: Path,
+    audio_name: str,
+) -> Path:
+    """
+    Calculate and save overall gender statistics for the entire audio file.
+    
+    Args:
+        summary: The AudioChunksTaggingSummary containing chunk data with gender info.
+        output_dir: Directory to save the analysis file.
+        audio_name: Base name of the audio file for naming the output.
+        
+    Returns:
+        Path to the saved JSON file.
+    """
+    chunks = summary.get("chunks", [])
+    if not chunks:
+        return Path()
+
+    total_chunks = len(chunks)
+    male_count = 0
+    female_count = 0
+    unknown_count = 0
+    
+    total_male_prob = 0.0
+    total_female_prob = 0.0
+    
+    for chunk in chunks:
+        gender = chunk.get("dominant_gender", "unknown")
+        m_prob = chunk.get("male_prob", 0.0)
+        f_prob = chunk.get("female_prob", 0.0)
+        
+        if gender == "male":
+            male_count += 1
+        elif gender == "female":
+            female_count += 1
+        else:
+            unknown_count += 1
+            
+        total_male_prob += m_prob
+        total_female_prob += f_prob
+        
+    avg_male_prob = total_male_prob / total_chunks if total_chunks > 0 else 0.0
+    avg_female_prob = total_female_prob / total_chunks if total_chunks > 0 else 0.0
+    
+    # Determine overall dominant gender based on average probabilities
+    if avg_male_prob > avg_female_prob and avg_male_prob > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+        overall_dominant_gender = "male"
+    elif avg_female_prob > avg_male_prob and avg_female_prob > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+        overall_dominant_gender = "female"
+    else:
+        overall_dominant_gender = "unknown"
+        
+    gender_diff = abs(avg_male_prob - avg_female_prob)
+    if gender_diff > 0.3:
+        overall_confidence = "high"
+    elif gender_diff > 0.1:
+        overall_confidence = "medium"
+    else:
+        overall_confidence = "low"
+
+    analysis_data = {
+        "audio_file": summary.get("audio_path", "unknown"),
+        "total_duration": summary.get("total_duration", 0.0),
+        "total_chunks_analyzed": total_chunks,
+        "chunk_distribution": {
+            "male": {"count": male_count, "percentage": round((male_count / total_chunks) * 100, 2)},
+            "female": {"count": female_count, "percentage": round((female_count / total_chunks) * 100, 2)},
+            "unknown": {"count": unknown_count, "percentage": round((unknown_count / total_chunks) * 100, 2)},
+        },
+        "probability_averages": {
+            "avg_male_probability": round(avg_male_prob, 6),
+            "avg_female_probability": round(avg_female_prob, 6),
+        },
+        "overall_result": {
+            "dominant_gender": overall_dominant_gender,
+            "confidence": overall_confidence,
+            "gender_difference_score": round(gender_diff, 6)
+        }
+    }
+    
+    output_path = output_dir / "gender_analysis.json"
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(analysis_data, f, indent=2, ensure_ascii=False)
+        
+    console.print(f"[green]Overall gender analysis saved to: {linkify(str(output_path))}[/green]")
+    return output_path
+
+
 def summary_chunk_duration_or_default(chunks: List[ChunkTaggingResult]) -> float:
     """Return a representative chunk duration from the chunk list, default 1.0."""
     if not chunks:
@@ -1684,7 +1774,7 @@ def main():
                 console.print(f"[red]⚠ Chunk plot generation failed: {e}[/red]")
             
             # Save chunk summary JSON
-            summary_output = Path(args.output_dir) / f"{audio_name}_chunks_summary.json"
+            summary_output = Path(args.output_dir) / "chunks_summary.json"
             serializable = {
                 **summary,
                 "chunks": [{**chunk} for chunk in summary["chunks"]],
@@ -1706,6 +1796,14 @@ def main():
                 resolution_ms=args.resolution_ms,
                 include_non_speech=True,
                 speech_threshold=args.speech_threshold,
+            )
+
+            # --- Save Overall Gender Analysis ---
+            console.print("\n[bold cyan]💾 Saving Overall Gender Analysis[/bold cyan]")
+            save_overall_gender_analysis(
+                summary=summary,
+                output_dir=Path(args.output_dir),
+                audio_name=audio_name,
             )
             
             # Display per-chunk analysis
