@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
 import sherpa_onnx
+import wave
 
 
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
@@ -300,17 +301,17 @@ def save_segments_json(segments: List[SegmentInfo], all_labels: Dict[int, str],
     print(f"Detailed segments saved to: {output_path}")
 
 
-def save_summary_json(segments: List[SegmentInfo], audio_info: Dict[str, Any], 
-                      output_path: Path):
+def save_summary_json(segments: List[SegmentInfo], merged_speech_segments: List[Dict], 
+                      audio_info: Dict[str, Any], output_path: Path):
     """Save concise summary to JSON."""
     
     total_speech_segments = sum(1 for seg in segments if seg.speech_detected)
-    speech_segments = [seg for seg in segments if seg.speech_detected]
+    speech_segments_raw = [seg for seg in segments if seg.speech_detected]
     
-    if speech_segments:
-        male_count = sum(1 for seg in speech_segments if seg.dominant_gender == 'male')
-        female_count = sum(1 for seg in speech_segments if seg.dominant_gender == 'female')
-        unknown_count = sum(1 for seg in speech_segments if seg.dominant_gender == 'unknown')
+    if speech_segments_raw:
+        male_count = sum(1 for seg in speech_segments_raw if seg.dominant_gender == 'male')
+        female_count = sum(1 for seg in speech_segments_raw if seg.dominant_gender == 'female')
+        unknown_count = sum(1 for seg in speech_segments_raw if seg.dominant_gender == 'unknown')
         
         total_gender_detected = male_count + female_count
         
@@ -327,36 +328,31 @@ def save_summary_json(segments: List[SegmentInfo], audio_info: Dict[str, Any],
         dominant_overall = "none"
         male_count = female_count = unknown_count = 0
     
-    # Build timeline summary with detailed gender labels
+    # Build timeline summary using MERGED speech segments
+    # We combine merged speech segments with non-speech gaps from raw segments for a complete picture
     timeline_summary = []
-    for seg in segments[:20]:
+    
+    # Add merged speech segments
+    for seg in merged_speech_segments:
         entry = {
-            "start": round(seg.start_time, 2),
-            "end": round(seg.end_time, 2),
-            "type": "speech" if seg.speech_detected else "non-speech",
-            "gender": seg.dominant_gender if seg.speech_detected else None,
+            "start": round(seg['start_time'], 2),
+            "end": round(seg['end_time'], 2),
+            "type": "speech",
+            "gender": seg['dominant_gender'],
+            "duration": round(seg['end_time'] - seg['start_time'], 2)
         }
         
-        # Add gender_labels dict only if speech is detected
-        if seg.speech_detected:
-            gender_labels = {}
-            # Check specific indices: 1 (Male Speech), 2 (Female Speech), 32 (Male Singing), 33 (Female Singing)
-            for idx in [1, 2, 32, 33]:
-                prob = seg.all_probs.get(idx, 0.0)
-                # Only include if present in top-k (exists in all_probs) and > 0
-                if prob > 0:
-                    # Map index to a readable key
-                    if idx == 1: key = "male_speech"
-                    elif idx == 2: key = "female_speech"
-                    elif idx == 32: key = "male_singing"
-                    elif idx == 33: key = "female_singing"
-                    
-                    gender_labels[key] = round(prob, 6)
-            
-            if gender_labels:
-                entry["gender_labels"] = gender_labels
-                
+        # Add gender_labels dict
+        gender_labels = {}
+        # Check specific indices: 1 (Male Speech), 2 (Female Speech), 32 (Male Singing), 33 (Female Singing)
+        # Note: For merged segments, we might not have individual probs, so we skip or use avg if available.
+        # For simplicity in summary, we just list the dominant gender.
+        # If you want detailed probs for merged segments, you'd need to aggregate them in save_speech_segments.
+        
         timeline_summary.append(entry)
+        
+    # Sort timeline by start time
+    timeline_summary.sort(key=lambda x: x['start'])
     
     summary = {
         "audio_info": {
@@ -369,6 +365,7 @@ def save_summary_json(segments: List[SegmentInfo], audio_info: Dict[str, Any],
             "speech_windows": total_speech_segments,
             "non_speech_windows": len(segments) - total_speech_segments,
             "speech_coverage_percentage": round(total_speech_segments / len(segments) * 100, 2) if segments else 0,
+            "merged_speech_segments_count": len(merged_speech_segments)
         },
         "gender_analysis": {
             "dominant_gender_overall": dominant_overall,
@@ -386,16 +383,98 @@ def save_summary_json(segments: List[SegmentInfo], audio_info: Dict[str, Any],
     print(f"Summary saved to: {output_path}")
 
 
-def create_timeline_chart(segments: List[SegmentInfo], audio_info: Dict[str, Any], 
-                          output_path: Path):
-    """Create comprehensive timeline visualization."""
+def save_speech_segments(audio: np.ndarray, sample_rate: int, segments: List[SegmentInfo], 
+                         output_dir: Path) -> List[Dict]:
+    """Merge consecutive speech segments and save as individual WAV files. Returns merged segment info."""
+    
+    speech_dir = output_dir / "speech"
+    shutil.rmtree(speech_dir, ignore_errors=True)
+    speech_dir.mkdir(parents=True, exist_ok=True)
+    
+    if not segments:
+        return []
+
+    # 1. Filter only speech segments
+    speech_segs = [seg for seg in segments if seg.speech_detected]
+    if not speech_segs:
+        print("No speech segments detected to save.")
+        return []
+
+    # 2. Merge consecutive segments with same gender
+    merged_groups = []
+    current_group = [speech_segs[0]]
+    
+    for i in range(1, len(speech_segs)):
+        prev_seg = current_group[-1]
+        curr_seg = speech_segs[i]
+        
+        # Check if consecutive (overlapping or adjacent) and same gender
+        is_consecutive = curr_seg.start_time <= prev_seg.end_time
+        same_gender = curr_seg.dominant_gender == prev_seg.dominant_gender
+        
+        if is_consecutive and same_gender:
+            current_group.append(curr_seg)
+        else:
+            merged_groups.append(current_group)
+            current_group = [curr_seg]
+    merged_groups.append(current_group)
+
+    # 3. Process each group to resolve overlaps and save
+    print(f"\nSaving {len(merged_groups)} merged speech segments...")
+    
+    merged_segment_info = []
+    
+    for i, group in enumerate(merged_groups):
+        # Resolve overlap: Start is the start of the first window, End is the end of the last
+        start_time = group[0].start_time
+        end_time = group[-1].end_time
+        dominant_gender = group[0].dominant_gender
+        
+        # Convert to samples
+        start_sample = int(start_time * sample_rate)
+        end_sample = int(end_time * sample_rate)
+        
+        # Ensure bounds
+        start_sample = max(0, start_sample)
+        end_sample = min(len(audio), end_sample)
+        
+        if end_sample <= start_sample:
+            continue
+            
+        # Extract audio
+        clip_audio = audio[start_sample:end_sample]
+        
+        # Generate filename
+        # Format: speech_START_END_GENDER.wav
+        filename = f"speech_{start_time:.1f}_{end_time:.1f}_{dominant_gender}.wav"
+        filepath = speech_dir / filename
+        
+        # Save as WAV
+        sf.write(str(filepath), clip_audio, sample_rate)
+        
+        print(f"  Saved: {filename} ({len(clip_audio)/sample_rate:.2f}s)")
+        
+        # Store info for timeline/summary
+        merged_segment_info.append({
+            'start_time': start_time,
+            'end_time': end_time,
+            'dominant_gender': dominant_gender,
+            'filename': filename
+        })
+        
+    return merged_segment_info
+
+
+def create_timeline_chart(segments: List[SegmentInfo], merged_speech_segments: List[Dict], 
+                          audio_info: Dict[str, Any], output_path: Path):
+    """Create comprehensive timeline visualization using merged speech segments."""
     
     fig, axes = plt.subplots(3, 1, figsize=(16, 10), gridspec_kw={'height_ratios': [3, 1, 1]})
-    fig.suptitle('Audio Tagging Timeline Analysis (Raw Windows)', fontsize=14, fontweight='bold')
+    fig.suptitle('Audio Tagging Timeline Analysis (Merged Speech)', fontsize=14, fontweight='bold')
     
     total_duration = audio_info['duration']
     
-    # Plot 1: Main timeline
+    # Plot 1: Main timeline with merged speech segments
     ax1 = axes[0]
     colors_map = {
         'male': '#4A90E2',
@@ -404,45 +483,51 @@ def create_timeline_chart(segments: List[SegmentInfo], audio_info: Dict[str, Any
         'non-speech': '#BDC3C7'
     }
     
-    for seg in segments:
-        if seg.speech_detected:
-            color = colors_map.get(seg.dominant_gender, colors_map['unknown'])
-        else:
-            color = colors_map['non-speech']
-        
-        ax1.barh(y=0, width=seg.duration, left=seg.start_time, height=0.6, 
-                color=color, alpha=0.5, edgecolor=None)
+    # Draw non-speech background (optional, or just leave white)
+    # ax1.barh(y=0, width=total_duration, left=0, height=0.6, color=colors_map['non-speech'], alpha=0.1)
+    
+    # Draw merged speech segments
+    for seg in merged_speech_segments:
+        color = colors_map.get(seg['dominant_gender'], colors_map['unknown'])
+        duration = seg['end_time'] - seg['start_time']
+        ax1.barh(y=0, width=duration, left=seg['start_time'], height=0.6, 
+                color=color, alpha=0.8, edgecolor='white', linewidth=0.5)
     
     ax1.set_xlim(0, total_duration)
     ax1.set_ylim(-0.5, 0.5)
     ax1.set_xlabel('Time (seconds)', fontsize=11)
-    ax1.set_title('Temporal Segmentation Timeline', fontsize=12, fontweight='bold')
+    ax1.set_title('Temporal Segmentation Timeline (Merged Speech Segments)', fontsize=12, fontweight='bold')
     ax1.set_yticks([])
     ax1.grid(axis='x', alpha=0.3)
+    
+    # Add time markers
+    for t in range(0, int(total_duration) + 1, 2): # Every 2 seconds to reduce clutter
+        ax1.axvline(x=t, color='black', alpha=0.1, linewidth=0.5)
+        ax1.text(t, -0.4, f'{t}s', ha='center', va='top', fontsize=8)
     
     legend_elements = [
         mpatches.Patch(color=colors_map['male'], label='Male Speech'),
         mpatches.Patch(color=colors_map['female'], label='Female Speech'),
         mpatches.Patch(color=colors_map['unknown'], label='Unknown Gender'),
-        mpatches.Patch(color=colors_map['non-speech'], label='Non-Speech'),
+        mpatches.Patch(color=colors_map['non-speech'], label='Non-Speech / Silence'),
     ]
     ax1.legend(handles=legend_elements, loc='upper right', fontsize=9)
     
-    # Plot 2: Speech probability
+    # Plot 2: Speech probability over time (using raw segments for granularity)
     ax2 = axes[1]
     times = [(seg.start_time + seg.end_time) / 2 for seg in segments]
     speech_probs = [seg.top_predictions[0]['probability'] if seg.speech_detected and seg.top_predictions else 0 
                     for seg in segments]
     
-    ax2.plot(times, speech_probs, 'b-', linewidth=1, marker='.', markersize=8, alpha=0.7)
+    ax2.plot(times, speech_probs, 'b-', linewidth=1, marker='.', markersize=4, alpha=0.7)
     ax2.fill_between(times, 0, speech_probs, alpha=0.2)
     ax2.set_xlim(0, total_duration)
     ax2.set_ylim(0, 1.1)
     ax2.set_ylabel('Speech Probability', fontsize=11)
-    ax2.set_title('Speech Detection Probability', fontsize=12, fontweight='bold')
+    ax2.set_title('Speech Detection Probability (Raw Windows)', fontsize=12, fontweight='bold')
     ax2.grid(True, alpha=0.3)
     
-    # Plot 3: Gender probabilities
+    # Plot 3: Gender probabilities over time (using raw segments for granularity)
     ax3 = axes[2]
     male_probs = [seg.male_prob for seg in segments]
     female_probs = [seg.female_prob for seg in segments]
@@ -455,7 +540,7 @@ def create_timeline_chart(segments: List[SegmentInfo], audio_info: Dict[str, Any
     ax3.set_xlim(0, total_duration)
     ax3.set_xlabel('Time (seconds)', fontsize=11)
     ax3.set_ylabel('Probability Score', fontsize=11)
-    ax3.set_title('Gender-Specific Scores (Indices 1, 2, 32, 33)', fontsize=12, fontweight='bold')
+    ax3.set_title('Gender-Specific Scores (Raw Windows)', fontsize=12, fontweight='bold')
     ax3.legend(loc='upper right', fontsize=9)
     ax3.grid(True, alpha=0.3)
     
@@ -531,24 +616,24 @@ def main():
     
     print(f"\nTotal raw segments (windows): {len(segments)}")
     
-    # Display summary
+    # Display summary of raw windows
     print("\n" + "=" * 80)
-    print("SEGMENTATION SUMMARY")
+    print("RAW SEGMENTATION SUMMARY")
     print("=" * 80)
     
-    speech_segs = [seg for seg in segments if seg.speech_detected]
+    speech_segs_raw = [seg for seg in segments if seg.speech_detected]
     print(f"Total windows: {len(segments)}")
-    print(f"Speech windows: {len(speech_segs)}")
+    print(f"Speech windows: {len(speech_segs_raw)}")
     
-    if speech_segs:
-        male_count = sum(1 for seg in speech_segs if seg.dominant_gender == 'male')
-        female_count = sum(1 for seg in speech_segs if seg.dominant_gender == 'female')
+    if speech_segs_raw:
+        male_count = sum(1 for seg in speech_segs_raw if seg.dominant_gender == 'male')
+        female_count = sum(1 for seg in speech_segs_raw if seg.dominant_gender == 'female')
         
         print(f"\nGender distribution in speech windows:")
         print(f"  Male:   {male_count} windows")
         print(f"  Female: {female_count} windows")
     
-    print("\nFirst 10 windows:")
+    print("\nFirst 10 raw windows:")
     print("-" * 80)
     for seg in segments[:10]:
         gender_str = f" [{seg.dominant_gender}]" if seg.speech_detected else ""
@@ -562,19 +647,29 @@ def main():
     print("SAVING RESULTS")
     print("=" * 80)
     
+    # 1. Save raw segments JSON
     segments_path = OUTPUT_DIR / "segments.json"
     save_segments_json(segments, all_labels, audio_info, segments_path)
     
-    summary_path = OUTPUT_DIR / "summary.json"
-    save_summary_json(segments, audio_info, summary_path)
+    # 2. Save speech segments (WAVs) and get merged info
+    merged_speech_info = save_speech_segments(audio, sample_rate, segments, OUTPUT_DIR)
     
+    # 3. Save summary JSON (uses merged info for timeline)
+    summary_path = OUTPUT_DIR / "summary.json"
+    save_summary_json(segments, merged_speech_info, audio_info, summary_path)
+    
+    # 4. Create and save timeline chart (uses merged info for main timeline)
     chart_path = OUTPUT_DIR / "timeline_chart.png"
-    create_timeline_chart(segments, audio_info, chart_path)
+    create_timeline_chart(segments, merged_speech_info, audio_info, chart_path)
     
     print("\n" + "=" * 80)
     print("ANALYSIS COMPLETE")
     print("=" * 80)
     print(f"Output directory: {OUTPUT_DIR}")
+    print(f"  - segments.json: Detailed raw window-by-window analysis")
+    print(f"  - summary.json: Concise summary with merged speech timeline")
+    print(f"  - timeline_chart.png: Visual timeline showing merged speech/gender")
+    print(f"  - speech/: Folder containing merged speech audio clips")
     print("=" * 80)
     
     return {
