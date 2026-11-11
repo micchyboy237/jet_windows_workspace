@@ -80,13 +80,13 @@ def get_args():
         "--window-size",
         type=float,
         default=1.0,
-        help="Window size in seconds for each segment (default: 1.0)",
+        help="Window size in seconds for each segment",
     )
     parser.add_argument(
         "--hop-size",
         type=float,
-        default=0.5,
-        help="Hop size in seconds between windows (default: 0.5)",
+        default=0.25,
+        help="Hop size in seconds between windows",
     )
     return parser.parse_args()
 
