@@ -426,6 +426,9 @@ def _process_non_japanese(
         "speaker_label": primary_label,
         "speaker_confidence": primary_confidence,
         "speaker_match_type": speaker_metadata.get("match_type", "skipped"),
+        "speaker_gender": speaker_metadata.get("dominant_gender", "unknown"),
+        "male_probability": speaker_metadata.get("male_probability", 0.0),
+        "female_probability": speaker_metadata.get("female_probability", 0.0),
         "speakers": speaker_results,
         "diarization": get_speaker_diarization()
         if text_has_sufficient_content
@@ -766,6 +769,9 @@ def _process_japanese(
         "speaker_label": primary_label,
         "speaker_confidence": primary_confidence,
         "speaker_match_type": speaker_metadata.get("match_type", "skipped"),
+        "speaker_gender": speaker_metadata.get("dominant_gender", "unknown"),
+        "male_probability": speaker_metadata.get("male_probability", 0.0),
+        "female_probability": speaker_metadata.get("female_probability", 0.0),
         "speakers": speaker_results,
         "diarization": get_speaker_diarization()
         if text_has_sufficient_content

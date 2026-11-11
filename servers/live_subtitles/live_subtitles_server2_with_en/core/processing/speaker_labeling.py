@@ -300,6 +300,12 @@ def perform_speaker_labeling(
             f"speech segment(s) — labeling each individually "
             f"(max {max_label_duration}s per segment):[/success]"
         )
+
+        # Gender Aggregation Variables
+        male_probs = []
+        female_probs = []
+        genders = []
+
         for i, (seg, aud) in enumerate(zip(high_conf_segments, high_conf_audios)):
             seg_dur = len(aud) / sample_rate if len(aud) > 0 else 0
             seg_start = seg.get('start_time', 0)
@@ -352,6 +358,18 @@ def perform_speaker_labeling(
                     segment_id=sub_segment_id,
                 )
             )
+
+            # Collect Gender Data
+            # The 'seg' object is a SpeechSegmentResult which now has gender fields
+            m_prob = seg.get('male_probability', 0.0)
+            f_prob = seg.get('female_probability', 0.0)
+            dom_gender = seg.get('dominant_gender', 'unknown')
+            
+            if m_prob > 0 or f_prob > 0:
+                male_probs.append(m_prob)
+                female_probs.append(f_prob)
+                genders.append(dom_gender)
+
             extraction_info["individual_segment_results"].append({
                 "index": i,
                 "start_time": seg_start,
@@ -363,6 +381,9 @@ def perform_speaker_labeling(
                 "primary_confidence": seg_conf,
                 "match_type": seg_meta.get("match_type", "unknown"),
                 "speaker_results": seg_results,
+                "dominant_gender": dom_gender,
+                "male_probability": m_prob,
+                "female_probability": f_prob,
             })
             all_segment_speaker_results.append({
                 "segment_index": i,
@@ -377,8 +398,36 @@ def perform_speaker_labeling(
                 f"[dim]     → Speaker: {seg_primary} "
                 f"(confidence: {seg_conf:.3f}, type: {seg_meta.get('match_type', 'unknown')})[/dim]"
             )
+        
+        # Calculate Overall Segment Gender
+        overall_dominant_gender = "unknown"
+        avg_male_prob = 0.0
+        avg_female_prob = 0.0
+        
+        if male_probs:
+            avg_male_prob = sum(male_probs) / len(male_probs)
+            avg_female_prob = sum(female_probs) / len(female_probs)
+            
+            # Use the same threshold logic as in audio_tagger_defaults
+            from services.audio_tagger_defaults import DEFAULT_GENDER_CONFIDENCE_THRESHOLD
+            if avg_male_prob > avg_female_prob and avg_male_prob > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+                overall_dominant_gender = "male"
+            elif avg_female_prob > avg_male_prob and avg_female_prob > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+                overall_dominant_gender = "female"
+                
+        console.print(
+            f"[dim]   👥 Segment Gender: {overall_dominant_gender.capitalize()} "
+            f"(M:{avg_male_prob:.4f}, F:{avg_female_prob:.4f})[/dim]"
+        )
+
         speaker_results, primary_label, primary_confidence, speaker_metadata = \
             _aggregate_speaker_results(all_segment_speaker_results, extraction_info)
+
+        # Inject Gender into Metadata
+        speaker_metadata["dominant_gender"] = overall_dominant_gender
+        speaker_metadata["male_probability"] = round(avg_male_prob, 6)
+        speaker_metadata["female_probability"] = round(avg_female_prob, 6)
+
         if speaker_results:
             if len(speaker_results) > 1:
                 speakers_str = ", ".join(
