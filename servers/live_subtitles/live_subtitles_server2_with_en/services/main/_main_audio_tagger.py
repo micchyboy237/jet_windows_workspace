@@ -23,12 +23,15 @@ from audio_tagger import (
     DEFAULT_MIN_SPEECH_PROB_THRESHOLD,
     DEFAULT_SPEECH_PROB_THRESHOLD,
     DEFAULT_SPEECH_TOP_N,
+    DEFAULT_TOP_K,
     DEFAULT_CHUNK_DURATION,
     DEFAULT_CHUNK_OVERLAP,
     DEFAULT_MIN_SILENCE_DURATION_SEC,
     DEFAULT_MIN_SPEECH_DURATION_SEC,
     DEFAULT_RESOLUTION_MS,
     calculate_confidence_tier,
+    GENDER_CLASS_INDICES,
+    DEFAULT_GENDER_CONFIDENCE_THRESHOLD,
 )
 from serialization_utils import serialize
 from audio_config import FRAME_SHIFT_MS, SAMPLE_RATE
@@ -70,7 +73,7 @@ def get_args(
     parser.add_argument(
         "-k", "--top-k",
         type=int,
-        default=5,
+        default=DEFAULT_TOP_K,
         help="Number of top predictions to return",
     )
     parser.add_argument(
@@ -271,31 +274,10 @@ def display_per_chunk_analysis(
 ) -> None:
     """
     Display detailed per-chunk analysis from a chunked tagging summary.
-    
-    This function creates rich-formatted tables showing:
-    1. A chunk summary table with overall metrics (total duration, speech stats, etc.)
-    2. A per-chunk detailed table with timing, speech detection, and predictions
-    
-    Args:
-        summary: AudioChunksTaggingSummary from tag_audio_chunks()
-        probability_threshold: Minimum probability to show in predictions display
-        max_predictions_display: Maximum number of predictions to show per chunk
-        show_summary_table: Whether to display the summary metrics table
-        show_chunk_table: Whether to display the per-chunk details table
-        
-    Example:
-        >>> tagger = AudioTagger()
-        >>> summary = tagger.tag_audio_chunks("audio.wav")
-        >>> display_per_chunk_analysis(summary)
-        
-    Debug logs trace:
-        - Number of chunks processed
-        - Speech detection statistics
-        - Table generation status
+    Updated to include gender distribution stats and full probability precision.
     """
     console.print(f"[dim]📊 display_per_chunk_analysis: {len(summary.get('chunks', []))} chunks[/dim]")
-    
-    # Display chunk summary table
+
     if show_summary_table:
         chunk_summary_table = Table(
             title="Chunk Analysis Summary",
@@ -305,7 +287,25 @@ def display_per_chunk_analysis(
         )
         chunk_summary_table.add_column("Metric", style="cyan")
         chunk_summary_table.add_column("Value", style="yellow")
+
+        # --- Gender Statistics Calculation ---
+        chunks = summary.get("chunks", [])
+        male_count = sum(1 for c in chunks if c.get("dominant_gender") == "male")
+        female_count = sum(1 for c in chunks if c.get("dominant_gender") == "female")
+        unknown_count = sum(1 for c in chunks if c.get("dominant_gender") != "male" and c.get("dominant_gender") != "female")
+        total_chunks = len(chunks) if chunks else 1 # Avoid div by zero
+
+        male_pct = (male_count / total_chunks) * 100
+        female_pct = (female_count / total_chunks) * 100
+        unknown_pct = (unknown_count / total_chunks) * 100
         
+        gender_stats_str = (
+            f"[blue]{male_count} Male ({male_pct:.1f}%)[/blue] | "
+            f"[magenta]{female_count} Female ({female_pct:.1f}%)[/magenta] | "
+            f"[dim]{unknown_count} Unknown ({unknown_pct:.1f}%)[/dim]"
+        )
+        # --------------------------------------
+
         chunk_summary_table.add_row("Total Duration", f"{summary['total_duration']:.2f}s")
         chunk_summary_table.add_row("Total Chunks", str(summary["total_chunks"]))
         chunk_summary_table.add_row("Chunk Duration", f"{summary['chunk_duration']:.2f}s")
@@ -322,28 +322,29 @@ def display_per_chunk_analysis(
             else "0.00s",
         )
         chunk_summary_table.add_row(
-            "Max Speech Probability", f"{summary['max_speech_probability']:.4f}"
+            "Max Speech Probability", f"{summary['max_speech_probability']}" # Full precision
         )
         chunk_summary_table.add_row(
             "Avg Speech Probability",
-            f"{summary['avg_speech_probability']:.4f}"
+            f"{summary['avg_speech_probability']}" # Full precision
             if summary["avg_speech_probability"] > 0
             else "N/A (no speech chunks)",
         )
+        
+        # Add Gender Row
+        chunk_summary_table.add_row("Gender Distribution", gender_stats_str)
+
         chunk_summary_table.add_row(
             "Processing Time", f"{summary['total_processing_time']:.3f}s"
         )
         chunk_summary_table.add_row(
             "Real-Time Factor", f"{summary['real_time_factor']:.3f}x"
         )
-        
         console.print(chunk_summary_table)
         console.print(f"[dim]✅ Chunk summary table displayed[/dim]")
-    
-    # Display per-chunk detailed table
+
     if show_chunk_table:
         console.print("\n[bold]Overall Top Predictions:[/bold]")
-        # We need a tagger instance for display_results, but we can also display inline
         if summary.get("overall_top_predictions"):
             predictions_table = Table(
                 title="Overall Top Predictions (Aggregated)",
@@ -354,16 +355,16 @@ def display_per_chunk_analysis(
             predictions_table.add_column("Rank", style="cyan", justify="right")
             predictions_table.add_column("Name", style="green")
             predictions_table.add_column("Mean Probability", style="magenta", justify="right")
-            
             for i, pred in enumerate(summary["overall_top_predictions"], 1):
                 prob_color = "green" if pred["prob"] >= 0.5 else "yellow"
+                # Use full precision here as well
                 predictions_table.add_row(
                     str(i),
                     pred["name"],
-                    f"[{prob_color}]{pred['prob']:.4f}[/{prob_color}]",
+                    f"[{prob_color}]{pred['prob']}[/{prob_color}]",
                 )
             console.print(predictions_table)
-        
+
         chunk_table = Table(
             title=title,
             border_style="blue",
@@ -374,9 +375,10 @@ def display_per_chunk_analysis(
         chunk_table.add_column("Time Range", style="yellow")
         chunk_table.add_column("Duration", justify="right")
         chunk_table.add_column("Speech", justify="center", style="green")
+        chunk_table.add_column("Gender", justify="center", style="magenta")
         chunk_table.add_column("Top Predictions", style="green", min_width=40)
         chunk_table.add_column("Proc Time", justify="right")
-        
+
         for chunk in summary["chunks"]:
             predictions = chunk.get("predictions", [])
             predictions_display = _format_predictions_with_emphasis(
@@ -384,22 +386,42 @@ def display_per_chunk_analysis(
                 threshold=probability_threshold,
                 max_display=max_predictions_display,
             )
-            
+
             speech_indicator = (
-                f"✅ {chunk['speech_probability']:.0%}"
+                f"✅ {chunk['speech_probability']}" # Full precision
                 if chunk.get("speech_detected", False)
-                else "❌ —"
+                else "❌ --"
             )
+
+            # --- New Gender Logic ---
+            dominant_gender = chunk.get("dominant_gender", "unknown")
+            male_prob = chunk.get("male_prob", 0.0)
+            female_prob = chunk.get("female_prob", 0.0)
             
+            if dominant_gender == "male":
+                gender_icon = "👨"
+                gender_color = "blue"
+            elif dominant_gender == "female":
+                gender_icon = "👩"
+                gender_color = "magenta"
+            else:
+                gender_icon = "❓"
+                gender_color = "dim"
+                
+            # Show full precision for gender probs
+            gender_display = f"[{gender_color}]{gender_icon} M:{male_prob} F:{female_prob}[/{gender_color}]"
+            # ------------------------
+
             chunk_table.add_row(
                 str(chunk["chunk_index"]),
                 f"{chunk['start_time']:.2f}s - {chunk['end_time']:.2f}s",
                 f"{chunk['duration']:.2f}s",
                 speech_indicator,
+                gender_display,
                 predictions_display,
                 f"{chunk['processing_time'] * 1000:.1f}ms",
             )
-        
+
         console.print(chunk_table)
         console.print(f"[dim]✅ Per-chunk table displayed with {len(summary['chunks'])} rows[/dim]")
 
@@ -440,18 +462,18 @@ def display_per_segment_analysis(
         - Speech duration calculations with threshold context
         - Confidence tier distribution statistics
     """
-    console.print(f"[dim]📊 display_per_segment_analysis: {len(segment_dirs)} segment dirs[/dim]")
-    
+    console.print(f"[dim]📂 display_per_segment_analysis: {len(segment_dirs)} segment dirs[/dim]")
+
     speech_dirs = [d for d in segment_dirs if "non_speech" not in d.name]
     non_speech_dirs = [d for d in segment_dirs if "non_speech" in d.name]
-    
+
     console.print(
-        f"[dim]🔍 Found {len(speech_dirs)} speech, {len(non_speech_dirs)} non-speech segments[/dim]"
+        f"[dim]📊 Found {len(speech_dirs)} speech, {len(non_speech_dirs)} non-speech segments[/dim]"
     )
-    
+
     if show_speech_segments and speech_dirs:
         speech_table = Table(
-            title="🗂 Speech Segments Analysis",
+            title="🗣️ Speech Segments Analysis",
             border_style="green",
             show_header=True,
             header_style="bold cyan",
@@ -461,20 +483,20 @@ def display_per_segment_analysis(
         speech_table.add_column("Duration", justify="right")
         if show_details:
             speech_table.add_column("Avg Speech Prob", justify="right", style="green")
-            speech_table.add_column("Speech Density", justify="right", style="green")
+            speech_table.add_column("Gender", justify="center", style="magenta") # New Column
             speech_table.add_column("Top Prediction", style="magenta")
             speech_table.add_column("Confidence", justify="center", style="bold")
-        speech_table.add_column("", justify="center", style="bold cyan")
-        
+            speech_table.add_column("", justify="center", style="bold cyan")
+
         segments_with_audio = 0
         total_speech_duration = 0.0
         threshold_used = None
         
-        # Track confidence distribution
-        high_conf_count = 0
-        medium_conf_count = 0
-        low_conf_count = 0
-        
+        # Gender stats
+        male_count = 0
+        female_count = 0
+        unknown_count = 0
+
         for seg_dir in speech_dirs:
             segment_json = seg_dir / "segment.json"
             if segment_json.exists():
@@ -494,33 +516,48 @@ def display_per_segment_analysis(
                     segment_speech_duration = duration * speech_density
                     total_speech_duration += segment_speech_duration
                     
-                    # Get confidence info with tiered display
                     confidence_tier = insights.get("confidence_tier", "low")
-                    confidence_label = insights.get("confidence_label", "—")
+                    confidence_label = insights.get("confidence_label", "❓")
                     
-                    # Track confidence tiers
                     if confidence_tier == "high":
-                        high_conf_count += 1
                         conf_style = "bold green"
                     elif confidence_tier == "medium":
-                        medium_conf_count += 1
                         conf_style = "yellow"
                     else:
-                        low_conf_count += 1
                         conf_style = "dim"
+
+                    # --- New Gender Logic ---
+                    dominant_gender = insights.get("dominant_gender", "unknown")
+                    male_prob = insights.get("male_probability", 0.0)
+                    female_prob = insights.get("female_probability", 0.0)
+                    gender_conf = insights.get("gender_confidence", "low")
                     
+                    if dominant_gender == "male":
+                        gender_icon = "👨"
+                        gender_color = "blue"
+                        male_count += 1
+                    elif dominant_gender == "female":
+                        gender_icon = "👩"
+                        gender_color = "magenta"
+                        female_count += 1
+                    else:
+                        gender_icon = "❓"
+                        gender_color = "dim"
+                        unknown_count += 1
+                        
+                    gender_display = f"[{gender_color}]{gender_icon} {dominant_gender.capitalize()} ({gender_conf})[/{gender_color}]"
+                    # ------------------------
+
                     segment_name = _create_clickable_segment_name(seg_dir)
-                    
                     row = [
                         segment_name,
                         f"{seg_info.get('start_time', 0):.3f}s – {seg_info.get('end_time', 0):.3f}s",
                         f"{duration:.3f}s",
                     ]
-                    
                     if show_details:
                         row.extend([
                             f"{speech_stats.get('avg_speech_probability', 0):.3f}",
-                            f"{speech_density:.1%}",
+                            gender_display, # Added to row
                             f"{insights.get('top_prediction', 'Unknown')} "
                             f"({insights.get('top_prediction_prob', 0):.3f})",
                             f"[{conf_style}]{confidence_label}[/{conf_style}]",
@@ -533,47 +570,25 @@ def display_per_segment_analysis(
                     row.append(play_button)
                     
                     speech_table.add_row(*row)
-                    
+
                 except Exception as e:
                     console.print(
-                        f"[yellow]⚠ Failed to read segment.json for {seg_dir}: {e}[/yellow]"
-                    )
-                    segment_name = _create_clickable_segment_name(seg_dir)
-                    wav_path = seg_dir / "sound.wav"
-                    speech_table.add_row(
-                        segment_name,
-                        "N/A",
-                        "N/A",
-                        "—",
-                        "—",
-                        "—",
-                        "—",
-                        _create_play_button(wav_path),
+                        f"[yellow]⚠️ Failed to read segment.json for {seg_dir}: {e}[/yellow]"
                     )
         
         console.print(speech_table)
         
-        # Summary with confidence distribution
         if speech_dirs:
-            threshold_info = f" (threshold: {threshold_used:.2f})" if threshold_used else ""
             console.print(
                 f"[dim]📊 Speech segments summary: "
                 f"{len(speech_dirs)} segments, "
-                f"total speech duration: {total_speech_duration:.2f}s{threshold_info}[/dim]"
+                f"total speech duration: {total_speech_duration:.2f}s[/dim]"
             )
-            
-            # Confidence distribution summary
             console.print(
-                f"[dim]🎯 Confidence distribution: "
-                f"[green]{high_conf_count} High[/green] | "
-                f"[yellow]{medium_conf_count} Medium[/yellow] | "
-                f"[dim]{low_conf_count} Low[/dim][/dim]"
-            )
-            
-            # Show confidence criteria reminder
-            console.print(
-                "[dim]   Criteria: ✨ High (avg≥0.6 & density≥70%) | "
-                "⚠ Medium (avg≥0.4 & density≥50%) | — Low[/dim]"
+                f"[dim]👥 Gender distribution: "
+                f"[blue]{male_count} Male[/blue] | "
+                f"[magenta]{female_count} Female[/magenta] | "
+                f"[dim]{unknown_count} Unknown[/dim][/dim]"
             )
         
         console.print(f"[dim]✅ Speech segments table displayed[/dim]")
@@ -1111,6 +1126,7 @@ def save_speech_segments(
     segments_root = output_dir / "segments"
     segments_root.mkdir(parents=True, exist_ok=True)
     created: List[Path] = []
+
     def _save_segment(
         seg_num: int,
         seg_start: float,
@@ -1128,6 +1144,8 @@ def save_speech_segments(
             f"{seg_start:.3f}s – {seg_end:.3f}s "
             f"(dur={seg_duration:.3f}s)[/bold cyan]"
         )
+        
+        # 1. Extract Audio
         if waveform is not None:
             try:
                 start_sample = int(seg_start * actual_sr)
@@ -1157,6 +1175,8 @@ def save_speech_segments(
                 console.print(f"[red]   ❌ Failed to save sound.wav: {e}[/red]")
         else:
             console.print("[dim]   ℹ No audio waveform available for extraction[/dim]")
+
+        # 2. Calculate Stats & Prepare Info
         mask = (times >= seg_start) & (times <= seg_end)
         seg_times = times[mask]
         seg_probs = probs[mask]
@@ -1169,29 +1189,11 @@ def save_speech_segments(
             if c["start_time"] < seg_end and c["end_time"] > seg_start
         ]
         
-        # ===== DEBUG: Low coverage chunk analysis =====
-        low_coverage_chunks = []
-        for c in seg_chunks:
-            overlap_start = max(c["start_time"], seg_start)
-            overlap_end = min(c["end_time"], seg_end)
-            overlap_dur = max(0.0, overlap_end - overlap_start)
-            coverage = overlap_dur / c["duration"] if c["duration"] > 0 else 0.0
-            if coverage < 0.1 and c.get("speech_detected", False):
-                low_coverage_chunks.append((c, coverage))
-        
-        if low_coverage_chunks:
-            console.print(f"[yellow]   ⚠ Speech chunks with <10% coverage in this segment:[/yellow]")
-            for c, cov in low_coverage_chunks:
-                console.print(
-                    f"[yellow]     Chunk {c['chunk_index']}: {c['start_time']:.3f}-{c['end_time']:.3f}s "
-                    f"(coverage={cov:.1%}, speech_prob={c.get('speech_probability', 0):.4f})[/yellow]"
-                )
-        # ===== END DEBUG =====
-        
         console.print(
             f"[dim]   Timeline cells: {len(seg_times)} | "
             f"Overlapping chunks: {len(seg_chunks)}[/dim]"
         )
+        
         pred_acc: Dict[str, List[float]] = {}
         for c in seg_chunks:
             for p in c.get("predictions", []):
@@ -1204,12 +1206,12 @@ def save_speech_segments(
             key=lambda x: x["mean_prob"],
             reverse=True,
         )[:10]
+        
         speech_chunk_count = sum(
             1 for c in seg_chunks
             if c.get("speech_probability", 0.0) >= speech_threshold
         )
 
-        # Duration-aware tiered confidence
         confidence_tier, confidence_label, is_high_confidence, is_medium_confidence = \
             calculate_confidence_tier(
                 avg_prob=avg_prob,
@@ -1219,7 +1221,6 @@ def save_speech_segments(
                 if seg_chunks else 0.0,
             )
         
-        # Duration-specific notes
         duration_note = ""
         if seg_duration < 0.3 and confidence_tier in ("high", "medium"):
             duration_note = "⚠ Very short - verify manually"
@@ -1235,6 +1236,7 @@ def save_speech_segments(
         if duration_note:
             console.print(f"[dim]   📝 Duration note: {duration_note}[/dim]")
 
+        # Initialize segment_info WITHOUT gender yet
         segment_info = {
             "segment_index": seg_num - 1,
             "segment_type": segment_type,
@@ -1258,7 +1260,7 @@ def save_speech_segments(
                 "is_medium_confidence": is_medium_confidence,
                 "confidence_tier": confidence_tier,
                 "confidence_label": confidence_label,
-                "confidence_duration_note": duration_note,  # NEW
+                "confidence_duration_note": duration_note,
                 "is_dense_speech": speech_density >= 0.8,
                 "top_prediction": top_preds[0]["name"] if top_preds else "Unknown",
                 "top_prediction_prob": top_preds[0]["mean_prob"] if top_preds else 0.0,
@@ -1279,10 +1281,8 @@ def save_speech_segments(
                 "include_non_speech": include_non_speech,
             },
         }
-        seg_json_path = seg_dir / "segment.json"
-        with open(seg_json_path, "w", encoding="utf-8") as f:
-            json.dump(serialize(segment_info), f, indent=2, ensure_ascii=False)
-        console.print(f"[dim]   ✅ segment.json ({seg_json_path.stat().st_size:,} bytes)[/dim]")
+
+        # 3. Save Chunks & Probs JSONs (These don't depend on gender)
         chunks_data = []
         for c in seg_chunks:
             overlap_start = max(c["start_time"], seg_start)
@@ -1320,6 +1320,7 @@ def save_speech_segments(
             f"[dim]   ✅ chunks.json ({chunks_json_path.stat().st_size:,} bytes) | "
             f"speech_chunks={speech_chunk_count}/{len(seg_chunks)}[/dim]"
         )
+
         probs_data = [
             {"time": round(float(t), 4), "speech_prob": round(float(p), 4)}
             for t, p in zip(seg_times, seg_probs)
@@ -1328,6 +1329,8 @@ def save_speech_segments(
         with open(probs_json_path, "w", encoding="utf-8") as f:
             json.dump(serialize(probs_data), f, indent=2, ensure_ascii=False)
         console.print(f"[dim]   ✅ probs.json ({probs_json_path.stat().st_size:,} bytes)[/dim]")
+
+        # 4. Generate Plots AND Inject Gender Data into segment_info
         _save_segment_plots(
             seg_dir=seg_dir,
             seg_times=seg_times,
@@ -1336,12 +1339,20 @@ def save_speech_segments(
             seg_start=seg_start,
             seg_end=seg_end,
             speech_threshold=speech_threshold,
-            segment_info=segment_info,
+            segment_info=segment_info, # This dict is modified in-place by _save_segment_plots
         )
+
+        # 5. NOW Save segment.json (which now contains the gender data injected by plots function)
+        seg_json_path = seg_dir / "segment.json"
+        with open(seg_json_path, "w", encoding="utf-8") as f:
+            json.dump(serialize(segment_info), f, indent=2, ensure_ascii=False)
+        console.print(f"[dim]   ✅ segment.json ({seg_json_path.stat().st_size:,} bytes)[/dim]")
+
         console.print(
             f"[green]   📁 Saved: {linkify(str(seg_dir))}[/green]"
         )
         return seg_dir
+
     for seg_num, (seg_start, seg_end) in enumerate(segments, start=1):
         seg_dir = _save_segment(
             seg_num=seg_num,
@@ -1386,7 +1397,6 @@ def save_speech_segments(
     return created
 
 
-
 def _save_segment_plots(
     seg_dir: Path,
     seg_times: np.ndarray,
@@ -1398,22 +1408,8 @@ def _save_segment_plots(
     segment_info: dict,
 ) -> None:
     """
-    Save a multi-panel PNG for one speech segment.
-    
-    Panels:
-      1. Speech probability timeline (line chart with threshold line)
-      2. Predictions heatmap — top-N labels × chunks within segment
-      3. Per-chunk speech bar chart (speech probability per chunk)
-      
-    Args:
-        seg_dir: Directory to write plots.png into.
-        seg_times: Time axis (seconds) for the probability timeline.
-        seg_probs: Speech probabilities aligned with seg_times.
-        seg_chunks: Chunks overlapping this segment.
-        seg_start: Segment start time in seconds.
-        seg_end: Segment end time in seconds.
-        speech_threshold: Horizontal threshold line value.
-        segment_info: Segment metadata dict (for title).
+    Save multi-panel PNGs for one speech segment, including a new gender analysis chart.
+    Updated to inject gender data into segment_info for JSON persistence.
     """
     try:
         import matplotlib
@@ -1421,22 +1417,63 @@ def _save_segment_plots(
         import matplotlib.pyplot as plt
         import matplotlib.gridspec as gridspec
     except ImportError:
-        console.print("[yellow]   ⚠ matplotlib not available — skipping plots.png[/yellow]")
+        console.print("[yellow]   ⚠️ matplotlib not available – skipping plots[/yellow]")
         return
+
+    # --- 1. Gender Aggregation & Injection ---
+    male_probs = [c.get('male_prob', 0.0) for c in seg_chunks]
+    female_probs = [c.get('female_prob', 0.0) for c in seg_chunks]
     
+    avg_male_prob = float(np.mean(male_probs)) if male_probs else 0.0
+    avg_female_prob = float(np.mean(female_probs)) if female_probs else 0.0
+    
+    # Determine segment dominant gender using the low threshold
+    if avg_male_prob > avg_female_prob and avg_male_prob > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+        segment_dominant_gender = "male"
+    elif avg_female_prob > avg_male_prob and avg_female_prob > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+        segment_dominant_gender = "female"
+    else:
+        segment_dominant_gender = "unknown"
+        
+    # Simple confidence metric for gender
+    gender_diff = abs(avg_male_prob - avg_female_prob)
+    if gender_diff > 0.3:
+        gender_confidence = "high"
+    elif gender_diff > 0.1:
+        gender_confidence = "medium"
+    else:
+        gender_confidence = "low"
+
+    # INJECT into segment_info so it gets saved to segment.json
+    segment_info["insights"]["dominant_gender"] = segment_dominant_gender
+    segment_info["insights"]["male_probability"] = round(avg_male_prob, 6)
+    segment_info["insights"]["female_probability"] = round(avg_female_prob, 6)
+    segment_info["insights"]["gender_confidence"] = gender_confidence
+    
+    console.print(
+        f"[dim]   👥 Gender Calculated: {segment_dominant_gender.capitalize()} "
+        f"(M:{avg_male_prob:.4f}, F:{avg_female_prob:.4f})[/dim]"
+    )
+    # -----------------------------------------
+
+    # --- 2. Standard Plots (Speech Timeline, Heatmap, Bar Chart) ---
     fig = plt.figure(figsize=(14, 10))
     segment_type = segment_info.get("segment_type", "speech")
+    
+    # Add Gender to Title
+    gender_str = f" | Gender: {segment_dominant_gender.capitalize()}" if segment_dominant_gender != "unknown" else ""
+    
     fig.suptitle(
         f"{segment_type.title()} Segment {segment_info['segment_index'] + 1}  "
         f"[{seg_start:.3f}s – {seg_end:.3f}s]  "
-        f"dur={segment_info['duration']:.3f}s",
+        f"dur={segment_info['duration']:.3f}s{gender_str}",
         fontsize=13,
         fontweight="bold",
     )
-    
+
     gs = gridspec.GridSpec(3, 1, figure=fig, hspace=0.45)
     
-    # Panel 1: Speech probability timeline
+    # Panel 1: Speech Probability Timeline
     ax1 = fig.add_subplot(gs[0])
     ax1.plot(seg_times, seg_probs, color="#1f77b4", linewidth=1.2, label="speech prob")
     ax1.fill_between(seg_times, seg_probs, alpha=0.25, color="#1f77b4")
@@ -1445,15 +1482,11 @@ def _save_segment_plots(
     ax1.set_xlim(seg_start, seg_end)
     ax1.set_ylim(0, 1.05)
     ax1.set_ylabel("Speech Probability")
-    ax1.set_title("Speech Probability Timeline (overlap-consolidated)")
+    ax1.set_title("Speech Probability Timeline")
     ax1.legend(fontsize=8, loc="upper right")
     ax1.grid(axis="y", alpha=0.3)
-    
-    above = seg_probs >= speech_threshold
-    ax1.fill_between(seg_times, 0, 1, where=above, alpha=0.08,
-                     color="green", label="speech region")
-    
-    # Panel 2: Predictions heatmap
+
+    # Panel 2: Predictions Heatmap
     ax2 = fig.add_subplot(gs[1])
     if seg_chunks:
         pred_names_set: Dict[str, float] = {}
@@ -1461,19 +1494,16 @@ def _save_segment_plots(
             for p in c.get("predictions", []):
                 n = p["name"]
                 pred_names_set[n] = max(pred_names_set.get(n, 0.0), p["prob"])
-        
         top_labels = sorted(pred_names_set, key=pred_names_set.get, reverse=True)[:8]
         n_labels = len(top_labels)
         n_chunks = len(seg_chunks)
         heatmap_data = np.zeros((n_labels, n_chunks), dtype=np.float32)
         chunk_labels = []
-        
         for ci, c in enumerate(seg_chunks):
             chunk_labels.append(f"C{c['chunk_index']}\n{c['start_time']:.1f}s")
             pred_dict = {p["name"]: p["prob"] for p in c.get("predictions", [])}
             for li, label in enumerate(top_labels):
                 heatmap_data[li, ci] = pred_dict.get(label, 0.0)
-        
         im = ax2.imshow(heatmap_data, aspect="auto", cmap="YlOrRd",
                         vmin=0.0, vmax=1.0, interpolation="nearest")
         ax2.set_xticks(range(n_chunks))
@@ -1481,52 +1511,69 @@ def _save_segment_plots(
         ax2.set_yticks(range(n_labels))
         short_labels = [lb[:30] + "…" if len(lb) > 30 else lb for lb in top_labels]
         ax2.set_yticklabels(short_labels, fontsize=7)
-        ax2.set_title("Predictions Heatmap (top-8 labels × overlapping chunks)")
+        ax2.set_title("Predictions Heatmap")
         fig.colorbar(im, ax=ax2, fraction=0.02, pad=0.02, label="Probability")
     else:
-        ax2.text(0.5, 0.5, "No overlapping chunks", ha="center", va="center",
-                 transform=ax2.transAxes, color="gray")
-        ax2.set_title("Predictions Heatmap")
-    
-    # Panel 3: Per-chunk speech probability
+        ax2.text(0.5, 0.5, "No overlapping chunks", ha="center", va="center", transform=ax2.transAxes)
+
+    # Panel 3: Per-Chunk Speech Bar Chart
     ax3 = fig.add_subplot(gs[2])
     if seg_chunks:
-        chunk_indices = [c["chunk_index"] for c in seg_chunks]
         chunk_speech = [c.get("speech_probability", 0.0) for c in seg_chunks]
-        chunk_centers = [
-            (c["start_time"] + c["end_time"]) / 2 for c in seg_chunks
-        ]
-        
-        bar_colors = [
-            "#2ca02c" if sp >= speech_threshold else "#d62728"
-            for sp in chunk_speech
-        ]
-        
-        bar_width = min(
-            (seg_end - seg_start) / max(len(seg_chunks), 1) * 0.7,
-            summary_chunk_duration_or_default(seg_chunks) * 0.7,
-        )
-        
-        ax3.bar(chunk_centers, chunk_speech, width=bar_width,
-                color=bar_colors, alpha=0.85, edgecolor="white", linewidth=0.4)
-        ax3.axhline(speech_threshold, color="red", linestyle="--", linewidth=0.9,
-                    label=f"threshold ({speech_threshold:.2f})")
+        chunk_centers = [(c["start_time"] + c["end_time"]) / 2 for c in seg_chunks]
+        bar_colors = ["#2ca02c" if sp >= speech_threshold else "#d62728" for sp in chunk_speech]
+        bar_width = min((seg_end - seg_start) / max(len(seg_chunks), 1) * 0.7, 0.7)
+        ax3.bar(chunk_centers, chunk_speech, width=bar_width, color=bar_colors, alpha=0.85)
+        ax3.axhline(speech_threshold, color="red", linestyle="--", linewidth=0.9)
         ax3.set_xlim(seg_start, seg_end)
         ax3.set_ylim(0, 1.05)
         ax3.set_xlabel("Time (s)")
         ax3.set_ylabel("Speech Probability")
-        ax3.set_title("Per-Chunk Speech Probability (green=speech, red=non-speech)")
-        ax3.legend(fontsize=8, loc="upper right")
-        ax3.grid(axis="y", alpha=0.3)
-    else:
-        ax3.text(0.5, 0.5, "No chunk data", ha="center", va="center",
-                 transform=ax3.transAxes, color="gray")
         ax3.set_title("Per-Chunk Speech Probability")
-    
+        ax3.grid(axis="y", alpha=0.3)
+
     plot_path = seg_dir / "plots.png"
     fig.savefig(str(plot_path), dpi=120, bbox_inches="tight")
     plt.close(fig)
-    console.print(f"[dim]   ✅ plots.png ({plot_path.stat().st_size:,} bytes)[/dim]")
+    console.print(f"[dim]   ✅ plots.png saved[/dim]")
+
+    # --- 3. NEW: Dedicated Gender Analysis Chart ---
+    try:
+        fig_g, ax_g = plt.subplots(figsize=(12, 4))
+        
+        # Prepare data for gender timeline
+        # We map each chunk's gender probs to its time range
+        chunk_starts = [c["start_time"] for c in seg_chunks]
+        chunk_ends = [c["end_time"] for c in seg_chunks]
+        m_probs = [c.get("male_prob", 0.0) for c in seg_chunks]
+        f_probs = [c.get("female_prob", 0.0) for c in seg_chunks]
+        
+        # Plot Male and Female probabilities as step lines or filled areas
+        # Using a simple line plot connecting chunk centers for clarity
+        centers = [(s + e) / 2 for s, e in zip(chunk_starts, chunk_ends)]
+        
+        ax_g.plot(centers, m_probs, 'b-o', label='Male Prob', linewidth=2, markersize=4)
+        ax_g.plot(centers, f_probs, 'm-o', label='Female Prob', linewidth=2, markersize=4)
+        ax_g.fill_between(centers, m_probs, alpha=0.1, color='blue')
+        ax_g.fill_between(centers, f_probs, alpha=0.1, color='magenta')
+        
+        ax_g.set_title(f"Gender Probability Analysis ({segment_dominant_gender.capitalize()})")
+        ax_g.set_xlabel("Time (s)")
+        ax_g.set_ylabel("Probability")
+        ax_g.set_xlim(seg_start, seg_end)
+        ax_g.legend(loc="upper right")
+        ax_g.grid(True, alpha=0.3)
+        
+        # Add threshold line for gender confidence
+        ax_g.axhline(DEFAULT_GENDER_CONFIDENCE_THRESHOLD, color='gray', linestyle=':', label=f'Confidence Threshold ({DEFAULT_GENDER_CONFIDENCE_THRESHOLD})')
+        
+        gender_plot_path = seg_dir / "gender_analysis.png"
+        fig_g.savefig(str(gender_plot_path), dpi=120, bbox_inches="tight")
+        plt.close(fig_g)
+        console.print(f"[dim]   ✅ gender_analysis.png saved[/dim]")
+        
+    except Exception as e:
+        console.print(f"[yellow]   ⚠️ Failed to save gender chart: {e}[/yellow]")
 
 
 def summary_chunk_duration_or_default(chunks: List[ChunkTaggingResult]) -> float:

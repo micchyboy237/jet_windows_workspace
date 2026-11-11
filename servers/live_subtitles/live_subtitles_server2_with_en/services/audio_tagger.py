@@ -52,6 +52,8 @@ try:
         DEFAULT_MEDIUM_CONFIDENCE_NORMAL,
         DEFAULT_MEDIUM_CONFIDENCE_LONG,
         SPEECH_CLASS_NAMES,
+        GENDER_CLASS_INDICES,
+        DEFAULT_GENDER_CONFIDENCE_THRESHOLD,
     )
     from services.audio_tagger_types import (
         TaggingResult,
@@ -104,6 +106,8 @@ except ImportError:
         DEFAULT_MEDIUM_CONFIDENCE_NORMAL,
         DEFAULT_MEDIUM_CONFIDENCE_LONG,
         SPEECH_CLASS_NAMES,
+        GENDER_CLASS_INDICES,
+        DEFAULT_GENDER_CONFIDENCE_THRESHOLD,
     )
     from audio_tagger_types import (
         TaggingResult,
@@ -121,7 +125,6 @@ except ImportError:
 install_rich_traceback(show_locals=True)
 
 console = Console()
-
 
 
 def calculate_confidence_tier(
@@ -850,17 +853,7 @@ class AudioTagger:
     ) -> AudioChunksTaggingSummary:
         """
         Process long audio by splitting into overlapping chunks and tagging each.
-
-        Args:
-            audio: Audio input (file path, bytes, numpy array, or torch tensor)
-            sample_rate: Sample rate for raw audio data (default: 16000)
-            chunk_duration: Duration of each chunk in seconds.
-            overlap_duration: Overlap between chunks in seconds.
-            min_chunk_duration: Minimum duration for the last chunk.
-
-        Returns:
-            AudioChunksTaggingSummary with per-chunk results, overall aggregation,
-            speech_duration, and avg_speech_probability
+        Updated to include gender analysis per chunk.
         """
         _chunk_dur = chunk_duration if chunk_duration is not None else self.chunk_duration
         _overlap = overlap_duration if overlap_duration is not None else self.chunk_overlap
@@ -870,14 +863,14 @@ class AudioTagger:
 
         if _chunk_dur < _min_chunk:
             console.print(
-                f"[yellow]⚠ Chunk duration {_chunk_dur}s < min {_min_chunk}s, "
+                f"[yellow]⚠️  Chunk duration {_chunk_dur}s < min {_min_chunk}s, "
                 f"using min value[/yellow]"
             )
             _chunk_dur = _min_chunk
 
         if _overlap >= _chunk_dur:
             console.print(
-                f"[yellow]⚠ Overlap {_overlap}s >= chunk duration {_chunk_dur}s, "
+                f"[yellow]⚠️  Overlap {_overlap}s >= chunk duration {_chunk_dur}s, "
                 f"using half chunk duration[/yellow]"
             )
             _overlap = _chunk_dur / 2.0
@@ -893,8 +886,9 @@ class AudioTagger:
 
         total_samples = len(waveform)
         total_duration = total_samples / actual_sr
+
         console.print(
-            f"[dim]📊 Audio loaded: {total_duration:.2f}s, "
+            f"[dim]📥 Audio loaded: {total_duration:.2f}s, "
             f"{actual_sr}Hz, {total_samples} samples[/dim]"
         )
 
@@ -911,7 +905,7 @@ class AudioTagger:
             hop_samples = 1
 
         console.print(
-            f"[dim]🔧 Chunk config: {_chunk_dur}s chunks, "
+            f"[dim]⚙️ Chunk config: {_chunk_dur}s chunks, "
             f"{_overlap}s overlap, hop={hop_samples} samples[/dim]"
         )
 
@@ -922,11 +916,12 @@ class AudioTagger:
             min_chunk_duration=_min_chunk,
             sample_rate=actual_sr,
         )
-        console.print(f"[dim]📏 Calculated {len(chunk_positions)} chunk positions[/dim]")
+
+        console.print(f"[dim]📍 Calculated {len(chunk_positions)} chunk positions[/dim]")
 
         if not chunk_positions:
             elapsed = time.time() - overall_start
-            console.print("[yellow]⚠ No valid chunk positions found[/yellow]")
+            console.print("[yellow]⚠️ No valid chunk positions found[/yellow]")
             return AudioChunksTaggingSummary(
                 audio_path=audio_path_str,
                 total_duration=total_duration,
@@ -956,12 +951,11 @@ class AudioTagger:
             end_sec = end_sample / actual_sr
 
             console.print(
-                f"[dim]🔍 Processing chunk {idx + 1}/{len(chunk_positions)}: "
+                f"[dim]🔄 Processing chunk {idx + 1}/{len(chunk_positions)}: "
                 f"{start_sec:.2f}s - {end_sec:.2f}s[/dim]"
             )
 
             chunk_waveform = waveform[start_sample:end_sample].copy()
-
             try:
                 chunk_predictions = self._tag_waveform(chunk_waveform, actual_sr)
                 console.print(
@@ -973,12 +967,15 @@ class AudioTagger:
                 chunk_predictions = []
 
             speech_detected, chunk_speech_prob = self._chunk_has_speech(chunk_predictions)
+            
+            # Calculate gender for this chunk
+            gender_info = self._calculate_gender(chunk_predictions, chunk_index=idx)
 
             if speech_detected:
                 any_speech_detected = True
                 speech_probabilities.append(chunk_speech_prob)
                 console.print(
-                    f"[green]   🎤 Speech detected! "
+                    f"[green]   🗣️ Speech detected! "
                     f"speech_prob={chunk_speech_prob:.4f}[/green]"
                 )
             else:
@@ -1007,6 +1004,10 @@ class AudioTagger:
                 processing_time=round(chunk_elapsed, 4),
                 speech_detected=speech_detected,
                 speech_probability=round(chunk_speech_prob, 4),
+                # New gender fields
+                dominant_gender=gender_info['dominant_gender'],
+                male_prob=round(gender_info['male_prob'], 4),
+                female_prob=round(gender_info['female_prob'], 4),
             )
             chunks.append(chunk_result)
 
@@ -1023,11 +1024,12 @@ class AudioTagger:
             console.print("[dim]📊 No speech chunks for avg calculation[/dim]")
 
         overall_top = self._aggregate_chunk_predictions(all_predictions, self.top_k)
+
         total_elapsed = time.time() - overall_start
         rtf = total_elapsed / total_duration if total_duration > 0 else 0.0
 
         console.print(
-            f"[dim]⏱ Total processing: {total_elapsed:.2f}s, "
+            f"[dim]⏱️ Total processing: {total_elapsed:.2f}s, "
             f"RTF: {rtf:.3f}x[/dim]"
         )
 
@@ -1408,6 +1410,47 @@ class AudioTagger:
         
         return times.astype(np.float32), probs.astype(np.float32)
 
+    def _calculate_gender(
+        self, 
+        predictions: List[TaggingResult],
+        chunk_index: int = -1
+    ) -> dict:
+        """
+        Calculate gender probabilities based on specific class indices.
+        Returns dict with 'dominant_gender', 'male_prob', 'female_prob'.
+        """
+        label_probs = {}
+        for pred in predictions:
+            label_probs[pred['class_index']] = pred['prob']
+
+        p_male_speech = label_probs.get(GENDER_CLASS_INDICES['male_speech'], 0.0)
+        p_female_speech = label_probs.get(GENDER_CLASS_INDICES['female_speech'], 0.0)
+        p_male_singing = label_probs.get(GENDER_CLASS_INDICES['male_singing'], 0.0)
+        p_female_singing = label_probs.get(GENDER_CLASS_INDICES['female_singing'], 0.0)
+
+        male_score = max(p_male_speech, p_male_singing)
+        female_score = max(p_female_speech, p_female_singing)
+
+        console.print(
+            f"[dim]   🔍 Gender Debug (Chunk {chunk_index}): "
+            f"M_Speech={p_male_speech:.4f}, F_Speech={p_female_speech:.4f}, "
+            f"M_Sing={p_male_singing:.4f}, F_Sing={p_female_singing:.4f} | "
+            f"Scores -> M:{male_score:.4f}, F:{female_score:.4f}[/dim]"
+        )
+
+        if male_score > female_score and male_score > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+            dominant_gender = "male"
+        elif female_score > male_score and female_score > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+            dominant_gender = "female"
+        else:
+            dominant_gender = "unknown"
+
+        return {
+            "dominant_gender": dominant_gender,
+            "male_prob": male_score,
+            "female_prob": female_score
+        }
+
     def _build_segment_result(
         self,
         seg_num: int,
@@ -1421,71 +1464,41 @@ class AudioTagger:
     ) -> SpeechSegmentResult:
         """
         Build a SpeechSegmentResult with duration-aware tiered confidence.
-        
-        Confidence considers:
-            1. Average speech probability (quality of speech signal)
-            2. Speech density (consistency of speech throughout segment)
-            3. Segment duration (reliability increases with duration)
-            4. Speech chunk ratio (agreement among overlapping chunks)
-        
-        Duration adjustments:
-            < 0.5s  : Very strict thresholds (likely noise if weak)
-            0.5-1.5s: Elevated thresholds (short segments need strong signal)
-            1.5-5.0s: Standard thresholds (optimal range)
-            > 5.0s  : Relaxed thresholds (long segments are more reliable)
-        
-        Args:
-            seg_num: 0-based segment index.
-            seg_start: Segment start time in seconds.
-            seg_end: Segment end time in seconds.
-            is_speech: True for speech segments, False for non-speech.
-            times: Full probability timeline time array.
-            probs: Full probability timeline probability array.
-            chunks: All chunk results from tag_audio_chunks.
-            speech_threshold: Threshold used for speech detection.
-        
-        Returns:
-            SpeechSegmentResult with all computed statistics including confidence tier.
+        Updated to include aggregated gender information.
         """
         seg_duration = seg_end - seg_start
         segment_type = "speech" if is_speech else "non-speech"
-        
+
         console.print(
-            f"[dim]🔍 _build_segment_result: {segment_type} segment {seg_num + 1} "
+            f"[dim]📝 _build_segment_result: {segment_type} segment {seg_num + 1} "
             f"{seg_start:.3f}s–{seg_end:.3f}s (dur={seg_duration:.3f}s)[/dim]"
         )
-        
-        # Extract segment-specific timeline data
+
         mask = (times >= seg_start) & (times <= seg_end)
         seg_times = times[mask]
         seg_probs = probs[mask]
-        
-        # Calculate probability statistics
+
         avg_prob = float(np.mean(seg_probs)) if len(seg_probs) else 0.0
         max_prob = float(np.max(seg_probs)) if len(seg_probs) else 0.0
         min_prob = float(np.min(seg_probs)) if len(seg_probs) else 0.0
-        
-        # Calculate speech density (percentage of timeline cells above threshold)
         speech_density = float(np.mean(seg_probs >= speech_threshold)) if len(seg_probs) else 0.0
-        
-        # Find overlapping chunks
+
         seg_chunks = [
             c for c in chunks
             if c["start_time"] < seg_end and c["end_time"] > seg_start
         ]
-        
+
         console.print(
             f"[dim]   Timeline cells: {len(seg_times)} | "
             f"Overlapping chunks: {len(seg_chunks)} | "
             f"Duration: {seg_duration:.3f}s[/dim]"
         )
-        
-        # Aggregate predictions from overlapping chunks
+
         pred_acc: Dict[str, List[float]] = {}
         for c in seg_chunks:
             for p in c.get("predictions", []):
                 pred_acc.setdefault(p["name"], []).append(p["prob"])
-        
+
         top_preds = sorted(
             [
                 TaggingResult(
@@ -1499,20 +1512,16 @@ class AudioTagger:
             key=lambda x: x["prob"],
             reverse=True,
         )[:10]
-        
-        # Count speech chunks
+
         speech_chunk_count = sum(
             1 for c in seg_chunks
             if c.get("speech_probability", 0.0) >= speech_threshold
         )
-        
-        # Calculate speech chunk ratio
         speech_chunk_ratio = (
             round(speech_chunk_count / len(seg_chunks), 4)
             if seg_chunks else 0.0
         )
-        
-        # DURATION-AWARE TIERED CONFIDENCE SYSTEM
+
         confidence_tier, confidence_label, is_high_confidence, is_medium_confidence = \
             calculate_confidence_tier(
                 avg_prob=avg_prob,
@@ -1520,16 +1529,44 @@ class AudioTagger:
                 duration=seg_duration,
                 speech_chunk_ratio=speech_chunk_ratio,
             )
-        
-        # Get duration-specific notes
+
         duration_note = self._get_duration_confidence_note(
             duration=seg_duration,
             confidence_tier=confidence_tier,
         )
-        
         if duration_note:
-            console.print(f"[dim]   📝 Duration note: {duration_note}[/dim]")
+            console.print(f"[dim]   💡 Duration note: {duration_note}[/dim]")
+
+        # --- Gender Aggregation Logic ---
+        male_probs = [c.get('male_prob', 0.0) for c in seg_chunks]
+        female_probs = [c.get('female_prob', 0.0) for c in seg_chunks]
         
+        avg_male_prob = float(np.mean(male_probs)) if male_probs else 0.0
+        avg_female_prob = float(np.mean(female_probs)) if female_probs else 0.0
+        
+        console.print(
+            f"[dim]   👥 Gender Aggregation: Avg Male Prob={avg_male_prob:.4f}, "
+            f"Avg Female Prob={avg_female_prob:.4f}[/dim]"
+        )
+
+        # Determine segment dominant gender
+        if avg_male_prob > avg_female_prob and avg_male_prob > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+            segment_dominant_gender = "male"
+        elif avg_female_prob > avg_male_prob and avg_female_prob > DEFAULT_GENDER_CONFIDENCE_THRESHOLD:
+            segment_dominant_gender = "female"
+        else:
+            segment_dominant_gender = "unknown"
+            
+        # Simple confidence metric for gender
+        gender_diff = abs(avg_male_prob - avg_female_prob)
+        if gender_diff > 0.3:
+            gender_confidence = "high"
+        elif gender_diff > 0.1:
+            gender_confidence = "medium"
+        else:
+            gender_confidence = "low"
+        # ----------------------------------
+
         result: SpeechSegmentResult = {
             "segment_index": seg_num,
             "segment_type": segment_type,
@@ -1548,7 +1585,7 @@ class AudioTagger:
             "is_medium_confidence": is_medium_confidence,
             "confidence_tier": confidence_tier,
             "confidence_label": confidence_label,
-            "confidence_duration_note": duration_note,  # NEW: explains duration's impact
+            "confidence_duration_note": duration_note,
             "is_dense_speech": speech_density >= 0.8,
             "top_prediction": top_preds[0]["name"] if top_preds else "Unknown",
             "top_prediction_prob": top_preds[0]["prob"] if top_preds else 0.0,
@@ -1558,8 +1595,12 @@ class AudioTagger:
                 times=[round(float(t), 4) for t in seg_times],
                 probs=[round(float(p), 4) for p in seg_probs],
             ),
+            # New Gender Fields
+            "dominant_gender": segment_dominant_gender,
+            "male_probability": round(avg_male_prob, 4),
+            "female_probability": round(avg_female_prob, 4),
+            "gender_confidence": gender_confidence,
         }
-        
         return result
 
     def _get_duration_confidence_note(

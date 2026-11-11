@@ -24,7 +24,7 @@ DEFAULT_LABELS_PATH: Path = (
     / "sherpa-onnx-zipformer-audio-tagging-2024-04-09/class_labels_indices.csv"
 )
 
-DEFAULT_TOP_K: int = 5
+DEFAULT_TOP_K: int = 50
 DEFAULT_NUM_THREADS: int = 1
 DEFAULT_PROVIDER: str = "cpu"
 
@@ -32,9 +32,9 @@ DEFAULT_MIN_SPEECH_PROB_THRESHOLD: float = 0.1
 DEFAULT_SPEECH_PROB_THRESHOLD: float = 0.3
 DEFAULT_SPEECH_TOP_N: int = 3
 
-DEFAULT_CHUNK_DURATION: float = 0.5
+DEFAULT_CHUNK_DURATION: float = 1.0
 DEFAULT_CHUNK_OVERLAP: float = 0.25
-DEFAULT_MIN_CHUNK_DURATION: float = 0.5  # Minimum chunk size in seconds
+DEFAULT_MIN_CHUNK_DURATION: float = 1.0  # Minimum chunk size in seconds
 
 # Speech segment constants
 DEFAULT_MIN_SILENCE_DURATION_SEC: float = 1.5
@@ -94,3 +94,14 @@ SPEECH_CLASS_NAMES: list[str] = [
     "Conversation",
     "Narration, monologue",
 ]
+
+# Speech speaker gender
+GENDER_CLASS_INDICES = {
+    "male_speech": 1,      # "Male speech, man speaking"
+    "female_speech": 2,    # "Female speech, woman speaking"
+    "male_singing": 32,    # "Male singing"
+    "female_singing": 33,  # "Female singing"
+}
+
+# Lowered to 0.00001 to detect gender even in mixed audio with music
+DEFAULT_GENDER_CONFIDENCE_THRESHOLD: float = 0.00001

@@ -4,16 +4,15 @@ from typing import List, Optional, TypedDict, Union
 
 class TaggingResult(TypedDict):
     """Typed dictionary for audio tagging results."""
-
     index: int
     name: str
     class_index: int
     prob: float
-
+    # Optional: Add gender if known for this specific prediction
+    gender: Optional[str] 
 
 class ChunkTaggingResult(TypedDict):
     """Per-chunk tagging result with timing metadata."""
-
     chunk_index: int
     start_time: float
     end_time: float
@@ -21,7 +20,10 @@ class ChunkTaggingResult(TypedDict):
     predictions: List[TaggingResult]
     processing_time: float
     speech_detected: bool
-    # REMOVED: max_speech_probability: float
+    # Add gender info for the chunk
+    dominant_gender: Optional[str]
+    male_prob: float
+    female_prob: float
 
 
 class AudioChunksTaggingSummary(TypedDict):
@@ -83,6 +85,7 @@ class SpeechSegmentTimeline(TypedDict):
     probs: List[float]
 
 
+
 class SpeechSegmentResult(TypedDict):
     """A single detected speech or non-speech segment."""
 
@@ -103,13 +106,19 @@ class SpeechSegmentResult(TypedDict):
     is_medium_confidence: bool
     confidence_tier: str
     confidence_label: str
-    confidence_duration_note: str  # NEW: explains duration's impact
+    confidence_duration_note: str
     is_dense_speech: bool
     top_prediction: str
     top_prediction_prob: float
     top_predictions: List[TaggingResult]
     overlapping_chunks: List[ChunkTaggingResult]
     timeline: SpeechSegmentTimeline
+    
+    # --- GENDER ---
+    dominant_gender: str
+    male_probability: float
+    female_probability: float
+    gender_confidence: str  # e.g., "high", "medium", "low", "unknown"
 
 
 class AudioSegmentsResult(TypedDict):

@@ -84,7 +84,9 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Analyze carefully these overlaps and how to properly handle in audio tagger?
+Review python_scripts\audio\audio_tagger.py on its gender info logic.
+Then see how to include gender data in live_subtitles_server2_with_en\services\audio_tagger.py workflow.
+Show updated parts.
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """
