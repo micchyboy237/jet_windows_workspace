@@ -62,9 +62,9 @@ include_files = [
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\audio_tagger.py",
     # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\servers\live_subtitles\live_subtitles_server2_with_en\services\main\_main_audio_tagger.py",
     r"",
-    # r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp3.py",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\generated\temp3\segments.json",
-    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\generated\temp3\summary.json",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\tag_audio.py",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\generated\tag_audio\segments.json",
+    r"C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\audio\generated\tag_audio\summary.json",
     r"",
 ]
 
