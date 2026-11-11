@@ -84,59 +84,7 @@ COMPRESSION_MODEL = "gpt-4o"
 TOKEN_BUDGET = 8000
 
 DEFAULT_QUERY_MESSAGE = r"""
-Evaluate
 
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace> python C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\temp3.py "C:\Users\druiv\.cache\files\audio\sub_audio\start_5s_recording_1_speaker.wav"
-Loading audio from: C:\Users\druiv\.cache\files\audio\sub_audio\start_5s_recording_1_speaker.wav
-Using model: C:\Users\druiv\.cache\pretrained_models\sherpa-onnx\sherpa-onnx-zipformer-audio-tagging-2024-04-09\model.int8.onnx
-Window size: 1.0s, Hop size: 0.5s
-Audio info: sample_rate=16000Hz, duration=5.00s
-Loaded 527 class labels
-
-Initializing audio tagger...
-
-Processing audio with sliding window segmentation...
-Created 9 windows (size=1.0s, hop=0.5s)
-Processed 9/9 windows...
-
-Total raw segments (windows): 9
-
-================================================================================
-SEGMENTATION SUMMARY
-================================================================================
-Total windows: 9
-Speech windows: 8
-
-Gender distribution in speech windows:
-  Male:   4 windows
-  Female: 0 windows
-
-First 10 windows:
---------------------------------------------------------------------------------
-  [  0.00s -   1.00s] Music
-  [  0.50s -   1.50s] Speech                         [unknown]
-  [  1.00s -   2.00s] Speech                         [unknown]
-  [  1.50s -   2.50s] Speech                         [male]
-  [  2.00s -   3.00s] Speech                         [male]
-  [  2.50s -   3.50s] Music                          [male]
-  [  3.00s -   4.00s] Speech                         [male]
-  [  3.50s -   4.50s] Music                          [unknown]
-  [  4.00s -   5.00s] Speech                         [unknown]
-================================================================================
-
-================================================================================
-SAVING RESULTS
-================================================================================
-Detailed segments saved to: C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\generated\temp3\segments.json
-Summary saved to: C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\generated\temp3\summary.json
-Timeline chart saved to: C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\generated\temp3\timeline_chart.png
-
-================================================================================
-ANALYSIS COMPLETE
-================================================================================
-Output directory: C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace\python_scripts\temp\generated\temp3
-================================================================================
-(jet_venv) PS C:\Users\druiv\Desktop\Jet_Files\Jet_Windows_Workspace>
 """.strip()
 
 DEFAULT_INSTRUCTIONS_MESSAGE = """

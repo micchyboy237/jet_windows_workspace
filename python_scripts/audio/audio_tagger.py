@@ -88,12 +88,6 @@ def get_args():
         default=0.5,
         help="Hop size in seconds between windows (default: 0.5)",
     )
-    parser.add_argument(
-        "--top-k",
-        type=int,
-        default=50,
-        help="Number of top predictions per segment (default: 50)",
-    )
     return parser.parse_args()
 
 
@@ -531,7 +525,7 @@ def save_speech_segments(audio: np.ndarray, sample_rate: int, segments: List[Seg
         print("No speech segments detected to save.")
         return []
 
-    # 2. Merge consecutive speech segments (regardless of gender)
+    # 2. Merge consecutive segments with same gender
     merged_groups = []
     current_group = [speech_segs[0]]
     
@@ -539,18 +533,18 @@ def save_speech_segments(audio: np.ndarray, sample_rate: int, segments: List[Seg
         prev_seg = current_group[-1]
         curr_seg = speech_segs[i]
         
-        # Check if consecutive (overlapping or adjacent)
-        # We no longer check same_gender here
+        # Check if consecutive (overlapping or adjacent) and same gender
         is_consecutive = curr_seg.start_time <= prev_seg.end_time
+        same_gender = curr_seg.dominant_gender == prev_seg.dominant_gender
         
-        if is_consecutive:
+        if is_consecutive and same_gender:
             current_group.append(curr_seg)
         else:
             merged_groups.append(current_group)
             current_group = [curr_seg]
     merged_groups.append(current_group)
 
-    # 3. Process each group to resolve overlaps, determine majority gender, and save
+    # 3. Process each group to resolve overlaps and save
     print(f"\nSaving {len(merged_groups)} merged speech segments...")
     
     merged_segment_info = []
@@ -559,25 +553,8 @@ def save_speech_segments(audio: np.ndarray, sample_rate: int, segments: List[Seg
         # Resolve overlap: Start is the start of the first window, End is the end of the last
         start_time = group[0].start_time
         end_time = group[-1].end_time
+        dominant_gender = group[0].dominant_gender
         
-        # Determine Majority Gender
-        gender_counts = {'male': 0, 'female': 0, 'unknown': 0}
-        for seg in group:
-            g = seg.dominant_gender
-            if g in gender_counts:
-                gender_counts[g] += 1
-        
-        # Find max count
-        max_count = max(gender_counts.values())
-        
-        # Resolve ties: Priority Male > Female > Unknown if counts are equal
-        if gender_counts['male'] == max_count:
-            dominant_gender = 'male'
-        elif gender_counts['female'] == max_count:
-            dominant_gender = 'female'
-        else:
-            dominant_gender = 'unknown'
-            
         # Convert to samples
         start_sample = int(start_time * sample_rate)
         end_sample = int(end_time * sample_rate)
@@ -599,7 +576,7 @@ def save_speech_segments(audio: np.ndarray, sample_rate: int, segments: List[Seg
         # Save as WAV
         sf.write(str(filepath), clip_audio, sample_rate)
         
-        print(f"  Saved: {filename} ({len(clip_audio)/sample_rate:.2f}s) [Majority: {dominant_gender}]")
+        print(f"  Saved: {filename} ({len(clip_audio)/sample_rate:.2f}s)")
         
         # Store info for timeline/summary
         merged_segment_info.append({
@@ -627,7 +604,7 @@ def main():
     print(f"Window size: {args.window_size}s, Hop size: {args.hop_size}s")
 
     # Initialize Engine (encapsulates model loading, label loading, etc.)
-    engine = AudioTaggerEngine(model_dir, top_k=args.top_k)
+    engine = AudioTaggerEngine(model_dir, top_k=50)
     
     # Process Audio (encapsulates reading, windowing, inference)
     segments, audio_info = engine.process_audio_with_segmentation(
