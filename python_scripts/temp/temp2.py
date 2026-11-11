@@ -327,6 +327,37 @@ def save_summary_json(segments: List[SegmentInfo], audio_info: Dict[str, Any],
         dominant_overall = "none"
         male_count = female_count = unknown_count = 0
     
+    # Build timeline summary with detailed gender labels
+    timeline_summary = []
+    for seg in segments[:20]:
+        entry = {
+            "start": round(seg.start_time, 2),
+            "end": round(seg.end_time, 2),
+            "type": "speech" if seg.speech_detected else "non-speech",
+            "gender": seg.dominant_gender if seg.speech_detected else None,
+        }
+        
+        # Add gender_labels dict only if speech is detected
+        if seg.speech_detected:
+            gender_labels = {}
+            # Check specific indices: 1 (Male Speech), 2 (Female Speech), 32 (Male Singing), 33 (Female Singing)
+            for idx in [1, 2, 32, 33]:
+                prob = seg.all_probs.get(idx, 0.0)
+                # Only include if present in top-k (exists in all_probs) and > 0
+                if prob > 0:
+                    # Map index to a readable key
+                    if idx == 1: key = "male_speech"
+                    elif idx == 2: key = "female_speech"
+                    elif idx == 32: key = "male_singing"
+                    elif idx == 33: key = "female_singing"
+                    
+                    gender_labels[key] = round(prob, 6)
+            
+            if gender_labels:
+                entry["gender_labels"] = gender_labels
+                
+        timeline_summary.append(entry)
+    
     summary = {
         "audio_info": {
             "file": audio_info['file'],
@@ -346,15 +377,7 @@ def save_summary_json(segments: List[SegmentInfo], audio_info: Dict[str, Any],
             "female_windows": female_count,
             "unknown_gender_windows": unknown_count,
         },
-        "timeline_summary": [
-            {
-                "start": round(seg.start_time, 2),
-                "end": round(seg.end_time, 2),
-                "type": "speech" if seg.speech_detected else "non-speech",
-                "gender": seg.dominant_gender if seg.speech_detected else None,
-            }
-            for seg in segments[:20]
-        ]
+        "timeline_summary": timeline_summary
     }
     
     with open(output_path, 'w', encoding='utf-8') as f:
