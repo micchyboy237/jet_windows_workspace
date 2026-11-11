@@ -80,32 +80,32 @@ def get_args():
         "--window-size",
         type=float,
         default=1.0,
-        help="Window size in seconds for each segment (default: 1.0)",
+        help="Window size in seconds for each segment",
     )
     parser.add_argument(
         "--hop-size",
         type=float,
-        default=0.5,
-        help="Hop size in seconds between windows (default: 0.5)",
+        default=0.25,
+        help="Hop size in seconds between windows",
     )
     parser.add_argument(
         "--top-k",
         type=int,
         default=50,  # Increased default to ensure gender labels are captured
-        help="Number of top predictions per segment (default: 50)",
+        help="Number of top predictions per segment",
     )
     parser.add_argument(
         "--num-threads",
         type=int,
         default=1,
-        help="Number of threads for inference (default: 1)",
+        help="Number of threads for inference",
     )
     parser.add_argument(
         "--provider",
         type=str,
         default="cpu",
         choices=["cpu", "cuda"],
-        help="Execution provider: cpu or cuda (default: cpu)",
+        help="Execution provider: cpu or cuda",
     )
     return parser.parse_args()
 
