@@ -24,7 +24,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
 import sherpa_onnx
-import wave
 
 
 OUTPUT_DIR = Path(__file__).parent / "generated" / Path(__file__).stem
@@ -92,21 +91,8 @@ def get_args():
     parser.add_argument(
         "--top-k",
         type=int,
-        default=50,  # Increased default to ensure gender labels are captured
+        default=50,
         help="Number of top predictions per segment (default: 50)",
-    )
-    parser.add_argument(
-        "--num-threads",
-        type=int,
-        default=1,
-        help="Number of threads for inference (default: 1)",
-    )
-    parser.add_argument(
-        "--provider",
-        type=str,
-        default="cpu",
-        choices=["cpu", "cuda"],
-        help="Execution provider: cpu or cuda (default: cpu)",
     )
     return parser.parse_args()
 
@@ -128,7 +114,7 @@ def load_class_labels(labels_path: Path) -> Dict[int, str]:
     return labels
 
 
-def create_windows(audio: np.ndarray, sample_rate: int, 
+def create_windows(audio_length: int, sample_rate: int, 
                    window_size: float, hop_size: float) -> List[Tuple[int, int]]:
     """Create sliding windows over audio signal."""
     window_samples = int(window_size * sample_rate)
@@ -137,14 +123,14 @@ def create_windows(audio: np.ndarray, sample_rate: int,
     windows = []
     start = 0
     
-    while start + window_samples <= len(audio):
+    while start + window_samples <= audio_length:
         end = start + window_samples
         windows.append((start, end))
         start += hop_samples
     
     # Handle last partial window if needed
-    if len(audio) - start > window_samples * 0.5:
-        windows.append((start, len(audio)))
+    if audio_length - start > window_samples * 0.5:
+        windows.append((start, audio_length))
     
     return windows
 
@@ -168,7 +154,6 @@ def analyze_segment(predictions: List, all_labels: Dict[int, str]) -> Dict[str, 
     female_score = max(p_female_speech, p_female_singing)
     
     # 3. Determine dominant gender based on relative strength
-    # We use a small epsilon to avoid 'unknown' if one is clearly higher than the other
     if male_score > female_score and male_score > 1e-6:
         dominant_gender = "male"
     elif female_score > male_score and female_score > 1e-6:
@@ -180,7 +165,7 @@ def analyze_segment(predictions: List, all_labels: Dict[int, str]) -> Dict[str, 
     speech_prob = label_probs.get(0, 0.0)
     speech_detected = speech_prob > 0.3
     
-    # 5. Prepare top predictions, ensuring gender labels are included if relevant
+    # 5. Prepare top predictions
     top_preds = []
     for event in predictions:
         idx = int(event.index)
@@ -210,61 +195,120 @@ def analyze_segment(predictions: List, all_labels: Dict[int, str]) -> Dict[str, 
     }
 
 
-def process_audio_with_segmentation(
-    audio: np.ndarray,
-    sample_rate: int,
-    tagger: sherpa_onnx.AudioTagging,
-    window_size: float,
-    hop_size: float,
-    top_k: int,
-    all_labels: Dict[int, str]
-) -> List[SegmentInfo]:
-    """Process audio with sliding window segmentation."""
+class AudioTaggerEngine:
+    """Encapsulates model loading, configuration, and inference logic."""
     
-    windows = create_windows(audio, sample_rate, window_size, hop_size)
-    print(f"Created {len(windows)} windows (size={window_size}s, hop={hop_size}s)")
-    
-    segments = []
-    
-    for i, (start_idx, end_idx) in enumerate(windows):
-        window_audio = audio[start_idx:end_idx]
-        if len(window_audio) < sample_rate * 0.1:
-            continue
+    def __init__(self, model_dir: Path, top_k: int = 50):
+        self.model_dir = model_dir
+        self.top_k = top_k
         
-        stream = tagger.create_stream()
-        stream.accept_waveform(sample_rate, window_audio)
-        predictions = tagger.compute(stream, top_k)
+        # Setup paths
+        self.model_path = model_dir / "model.int8.onnx"
+        if not self.model_path.exists():
+            self.model_path = model_dir / "model.onnx"
         
-        analysis = analyze_segment(predictions, all_labels)
+        self.labels_path = model_dir / "class_labels_indices.csv"
         
-        start_time = start_idx / sample_rate
-        end_time = end_idx / sample_rate
-        duration = end_time - start_time
+        if not self.model_path.exists():
+            raise FileNotFoundError(f"Model file not found: {self.model_path}")
+        if not self.labels_path.exists():
+            raise FileNotFoundError(f"Labels file not found: {self.labels_path}")
+            
+        # Load labels
+        self.all_labels = load_class_labels(self.labels_path)
+        print(f"Loaded {len(self.all_labels)} class labels")
         
-        segment = SegmentInfo(
-            segment_id=i,
-            start_time=start_time,
-            end_time=end_time,
-            duration=duration,
-            top_predictions=analysis["top_predictions"],
-            speech_detected=analysis["speech_detected"],
-            male_prob=analysis["male_prob"],
-            female_prob=analysis["female_prob"],
-            dominant_gender=analysis["dominant_gender"],
-            all_probs=analysis["all_probs"]
+        # Initialize Tagger
+        config = sherpa_onnx.AudioTaggingConfig(
+            model=sherpa_onnx.AudioTaggingModelConfig(
+                zipformer=sherpa_onnx.OfflineZipformerAudioTaggingModelConfig(
+                    model=str(self.model_path),
+                ),
+                num_threads=1,
+                debug=False,
+                provider="cpu",
+            ),
+            labels=str(self.labels_path),
+            top_k=self.top_k,
         )
         
-        segments.append(segment)
+        self.tagger = sherpa_onnx.AudioTagging(config)
+        print("Audio tagger initialized.")
+
+    def process_audio_with_segmentation(
+        self,
+        audio_path: str,
+        window_size: float = 1.0,
+        hop_size: float = 0.5,
+    ) -> Tuple[List[SegmentInfo], Dict[str, Any]]:
+        """
+        Process audio file with sliding window segmentation.
+        Returns segments and audio info.
+        """
+        path = Path(audio_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Audio file not found: {path}")
+            
+        # Read audio
+        audio, sample_rate = sf.read(str(path), dtype="float32")
+        if len(audio.shape) > 1:
+            audio = audio[:, 0]
+            
+        duration = len(audio) / sample_rate
+        audio_info = {
+            'file': str(path),
+            'sample_rate': sample_rate,
+            'duration': duration,
+            'num_samples': len(audio),
+        }
         
-        if (i + 1) % 10 == 0 or i == len(windows) - 1:
-            print(f"Processed {i + 1}/{len(windows)} windows...")
-    
-    return segments
+        print(f"Audio info: sample_rate={sample_rate}Hz, duration={duration:.2f}s")
+        
+        # Create windows
+        windows = create_windows(len(audio), sample_rate, window_size, hop_size)
+        print(f"Created {len(windows)} windows (size={window_size}s, hop={hop_size}s)")
+        
+        segments = []
+        
+        for i, (start_idx, end_idx) in enumerate(windows):
+            window_audio = audio[start_idx:end_idx]
+            if len(window_audio) < sample_rate * 0.1:
+                continue
+            
+            stream = self.tagger.create_stream()
+            stream.accept_waveform(sample_rate, window_audio)
+            predictions = self.tagger.compute(stream, self.top_k)
+            
+            analysis = analyze_segment(predictions, self.all_labels)
+            
+            start_time = start_idx / sample_rate
+            end_time = end_idx / sample_rate
+            duration_seg = end_time - start_time
+            
+            segment = SegmentInfo(
+                segment_id=i,
+                start_time=start_time,
+                end_time=end_time,
+                duration=duration_seg,
+                top_predictions=analysis["top_predictions"],
+                speech_detected=analysis["speech_detected"],
+                male_prob=analysis["male_prob"],
+                female_prob=analysis["female_prob"],
+                dominant_gender=analysis["dominant_gender"],
+                all_probs=analysis["all_probs"]
+            )
+            
+            segments.append(segment)
+            
+            if (i + 1) % 10 == 0 or i == len(windows) - 1:
+                print(f"Processed {i + 1}/{len(windows)} windows...")
+                
+        return segments, audio_info
 
 
 def save_segments_json(segments: List[SegmentInfo], all_labels: Dict[int, str], 
                        audio_info: Dict[str, Any], output_path: Path):
-    """Save detailed segments to JSON."""
+    """Save detailed segments to JSON. Optimized to include top 10 + all gender labels."""
     
     segments_data = {
         "metadata": {
@@ -274,12 +318,28 @@ def save_segments_json(segments: List[SegmentInfo], all_labels: Dict[int, str],
             "num_samples": audio_info['num_samples'],
             "analysis_type": "sliding_window_segmentation_raw",
             "total_segments": len(segments),
-            "note": "Each segment represents a single sliding window. Gender is derived from indices 1, 2, 32, 33."
+            "note": "Each segment represents a single sliding window. Predictions limited to top 10 + gender labels."
         },
         "segments": []
     }
     
     for seg in segments:
+        # Filter predictions: Keep gender labels and top non-gender labels
+        gender_preds = []
+        other_preds = []
+        
+        for pred in seg.top_predictions:
+            if pred['is_gender_specific'] and pred['probability'] > 0:
+                gender_preds.append(pred)
+            else:
+                other_preds.append(pred)
+                
+        # Sort others by probability descending
+        other_preds.sort(key=lambda x: x['probability'], reverse=True)
+        
+        # Combine: Gender labels first, then top others up to 10 total
+        combined_preds = gender_preds + other_preds[:max(0, 10 - len(gender_preds))]
+        
         segment_dict = {
             "segment_id": seg.segment_id,
             "start_time": round(seg.start_time, 3),
@@ -291,7 +351,7 @@ def save_segments_json(segments: List[SegmentInfo], all_labels: Dict[int, str],
                 "male_probability": round(seg.male_prob, 6),
                 "female_probability": round(seg.female_prob, 6),
             },
-            "top_predictions": seg.top_predictions,
+            "top_predictions": combined_preds,
         }
         segments_data["segments"].append(segment_dict)
     
@@ -329,10 +389,7 @@ def save_summary_json(segments: List[SegmentInfo], merged_speech_segments: List[
         male_count = female_count = unknown_count = 0
     
     # Build timeline summary using MERGED speech segments
-    # We combine merged speech segments with non-speech gaps from raw segments for a complete picture
     timeline_summary = []
-    
-    # Add merged speech segments
     for seg in merged_speech_segments:
         entry = {
             "start": round(seg['start_time'], 2),
@@ -341,14 +398,6 @@ def save_summary_json(segments: List[SegmentInfo], merged_speech_segments: List[
             "gender": seg['dominant_gender'],
             "duration": round(seg['end_time'] - seg['start_time'], 2)
         }
-        
-        # Add gender_labels dict
-        gender_labels = {}
-        # Check specific indices: 1 (Male Speech), 2 (Female Speech), 32 (Male Singing), 33 (Female Singing)
-        # Note: For merged segments, we might not have individual probs, so we skip or use avg if available.
-        # For simplicity in summary, we just list the dominant gender.
-        # If you want detailed probs for merged segments, you'd need to aggregate them in save_speech_segments.
-        
         timeline_summary.append(entry)
         
     # Sort timeline by start time
@@ -381,6 +430,88 @@ def save_summary_json(segments: List[SegmentInfo], merged_speech_segments: List[
         json.dump(summary, f, indent=2, ensure_ascii=False)
     
     print(f"Summary saved to: {output_path}")
+
+
+def create_timeline_chart(segments: List[SegmentInfo], merged_speech_segments: List[Dict], 
+                          audio_info: Dict[str, Any], output_path: Path):
+    """Create comprehensive timeline visualization using merged speech segments."""
+    
+    fig, axes = plt.subplots(3, 1, figsize=(16, 10), gridspec_kw={'height_ratios': [3, 1, 1]})
+    fig.suptitle('Audio Tagging Timeline Analysis (Merged Speech)', fontsize=14, fontweight='bold')
+    
+    total_duration = audio_info['duration']
+    
+    # Plot 1: Main timeline with merged speech segments
+    ax1 = axes[0]
+    colors_map = {
+        'male': '#4A90E2',
+        'female': '#E94B99',
+        'unknown': '#95A5A6',
+        'non-speech': '#BDC3C7'
+    }
+    
+    # Draw merged speech segments
+    for seg in merged_speech_segments:
+        color = colors_map.get(seg['dominant_gender'], colors_map['unknown'])
+        duration = seg['end_time'] - seg['start_time']
+        ax1.barh(y=0, width=duration, left=seg['start_time'], height=0.6, 
+                color=color, alpha=0.8, edgecolor='white', linewidth=0.5)
+    
+    ax1.set_xlim(0, total_duration)
+    ax1.set_ylim(-0.5, 0.5)
+    ax1.set_xlabel('Time (seconds)', fontsize=11)
+    ax1.set_title('Temporal Segmentation Timeline (Merged Speech Segments)', fontsize=12, fontweight='bold')
+    ax1.set_yticks([])
+    ax1.grid(axis='x', alpha=0.3)
+    
+    # Add time markers
+    for t in range(0, int(total_duration) + 1, 2): 
+        ax1.axvline(x=t, color='black', alpha=0.1, linewidth=0.5)
+        ax1.text(t, -0.4, f'{t}s', ha='center', va='top', fontsize=8)
+    
+    legend_elements = [
+        mpatches.Patch(color=colors_map['male'], label='Male Speech'),
+        mpatches.Patch(color=colors_map['female'], label='Female Speech'),
+        mpatches.Patch(color=colors_map['unknown'], label='Unknown Gender'),
+        mpatches.Patch(color=colors_map['non-speech'], label='Non-Speech / Silence'),
+    ]
+    ax1.legend(handles=legend_elements, loc='upper right', fontsize=9)
+    
+    # Plot 2: Speech probability over time (using raw segments for granularity)
+    ax2 = axes[1]
+    times = [(seg.start_time + seg.end_time) / 2 for seg in segments]
+    speech_probs = [seg.top_predictions[0]['probability'] if seg.speech_detected and seg.top_predictions else 0 
+                    for seg in segments]
+    
+    ax2.plot(times, speech_probs, 'b-', linewidth=1, marker='.', markersize=4, alpha=0.7)
+    ax2.fill_between(times, 0, speech_probs, alpha=0.2)
+    ax2.set_xlim(0, total_duration)
+    ax2.set_ylim(0, 1.1)
+    ax2.set_ylabel('Speech Probability', fontsize=11)
+    ax2.set_title('Speech Detection Probability (Raw Windows)', fontsize=12, fontweight='bold')
+    ax2.grid(True, alpha=0.3)
+    
+    # Plot 3: Gender probabilities over time (using raw segments for granularity)
+    ax3 = axes[2]
+    male_probs = [seg.male_prob for seg in segments]
+    female_probs = [seg.female_prob for seg in segments]
+    
+    ax3.plot(times, male_probs, 'b-', linewidth=1, label='Male Score', alpha=0.7)
+    ax3.plot(times, female_probs, 'r-', linewidth=1, label='Female Score', alpha=0.7)
+    ax3.fill_between(times, 0, male_probs, alpha=0.1, color='blue')
+    ax3.fill_between(times, 0, female_probs, alpha=0.1, color='red')
+    
+    ax3.set_xlim(0, total_duration)
+    ax3.set_xlabel('Time (seconds)', fontsize=11)
+    ax3.set_ylabel('Probability Score', fontsize=11)
+    ax3.set_title('Gender-Specific Scores (Raw Windows)', fontsize=12, fontweight='bold')
+    ax3.legend(loc='upper right', fontsize=9)
+    ax3.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Timeline chart saved to: {output_path}")
 
 
 def save_speech_segments(audio: np.ndarray, sample_rate: int, segments: List[SegmentInfo], 
@@ -445,7 +576,6 @@ def save_speech_segments(audio: np.ndarray, sample_rate: int, segments: List[Seg
         clip_audio = audio[start_sample:end_sample]
         
         # Generate filename
-        # Format: speech_START_END_GENDER.wav
         filename = f"speech_{start_time:.1f}_{end_time:.1f}_{dominant_gender}.wav"
         filepath = speech_dir / filename
         
@@ -465,91 +595,6 @@ def save_speech_segments(audio: np.ndarray, sample_rate: int, segments: List[Seg
     return merged_segment_info
 
 
-def create_timeline_chart(segments: List[SegmentInfo], merged_speech_segments: List[Dict], 
-                          audio_info: Dict[str, Any], output_path: Path):
-    """Create comprehensive timeline visualization using merged speech segments."""
-    
-    fig, axes = plt.subplots(3, 1, figsize=(16, 10), gridspec_kw={'height_ratios': [3, 1, 1]})
-    fig.suptitle('Audio Tagging Timeline Analysis (Merged Speech)', fontsize=14, fontweight='bold')
-    
-    total_duration = audio_info['duration']
-    
-    # Plot 1: Main timeline with merged speech segments
-    ax1 = axes[0]
-    colors_map = {
-        'male': '#4A90E2',
-        'female': '#E94B99',
-        'unknown': '#95A5A6',
-        'non-speech': '#BDC3C7'
-    }
-    
-    # Draw non-speech background (optional, or just leave white)
-    # ax1.barh(y=0, width=total_duration, left=0, height=0.6, color=colors_map['non-speech'], alpha=0.1)
-    
-    # Draw merged speech segments
-    for seg in merged_speech_segments:
-        color = colors_map.get(seg['dominant_gender'], colors_map['unknown'])
-        duration = seg['end_time'] - seg['start_time']
-        ax1.barh(y=0, width=duration, left=seg['start_time'], height=0.6, 
-                color=color, alpha=0.8, edgecolor='white', linewidth=0.5)
-    
-    ax1.set_xlim(0, total_duration)
-    ax1.set_ylim(-0.5, 0.5)
-    ax1.set_xlabel('Time (seconds)', fontsize=11)
-    ax1.set_title('Temporal Segmentation Timeline (Merged Speech Segments)', fontsize=12, fontweight='bold')
-    ax1.set_yticks([])
-    ax1.grid(axis='x', alpha=0.3)
-    
-    # Add time markers
-    for t in range(0, int(total_duration) + 1, 2): # Every 2 seconds to reduce clutter
-        ax1.axvline(x=t, color='black', alpha=0.1, linewidth=0.5)
-        ax1.text(t, -0.4, f'{t}s', ha='center', va='top', fontsize=8)
-    
-    legend_elements = [
-        mpatches.Patch(color=colors_map['male'], label='Male Speech'),
-        mpatches.Patch(color=colors_map['female'], label='Female Speech'),
-        mpatches.Patch(color=colors_map['unknown'], label='Unknown Gender'),
-        mpatches.Patch(color=colors_map['non-speech'], label='Non-Speech / Silence'),
-    ]
-    ax1.legend(handles=legend_elements, loc='upper right', fontsize=9)
-    
-    # Plot 2: Speech probability over time (using raw segments for granularity)
-    ax2 = axes[1]
-    times = [(seg.start_time + seg.end_time) / 2 for seg in segments]
-    speech_probs = [seg.top_predictions[0]['probability'] if seg.speech_detected and seg.top_predictions else 0 
-                    for seg in segments]
-    
-    ax2.plot(times, speech_probs, 'b-', linewidth=1, marker='.', markersize=4, alpha=0.7)
-    ax2.fill_between(times, 0, speech_probs, alpha=0.2)
-    ax2.set_xlim(0, total_duration)
-    ax2.set_ylim(0, 1.1)
-    ax2.set_ylabel('Speech Probability', fontsize=11)
-    ax2.set_title('Speech Detection Probability (Raw Windows)', fontsize=12, fontweight='bold')
-    ax2.grid(True, alpha=0.3)
-    
-    # Plot 3: Gender probabilities over time (using raw segments for granularity)
-    ax3 = axes[2]
-    male_probs = [seg.male_prob for seg in segments]
-    female_probs = [seg.female_prob for seg in segments]
-    
-    ax3.plot(times, male_probs, 'b-', linewidth=1, label='Male Score', alpha=0.7)
-    ax3.plot(times, female_probs, 'r-', linewidth=1, label='Female Score', alpha=0.7)
-    ax3.fill_between(times, 0, male_probs, alpha=0.1, color='blue')
-    ax3.fill_between(times, 0, female_probs, alpha=0.1, color='red')
-    
-    ax3.set_xlim(0, total_duration)
-    ax3.set_xlabel('Time (seconds)', fontsize=11)
-    ax3.set_ylabel('Probability Score', fontsize=11)
-    ax3.set_title('Gender-Specific Scores (Raw Windows)', fontsize=12, fontweight='bold')
-    ax3.legend(loc='upper right', fontsize=9)
-    ax3.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"Timeline chart saved to: {output_path}")
-
-
 def main():
     """Main function to perform audio tagging with temporal segmentation."""
     args = get_args()
@@ -559,59 +604,19 @@ def main():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
     model_dir = Path(args.model_dir)
-    model_path = model_dir / "model.int8.onnx"
-    if not model_path.exists():
-        model_path = model_dir / "model.onnx"
     
-    labels_path = model_dir / "class_labels_indices.csv"
-
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model file not found: {model_path}")
-    if not labels_path.exists():
-        raise FileNotFoundError(f"Labels file not found: {labels_path}")
-
     print(f"Loading audio from: {audio_path}")
-    print(f"Using model: {model_path}")
+    print(f"Using model dir: {model_dir}")
     print(f"Window size: {args.window_size}s, Hop size: {args.hop_size}s")
 
-    audio, sample_rate = sf.read(str(audio_path), dtype="float32")
-    if len(audio.shape) > 1:
-        audio = audio[:, 0]
+    # Initialize Engine (encapsulates model loading, label loading, etc.)
+    engine = AudioTaggerEngine(model_dir, top_k=args.top_k)
     
-    duration = len(audio) / sample_rate
-    audio_info = {
-        'file': str(audio_path),
-        'sample_rate': sample_rate,
-        'duration': duration,
-        'num_samples': len(audio),
-    }
-    
-    print(f"Audio info: sample_rate={sample_rate}Hz, duration={duration:.2f}s")
-
-    all_labels = load_class_labels(labels_path)
-    print(f"Loaded {len(all_labels)} class labels")
-
-    config = sherpa_onnx.AudioTaggingConfig(
-        model=sherpa_onnx.AudioTaggingModelConfig(
-            zipformer=sherpa_onnx.OfflineZipformerAudioTaggingModelConfig(
-                model=str(model_path),
-            ),
-            num_threads=args.num_threads,
-            debug=False,
-            provider=args.provider,
-        ),
-        labels=str(labels_path),
-        top_k=args.top_k,
-    )
-
-    print("\nInitializing audio tagger...")
-    tagger = sherpa_onnx.AudioTagging(config)
-
-    print(f"\nProcessing audio with sliding window segmentation...")
-    segments = process_audio_with_segmentation(
-        audio, sample_rate, tagger, 
-        args.window_size, args.hop_size, 
-        args.top_k, all_labels
+    # Process Audio (encapsulates reading, windowing, inference)
+    segments, audio_info = engine.process_audio_with_segmentation(
+        audio_path=str(audio_path),
+        window_size=args.window_size,
+        hop_size=args.hop_size,
     )
     
     print(f"\nTotal raw segments (windows): {len(segments)}")
@@ -649,10 +654,17 @@ def main():
     
     # 1. Save raw segments JSON
     segments_path = OUTPUT_DIR / "segments.json"
-    save_segments_json(segments, all_labels, audio_info, segments_path)
+    save_segments_json(segments, engine.all_labels, audio_info, segments_path)
     
-    # 2. Save speech segments (WAVs) and get merged info
-    merged_speech_info = save_speech_segments(audio, sample_rate, segments, OUTPUT_DIR)
+    # 2. We need raw audio for saving speech segments. 
+    # Since process_audio_with_segmentation doesn't return raw audio to keep memory low,
+    # we reload it here specifically for saving clips.
+    audio_for_save, sr_for_save = sf.read(str(audio_path), dtype="float32")
+    if len(audio_for_save.shape) > 1:
+        audio_for_save = audio_for_save[:, 0]
+        
+    # Save speech segments (WAVs) and get merged info
+    merged_speech_info = save_speech_segments(audio_for_save, sr_for_save, segments, OUTPUT_DIR)
     
     # 3. Save summary JSON (uses merged info for timeline)
     summary_path = OUTPUT_DIR / "summary.json"
