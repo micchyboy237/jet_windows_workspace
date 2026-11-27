@@ -6,10 +6,10 @@ llama-server `
   --embeddings `
   --pooling mean `
   --parallel 4 `
-  --batch-size 2048 `
+  --ctx-size 2048 `
+  --batch-size 512 `
   --ubatch-size 512 `
   --threads 8 `
-  --ctx-size 512 `
   --host 0.0.0.0 `
   --port 8081 `
   --alias nomic-embed-2-moe `
@@ -19,15 +19,29 @@ llama-server `
 #   -m "C:\Users\druiv\.cache\llama.cpp\embed_models\nomic-embed-text-v1.5.Q4_K_M.gguf" `
 #   --embeddings `
 #   --pooling mean `
-#   --parallel 6 `
-#   --batch-size 4096 `
-#   --ubatch-size 512 `
-#   --threads 6 `
-#   --ctx-size 8192 `
+#   --parallel 4 `
+#   --ctx-size 4096 `
+#   --batch-size 1024 `
+#   --ubatch-size 1024 `
+#   --threads 8 `
+#   --host 0.0.0.0 `
+#   --port 8082 `
+#   --alias nomic-embed-v1.5 `
+#   --tags embed
+
+# For inputs longer than 2048 token, use rope scaling
+# llama-server `
+#   -m "C:\Users\druiv\.cache\llama.cpp\embed_models\nomic-embed-text-v1.5.Q4_K_M.gguf" `
+#   --embeddings `
+#   --pooling mean `
+#   --parallel 2 `
+#   --ctx-size 16384 `
+#   --batch-size 8192 `
+#   --ubatch-size 8192 `
 #   --rope-scaling yarn `
 #   --rope-freq-scale 0.75 `
-#   --ngl 99 `
+#   --threads 8 `
 #   --host 0.0.0.0 `
-#   --port 8080 `
+#   --port 8081 `
 #   --alias nomic-embed-1.5 `
 #   --tags embed
